@@ -1,0 +1,3 @@
+# Manual payments via a reviewer-approved ledger
+
+Pact is built around money penalties, but v0 never moves money. A missed occurrence adds a penalty to the owner's ledger for that pact's recipient. The owner pays the recipient outside the app and records a payment with screenshot proof, and a reviewer approves it before it reduces the balance. We chose this over integrating a payment provider because charging cards or donating to arbitrary recipients — including organizations the owner dislikes, which payment platforms may not support — adds cost, compliance work and financial risk while the product is still being shaped. The trade-off is that payment can only be enforced socially, through due dates, overdue banners and notifications to the reviewer.

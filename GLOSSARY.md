@@ -1,0 +1,79 @@
+# Pact
+
+An accountability app where people make commitments with money at stake, and friends review the evidence and excuses for them.
+
+## Language
+
+### Commitments
+
+**Pact**:
+A commitment the owner makes: what they'll do and when, how it's proven, and what it costs to miss.
+_Avoid_: Commitment, contract, habit, task, goal
+
+**Owner**:
+The person who made a pact and is held to it.
+_Avoid_: Creator, user (when the role matters)
+
+**Draft / Active / Ended**:
+The stages a pact goes through. A Draft hasn't been approved by a reviewer yet and has nothing at stake. An Active pact is being held to. An Ended pact is past its end date or was ended through an approved change request.
+_Avoid_: Pending, live, archived
+
+**Schedule**:
+When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. Mon, Wed, Fri, each day its own occurrence), **Weekly count** (e.g. 3× per week, the week being one occurrence), and **One-time** (one occurrence by a deadline).
+_Avoid_: Frequency, recurrence, cadence
+
+**Occurrence**:
+One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact.
+_Avoid_: Instance, check-in, day, session
+
+**Kept / Missed / Excused**:
+The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it.
+_Avoid_: Passed, failed, success, failure
+
+### Proof and review
+
+**Evidence**:
+Proof that an occurrence was kept. It's either pulled automatically (e.g. sleep data) or submitted by the owner (e.g. a photo).
+_Avoid_: Proof, submission, check-in
+
+**Excuse**:
+The owner's request to have one or more occurrences treated as excused, either because there was a good reason not to keep them or because the evidence was wrong.
+_Avoid_: Appeal, dispute, exemption, pass
+
+**Reviewer**:
+A person the owner has picked to decide on their evidence, excuses, payments and change requests for a pact. An account can be an owner on some pacts and a reviewer on others.
+_Avoid_: Referee, judge, verifier, buddy
+
+**Friend**:
+Another account you're connected with. Only friends can be picked as reviewers or as a person recipient.
+_Avoid_: Contact, connection, follower, buddy
+
+**Review Queue**:
+The list of items waiting for a reviewer's decision.
+_Avoid_: Inbox, to-do list
+
+**Change Request**:
+An owner's proposed edit to a pact that makes it less strict, such as deleting or pausing it or lowering the penalty. The pact stays as it is until a reviewer approves the change.
+_Avoid_: Edit, amendment
+
+### Money
+
+**Penalty**:
+The fixed amount the owner owes for each missed occurrence of a pact.
+_Avoid_: Fine, stake, forfeit, charge
+
+**Recipient**:
+Where a pact's penalties are meant to go: a person (e.g. a friend) or an organization. Several pacts can share one recipient.
+_Avoid_: Anti-charity, beneficiary, charity, payee
+
+**Ledger**:
+The running total an owner owes one recipient: penalties from every pact with that recipient, minus the payments to it that have been approved.
+_Avoid_: Balance, debt, tab
+
+**Overdue**:
+Describes a penalty still unpaid after its due period has passed.
+_Avoid_: Late, delinquent, outstanding
+
+**Payment**:
+The owner's record that they paid off some of their ledger, with proof attached. It counts only after a reviewer approves it.
+_Avoid_: Settlement, transaction
