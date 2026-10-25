@@ -246,6 +246,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Create pact:** a **step-by-step** form: What → Evidence → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Send for review. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both edit the same draft, so switching later is a layout change.
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. Items waiting on the owner's reply are listed below the current item.
 - **Ledgers:** one card per recipient showing what's owed, what's on hold, lifetime penalties, lifetime paid and Record payment. Tapping a card opens its history.
+- **Theme:** light only. v0 ignores the system's dark-mode setting; a dark theme can come later.
 
 ## Testing Decisions
 
