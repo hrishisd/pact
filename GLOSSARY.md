@@ -36,6 +36,14 @@ _Avoid_: Passed, failed, success, failure
 Proof that an occurrence was kept. It's either pulled automatically (e.g. sleep data) or submitted by the owner (e.g. a photo).
 _Avoid_: Proof, submission, check-in
 
+**Evidence kind**:
+How a pact's evidence is gathered. It's the first thing picked when creating a pact and never changes. v0 has two: **Camera** (the owner takes a photo and a reviewer checks it) and **Oura Ring** (the ring reports when the owner got into bed, so there's nothing to submit or review).
+_Avoid_: Evidence type, data source, source
+
+**Connection**:
+A link between a Pact account and an outside service that supplies evidence, such as Oura. Some evidence kinds need one; Camera doesn't.
+_Avoid_: Integration, connector, link
+
 **Excuse**:
 The owner's request to have one or more occurrences treated as excused, either because there was a good reason not to keep them or because the evidence was wrong.
 _Avoid_: Appeal, dispute, exemption, pass

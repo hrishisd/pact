@@ -36,14 +36,14 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ### Creating a pact
 
-10. As an owner, I want to give a pact a name and describe what counts as evidence, so that my reviewer knows exactly what to accept.
-11. As an owner, I want to choose either submitted evidence (a photo in v0; video or a time-lapse later) or automatic Oura bedtime as a pact's evidence type, so that each pact is verified in the way that suits it.
-12. As an owner, I want to connect my Oura account the first time I create a bedtime pact, so that sleep data can be checked automatically.
-13. As an owner, I want to set a bedtime deadline (e.g. 12:00am) on a bedtime pact, so that the app knows what counts as on time.
-14. As an owner, I want a Fixed days schedule (e.g. Mon/Wed/Fri, or every night), so that each of those days is held to the pact.
-15. As an owner, I want a Weekly count schedule (e.g. 3× per week), so that I can choose which days I go.
-16. As an owner, I want a One-time schedule with a deadline, so that I can commit to a single task such as filing my taxes.
-17. As an owner, I want to optionally make evidence due by a set time of day (e.g. by 9:00am) instead of midnight, on any schedule, so that I'm held to doing it early.
+10. As an owner, I want to start a new pact by picking its evidence kind (Camera or Oura Ring), so that the rest of the form only asks what makes sense for that kind.
+11. As an owner of a Camera pact, I want to give it a name and describe what my photo will show, so that my reviewer knows exactly what to accept.
+12. As an owner, I want picking Oura Ring to take me straight to connecting my ring when I haven't yet, and back to the source picker if I cancel, so that sleep data can be checked automatically.
+13. As an owner of an Oura Ring pact, I want to set an in-bed-by time (e.g. 12:00am), with the pact's name filled in from it until I change it, so that the app knows what counts as on time.
+14. As an owner, I want a Fixed days schedule (e.g. Mon/Wed/Fri, or every night), so that each of those days is held to the pact. It's the only schedule for Oura Ring pacts.
+15. As an owner of a Camera pact, I want a Weekly count schedule (e.g. 3× per week), so that I can choose which days I go.
+16. As an owner of a Camera pact, I want a One-time schedule with a deadline, so that I can commit to a single task such as filing my taxes.
+17. As an owner of a Camera pact, I want to optionally make evidence due by a set time of day (e.g. by 9:00am) instead of midnight, on any schedule, so that I'm held to doing it early.
 18. As an owner, I want to set an optional start date, so that I can create a pact now that begins later.
 19. As an owner, I want to set an optional end date on a recurring pact, so that it finishes automatically.
 20. As an owner, I want to set a penalty amount in USD on each pact, so that more important pacts can cost more to miss.
@@ -147,12 +147,18 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 91. As an owner, I want to tap a pact on Today to open its page, and Back to return me to Today, so that I can check details without losing my place.
 92. As an owner looking at my own Draft, I want it to say who it's waiting on instead of offering to approve it, so that it's clear only a reviewer can make it Active.
 
+### Connections
+
+93. As an owner, I want my profile to list only the connections I've made (Oura in v0), each with its status and a Reconnect button when it needs one, so that I can fix a broken connection without hunting for it.
+94. As an owner, I want a warning that says how many active pacts use a connection before I disconnect it, so that I know their nights will count as Missed until I reconnect.
+95. As a reviewer, I want a pact's evidence kind fixed for its whole life, so that the proof I agreed to can't be swapped for something weaker.
+
 ## Implementation Decisions
 
 ### Architecture
 
 - **One deep module, the Pact core.** It holds every domain rule. Its interface is a set of **commands** and **queries**, each called as a particular account.
-  - **Commands:** create/edit/send-for-review pact; approve/reject/comment on a review item; submit evidence; file excuse; record payment; request change; add reviewer; create/accept invite; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, due-date transition and reminder that's due by T.
+  - **Commands:** create/edit/send-for-review pact; approve/reject/comment on a review item; submit evidence; file excuse; record payment; request change; add reviewer; create/accept invite; connect/disconnect Oura; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, due-date transition and reminder that's due by T.
   - **Queries:** Today (cards with status, alerts, waiting for approval, Yesterday, total owed); the review queue and item detail; a pact page with its heat map; the pacts list; ledgers (balance, on hold, pending, overdue, lifetime totals) and a ledger's history.
 - **Four ports** sit outside the core, each with a production adapter and a fake for tests:
   - **Clock**: the current time. The core never reads system time directly.
@@ -165,10 +171,11 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ### Domain model (schema level)
 
-- **Account**: Google identity, display name, timezone, Oura connection (tokens, status).
+- **Account**: Google identity, display name, timezone.
+- **Connection**: account, service (Oura in v0), tokens, status (Connected | Needs reconnecting). Exists only once the owner has connected the service.
 - **Friendship**: two accounts. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
 - **Recipient**: owned by an account. Either a person (a friend's account) or an organization (name, link).
-- **Pact**: owner, name, description, evidence type (Submitted | Oura bedtime), schedule, optional start date, optional end date, optional due-by time, bedtime deadline (Oura only), penalty amount (USD), recipient, reviewers (one or more, each with accepted status), reminders, stage (Draft | Active | Ended), activation time.
+- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date, optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more, each with accepted status), reminders, stage (Draft | Active | Ended), activation time.
 - **Schedule**: one of three kinds:
   - **Fixed days**: a set of weekdays.
   - **Weekly count**: a target per Mon–Sun week.
@@ -187,6 +194,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 **Activation and change**
 - A pact's first occurrence is whichever comes later: its start date, or the first full day (week, for Weekly count) after approval.
 - Rejecting a New pact returns it to Draft. Only Drafts can be edited directly.
+- A pact's evidence kind is set when it's created and never changes, not even in a Draft. Proving it a different way means making a new pact.
+- Oura Ring pacts use Fixed days only. Camera pacts can use any schedule.
 - A change that relaxes the pact (delete, pause, end, lower penalty, ease schedule, remove reviewer) creates a change request. The old terms stay in force until it's approved.
 - Adding a reviewer is immediate and takes effect once they accept. A pact can never have zero reviewers.
 - A pact is Ended when its end date passes or an approved change request ends it.
@@ -243,8 +252,9 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 - **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today.
 - **Today:** cards for each Active pact, sorted so the ones needing action come first. Each card has a status label on the right: **To do** (green), **Waiting for approval** (tan), **Automatic** (grey), **Done**, **Missed** (red). Evidence is submitted **inline on the card**. Alerts sit at the top, and only for things that need the owner. Pending items sit under "Waiting for approval" near the bottom, followed by Yesterday and the total owed.
-- **Create pact:** a **step-by-step** form: What → Evidence → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Send for review. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both edit the same draft, so switching later is a layout change.
+- **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Send for review. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. Editing a Draft skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both edit the same draft, so switching later is a layout change.
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. Items waiting on the owner's reply are listed below the current item.
+- **Profile:** a Connections section lists only the connections the owner has made, and is hidden when there are none. Disconnecting warns how many active pacts use it.
 - **Ledgers:** one card per recipient showing what's owed, what's on hold, lifetime penalties, lifetime paid and Record payment. Tapping a card opens its history.
 - **Theme:** light only. v0 ignores the system's dark-mode setting; a dark theme can come later.
 
@@ -287,7 +297,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Late fees on overdue balances, or blocking new pacts while overdue.
 - AI review, and auto-approving review items after a timeout.
 - Reviewers viewing an owner's pact pages.
-- Evidence types other than photos and Oura bedtime, such as video or a time-lapse.
+- Evidence kinds other than Camera and Oura Ring, Oura goals other than in-bed-by, and Oura schedules other than Fixed days (see Future Ideas).
 - Showing reviewers evidence metadata such as capture time or notes.
 - Oura webhooks, and automatically re-judging nights when Oura data arrives late.
 - Weekly count excuses that cover only part of a week.
@@ -298,9 +308,16 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Currencies other than USD.
 - Choosing the tech stack. That's a separate decision.
 
+## Future Ideas
+
+- **More evidence kinds:** GPS check-in, Apple Health, Strava. Each brings its own goals and schedules on the Goal step, and its own connection where it needs one.
+- **More Oura goals:** sleep at least X hours (Oura's total sleep, not time in bed, which is easy to game), and up by a time.
+- **More Oura schedules:** Weekly count, e.g. "in bed by midnight 5 nights a week".
+- **Richer Camera evidence:** video or a time-lapse.
+
 ## Further Notes
 
-- Vocabulary follows the project glossary: Pact, Owner, Reviewer, Friend, Schedule, Occurrence, Kept/Missed/Excused, Evidence, Excuse, Review Queue, Change Request, Penalty, Recipient, Ledger, Payment, Overdue, Draft/Active/Ended.
+- Vocabulary follows the project glossary: Pact, Owner, Reviewer, Friend, Schedule, Occurrence, Kept/Missed/Excused, Evidence, Evidence kind, Connection, Excuse, Review Queue, Change Request, Penalty, Recipient, Ledger, Payment, Overdue, Draft/Active/Ended.
 - **Oura API facts (researched 2026-10-24):**
   - OAuth2 only. Personal access tokens were removed in December 2025.
   - Refresh tokens are single-use, so each new one has to be stored.
@@ -310,7 +327,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - Data appears only after the Oura app syncs.
   - A night without the ring looks the same as an unsynced one: neither has a `long_sleep` period.
 - **Still to verify:** whether Oura's sleep timestamps include a UTC offset. The bedtime rules depend on it. Check against a live response before building the Oura adapter, and use that response as the seed for the fake.
-- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through three rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, and f2c1330 settles inline evidence. It's the primary source for the Screens decisions above.
+- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through four rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, and 66d9ead makes Create start with the evidence kind. It's the primary source for the Screens decisions above.
 - **Open questions from the prototype:**
   - Should a stricter change (a higher penalty, more days) take effect at once, or also need review? The prototype applies it at once.
   - Daily reminders for One-time pacts were proposed and not objected to, but never explicitly confirmed.
