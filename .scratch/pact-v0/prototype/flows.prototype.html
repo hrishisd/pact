@@ -283,7 +283,7 @@ function addPenalty(s, occ, at, status, mult=1){
 
 function seed(){
   const s = {
-    now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, kindStyle:readKindStyle(), sideOpen:false,
+    now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, sideOpen:false,
     log:[], tmp:{}, form:{}, draft:null,
     accounts:{you:{id:'you', name:'You', initial:'Y'}, sam:{id:'sam', name:'Sam', initial:'S'}},
     recipients:[
@@ -581,7 +581,6 @@ function screenKey(){
   if (!top && S.tab === 'today') return 'evidence';
   return null;
 }
-function readKindStyle(){ let k = null; try { k = new URLSearchParams(location.search).get('kinds'); } catch(e) {} return k === 'badge' ? 'badge' : 'icon'; }
 function readVariant(){
   let v = null;
   try { v = new URLSearchParams(location.search).get('variant'); } catch(e) {}
@@ -610,14 +609,12 @@ const IC = {
   excuse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4M9.5 12.5l5 5M14.5 12.5l-5 5"/></svg>',
   dollar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M15.5 8.2c-.6-1.2-1.9-1.9-3.6-1.9-2 0-3.4 1-3.4 2.5 0 3.5 7.3 1.9 7.3 5.5 0 1.6-1.6 2.7-3.9 2.7-1.8 0-3.2-.8-3.8-2.1M12 4v16"/></svg>',
 };
-// Round 5 compares two ways to show an item's kind: 'badge' (coloured word) or 'icon' (coloured icon square).
+// Each item kind has its own colour and icon (chosen in round 5 over plain colour badges).
 const KIND_IC = {pact:'plus', change:'pencil', evidence:'camera', excuse:'excuse', payment:'dollar'};
-const kindBadge = i => `<span class="kind k-${i.kind}">${S.kindStyle === 'icon' ? IC[KIND_IC[i.kind]] : ''}${KIND[i.kind]}</span>`;
+const kindBadge = i => `<span class="kind k-${i.kind}">${IC[KIND_IC[i.kind]]}${KIND[i.kind]}</span>`;
 const kindIcon = i => `<span class="kico k-${i.kind}" aria-hidden="true">${IC[KIND_IC[i.kind]]}</span>`;
-// A waiting-item row: in 'badge' style the badge sits above the title, in 'icon' style the icon sits left and the kind joins the small line.
 function itemRow(i, sub, right = ''){
-  const icon = S.kindStyle === 'icon';
-  return `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}">${icon ? kindIcon(i) : ''}<span class="rt">${icon ? '' : `<span>${kindBadge(i)}</span>`}<b>${esc(itemTitle(i))}</b><small>${icon ? KIND[i.kind] + ' · ' : ''}${esc(sub)}</small></span>${right}</button>`;
+  return `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}">${kindIcon(i)}<span class="rt"><b>${esc(itemTitle(i))}</b><small>${KIND[i.kind]} · ${esc(sub)}</small></span>${right}</button>`;
 }
 const ouraOk = a => S.oura[a] === 'ok';
 const ouraAuto = t => `In bed by ${fmtHM(t)}`;
@@ -1004,7 +1001,7 @@ function renderPact(id){
     ${p.rejectReason && !p.sent ? `<div class="alert warn"><div><b>Sent back:</b> “${esc(p.rejectReason)}”</div></div>` : ''}
     ${actions}
     <section class="card"><h3>History</h3>${heatmap(p)}</section>
-    ${waiting.length ? `<section class="stack"><div class="label">Waiting on ${p.reviewers.map(nameOf).join(', ')}</div><div class="cards">${waiting.map(i => S.kindStyle === 'icon' ? `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}">${kindIcon(i)}<span class="rt"><b>${KIND[i.kind]}</b><small>${esc(itemSub(i))}</small></span><span class="age">${age(i.at)}</span></button>` : `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}"><span class="kind k-${i.kind}">${KIND[i.kind]}</span><span class="rt"><b>${esc(itemSub(i))}</b></span><span class="age">${age(i.at)}</span></button>`).join('')}</div></section>` : ''}
+    ${waiting.length ? `<section class="stack"><div class="label">Waiting on ${p.reviewers.map(nameOf).join(', ')}</div><div class="cards">${waiting.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}">${kindIcon(i)}<span class="rt"><b>${KIND[i.kind]}</b><small>${esc(itemSub(i))}</small></span><span class="age">${age(i.at)}</span></button>`).join('')}</div></section>` : ''}
     <section class="card"><h3>Terms</h3>${termsList(p)}</section>`;
 }
 
@@ -1099,8 +1096,7 @@ function renderSide(){
   const recent = S.occurrences.filter(o => o.key >= iso(addDays(S.now,-3))).sort((a,b) => a.key < b.key ? 1 : -1).slice(0, 8)
     .map(o => { const p = pact(o.pactId); return `<tr><td>${esc(p.name)}</td><td>${occLabel(p, o.key).replace('Night of ','')}</td><td>${o.outcome}</td></tr>`; }).join('');
   $('#side').innerHTML = `<div class="spread"><span class="tag">PROTOTYPE · THROWAWAY</span><button class="btn sm closeside" data-act="side">Close</button></div>
-    <section><h2>Pact flows · round 5</h2><div class="muted" style="font-size:13.5px">New in this round: tappable rows are separate cards, penalties show in red, due times show in orange, and the copy is plainer. Compare the two kind styles below on Today, Review and a pact page.</div></section>
-    <section><div class="label">Item kinds (pick one)</div><div class="seg">${[['icon','Icon squares'],['badge','Colour badges']].map(([k,l]) => `<button aria-pressed="${S.kindStyle === k}" data-act="kinds" data-arg="${k}">${l}</button>`).join('')}</div><small class="muted">Icon squares: a coloured icon left of each waiting item. Colour badges: a coloured word above the title. The badge on Review and item pages gains the icon in icon mode.</small></section>
+    <section><h2>Pact flows · round 5</h2><div class="muted" style="font-size:13.5px">New in this round: tappable rows are separate cards, penalties show in red, due times show in orange, the copy is plainer, and each item kind has its own coloured icon. Camera evidence is a live photo only.</div></section>
     <section><div class="label">Signed in as</div><div class="seg">${Object.keys(S.accounts).map(a => `<button aria-pressed="${S.me === a}" data-act="as" data-arg="${a}">${acct(a).name}</button>`).join('')}</div><small class="muted">You own the bedtime and gym pacts and Sam reviews them. Sam owns a running pact that you review. Switch to act as the other person.</small></section>
     <section><div class="label">Jump to</div><div class="row2"><button class="btn sm" data-act="jump" data-arg="create">Create pact</button><button class="btn sm" data-act="jump" data-arg="review">Review</button><button class="btn sm" data-act="jump" data-arg="evidence">Submit evidence</button><button class="btn sm" data-act="jump" data-arg="ledgers">Ledgers</button></div>
       <table><tr><th>Screen</th><th>Design</th></tr>${Object.entries(CHOSEN).map(([k,v]) => `<tr><td>${SCREEN_NAME[k]}</td><td>${v} (chosen)</td></tr>`).join('')}</table></section>
@@ -1228,7 +1224,6 @@ const ACT = {
   advance:() => { const t = addDays(sod(S.now), 1); t.setHours(12,0,0,0); advanceTo(t); S.sheet = null; },
   oura:() => { if (!S.oura.you) { toast('Connect Oura as You first'); return; } S.oura.you = S.oura.you === 'ok' ? 'broken' : 'ok'; log(S.oura.you === 'ok' ? 'Oura reconnected.' : 'Oura connection dropped (simulated). You get an alert and a push notification.'); },
   reset:() => { const v = S.variant; S = seed(); S.variant = v; },
-  kinds:a => { S.kindStyle = a; try { const u = new URL(location.href); u.searchParams.set('kinds', a); history.replaceState(null, '', u); } catch(e) {} },
   invite:() => { S.tmp.invite = true; },
   copy:() => { try { navigator.clipboard.writeText('pact.app/i/7Kq2xV').then(() => toast('Link copied'), () => toast('Select the link to copy it')); } catch(e) { toast('Select the link to copy it'); } return 'skip'; },
   hist:a => { S.form['hist-' + a] = !S.form['hist-' + a]; },
