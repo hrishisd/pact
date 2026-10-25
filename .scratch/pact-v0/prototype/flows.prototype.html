@@ -294,7 +294,7 @@ function seed(){
     pacts:[
       {id:'p-bed', owner:'you', name:'In bed by midnight', desc:'Oura says I got into bed before 12:00am.', evidence:'oura', schedule:{kind:'fixed', days:[0,1,2,3,4,5,6]}, bedtime:'00:00', by:null, penalty:2, recipientId:'rc-org', reviewers:['sam'], reminders:[{time:'23:30', channel:'Push'}], stage:'active', start:'2026-09-28', end:'', thread:[]},
       {id:'p-gym', owner:'you', name:'Gym Mon/Wed/Fri', desc:'A photo of me inside the gym.', evidence:'photo', schedule:{kind:'fixed', days:[1,3,5]}, by:null, penalty:5, recipientId:'rc-sam', reviewers:['sam'], reminders:[{time:'18:00', channel:'Push'}], stage:'active', start:'2026-09-28', end:'', thread:[]},
-      {id:'p-tax', owner:'you', name:'File my taxes', desc:'Photo of the e-file confirmation on screen.', evidence:'photo', schedule:{kind:'once', deadline:'2026-11-30'}, by:null, penalty:50, recipientId:'rc-org', reviewers:['sam'], reminders:[], stage:'draft', sent:true, sentAt:D(2026,10,20,22,10), start:'2026-11-01', end:'', thread:[]},
+      {id:'p-tax', owner:'you', name:'File my taxes', desc:'Photo of the e-file confirmation on screen.', evidence:'photo', schedule:{kind:'once', deadline:'2026-11-30'}, by:null, penalty:50, recipientId:'rc-org', reviewers:['sam'], reminders:[{date:'2026-11-29', time:'19:00', channel:'Push'}], stage:'draft', sent:true, sentAt:D(2026,10,20,22,10), start:'2026-11-01', end:'', thread:[]},
       {id:'p-run', owner:'sam', name:'Run 3× a week', desc:'A photo outside or a screenshot of the run.', evidence:'photo', schedule:{kind:'weekly', target:3}, by:null, penalty:10, recipientId:'rc-you', reviewers:['you'], reminders:[], stage:'active', start:'2026-10-05', end:'', thread:[]},
     ],
     occurrences:[], evidence:[], excuses:[], payments:[], changes:[], penalties:[],
@@ -645,7 +645,7 @@ function termsList(p){
     ['Reviewers', p.reviewers.map(nameOf).join(', ')],
     ['Starts', p.start ? fmtDay(parseIso(p.start)) : 'The day after approval'],
     p.end ? ['Ends', fmtDay(parseIso(p.end))] : null,
-    ['Reminders', p.reminders.length ? p.reminders.map(r => `${fmtHM(r.time)} (${r.channel})`).join(', ') : 'None'],
+    ['Reminders', p.reminders.length ? p.reminders.map(r => `${r.date ? fmtDate(parseIso(r.date)) + ', ' : ''}${fmtHM(r.time)} (${r.channel})`).join(', ') : 'None'],
   ].filter(Boolean);
   return `<dl class="kv">${rows.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`;
 }
@@ -929,13 +929,13 @@ function fStakes(){ const d = S.draft; return `<div class="stack">
   <div class="field"><span>Where the money goes</span>${myRecipients().map(r => `<button class="opt" aria-pressed="${d.recipientId === r.id}" data-act="cset" data-arg="recipientId=${r.id}"><span class="glyph">${r.kind === 'org' ? 'Org' : esc(r.name[0])}</span><span><b>${esc(r.name)}</b><small>${r.kind === 'org' ? esc(r.link) : 'A friend'}</small></span></button>`).join('')}
   <details><summary class="link" style="cursor:pointer">Add an organization</summary><div class="stack" style="margin-top:8px"><input class="inp" id="c-org" data-f="newOrg" placeholder="Organization name" value="${esc(d.newOrg)}"><input class="inp" id="c-orgl" data-f="newOrgLink" placeholder="Link (donation page)" value="${esc(d.newOrgLink)}"><button class="btn sm" data-act="addOrg">Add</button></div></details></div></div>`; }
 function fReviewers(){ const d = S.draft; return `<div class="stack">${friendsOf(S.me).map(f => `<label class="opt" style="align-items:center"><input type="checkbox" data-act="crev" data-arg="${f}" ${d.reviewers.includes(f) ? 'checked' : ''}><span class="avatar" style="width:32px;height:32px">${acct(f).initial}</span><span><b>${acct(f).name}</b><small>${d.evidence === 'oura' ? 'Approves the pact and reviews excuses and payments' : 'Approves the pact and reviews photos, excuses and payments'}</small></span></label>`).join('')}<small class="muted">${d.evidence === 'oura' ? 'Any reviewer you pick can review your excuses and payments. There are no photos to review, because the app checks your ring.' : 'Any reviewer you pick can review your photos, excuses and payments.'}</small></div>`; }
-function fReminders(){ const d = S.draft; return `<div class="stack">${d.reminders.map((r,i) => `<div class="row2" style="flex-wrap:nowrap"><input class="inp" type="time" id="c-rt${i}" data-f="reminders.${i}.time" value="${r.time}"><select class="inp" id="c-rc${i}" data-f="reminders.${i}.channel">${['Push','Email','Push + email'].map(c => `<option ${c === r.channel ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="iconbtn" data-act="crem" data-arg="${i}" aria-label="Remove reminder">×</button></div>`).join('')}
+function fReminders(){ const d = S.draft; return `<div class="stack">${d.reminders.map((r,i) => d.kind === 'once' && d.evidence === 'photo' ? `<div class="stack" style="gap:6px"><div class="row2" style="flex-wrap:nowrap"><input class="inp" type="date" id="c-rd${i}" data-f="reminders.${i}.date" value="${r.date || d.deadline}"><input class="inp" type="time" id="c-rt${i}" data-f="reminders.${i}.time" value="${r.time}"></div><div class="row2" style="flex-wrap:nowrap"><select class="inp" id="c-rc${i}" data-f="reminders.${i}.channel">${['Push','Email','Push + email'].map(c => `<option ${c === r.channel ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="iconbtn" data-act="crem" data-arg="${i}" aria-label="Remove reminder">×</button></div></div>` : `<div class="row2" style="flex-wrap:nowrap"><input class="inp" type="time" id="c-rt${i}" data-f="reminders.${i}.time" value="${r.time}"><select class="inp" id="c-rc${i}" data-f="reminders.${i}.channel">${['Push','Email','Push + email'].map(c => `<option ${c === r.channel ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="iconbtn" data-act="crem" data-arg="${i}" aria-label="Remove reminder">×</button></div>`).join('')}
   <button class="btn sm" data-act="cremadd" style="align-self:flex-start">Add reminder</button>
-  <small class="muted">${d.evidence === 'oura' ? 'This reminder goes off every scheduled night, even if you’re already in bed. The app can’t tell until your ring syncs, usually the next morning.' : d.kind === 'weekly' ? 'Fires every day you haven’t submitted evidence, until the week’s target is met.' : d.kind === 'once' ? 'Fires every day until you submit evidence.' : 'Fires on scheduled days, only if you haven’t submitted evidence yet.'}</small></div>`; }
+  <small class="muted">${d.evidence === 'oura' ? 'This reminder goes off every scheduled night, even if you’re already in bed. The app can’t tell until your ring syncs, usually the next morning.' : d.kind === 'weekly' ? 'Fires every day you haven’t submitted evidence, until the week’s target is met.' : d.kind === 'once' ? 'Each reminder goes off once, on its date and time, unless you’ve already submitted evidence.' : 'Fires on scheduled days, only if you haven’t submitted evidence yet.'}</small></div>`; }
 const FIELDS = {source:['How will you prove it?', fSource], goal:['Goal', fGoal], schedule:['Schedule', fSchedule], stakes:['Penalty', fStakes], reviewers:['Reviewers', fReviewers], reminders:['Reminders', fReminders]};
 function draftToPact(d){
   return {name:d.name.trim() || 'Untitled pact', desc:d.desc, evidence:d.evidence, schedule:d.kind === 'fixed' ? {kind:'fixed', days:[...d.days]} : d.kind === 'weekly' ? {kind:'weekly', target:d.target} : {kind:'once', deadline:d.deadline},
-    bedtime:d.bedtime, by:d.byOn && d.evidence === 'photo' ? d.byTime : null, penalty:Number(d.penalty) || 1, recipientId:d.recipientId, reviewers:[...d.reviewers], reminders:d.reminders.map(r => ({...r})), start:d.start, end:d.end};
+    bedtime:d.bedtime, by:d.byOn && d.evidence === 'photo' ? d.byTime : null, penalty:Number(d.penalty) || 1, recipientId:d.recipientId, reviewers:[...d.reviewers], reminders:d.reminders.map(r => d.kind === 'once' ? {...r, date:r.date || d.deadline} : {time:r.time, channel:r.channel}), start:d.start, end:d.end};
 }
 function draftProblems(d){
   const out = [];
@@ -1096,7 +1096,7 @@ function renderSide(){
   const recent = S.occurrences.filter(o => o.key >= iso(addDays(S.now,-3))).sort((a,b) => a.key < b.key ? 1 : -1).slice(0, 8)
     .map(o => { const p = pact(o.pactId); return `<tr><td>${esc(p.name)}</td><td>${occLabel(p, o.key).replace('Night of ','')}</td><td>${o.outcome}</td></tr>`; }).join('');
   $('#side').innerHTML = `<div class="spread"><span class="tag">PROTOTYPE · THROWAWAY</span><button class="btn sm closeside" data-act="side">Close</button></div>
-    <section><h2>Pact flows · round 5</h2><div class="muted" style="font-size:13.5px">New in this round: tappable rows are separate cards, penalties show in red, due times show in orange, the copy is plainer, and each item kind has its own coloured icon. Camera evidence is a live photo only.</div></section>
+    <section><h2>Pact flows · round 5</h2><div class="muted" style="font-size:13.5px">New in this round: tappable rows are separate cards, penalties show in red, due times show in orange, the copy is plainer, and each item kind has its own coloured icon. Camera evidence is a live photo only. One-time pacts get one-off reminders, each with its own date.</div></section>
     <section><div class="label">Signed in as</div><div class="seg">${Object.keys(S.accounts).map(a => `<button aria-pressed="${S.me === a}" data-act="as" data-arg="${a}">${acct(a).name}</button>`).join('')}</div><small class="muted">You own the bedtime and gym pacts and Sam reviews them. Sam owns a running pact that you review. Switch to act as the other person.</small></section>
     <section><div class="label">Jump to</div><div class="row2"><button class="btn sm" data-act="jump" data-arg="create">Create pact</button><button class="btn sm" data-act="jump" data-arg="review">Review</button><button class="btn sm" data-act="jump" data-arg="evidence">Submit evidence</button><button class="btn sm" data-act="jump" data-arg="ledgers">Ledgers</button></div>
       <table><tr><th>Screen</th><th>Design</th></tr>${Object.entries(CHOSEN).map(([k,v]) => `<tr><td>${SCREEN_NAME[k]}</td><td>${v} (chosen)</td></tr>`).join('')}</table></section>
@@ -1107,7 +1107,6 @@ function renderSide(){
       <table><tr><th>Pact</th><th>Occurrence</th><th>Outcome</th></tr>${recent}</table></section>
     <section><div class="label">What just happened</div><div class="log">${S.log.slice(0, 10).map(l => `<div><span class="muted">${fmtTime(l.at)}</span> ${esc(l.text)}</div>`).join('')}</div></section>
     <section><div class="label">Questions this prototype raised</div><ul>
-      <li>Should a stricter change (higher penalty, more days) apply right away, or also go through review? The prototype applies it right away.</li>
       <li>After a reviewer asks a question, the item waits on the owner (an alert on their Today) and leaves the review queue until they reply. Is that the right home for it?</li></ul></section>`;
 }
 function renderSwitcher(){ $('#switcher').innerHTML = `<button class="ctl" data-act="side">Prototype controls</button>`; }
@@ -1206,7 +1205,7 @@ const ACT = {
   cwin:(a, el) => { S.draft.byOn = el.checked; },
   crev:(a, el) => { const s = new Set(S.draft.reviewers); el.checked ? s.add(a) : s.delete(a); S.draft.reviewers = [...s]; },
   crem:a => { S.draft.reminders.splice(Number(a), 1); },
-  cremadd:() => { S.draft.reminders.push({time:'20:00', channel:'Push'}); },
+  cremadd:() => { S.draft.reminders.push({time:'20:00', channel:'Push', ...(S.draft.kind === 'once' ? {date:S.draft.deadline} : {})}); },
   addOrg:() => { const d = S.draft; if (!d.newOrg.trim()) return; const r = {id:nid('rc'), owner:S.me, kind:'org', name:d.newOrg.trim(), link:d.newOrgLink.trim() || '—'}; S.recipients.push(r); d.recipientId = r.id; d.newOrg = d.newOrgLink = ''; log(`Added recipient "${r.name}".`); },
   saveDraft:() => sendDraft(false),
   sendDraft:() => sendDraft(true),
