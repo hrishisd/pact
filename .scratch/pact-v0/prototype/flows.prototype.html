@@ -113,6 +113,14 @@ textarea.inp{min-height:76px;resize:vertical}
 .opt[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
 .opt b{display:block}
 .opt small{color:var(--muted)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:16px;padding:14px 12px;min-height:150px}
+.tile[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.tile b{font-family:var(--f-display);font-size:17px}
+.tile small{color:var(--muted);font-size:12.5px;line-height:1.35}
+.tile .chip{margin-top:auto}
+.tico{width:44px;height:44px;border-radius:12px;background:var(--sunk);display:grid;place-items:center;margin-bottom:4px}
+.tico svg,.glyph svg{width:24px;height:24px}
 .glyph{width:36px;height:36px;border-radius:10px;background:var(--sunk);display:grid;place-items:center;font-family:var(--f-display);font-weight:700;flex:none}
 .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .photos img,.ph-add{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--sunk);max-width:100%}
@@ -261,7 +269,7 @@ function addPenalty(s, occ, at, status, mult=1){
 
 function seed(){
   const s = {
-    now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', ouraOk:true, sideOpen:false,
+    now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, sideOpen:false,
     log:[], tmp:{}, form:{}, draft:null,
     accounts:{you:{id:'you', name:'You', initial:'Y'}, sam:{id:'sam', name:'Sam', initial:'S'}},
     recipients:[
@@ -365,7 +373,7 @@ function missOcc(p, occ, at, detail, mult=1){
 function judgeNight(p, key, at){
   const occ = getOcc(p, key); if (occ.outcome !== 'pending') return;
   if (excuseFor(p, key, 'approved')) { occ.outcome='excused'; occ.detail='Excused'; occ.judgedAt=at; return log(`${p.name}: ${occLabel(p,key)} → Excused (approved excuse).`); }
-  if (!S.ouraOk) { missOcc(p, occ, at, 'No Oura data by noon'); return log(`${p.name}: ${occLabel(p,key)} → Missed, no Oura data. ${money(p.penalty)} penalty.`); }
+  if (!ouraOk(p.owner)) { missOcc(p, occ, at, 'No Oura data by noon'); return log(`${p.name}: ${occLabel(p,key)} → Missed, no Oura data. ${money(p.penalty)} penalty.`); }
   const bed = cannedBed(key);
   if (bed < deadlineMin(p.bedtime)) { occ.outcome='kept'; occ.detail='In bed '+fmtMin(bed); occ.judgedAt=at; log(`${p.name}: ${occLabel(p,key)} → Kept (in bed ${fmtMin(bed)}).`); }
   else { missOcc(p, occ, at, 'In bed '+fmtMin(bed)); log(`${p.name}: ${occLabel(p,key)} → Missed (in bed ${fmtMin(bed)}). ${money(p.penalty)} penalty.`); }
@@ -533,7 +541,7 @@ function comment(key, text){
 /* alerts for the signed-in account */
 function alertsFor(me){
   const out = [];
-  if (!S.ouraOk && S.pacts.some(p => p.owner === me && p.evidence === 'oura' && p.stage === 'active')) out.push({tone:'bad', html:`<b>Oura is disconnected.</b> Nights without data count as Missed. Reconnect to stop that.`, actions:`<button class="btn sm" data-act="oura" data-arg="on">Reconnect Oura</button>`});
+  if (!ouraOk(me) && S.pacts.some(p => p.owner === me && p.evidence === 'oura' && p.stage === 'active')) out.push({tone:'bad', html:`<b>${S.oura[me] ? 'Oura needs reconnecting.' : 'Oura is disconnected.'}</b> Nights without data count as Missed. Reconnect to stop that.`, actions:`<button class="btn sm" data-act="connect">Reconnect Oura</button>`});
   for (const e of S.evidence.filter(e => e.owner === me && e.status === 'rejected' && !e.ack)) {
     const p = pact(e.pactId), occ = occById(e.occId);
     out.push({tone:'bad', html:`<b>${nameOf(e.decidedBy)} rejected your evidence</b> for ${esc(p.name)} (${occLabel(p, occ.key)}): “${esc(e.reason)}”`, actions:`<button class="btn sm" data-act="openItem" data-arg="evidence:${e.id}">View</button><button class="btn sm" data-act="excuse" data-arg="${p.id}|${occ.key}">File excuse</button><button class="btn sm" data-act="ack" data-arg="${e.id}">Dismiss</button>`});
@@ -580,7 +588,11 @@ const IC = {
   review:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="6" width="17" height="13.5" rx="3"/><path d="M8 3.5h8M8.5 12.5l2.5 2.5 4.5-5"/></svg>',
   ledgers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H19M9 8.5h6"/></svg>',
   back:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>',
+  camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8.5A2 2 0 0 1 6 6.5h2l1.5-2h5l1.5 2h2a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></svg>',
+  ring:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="5"/></svg>',
 };
+const ouraOk = a => S.oura[a] === 'ok';
+const ouraAuto = t => `In bed by ${fmtHM(t)}`;
 
 /* ---------- small renderers ---------- */
 function outcomeChip(o){
@@ -600,7 +612,7 @@ function scheduleText(p){
 }
 function termsList(p){
   const rows = [
-    ['Evidence', p.evidence === 'oura' ? `Oura: in bed by ${fmtHM(p.bedtime)}` : 'Submitted (photo), checked by a reviewer'],
+    ['Evidence', p.evidence === 'oura' ? `Oura Ring: in bed by ${fmtHM(p.bedtime)}` : `Camera: ${esc(p.desc || 'a photo')}, checked by a reviewer`],
     ['Schedule', scheduleText(p)],
     p.by ? ['Evidence due', `By ${fmtHM(p.by)}`] : null,
     ['Penalty', `${money(p.penalty)} per miss`],
@@ -837,18 +849,32 @@ function submitChange(pid){
   else { if ('penalty' in after) p.penalty = after.penalty; if ('days' in after) p.schedule.days = after.days; log(`Stricter change to "${p.name}" applied right away (open question: should this need approval too?).`); toast('Change applied'); }
   S.tmp = {}; S.sheet = null;
 }
+function connectionsSection(){
+  const st = S.oura[S.me]; if (!st) return '';
+  const n = S.pacts.filter(p => p.owner === S.me && p.evidence === 'oura' && p.stage === 'active').length;
+  return `<div class="stack"><div class="label">Connections</div><div class="list"><div class="rowbtn"><span class="glyph">${IC.ring}</span><span class="rt"><b>Oura Ring</b><small>${n} active pact${n === 1 ? '' : 's'}</small></span>${st === 'ok' ? '<span class="chip c-kept">Connected</span>' : '<span class="chip c-missed">Needs reconnecting</span>'}</div></div>
+    ${S.tmp.disc ? `<div class="alert warn"><div>${n ? `<b>${n} active pact${n === 1 ? '' : 's'} use${n === 1 ? 's' : ''} Oura.</b> ${n === 1 ? 'Its' : 'Their'} nights will count as Missed until you reconnect.` : 'Disconnect Oura? You can connect it again when you next create an Oura pact.'}</div><div class="row2"><button class="btn sm" data-act="disc" data-arg="no">Keep connected</button><button class="btn sm danger" data-act="disc" data-arg="yes">Disconnect</button></div></div>`
+      : `<div class="row2">${st === 'ok' ? '' : '<button class="btn sm primary" data-act="connect">Reconnect</button>'}<button class="btn sm" data-act="disc" data-arg="ask">Disconnect</button></div>`}
+    <small class="muted">Only connections you've made show here. You add one by picking an evidence kind that needs it when you create a pact.</small></div>`;
+}
+function renderConnect(){
+  return `<div class="stack" style="align-items:center;text-align:center;padding-top:12px"><span class="glyph" style="width:64px;height:64px;border-radius:18px">${IC.ring}</span>
+    <h2 style="margin:0">Connect your Oura Ring</h2><p class="muted" style="margin:0">Pact reads one thing: when you got into bed each night. It never posts anything or sees your other health data.</p></div>
+    <div class="alert info"><div><b>Prototype:</b> in the real app, this hands you to Oura's own sign-in page, then brings you back here.</div></div>
+    <div class="footbar"><button class="btn" data-act="back">Cancel</button><button class="btn primary" style="flex:1" data-act="connected">Sign in with Oura (simulated)</button></div>`;
+}
 function profileSheet(){
   return `<h2>Profile</h2>
     <div class="stack"><div class="label">Friends</div><div class="list">${friendsOf(S.me).map(f => `<div class="rowbtn"><span class="avatar" style="width:30px;height:30px">${acct(f).initial}</span><span class="rt"><b>${acct(f).name}</b><small>Reviews ${S.pacts.filter(p => p.owner === S.me && p.reviewers.includes(f)).length} of your pacts</small></span></div>`).join('')}</div>
       ${S.tmp.invite ? `<div class="alert info"><div>Share this link. It works once and expires in 7 days.</div><div class="row2"><code class="mono" style="user-select:all">pact.app/i/7Kq2xV</code><button class="btn sm" data-act="copy">Copy</button></div></div>` : `<button class="btn" data-act="invite">Invite a friend</button>`}</div>
-    <div class="stack"><div class="label">Oura</div><div class="row2">${S.ouraOk ? '<span class="chip c-kept">Connected</span>' : '<span class="chip c-missed">Disconnected</span>'}<button class="btn sm" data-act="oura" data-arg="${S.ouraOk ? 'off' : 'on'}">${S.ouraOk ? 'Disconnect (simulate)' : 'Reconnect'}</button></div></div>
+    ${connectionsSection()}
     <div class="stack"><div class="label">Timezone</div><div>America/Los_Angeles <button class="link">Change</button></div></div>
     <div class="stack"><div class="label">Notifications</div><div class="list">${[['New item to review','Push + email'],['Decision on your evidence or excuse','Push'],['New comment','Push'],['Occurrence judged Missed','Push'],['Data source problem','Push + email'],['Overdue balance','Push + email']].map(([a,b]) => `<div class="rowbtn"><span class="rt"><b style="font-weight:500">${a}</b><small>${b}</small></span><input type="checkbox" checked aria-label="${a}"></div>`).join('')}</div><small class="muted">Reminders are set on each pact.</small></div>`;
 }
 
 /* ---------- Create pact (3 variants) ---------- */
 function newDraft(tpl = 'blank'){
-  const base = {name:'', desc:'', evidence:'photo', kind:'fixed', days:[1,3,5], target:3, deadline:iso(addDays(S.now,30)), bedtime:'00:00', byOn:false, byTime:'09:00', start:'', end:'', penalty:5, recipientId:'rc-org', reviewers:[friendsOf(S.me)[0]], reminders:[{time:'18:00', channel:'Push'}], newOrg:'', newOrgLink:''};
+  const base = {name:'', nameAuto:false, desc:'', evidence:null, kind:'fixed', days:[1,3,5], target:3, deadline:iso(addDays(S.now,30)), bedtime:'00:00', byOn:false, byTime:'09:00', start:'', end:'', penalty:5, recipientId:'rc-org', reviewers:[friendsOf(S.me)[0]], reminders:[{time:'18:00', channel:'Push'}], newOrg:'', newOrgLink:''};
   if (tpl === 'bedtime') Object.assign(base, {name:'In bed by 11:30pm', desc:'Oura says I got into bed on time.', evidence:'oura', days:[0,1,2,3,4,5,6], bedtime:'23:30', penalty:2, reminders:[{time:'23:00', channel:'Push'}]});
   if (tpl === 'gym') Object.assign(base, {name:'Gym 3× a week', desc:'A photo of me at the gym.', kind:'weekly', target:3, penalty:5, recipientId:S.me === 'you' ? 'rc-sam' : 'rc-you'});
   if (tpl === 'once') Object.assign(base, {name:'Renew my passport', desc:'Photo of the submitted application.', kind:'once', penalty:20, reminders:[]});
@@ -856,14 +882,16 @@ function newDraft(tpl = 'blank'){
   return base;
 }
 const myRecipients = () => S.recipients.filter(r => r.owner === S.me);
-function fWhat(){ const d = S.draft; return `<label class="field"><span>Name</span><input class="inp" id="c-name" data-f="name" placeholder="e.g. Gym Mon/Wed/Fri" value="${esc(d.name)}"></label>
-  <label class="field"><span>What counts as evidence?</span><textarea class="inp" id="c-desc" data-f="desc" placeholder="e.g. A photo of me inside the gym">${esc(d.desc)}</textarea><small>Your reviewer sees this when checking.</small></label>`; }
-function fEvidence(){ const d = S.draft; return `<div class="stack">
-  <button class="opt" aria-pressed="${d.evidence === 'photo'}" data-act="cset" data-arg="evidence=photo"><span class="glyph">E</span><span><b>You submit evidence</b><small>A photo for now (video or a time-lapse later). A reviewer checks it.</small></span></button>
-  <button class="opt" aria-pressed="${d.evidence === 'oura'}" data-act="cset" data-arg="evidence=oura"><span class="glyph">O</span><span><b>Automatic: Oura bedtime</b><small>Checked from your ring. Nothing to submit.</small></span></button>
-  ${d.evidence === 'oura' ? `<div class="row2">${S.ouraOk ? '<span class="chip c-kept">Oura connected</span>' : '<button class="btn sm" data-act="oura" data-arg="on">Connect Oura</button>'}</div><label class="field"><span>In bed by</span><input class="inp" type="time" id="c-bed" data-f="bedtime" value="${d.bedtime}"><small>Uses Oura's "got into bed" time. Judged at noon the next day.</small></label>` : ''}</div>`; }
+function fSource(){ const d = S.draft, st = S.oura[S.me];
+  const tile = (k, icon, label, line, extra = '') => `<button class="tile" aria-pressed="${d.evidence === k}" data-act="csource" data-arg="${k}"><span class="tico">${icon}</span><b>${label}</b><small>${line}</small>${extra}</button>`;
+  return `<div class="tiles">${tile('photo', IC.camera, 'Camera', 'Take a photo each time. Your reviewer checks it.')}${tile('oura', IC.ring, 'Oura Ring', 'Your ring reports when you got into bed. Nothing to submit or review.', st === 'ok' ? '' : `<span class="chip ${st ? 'c-missed' : 'c-draft'}">${st ? 'Needs reconnecting' : 'Connect first'}</span>`)}</div>
+  <small class="muted">You can't change this later. To prove it a different way, make a new pact.</small>`; }
+function fGoal(){ const d = S.draft;
+  const name = `<label class="field"><span>Name</span><input class="inp" id="c-name" data-f="name" placeholder="${d.evidence === 'oura' ? '' : 'e.g. Gym'}" value="${esc(d.name)}">${d.evidence === 'oura' ? '<small>Shown on Today. Filled in from your bedtime until you change it.</small>' : '<small>Shown on Today.</small>'}</label>`;
+  if (d.evidence === 'oura') return `<label class="field"><span>In bed by</span><input class="inp" type="time" id="c-bed" data-f="bedtime" value="${d.bedtime}"><small>Uses Oura's "got into bed" time. Checked at noon the next day.</small></label>${name}`;
+  return `${name}<label class="field"><span>What will your photo show?</span><textarea class="inp" id="c-desc" data-f="desc" placeholder="e.g. Me at the gym with the equipment visible">${esc(d.desc)}</textarea><small>Your reviewer sees this when checking the evidence.</small></label>`; }
 function fSchedule(){ const d = S.draft; return `<div class="stack">
-  <div class="seg" role="group" aria-label="Schedule type">${[['fixed','Fixed days'],['weekly','Weekly count'],['once','One-time']].map(([k,l]) => `<button aria-pressed="${d.kind === k}" data-act="cset" data-arg="kind=${k}" ${d.evidence === 'oura' && k === 'once' ? 'disabled' : ''}>${l}</button>`).join('')}</div>
+  ${d.evidence === 'oura' ? `<div class="field"><span>Which nights?</span></div>` : `<div class="seg" role="group" aria-label="Schedule type">${[['fixed','Fixed days'],['weekly','Weekly count'],['once','One-time']].map(([k,l]) => `<button aria-pressed="${d.kind === k}" data-act="cset" data-arg="kind=${k}">${l}</button>`).join('')}</div>`}
   ${d.kind === 'fixed' ? `<div class="days">${[1,2,3,4,5,6,0].map(x => `<button aria-pressed="${d.days.includes(x)}" data-act="cday" data-arg="${x}">${WD[x].slice(0,2)}</button>`).join('')}</div>` : ''}
   ${d.kind === 'weekly' ? `<div class="row2"><button class="iconbtn" data-act="ctarget" data-arg="-1">−</button><b class="num" style="font-size:20px">${d.target}×</b><span>per week (Mon–Sun)</span><button class="iconbtn" data-act="ctarget" data-arg="1">+</button></div><small class="muted">One penalty for each session you're short.</small>` : ''}
   ${d.kind === 'once' ? `<label class="field"><span>Deadline</span><input class="inp" type="date" id="c-deadline" data-f="deadline" value="${d.deadline}"></label>` : ''}
@@ -878,7 +906,7 @@ function fReviewers(){ const d = S.draft; return `<div class="stack">${friendsOf
 function fReminders(){ const d = S.draft; return `<div class="stack">${d.reminders.map((r,i) => `<div class="row2" style="flex-wrap:nowrap"><input class="inp" type="time" id="c-rt${i}" data-f="reminders.${i}.time" value="${r.time}"><select class="inp" id="c-rc${i}" data-f="reminders.${i}.channel">${['Push','Email','Push + email'].map(c => `<option ${c === r.channel ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="iconbtn" data-act="crem" data-arg="${i}" aria-label="Remove reminder">×</button></div>`).join('')}
   <button class="btn sm" data-act="cremadd" style="align-self:flex-start">Add reminder</button>
   <small class="muted">${d.evidence === 'oura' ? 'Bedtime reminders always fire.' : d.kind === 'weekly' ? 'Fires every day you haven’t submitted evidence, until the week’s target is met.' : d.kind === 'once' ? 'Fires every day until you submit evidence.' : 'Fires on scheduled days, only if you haven’t submitted evidence yet.'}</small></div>`; }
-const FIELDS = {what:['What', fWhat], evidence:['Evidence', fEvidence], schedule:['Schedule', fSchedule], stakes:['Penalty', fStakes], reviewers:['Reviewers', fReviewers], reminders:['Reminders', fReminders]};
+const FIELDS = {source:['How will you prove it?', fSource], goal:['Goal', fGoal], schedule:['Schedule', fSchedule], stakes:['Penalty', fStakes], reviewers:['Reviewers', fReviewers], reminders:['Reminders', fReminders]};
 function draftToPact(d){
   return {name:d.name.trim() || 'Untitled pact', desc:d.desc, evidence:d.evidence, schedule:d.kind === 'fixed' ? {kind:'fixed', days:[...d.days]} : d.kind === 'weekly' ? {kind:'weekly', target:d.target} : {kind:'once', deadline:d.deadline},
     bedtime:d.bedtime, by:d.byOn && d.evidence === 'photo' ? d.byTime : null, penalty:Number(d.penalty) || 1, recipientId:d.recipientId, reviewers:[...d.reviewers], reminders:d.reminders.map(r => ({...r})), start:d.start, end:d.end};
@@ -889,7 +917,7 @@ function draftProblems(d){
   if (d.kind === 'fixed' && !d.days.length) out.push('Pick at least one day');
   if (!(Number(d.penalty) > 0)) out.push('Set a penalty');
   if (!d.reviewers.length) out.push('Pick a reviewer');
-  if (d.evidence === 'oura' && !S.ouraOk) out.push('Connect Oura');
+  if (d.evidence === 'oura' && !ouraOk(S.me)) out.push('Reconnect Oura');
   return out;
 }
 function sendDraft(sent){
@@ -904,17 +932,26 @@ function sendDraft(sent){
   S.draft = null; S.form = {}; S.tab = 'pacts'; S.stack = [{name:'pact', id:p.id}];
   toast(sent ? 'Sent for review' : 'Draft saved');
 }
+// The evidence kind is fixed with the pact, so editing a draft skips the source step.
+const createSteps = () => S.draft?.editing ? ['goal','schedule','stakes','reviewers','reminders','check'] : ['source','goal','schedule','stakes','reviewers','reminders','check'];
+function pickSource(k){
+  const d = S.draft;
+  d.evidence = k;
+  if (k === 'oura') Object.assign(d, {kind:'fixed', days:[0,1,2,3,4,5,6], byOn:false, name:ouraAuto(d.bedtime), nameAuto:true, desc:'', penalty:2, reminders:[{time:'23:30', channel:'Push'}]});
+  else if (d.nameAuto) Object.assign(d, {name:'', nameAuto:false});
+  S.form.cstep = 1;
+}
 function renderCreate(){
   if (!S.draft) S.draft = newDraft();
   const d = S.draft;
   {
-    const steps = ['what','evidence','schedule','stakes','reviewers','reminders','check'];
+    const steps = createSteps();
     const i = S.form.cstep || 0, k = steps[i];
     const body = k === 'check' ? `<h2>Check it over</h2><div class="card">${termsList({...draftToPact(d), stage:'draft', reviewers:d.reviewers})}</div>${draftProblems(d).map(x => `<div class="alert warn">${x}</div>`).join('')}<p class="muted" style="margin:0">It stays a Draft until ${d.reviewers.map(nameOf).join(', ') || 'a reviewer'} approves it. Nothing is at stake until then.</p>`
       : `<h2>${FIELDS[k][0]}</h2>${FIELDS[k][1]()}`;
     return `<div class="stack"><div class="steps">${steps.map((_,j) => `<i class="${j <= i ? 'on' : ''}"></i>`).join('')}</div><small class="muted">Step ${i+1} of ${steps.length}</small></div>${body}
       <div class="footbar">${i > 0 ? `<button class="btn" data-act="cstep" data-arg="-1">Back</button>` : `<button class="btn" data-act="back">Cancel</button>`}
-      ${k === 'check' ? `<button class="btn" data-act="saveDraft">Save draft</button><button class="btn primary" style="flex:1" data-act="sendDraft">Send for review</button>` : `<button class="btn primary" style="flex:1" data-act="cstep" data-arg="1">Next</button>`}</div>`;
+      ${k === 'source' ? '' : k === 'check' ? `<button class="btn" data-act="saveDraft">Save draft</button><button class="btn primary" style="flex:1" data-act="sendDraft">Send for review</button>` : `<button class="btn primary" style="flex:1" data-act="cstep" data-arg="1">Next</button>`}</div>`;
   }
 }
 
@@ -1033,12 +1070,12 @@ function renderSide(){
   const recent = S.occurrences.filter(o => o.key >= iso(addDays(S.now,-3))).sort((a,b) => a.key < b.key ? 1 : -1).slice(0, 8)
     .map(o => { const p = pact(o.pactId); return `<tr><td>${esc(p.name)}</td><td>${occLabel(p, o.key).replace('Night of ','')}</td><td>${o.outcome}</td></tr>`; }).join('');
   $('#side').innerHTML = `<div class="spread"><span class="tag">PROTOTYPE · THROWAWAY</span><button class="btn sm closeside" data-act="side">Close</button></div>
-    <section><h2>Pact flows · round 3</h2><div class="muted" style="font-size:13.5px">All three screens are settled: Create pact is step by step, Review is one at a time, and Submit evidence happens inline on the Today card. Round 1 and 2 feedback is applied throughout.</div></section>
+    <section><h2>Pact flows · round 4</h2><div class="muted" style="font-size:13.5px">New in this round: Create pact starts by picking the evidence kind (Camera or Oura Ring), and the Goal step depends on it. Picking Oura without a connection opens a mock Oura sign-in. Profile lists your Connections.</div></section>
     <section><div class="label">Signed in as</div><div class="seg">${Object.keys(S.accounts).map(a => `<button aria-pressed="${S.me === a}" data-act="as" data-arg="${a}">${acct(a).name}</button>`).join('')}</div><small class="muted">You own the bedtime and gym pacts and Sam reviews them. Sam owns a running pact that you review. Switch to act as the other person.</small></section>
     <section><div class="label">Jump to</div><div class="row2"><button class="btn sm" data-act="jump" data-arg="create">Create pact</button><button class="btn sm" data-act="jump" data-arg="review">Review</button><button class="btn sm" data-act="jump" data-arg="evidence">Submit evidence</button><button class="btn sm" data-act="jump" data-arg="ledgers">Ledgers</button></div>
       <table><tr><th>Screen</th><th>Design</th></tr>${Object.entries(CHOSEN).map(([k,v]) => `<tr><td>${SCREEN_NAME[k]}</td><td>${v} (chosen)</td></tr>`).join('')}</table></section>
     <section><div class="label">Clock</div><div class="num">${fmtDay(S.now)}, ${fmtTime(S.now)}</div><div class="row2"><button class="btn sm" data-act="advance">Advance to tomorrow, noon</button></div><small class="muted">Judges today's evidence pacts at the end of the day and last night's bedtime at noon. Penalties, overdue amounts and 48h excuse windows all follow the clock.</small>
-      <label class="row2"><input type="checkbox" data-act="oura" data-arg="${S.ouraOk ? 'off' : 'on'}" ${S.ouraOk ? '' : 'checked'}> Simulate Oura disconnected</label>
+      <label class="row2"><input type="checkbox" data-act="oura" ${S.oura.you === 'broken' ? 'checked' : ''}> Simulate your Oura connection dropping</label>
       <button class="btn sm" data-act="reset" style="align-self:flex-start">Reset everything</button></section>
     <section><div class="label">State</div><table><tr><th>Account</th><th>To review</th><th>Owes</th><th>Overdue</th></tr>${qs}</table>
       <table><tr><th>Pact</th><th>Occurrence</th><th>Outcome</th></tr>${recent}</table></section>
@@ -1063,6 +1100,7 @@ function render(){
   else {
     let title, sub = '', body;
     if (top?.name === 'create') { title = S.draft?.editing ? 'Edit draft' : 'New pact'; body = renderCreate(); }
+    else if (top?.name === 'connect') { title = 'Oura Ring'; sub = 'Connection'; body = renderConnect(); }
     else if (top?.name === 'ledger') { const r = rcp(top.id); title = r.name; sub = r.kind === 'org' ? esc(r.link) : 'Friend'; body = renderLedger(top.id); }
     else if (top?.name === 'pact') { const p = pact(top.id); title = p.name; sub = scheduleText(p); body = renderPact(top.id); }
     else if (top?.name === 'item') { const i = itemByKey(top.key); title = i ? KIND[i.kind] : 'Item'; sub = i ? esc(itemTitle(i)) : ''; body = renderItemPage(top.key); }
@@ -1129,8 +1167,15 @@ const ACT = {
   expand:a => { S.form.expanded = S.form.expanded === a ? null : a; },
   ack:a => { const e = S.evidence.find(x => x.id === a); if (e) e.ack = true; },
   // create
-  cstep:a => { S.form.cstep = Math.max(0, Math.min(6, (S.form.cstep || 0) + Number(a))); },
-  cset:a => { const [k, v] = a.split('='); S.draft[k] = v; if (k === 'evidence' && v === 'oura') { S.draft.kind = S.draft.kind === 'once' ? 'fixed' : S.draft.kind; S.draft.byOn = false; } },
+  cstep:a => { S.form.cstep = Math.max(0, Math.min(createSteps().length - 1, (S.form.cstep || 0) + Number(a))); },
+  cset:a => { const [k, v] = a.split('='); S.draft[k] = v; },
+  csource:a => {
+    if (a === 'oura' && !ouraOk(S.me)) { S.stack.push({name:'connect', then:'oura'}); return; }
+    pickSource(a);
+  },
+  connect:() => { S.sheet = null; S.tmp = {}; S.stack.push({name:'connect'}); },
+  connected:() => { const t = S.stack.pop(); S.oura[S.me] = 'ok'; log(`${nameOf(S.me)} connected Oura.`); if (t?.then === 'oura') pickSource('oura'); else toast('Oura connected'); },
+  disc:a => { if (a === 'ask') S.tmp.disc = true; else if (a === 'no') S.tmp.disc = false; else { S.oura[S.me] = null; S.tmp = {}; log(`${nameOf(S.me)} disconnected Oura. Nights on Oura pacts count as Missed until reconnected.`); toast('Oura disconnected'); } },
   cday:a => { const d = Number(a), s = new Set(S.draft.days); s.has(d) ? s.delete(d) : s.add(d); S.draft.days = [...s]; },
   ctarget:a => { S.draft.target = Math.max(1, Math.min(7, S.draft.target + Number(a))); },
   cwin:(a, el) => { S.draft.byOn = el.checked; },
@@ -1152,7 +1197,7 @@ const ACT = {
     else if (a === 'evidence') { S.me = 'you'; S.tab = 'today'; S.stack = []; const p = S.pacts.find(x => x.owner === 'you' && x.evidence === 'photo' && x.stage === 'active' && scheduledOn(x, S.now)); if (p) ACT.evidence(p.id); else toast('No photo pact due today. Advance the clock.'); }
     else { S.tab = a; S.stack = []; } },
   advance:() => { const t = addDays(sod(S.now), 1); t.setHours(12,0,0,0); advanceTo(t); S.sheet = null; },
-  oura:a => { S.ouraOk = a === 'on'; log(S.ouraOk ? 'Oura reconnected.' : 'Oura disconnected (simulated). You get an alert and a push notification.'); },
+  oura:() => { if (!S.oura.you) { toast('Connect Oura as You first'); return; } S.oura.you = S.oura.you === 'ok' ? 'broken' : 'ok'; log(S.oura.you === 'ok' ? 'Oura reconnected.' : 'Oura connection dropped (simulated). You get an alert and a push notification.'); },
   reset:() => { const v = S.variant; S = seed(); S.variant = v; },
   invite:() => { S.tmp.invite = true; },
   copy:() => { try { navigator.clipboard.writeText('pact.app/i/7Kq2xV').then(() => toast('Link copied'), () => toast('Select the link to copy it')); } catch(e) { toast('Select the link to copy it'); } return 'skip'; },
@@ -1187,7 +1232,10 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => {
   const t = e.target;
-  if (t.dataset.f !== undefined) { setField(t); liveUpdate(); }
+  if (t.dataset.f !== undefined) { setField(t);
+    if (t.dataset.f === 'name') S.draft.nameAuto = false;
+    if (t.dataset.f === 'bedtime' && S.draft.nameAuto) { S.draft.name = ouraAuto(t.value); const n = document.getElementById('c-name'); if (n) n.value = S.draft.name; }
+    liveUpdate(); }
   else if (t.dataset.tmp !== undefined && t.dataset.rerender === undefined) { S.tmp[t.dataset.tmp] = t.value; liveUpdate(); }
 });
 function setField(t){
