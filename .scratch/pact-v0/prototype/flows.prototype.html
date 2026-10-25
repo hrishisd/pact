@@ -20,6 +20,7 @@
   --excused:#8F5C0C; --excused-bg:#F4E8CF;
   --pending:#565C7C; --pending-bg:#E4E6EF;
   --wait:#76582A; --wait-bg:#EEE2CB;
+  --due:#B0520A;
   --scrim:rgba(14,22,18,.45);
   --proto:#2A2140; --proto-ink:#F3EEFF; --proto-line:#8C7BC4;
   --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
@@ -138,8 +139,21 @@ textarea.inp{min-height:76px;resize:vertical}
 .rowbtn{display:flex;gap:10px;align-items:center;padding:12px 14px;background:none;border:0;text-align:left;width:100%}
 .rowbtn .rt{flex:1;min-width:0;display:flex;flex-direction:column}
 .rowbtn .rt small{color:var(--muted)}
+/* Tappable rows are separate cards with a chevron; rows you can't tap stay grouped in a .list. */
+.cards{display:flex;flex-direction:column;gap:8px}
+.cards>.rowbtn{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.cards>.rowbtn::after{content:"\203A";color:var(--muted);font-size:22px;line-height:1;margin-left:2px}
+.pen,.meta.pen{color:var(--missed);font-weight:700}
+.due,.meta.due{color:var(--due);font-weight:600}
+.kico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none}
+.kico svg{width:20px;height:20px}
+.kind svg{width:13px;height:13px;vertical-align:-2px;margin-right:4px}
 .kind{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;padding:3px 6px;white-space:nowrap;background:var(--sunk);color:var(--muted)}
-.k-pact,.k-change{background:var(--excused-bg);color:var(--excused)}
+.k-pact{background:var(--accent-soft);color:var(--accent)}
+.k-change{background:var(--excused-bg);color:var(--excused)}
+.k-evidence{background:var(--kept-bg);color:var(--kept)}
+.k-excuse{background:var(--pending-bg);color:var(--pending)}
+.k-payment{background:var(--missed-bg);color:var(--missed)}
 .age{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
 .sumrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .bigmoney{font-family:var(--f-mono);font-size:30px;font-weight:500;letter-spacing:-.02em}
@@ -269,7 +283,7 @@ function addPenalty(s, occ, at, status, mult=1){
 
 function seed(){
   const s = {
-    now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, sideOpen:false,
+    now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, kindStyle:readKindStyle(), sideOpen:false,
     log:[], tmp:{}, form:{}, draft:null,
     accounts:{you:{id:'you', name:'You', initial:'Y'}, sam:{id:'sam', name:'Sam', initial:'S'}},
     recipients:[
@@ -280,7 +294,7 @@ function seed(){
     pacts:[
       {id:'p-bed', owner:'you', name:'In bed by midnight', desc:'Oura says I got into bed before 12:00am.', evidence:'oura', schedule:{kind:'fixed', days:[0,1,2,3,4,5,6]}, bedtime:'00:00', by:null, penalty:2, recipientId:'rc-org', reviewers:['sam'], reminders:[{time:'23:30', channel:'Push'}], stage:'active', start:'2026-09-28', end:'', thread:[]},
       {id:'p-gym', owner:'you', name:'Gym Mon/Wed/Fri', desc:'A photo of me inside the gym.', evidence:'photo', schedule:{kind:'fixed', days:[1,3,5]}, by:null, penalty:5, recipientId:'rc-sam', reviewers:['sam'], reminders:[{time:'18:00', channel:'Push'}], stage:'active', start:'2026-09-28', end:'', thread:[]},
-      {id:'p-tax', owner:'you', name:'File my taxes', desc:'Screenshot of the e-file confirmation.', evidence:'photo', schedule:{kind:'once', deadline:'2026-11-30'}, by:null, penalty:50, recipientId:'rc-org', reviewers:['sam'], reminders:[], stage:'draft', sent:true, sentAt:D(2026,10,20,22,10), start:'2026-11-01', end:'', thread:[]},
+      {id:'p-tax', owner:'you', name:'File my taxes', desc:'Photo of the e-file confirmation on screen.', evidence:'photo', schedule:{kind:'once', deadline:'2026-11-30'}, by:null, penalty:50, recipientId:'rc-org', reviewers:['sam'], reminders:[], stage:'draft', sent:true, sentAt:D(2026,10,20,22,10), start:'2026-11-01', end:'', thread:[]},
       {id:'p-run', owner:'sam', name:'Run 3× a week', desc:'A photo outside or a screenshot of the run.', evidence:'photo', schedule:{kind:'weekly', target:3}, by:null, penalty:10, recipientId:'rc-you', reviewers:['you'], reminders:[], stage:'active', start:'2026-10-05', end:'', thread:[]},
     ],
     occurrences:[], evidence:[], excuses:[], payments:[], changes:[], penalties:[],
@@ -567,6 +581,7 @@ function screenKey(){
   if (!top && S.tab === 'today') return 'evidence';
   return null;
 }
+function readKindStyle(){ let k = null; try { k = new URLSearchParams(location.search).get('kinds'); } catch(e) {} return k === 'badge' ? 'badge' : 'icon'; }
 function readVariant(){
   let v = null;
   try { v = new URLSearchParams(location.search).get('variant'); } catch(e) {}
@@ -590,7 +605,20 @@ const IC = {
   back:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>',
   camera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8.5A2 2 0 0 1 6 6.5h2l1.5-2h5l1.5 2h2a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></svg>',
   ring:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="5"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
+  pencil:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 19l1-4.5L15.5 5l3.5 3.5L9.5 18z"/><path d="M13.5 7l3.5 3.5"/></svg>',
+  excuse:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4M9.5 12.5l5 5M14.5 12.5l-5 5"/></svg>',
+  dollar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M15.5 8.2c-.6-1.2-1.9-1.9-3.6-1.9-2 0-3.4 1-3.4 2.5 0 3.5 7.3 1.9 7.3 5.5 0 1.6-1.6 2.7-3.9 2.7-1.8 0-3.2-.8-3.8-2.1M12 4v16"/></svg>',
 };
+// Round 5 compares two ways to show an item's kind: 'badge' (coloured word) or 'icon' (coloured icon square).
+const KIND_IC = {pact:'plus', change:'pencil', evidence:'camera', excuse:'excuse', payment:'dollar'};
+const kindBadge = i => `<span class="kind k-${i.kind}">${S.kindStyle === 'icon' ? IC[KIND_IC[i.kind]] : ''}${KIND[i.kind]}</span>`;
+const kindIcon = i => `<span class="kico k-${i.kind}" aria-hidden="true">${IC[KIND_IC[i.kind]]}</span>`;
+// A waiting-item row: in 'badge' style the badge sits above the title, in 'icon' style the icon sits left and the kind joins the small line.
+function itemRow(i, sub, right = ''){
+  const icon = S.kindStyle === 'icon';
+  return `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}">${icon ? kindIcon(i) : ''}<span class="rt">${icon ? '' : `<span>${kindBadge(i)}</span>`}<b>${esc(itemTitle(i))}</b><small>${icon ? KIND[i.kind] + ' · ' : ''}${esc(sub)}</small></span>${right}</button>`;
+}
 const ouraOk = a => S.oura[a] === 'ok';
 const ouraAuto = t => `In bed by ${fmtHM(t)}`;
 
@@ -612,7 +640,7 @@ function scheduleText(p){
 }
 function termsList(p){
   const rows = [
-    ['Evidence', p.evidence === 'oura' ? `Oura Ring: in bed by ${fmtHM(p.bedtime)}` : `Camera: ${esc(p.desc || 'a photo')}, checked by a reviewer`],
+    ['Evidence', p.evidence === 'oura' ? `Oura Ring: in bed by ${fmtHM(p.bedtime)}` : `Camera: ${esc((p.desc || 'a photo').replace(/\.$/, ''))}, checked by a reviewer`],
     ['Schedule', scheduleText(p)],
     p.by ? ['Evidence due', `By ${fmtHM(p.by)}`] : null,
     ['Penalty', `${money(p.penalty)} per miss`],
@@ -663,7 +691,8 @@ const RANK = {todo:0, missed:1, wait:2, auto:3, done:4, off:5};
 const reviewersText = p => p.reviewers.map(nameOf).join(' or ');
 function byTimeToday(p){ const [h,m] = p.by.split(':').map(Number); const t = sod(S.now); t.setHours(h,m); return t; }
 const byPassed = p => !!p.by && S.now > byTimeToday(p);
-function timeLeft(p){ const ms = Math.max(0, (p.by ? byTimeToday(p) : eod(S.now)) - S.now); return `${Math.floor(ms/HOUR)}h ${Math.floor((ms%HOUR)/6e4)}m left`; }
+function timeLeft(p){ const ms = Math.max(0, (p.by ? byTimeToday(p) : eod(S.now)) - S.now); return `${Math.floor(ms/HOUR)}h ${Math.floor((ms%HOUR)/6e4)}m`; }
+const dueToday = p => `Due at ${p.by ? fmtHM(p.by) : 'midnight'} · ${timeLeft(p)}`;
 function submitActions(p){ return `<div class="row2"><button class="btn primary" data-act="evidence" data-arg="${p.id}">Submit evidence</button><button class="btn" data-act="excuse" data-arg="${p.id}|${todayKey()}">File excuse</button></div>`; }
 function evidenceCard(p){
   const today = sod(S.now);
@@ -685,8 +714,8 @@ function evidenceCard(p){
   if (pend) return {tone:'wait', label:`Waiting for ${reviewersText(p)}`, body:progress};
   if (byPassed(p)) return {tone:'missed', label:'Closed', body:`${progress}<div class="meta">Evidence was due by ${fmtHM(p.by)}.</div><div class="row2"><button class="btn" data-act="excuse" data-arg="${p.id}|${todayKey()}">File excuse</button></div>`};
   const inline = S.form.inline === p.id;
-  const due = p.schedule.kind === 'once' ? `Due ${fmtDay(parseIso(p.schedule.deadline))}${p.by ? ' by ' + fmtHM(p.by) : ''}` : `${p.by ? 'Due by ' + fmtHM(p.by) : 'Due today'} · ${timeLeft(p)}`;
-  return {tone:'todo', label:'To do', body:`${progress}<div class="meta">${due}</div>${inline ? evidenceInline(p) : submitActions(p)}`};
+  const due = p.schedule.kind === 'once' && p.schedule.deadline !== todayKey() ? `Due ${fmtDay(parseIso(p.schedule.deadline))}${p.by ? ' at ' + fmtHM(p.by) : ''}` : dueToday(p);
+  return {tone:'todo', label:'To do', body:`${progress}<div class="meta due">${due}</div>${inline ? evidenceInline(p) : submitActions(p)}`};
 }
 function bedtimeCard(p){
   const yk = iso(addDays(sod(S.now), -1)), occ = findOcc(p, yk);
@@ -703,9 +732,9 @@ function renderToday(){
   const active = S.pacts.filter(p => p.owner === me && p.stage === 'active');
   const alerts = alertsFor(me).map(a => `<div class="alert ${a.tone}"><div>${a.html}</div><div class="row2">${a.actions}</div></div>`).join('');
   const cards = active.map(p => ({p, ...(p.evidence === 'oura' ? bedtimeCard(p) : evidenceCard(p))})).sort((a,b) => RANK[a.tone] - RANK[b.tone])
-    .map(({p, tone, label, body}) => `<article class="card tcard" data-act="openPact" data-arg="${p.id}"><div class="spread"><h3>${esc(p.name)}</h3><span class="chip ${PILL[tone]}">${label}</span></div><div class="meta">${money(p.penalty)} per miss</div>${body}</article>`).join('');
+    .map(({p, tone, label, body}) => `<article class="card tcard" data-act="openPact" data-arg="${p.id}"><div class="spread"><h3>${esc(p.name)}</h3><span class="chip ${PILL[tone]}">${label}</span></div><div class="meta pen">${money(p.penalty)}</div>${body}</article>`).join('');
   const waiting = allItems().filter(i => i.owner === me && !awaitingOwner(i)).sort((a,b) => b.at - a.at);
-  const waitList = waiting.length ? `<section class="stack"><div class="label">Waiting for approval</div><div class="list">${waiting.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}"><span class="rt"><b>${KIND[i.kind]}: ${esc(itemTitle(i))}</b><small>${esc(i.kind === 'pact' ? 'Sent ' + age(i.at) + ' ago' : itemSub(i))}</small></span><span class="chip c-wait">${esc(i.pacts[0] ? reviewersText(i.pacts[0]) : 'Reviewer')}</span></button>`).join('')}</div></section>` : '';
+  const waitList = waiting.length ? `<section class="stack"><div class="label">Waiting for approval</div><div class="cards">${waiting.map(i => itemRow(i, i.kind === 'pact' ? 'Sent ' + age(i.at) + ' ago' : itemSub(i), `<span class="chip c-wait">${esc(i.pacts[0] ? reviewersText(i.pacts[0]) : 'Reviewer')}</span>`)).join('')}</div></section>` : '';
   const yk = iso(addDays(today,-1));
   const yOcc = S.occurrences.filter(o => { const p = pact(o.pactId); return p.owner === me && o.key === yk && p.schedule.kind !== 'weekly'; });
   const yesterday = yOcc.length ? `<section class="stack"><div class="label">Yesterday · ${fmtDay(addDays(today,-1))}</div><div class="list">${yOcc.map(o => { const p = pact(o.pactId); return `<div class="rowbtn"><span class="rt"><b>${esc(p.name)}</b><small>${esc(o.detail || (o.outcome === 'pending' ? (p.evidence === 'oura' ? 'Final at noon' : 'Waiting for review') : ''))}</small></span>${outcomeChip(o.outcome)}</div>`; }).join('')}</div></section>` : '';
@@ -721,7 +750,7 @@ function photoPicker(target, opts = {}){
   return `<div class="photos">${photos.map((ph, i) => `<img src="${ph.src}" alt="Selected photo ${i+1}">`).join('')}
     <label class="ph-add" for="file-${target}" aria-label="Add photo">+</label></div>
     <input id="file-${target}" type="file" accept="image/*" capture="environment" multiple hidden data-file="${target}">
-    <div class="row2"><button class="link" data-act="sample" data-arg="${opts.sample || 'gym'}">Use a sample photo</button><small class="muted">The real app opens your camera or photo library.</small></div>`;
+    <div class="row2"><button class="link" data-act="sample" data-arg="${opts.sample || 'gym'}">Use a sample photo</button><small class="muted">The real app opens your camera.</small></div>`;
 }
 function evidenceMeta(p){
   return `<div class="muted" style="font-size:13px">${p.reviewers.map(nameOf).join(' or ')} checks it against: “${esc(p.desc)}”. ${p.by ? `Due by ${fmtHM(p.by)}.` : 'Due by midnight.'}</div>`;
@@ -741,7 +770,7 @@ function renderCapture(top){
   const p = pact(top.pactId), ph = (S.tmp.photos || [])[0];
   const left = eod(S.now) - S.now;
   return `<div class="capture">
-    <div class="top gut"><button class="btn sm" data-act="back">Close</button><div style="text-align:center"><b>${esc(p.name)}</b><div class="ccount">${timeLeft(p)}${p.by ? ' · due by ' + fmtHM(p.by) : ' today'}</div></div><span style="width:56px"></span></div>
+    <div class="top gut"><button class="btn sm" data-act="back">Close</button><div style="text-align:center"><b>${esc(p.name)}</b><div class="ccount">${dueToday(p)}</div></div><span style="width:56px"></span></div>
     <label class="vf" for="file-cap">${ph ? `<img src="${ph.src}" alt="Your photo">` : `<span>Point the camera at you in the gym<br><small class="ccount">${esc(p.desc)}</small></span>`}</label>
     <input id="file-cap" type="file" accept="image/*" capture="environment" hidden data-file="cap">
     <div class="bottom gut">
@@ -884,7 +913,7 @@ function newDraft(tpl = 'blank'){
 const myRecipients = () => S.recipients.filter(r => r.owner === S.me);
 function fSource(){ const d = S.draft, st = S.oura[S.me];
   const tile = (k, icon, label, line, extra = '') => `<button class="tile" aria-pressed="${d.evidence === k}" data-act="csource" data-arg="${k}"><span class="tico">${icon}</span><b>${label}</b><small>${line}</small>${extra}</button>`;
-  return `<div class="tiles">${tile('photo', IC.camera, 'Camera', 'Take a photo each time. Your reviewer checks it.')}${tile('oura', IC.ring, 'Oura Ring', 'Your ring reports when you got into bed. Nothing to submit or review.', st === 'ok' ? '' : `<span class="chip ${st ? 'c-missed' : 'c-draft'}">${st ? 'Needs reconnecting' : 'Connect first'}</span>`)}</div>
+  return `<div class="tiles">${tile('photo', IC.camera, 'Camera', 'Take a live photo with your camera each time. You can’t upload one from your gallery. Your reviewer checks it.')}${tile('oura', IC.ring, 'Oura Ring', 'The app reads your bedtime from your ring. You don’t submit anything, and no reviewer checks it.', st === 'ok' ? '' : `<span class="chip ${st ? 'c-missed' : 'c-draft'}">${st ? 'Needs reconnecting' : 'Connect first'}</span>`)}</div>
   <small class="muted">You can't change this later. To prove it a different way, make a new pact.</small>`; }
 function fGoal(){ const d = S.draft;
   const name = `<label class="field"><span>Name</span><input class="inp" id="c-name" data-f="name" placeholder="${d.evidence === 'oura' ? '' : 'e.g. Gym'}" value="${esc(d.name)}">${d.evidence === 'oura' ? '<small>Shown on Today. Filled in from your bedtime until you change it.</small>' : '<small>Shown on Today.</small>'}</label>`;
@@ -902,10 +931,10 @@ function fStakes(){ const d = S.draft; return `<div class="stack">
   <label class="field"><span>Penalty per miss</span><div class="row2" style="flex-wrap:nowrap"><b style="font-size:20px">$</b><input class="inp num" type="number" min="1" id="c-pen" data-f="penalty" data-num value="${d.penalty}"></div></label>
   <div class="field"><span>Where the money goes</span>${myRecipients().map(r => `<button class="opt" aria-pressed="${d.recipientId === r.id}" data-act="cset" data-arg="recipientId=${r.id}"><span class="glyph">${r.kind === 'org' ? 'Org' : esc(r.name[0])}</span><span><b>${esc(r.name)}</b><small>${r.kind === 'org' ? esc(r.link) : 'A friend'}</small></span></button>`).join('')}
   <details><summary class="link" style="cursor:pointer">Add an organization</summary><div class="stack" style="margin-top:8px"><input class="inp" id="c-org" data-f="newOrg" placeholder="Organization name" value="${esc(d.newOrg)}"><input class="inp" id="c-orgl" data-f="newOrgLink" placeholder="Link (donation page)" value="${esc(d.newOrgLink)}"><button class="btn sm" data-act="addOrg">Add</button></div></details></div></div>`; }
-function fReviewers(){ const d = S.draft; return `<div class="stack">${friendsOf(S.me).map(f => `<label class="opt" style="align-items:center"><input type="checkbox" data-act="crev" data-arg="${f}" ${d.reviewers.includes(f) ? 'checked' : ''}><span class="avatar" style="width:32px;height:32px">${acct(f).initial}</span><span><b>${acct(f).name}</b><small>Approves the pact, checks photos, decides excuses</small></span></label>`).join('')}<small class="muted">Any one reviewer's decision counts. Pick from your friends.</small></div>`; }
+function fReviewers(){ const d = S.draft; return `<div class="stack">${friendsOf(S.me).map(f => `<label class="opt" style="align-items:center"><input type="checkbox" data-act="crev" data-arg="${f}" ${d.reviewers.includes(f) ? 'checked' : ''}><span class="avatar" style="width:32px;height:32px">${acct(f).initial}</span><span><b>${acct(f).name}</b><small>${d.evidence === 'oura' ? 'Approves the pact and reviews excuses and payments' : 'Approves the pact and reviews photos, excuses and payments'}</small></span></label>`).join('')}<small class="muted">${d.evidence === 'oura' ? 'Any reviewer you pick can review your excuses and payments. There are no photos to review, because the app checks your ring.' : 'Any reviewer you pick can review your photos, excuses and payments.'}</small></div>`; }
 function fReminders(){ const d = S.draft; return `<div class="stack">${d.reminders.map((r,i) => `<div class="row2" style="flex-wrap:nowrap"><input class="inp" type="time" id="c-rt${i}" data-f="reminders.${i}.time" value="${r.time}"><select class="inp" id="c-rc${i}" data-f="reminders.${i}.channel">${['Push','Email','Push + email'].map(c => `<option ${c === r.channel ? 'selected' : ''}>${c}</option>`).join('')}</select><button class="iconbtn" data-act="crem" data-arg="${i}" aria-label="Remove reminder">×</button></div>`).join('')}
   <button class="btn sm" data-act="cremadd" style="align-self:flex-start">Add reminder</button>
-  <small class="muted">${d.evidence === 'oura' ? 'Bedtime reminders always fire.' : d.kind === 'weekly' ? 'Fires every day you haven’t submitted evidence, until the week’s target is met.' : d.kind === 'once' ? 'Fires every day until you submit evidence.' : 'Fires on scheduled days, only if you haven’t submitted evidence yet.'}</small></div>`; }
+  <small class="muted">${d.evidence === 'oura' ? 'This reminder goes off every scheduled night, even if you’re already in bed. The app can’t tell until your ring syncs, usually the next morning.' : d.kind === 'weekly' ? 'Fires every day you haven’t submitted evidence, until the week’s target is met.' : d.kind === 'once' ? 'Fires every day until you submit evidence.' : 'Fires on scheduled days, only if you haven’t submitted evidence yet.'}</small></div>`; }
 const FIELDS = {source:['How will you prove it?', fSource], goal:['Goal', fGoal], schedule:['Schedule', fSchedule], stakes:['Penalty', fStakes], reviewers:['Reviewers', fReviewers], reminders:['Reminders', fReminders]};
 function draftToPact(d){
   return {name:d.name.trim() || 'Untitled pact', desc:d.desc, evidence:d.evidence, schedule:d.kind === 'fixed' ? {kind:'fixed', days:[...d.days]} : d.kind === 'weekly' ? {kind:'weekly', target:d.target} : {kind:'once', deadline:d.deadline},
@@ -958,7 +987,7 @@ function renderCreate(){
 /* ---------- Pacts + pact page ---------- */
 function renderPacts(){
   const mine = S.pacts.filter(p => p.owner === S.me);
-  const grp = (label, ps) => ps.length ? `<section class="stack"><div class="label">${label}</div><div class="list">${ps.map(p => `<button class="rowbtn" data-act="openPact" data-arg="${p.id}"><span class="rt"><b>${esc(p.name)}</b><small>${scheduleText(p)} · ${money(p.penalty)}/miss</small></span>${stageChip(p)}</button>`).join('')}</div></section>` : '';
+  const grp = (label, ps) => ps.length ? `<section class="stack"><div class="label">${label}</div><div class="cards">${ps.map(p => `<button class="rowbtn" data-act="openPact" data-arg="${p.id}"><span class="rt"><b>${esc(p.name)}</b><small>${scheduleText(p)} · <span class="pen">${money(p.penalty)}</span></small></span>${stageChip(p)}</button>`).join('')}</div></section>` : '';
   const ended = mine.filter(p => p.stage === 'ended');
   return `<button class="btn primary" data-act="create">New pact</button>
     ${grp('Drafts', mine.filter(p => p.stage === 'draft'))}${grp('Active', mine.filter(p => p.stage === 'active'))}
@@ -975,7 +1004,7 @@ function renderPact(id){
     ${p.rejectReason && !p.sent ? `<div class="alert warn"><div><b>Sent back:</b> “${esc(p.rejectReason)}”</div></div>` : ''}
     ${actions}
     <section class="card"><h3>History</h3>${heatmap(p)}</section>
-    ${waiting.length ? `<section class="stack"><div class="label">Waiting on ${p.reviewers.map(nameOf).join(', ')}</div><div class="list">${waiting.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}"><span class="kind k-${i.kind}">${KIND[i.kind]}</span><span class="rt"><b>${esc(itemSub(i))}</b></span><span class="age">${age(i.at)}</span></button>`).join('')}</div></section>` : ''}
+    ${waiting.length ? `<section class="stack"><div class="label">Waiting on ${p.reviewers.map(nameOf).join(', ')}</div><div class="cards">${waiting.map(i => S.kindStyle === 'icon' ? `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}">${kindIcon(i)}<span class="rt"><b>${KIND[i.kind]}</b><small>${esc(itemSub(i))}</small></span><span class="age">${age(i.at)}</span></button>` : `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}"><span class="kind k-${i.kind}">${KIND[i.kind]}</span><span class="rt"><b>${esc(itemSub(i))}</b></span><span class="age">${age(i.at)}</span></button>`).join('')}</div></section>` : ''}
     <section class="card"><h3>Terms</h3>${termsList(p)}</section>`;
 }
 
@@ -1023,7 +1052,7 @@ function decisionText(i){
 function renderItemPage(key){
   const i = itemByKey(key); if (!i) return '<p>Gone.</p>';
   const isOwner = i.owner === S.me, pend = isPendingItem(i);
-  const head = `<div class="row2"><span class="kind k-${i.kind}">${KIND[i.kind]}</span><span class="muted">from ${nameOf(i.owner)} · ${age(i.at)} ago</span></div>`;
+  const head = `<div class="row2">${kindBadge(i)}<span class="muted">from ${nameOf(i.owner)} · ${age(i.at)} ago</span></div>`;
   const decided = !pend ? `<div class="alert ${i.obj.status === 'rejected' || i.obj.rejectReason ? 'bad' : 'info'}">${decisionText(i)}</div>` : '';
   const bar = !isOwner && pend && !S.form.rejecting && S.form.commenting !== key ? `<div class="footbar"><button class="btn danger" data-act="reject" data-arg="${key}">Reject</button><button class="btn" data-act="comment" data-arg="${key}">Comment</button><button class="btn ok" style="flex:1" data-act="approve" data-arg="${key}">Approve</button></div>` : '';
   return `${head}${decided}${itemBody(i)}${threadHtml(i.obj.thread)}${pend ? composer(key, isOwner) : ''}${isOwner && pend ? `<div class="muted" style="font-size:13px">Waiting for ${i.pacts[0].reviewers.map(nameOf).join(', ')} to decide.</div>` : ''}${bar}`;
@@ -1031,13 +1060,13 @@ function renderItemPage(key){
 function renderReview(){
   const q = queueFor(S.me);
   const asked = reviewsFor(S.me).filter(awaitingOwner);
-  const askedNote = asked.length ? `<div class="list">${asked.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}"><span class="chip c-wait">Waiting for ${nameOf(i.owner)}</span><span class="rt"><b>${esc(itemTitle(i))}</b><small>You asked: “${esc(i.obj.thread[i.obj.thread.length-1].text)}”</small></span></button>`).join('')}</div>` : '';
+  const askedNote = asked.length ? `<div class="cards">${asked.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}"><span class="chip c-wait">Waiting for ${nameOf(i.owner)}</span><span class="rt"><b>${esc(itemTitle(i))}</b><small>You asked: “${esc(i.obj.thread[i.obj.thread.length-1].text)}”</small></span></button>`).join('')}</div>` : '';
   if (!q.length) return `<div class="card"><h3>Nothing to review</h3><p class="muted" style="margin:0">When ${friendsOf(S.me).map(nameOf).join(', ')} sends a new pact, evidence, an excuse, a payment or a change, it shows up here.</p></div>${askedNote}${S.me === 'you' && !asked.length ? '<button class="btn" data-act="as" data-arg="sam">Switch to Sam to see their queue</button>' : ''}`;
   {
     const idx = Math.min(S.form.ridx || 0, q.length - 1), i = q[idx], key = keyOf(i);
     const busy = S.form.rejecting === key || S.form.commenting === key;
     return `<div class="spread"><span class="counter">${idx+1} of ${q.length} to review</span><div class="row2">${q.length > 1 ? `<button class="btn sm" data-act="rskip" data-arg="-1">‹ Prev</button><button class="btn sm" data-act="rskip" data-arg="1">Skip ›</button>` : ''}</div></div>
-      <div class="row2"><span class="kind k-${i.kind}">${KIND[i.kind]}</span><span class="muted">from ${nameOf(i.owner)} · ${age(i.at)} ago</span></div>
+      <div class="row2">${kindBadge(i)}<span class="muted">from ${nameOf(i.owner)} · ${age(i.at)} ago</span></div>
       ${itemBody(i)}${threadHtml(i.obj.thread)}${composer(key, false)}
       ${busy ? '' : `<div class="decide"><button class="btn danger" data-act="reject" data-arg="${key}">Reject</button><button class="btn" data-act="comment" data-arg="${key}">Ask</button><button class="btn ok" data-act="approve" data-arg="${key}">Approve</button></div>`}
       ${asked.length ? `<div class="label">Waiting on a reply</div>${askedNote}` : ''}`;
@@ -1070,7 +1099,8 @@ function renderSide(){
   const recent = S.occurrences.filter(o => o.key >= iso(addDays(S.now,-3))).sort((a,b) => a.key < b.key ? 1 : -1).slice(0, 8)
     .map(o => { const p = pact(o.pactId); return `<tr><td>${esc(p.name)}</td><td>${occLabel(p, o.key).replace('Night of ','')}</td><td>${o.outcome}</td></tr>`; }).join('');
   $('#side').innerHTML = `<div class="spread"><span class="tag">PROTOTYPE · THROWAWAY</span><button class="btn sm closeside" data-act="side">Close</button></div>
-    <section><h2>Pact flows · round 4</h2><div class="muted" style="font-size:13.5px">New in this round: Create pact starts by picking the evidence kind (Camera or Oura Ring), and the Goal step depends on it. Picking Oura without a connection opens a mock Oura sign-in. Profile lists your Connections.</div></section>
+    <section><h2>Pact flows · round 5</h2><div class="muted" style="font-size:13.5px">New in this round: tappable rows are separate cards, penalties show in red, due times show in orange, and the copy is plainer. Compare the two kind styles below on Today, Review and a pact page.</div></section>
+    <section><div class="label">Item kinds (pick one)</div><div class="seg">${[['icon','Icon squares'],['badge','Colour badges']].map(([k,l]) => `<button aria-pressed="${S.kindStyle === k}" data-act="kinds" data-arg="${k}">${l}</button>`).join('')}</div><small class="muted">Icon squares: a coloured icon left of each waiting item. Colour badges: a coloured word above the title. The badge on Review and item pages gains the icon in icon mode.</small></section>
     <section><div class="label">Signed in as</div><div class="seg">${Object.keys(S.accounts).map(a => `<button aria-pressed="${S.me === a}" data-act="as" data-arg="${a}">${acct(a).name}</button>`).join('')}</div><small class="muted">You own the bedtime and gym pacts and Sam reviews them. Sam owns a running pact that you review. Switch to act as the other person.</small></section>
     <section><div class="label">Jump to</div><div class="row2"><button class="btn sm" data-act="jump" data-arg="create">Create pact</button><button class="btn sm" data-act="jump" data-arg="review">Review</button><button class="btn sm" data-act="jump" data-arg="evidence">Submit evidence</button><button class="btn sm" data-act="jump" data-arg="ledgers">Ledgers</button></div>
       <table><tr><th>Screen</th><th>Design</th></tr>${Object.entries(CHOSEN).map(([k,v]) => `<tr><td>${SCREEN_NAME[k]}</td><td>${v} (chosen)</td></tr>`).join('')}</table></section>
@@ -1082,8 +1112,7 @@ function renderSide(){
     <section><div class="label">What just happened</div><div class="log">${S.log.slice(0, 10).map(l => `<div><span class="muted">${fmtTime(l.at)}</span> ${esc(l.text)}</div>`).join('')}</div></section>
     <section><div class="label">Questions this prototype raised</div><ul>
       <li>Should a stricter change (higher penalty, more days) apply right away, or also go through review? The prototype applies it right away.</li>
-      <li>After a reviewer asks a question, the item waits on the owner (an alert on their Today) and leaves the review queue until they reply. Is that the right home for it?</li>
-      <li>Reviewers no longer see when evidence was taken. Is that fine if photos can come from the library?</li></ul></section>`;
+      <li>After a reviewer asks a question, the item waits on the owner (an alert on their Today) and leaves the review queue until they reply. Is that the right home for it?</li></ul></section>`;
 }
 function renderSwitcher(){ $('#switcher').innerHTML = `<button class="ctl" data-act="side">Prototype controls</button>`; }
 
@@ -1199,6 +1228,7 @@ const ACT = {
   advance:() => { const t = addDays(sod(S.now), 1); t.setHours(12,0,0,0); advanceTo(t); S.sheet = null; },
   oura:() => { if (!S.oura.you) { toast('Connect Oura as You first'); return; } S.oura.you = S.oura.you === 'ok' ? 'broken' : 'ok'; log(S.oura.you === 'ok' ? 'Oura reconnected.' : 'Oura connection dropped (simulated). You get an alert and a push notification.'); },
   reset:() => { const v = S.variant; S = seed(); S.variant = v; },
+  kinds:a => { S.kindStyle = a; try { const u = new URL(location.href); u.searchParams.set('kinds', a); history.replaceState(null, '', u); } catch(e) {} },
   invite:() => { S.tmp.invite = true; },
   copy:() => { try { navigator.clipboard.writeText('pact.app/i/7Kq2xV').then(() => toast('Link copied'), () => toast('Select the link to copy it')); } catch(e) { toast('Select the link to copy it'); } return 'skip'; },
   hist:a => { S.form['hist-' + a] = !S.form['hist-' + a]; },
