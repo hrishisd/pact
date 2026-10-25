@@ -49,7 +49,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 20. As an owner, I want to set a penalty amount in USD on each pact, so that more important pacts can cost more to miss.
 21. As an owner, I want to pick a recipient from my saved list, or add a new one (a friend, or an organization with a name and link), so that I decide where my penalties go.
 22. As an owner, I want to choose one or more reviewers for each pact, so that the right friend checks each commitment.
-23. As an owner, I want to add reminders to a pact, each with a time and a channel (push, email or both), so that I'm nudged at the right moment.
+23. As an owner, I want to add reminders to a pact, each with a time and a channel (push, email or both), plus a date on One-time pacts, so that I'm nudged at the right moment.
 24. As an owner, I want to edit a Draft pact freely, so that I can get it right before anything is at stake.
 25. As an owner, I want to send a Draft pact for review, so that my reviewer can agree to its terms before it starts.
 26. As an owner, I want my pact to become Active only after a reviewer approves it, and to start on whichever comes later, the first full day or week afterwards or my start date, so that I'm never charged for terms nobody agreed to.
@@ -104,7 +104,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Changing a pact
 
 62. As an owner, I want to request a change to an Active pact through the same form I used to create it, pre-filled, so that changing it is easy.
-63. As an owner, I want any change that makes a pact less strict (deleting, pausing, ending, lowering the penalty, easing the schedule, removing a reviewer) to need a reviewer's approval, so that I can't escape a commitment on a weak evening.
+63. As an owner, I want any change that makes a pact less strict (deleting, pausing, ending, lowering the penalty, easing the schedule, removing a reviewer) to need a reviewer's approval, and any change that only makes it stricter (raising the penalty, adding days) to take effect at once, so that I can't escape a commitment on a weak evening but can always raise the stakes.
 64. As an owner, I want my pact to keep its current terms until the change is approved, so that it's always clear which rules apply.
 65. As a reviewer, I want a before/after comparison of a requested change, so that I can see exactly what is being relaxed.
 66. As an owner, I want to add a reviewer without anyone's approval, so that I can replace a reviewer who has stopped responding.
@@ -135,7 +135,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ### Notifications
 
-85. As an owner, I want each pact's reminders to fire only while the occurrence still needs evidence (on scheduled days for Fixed days, every day until submitted for One-time), so that I'm not nagged about things I've already done.
+85. As an owner, I want each pact's reminders to fire only while the occurrence still needs evidence (on scheduled days for Fixed days; once, on its own date, for each One-time reminder), so that I'm not nagged about things I've already done.
 86. As an owner on a Weekly count pact, I want reminders to fire only on days without evidence and only until I've met the week's target, so that they stop once I'm done.
 87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to go off every scheduled night, even if I'm already in bed, so that I get a cue to start getting ready for bed. The app can't tell I'm in bed until my ring syncs, usually the next morning.
 88. As a user, I want to turn each kind of event notification (new review item, decision, comment, Missed occurrence, data-source problem, overdue) on or off and choose push and/or email for each, so that I control how much I'm contacted.
@@ -175,7 +175,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Connection**: account, service (Oura in v0), tokens, status (Connected | Needs reconnecting). Exists only once the owner has connected the service.
 - **Friendship**: two accounts. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
 - **Recipient**: owned by an account. Either a person (a friend's account) or an organization (name, link).
-- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date, optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more, each with accepted status), reminders, stage (Draft | Active | Ended), activation time.
+- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date, optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more, each with accepted status), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Draft | Active | Ended), activation time.
 - **Schedule**: one of three kinds:
   - **Fixed days**: a set of weekdays.
   - **Weekly count**: a target per Mon–Sun week.
@@ -197,6 +197,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - A pact's evidence kind is set when it's created and never changes, not even in a Draft. Proving it a different way means making a new pact.
 - Oura Ring pacts use Fixed days only. Camera pacts can use any schedule.
 - A change that relaxes the pact (delete, pause, end, lower penalty, ease schedule, remove reviewer) creates a change request. The old terms stay in force until it's approved.
+- A change that only makes the pact stricter (higher penalty, more days) takes effect at once, with no review. A change that both relaxes and tightens is reviewed as a whole.
 - Adding a reviewer is immediate and takes effect once they accept. A pact can never have zero reviewers.
 - A pact is Ended when its end date passes or an approved change request ends it.
 
@@ -237,7 +238,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 **Reminders**
 - Fixed days: fire on scheduled days, only if that day has no evidence.
-- One-time: fire every day from the start until evidence is submitted.
+- One-time: each reminder has its own date and time and fires once, unless evidence has already been submitted. There are no recurring reminders on One-time pacts.
 - Weekly count: fire only on days without evidence and while the week's target is unmet.
 - Bedtime: fire every scheduled night, even if the owner is already in bed. The app can't know that until the ring syncs, usually the next morning.
 
@@ -330,8 +331,5 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - Data appears only after the Oura app syncs.
   - A night without the ring looks the same as an unsynced one: neither has a `long_sleep` period.
 - **Still to verify:** whether Oura's sleep timestamps include a UTC offset. The bedtime rules depend on it. Check against a live response before building the Oura adapter, and use that response as the seed for the fake.
-- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through five rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, and 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only). It's the primary source for the Screens decisions above.
-- **Open questions from the prototype:**
-  - Should a stricter change (a higher penalty, more days) take effect at once, or also need review? The prototype applies it at once.
-  - Daily reminders for One-time pacts were proposed and not objected to, but never explicitly confirmed.
+- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through five rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), and 7053336 gives One-time pacts one-off reminders with a date. It's the primary source for the Screens decisions above.
 - The first real users are the owner and one friend as reviewer, so anything involving several reviewers should be correct but kept minimal.
