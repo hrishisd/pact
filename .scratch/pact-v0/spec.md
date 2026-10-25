@@ -58,7 +58,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Keeping a pact: submitted evidence
 
 28. As an owner, I want Today to show a card for each pact, with the ones that need my action first and a status label on the right (To do, Waiting for approval, Automatic, Done, Missed), so that I can see at a glance what I have to do.
-29. As an owner, I want to submit evidence right on the Today card, taking a photo or picking one from my library, so that I can prove I kept the pact without leaving the screen.
+29. As an owner, I want to submit evidence right on the Today card by taking a live photo with my camera, so that I can prove I kept the pact without leaving the screen.
 30. As an owner, I want to attach several photos to one piece of evidence, so that I can show more context when needed.
 31. As an owner, I want evidence accepted only on days it can count (scheduled days for Fixed days, any day for Weekly count, start to deadline for One-time) and only until its due-by time, so that the rules are clear and nobody can backfill evidence later.
 32. As an owner on a Weekly count pact, I want to see progress like "1 of 3 this week", so that I know how many sessions I still need.
@@ -137,12 +137,12 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 85. As an owner, I want each pact's reminders to fire only while the occurrence still needs evidence (on scheduled days for Fixed days, every day until submitted for One-time), so that I'm not nagged about things I've already done.
 86. As an owner on a Weekly count pact, I want reminders to fire only on days without evidence and only until I've met the week's target, so that they stop once I'm done.
-87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to fire whenever I've set them, so that I get a cue to start getting ready for bed.
+87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to go off every scheduled night, even if I'm already in bed, so that I get a cue to start getting ready for bed. The app can't tell I'm in bed until my ring syncs, usually the next morning.
 88. As a user, I want to turn each kind of event notification (new review item, decision, comment, Missed occurrence, data-source problem, overdue) on or off and choose push and/or email for each, so that I control how much I'm contacted.
 
 ### Today and navigation
 
-89. As an owner, I want things waiting on someone else (evidence, excuses, payments, change requests, draft pacts) listed under "Waiting for approval" at the bottom of Today, so that they stay visible without crowding what I need to do.
+89. As an owner, I want things waiting on someone else (evidence, excuses, payments, change requests, draft pacts) listed under "Waiting for approval" at the bottom of Today, each with an icon showing its kind, so that they stay visible without crowding what I need to do.
 90. As an owner, I want the overdue banner to go away once a pending payment covers the overdue amount, so that I'm only warned when there's something for me to do.
 91. As an owner, I want to tap a pact on Today to open its page, and Back to return me to Today, so that I can check details without losing my place.
 92. As an owner looking at my own Draft, I want it to say who it's waiting on instead of offering to approve it, so that it's clear only a reviewer can make it Active.
@@ -207,6 +207,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - No evidence at that point: Missed. Evidence still pending a decision at that point: the outcome waits for the decision.
 - Rejected evidence makes the occurrence Missed as of the rejection, unless the occurrence is still open and new evidence is submitted.
 - Evidence is accepted only on days it can count (scheduled days for Fixed days, any day of the week for Weekly count, start to deadline for One-time) and only until the due-by time. For Weekly count, at most one day of evidence counts per calendar day.
+- Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse can come from the library, since they're often screenshots.
 
 **Judging bedtime pacts**
 - The night of date D is the longest `long_sleep` period whose `bedtime_start` is between 18:00 on D and 18:00 on D+1. Times come from Oura's timestamps, in the timezone those timestamps carry.
@@ -238,7 +239,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Fixed days: fire on scheduled days, only if that day has no evidence.
 - One-time: fire every day from the start until evidence is submitted.
 - Weekly count: fire only on days without evidence and while the week's target is unmet.
-- Bedtime: always fire.
+- Bedtime: fire every scheduled night, even if the owner is already in bed. The app can't know that until the ring syncs, usually the next morning.
 
 **Overdue**
 - While anything is overdue, the owner gets a daily reminder and an alert.
@@ -251,8 +252,10 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Screens (settled with the prototype)
 
 - **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today.
-- **Today:** cards for each Active pact, sorted so the ones needing action come first. Each card has a status label on the right: **To do** (green), **Waiting for approval** (tan), **Automatic** (grey), **Done**, **Missed** (red). Evidence is submitted **inline on the card**. Alerts sit at the top, and only for things that need the owner. Pending items sit under "Waiting for approval" near the bottom, followed by Yesterday and the total owed.
-- **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Send for review. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. Editing a Draft skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both edit the same draft, so switching later is a layout change.
+- **Today:** cards for each Active pact, sorted so the ones needing action come first. Each card has a status label on the right: **To do** (green), **Waiting for approval** (tan), **Automatic** (grey), **Done**, **Missed** (red). Evidence is submitted **inline on the card**. Alerts sit at the top, and only for things that need the owner. Pending items sit under "Waiting for approval" near the bottom, followed by Yesterday and the total owed. Each card shows its penalty as a bare amount in red ("$5"). An open Camera card shows the due time in orange as "Due at 9:00pm · 4h 12m", or "Due at midnight · 16h 19m" with no due-by time.
+- **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Send for review. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. The Reviewers and Reminders text depends on the kind: an Oura Ring pact has no photos to review, and its reminders go off every scheduled night. Editing a Draft skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both edit the same draft, so switching later is a layout change.
+- **Lists:** rows you can tap are separate cards with a › chevron; rows you can't tap (Friends, Notifications, Connections, History) stay grouped in one block. The pacts list shows the penalty as a red amount too. The full wording, "$5 per miss", appears only in a pact's terms.
+- **Item kinds:** each review item kind has its own colour and icon: New pact blue +, Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. Items waiting on the owner's reply are listed below the current item.
 - **Profile:** a Connections section lists only the connections the owner has made, and is hidden when there are none. Disconnecting warns how many active pacts use it.
 - **Ledgers:** one card per recipient showing what's owed, what's on hold, lifetime penalties, lifetime paid and Record payment. Tapping a card opens its history.
@@ -327,7 +330,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - Data appears only after the Oura app syncs.
   - A night without the ring looks the same as an unsynced one: neither has a `long_sleep` period.
 - **Still to verify:** whether Oura's sleep timestamps include a UTC offset. The bedtime rules depend on it. Check against a live response before building the Oura adapter, and use that response as the seed for the fake.
-- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through four rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, and 66d9ead makes Create start with the evidence kind. It's the primary source for the Screens decisions above.
+- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through five rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, and 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only). It's the primary source for the Screens decisions above.
 - **Open questions from the prototype:**
   - Should a stricter change (a higher penalty, more days) take effect at once, or also need review? The prototype applies it at once.
   - Daily reminders for One-time pacts were proposed and not objected to, but never explicitly confirmed.
