@@ -66,7 +66,19 @@ small{font-size:12.5px}
 .tab{background:none;border:0;padding:8px 0 10px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--muted);position:relative;-webkit-tap-highlight-color:transparent}
 .tab:focus:not(:focus-visible){outline:none}
 .tab svg{width:25px;height:25px}
+.tab .ti{display:grid;place-items:center;width:56px;height:30px;border-radius:15px}
 .tab[aria-current]{color:var(--accent)}
+/* Round 8 compares ways to mark the current tab (Prototype controls → Tab bar style). Every style also bolds its label. */
+.tabbar:not(.ts-plain) .tab{font-weight:500}
+.tabbar:not(.ts-plain) .tab[aria-current]{font-weight:800}
+.ts-fill .tab[aria-current] svg{stroke-width:2.3}
+.ts-fill .tab[aria-current] svg>:not([fill="currentColor"]){fill:currentColor;fill-opacity:.2}
+.ts-bar .tab[aria-current]::before{content:"";position:absolute;top:-1px;left:24%;right:24%;height:3px;border-radius:0 0 3px 3px;background:var(--accent)}
+.ts-tile .tab{margin:5px 4px;padding:5px 0 6px;border-radius:12px}
+.ts-tile .tab[aria-current]{background:var(--accent-soft)}
+.ts-pill .tab[aria-current] .ti{background:var(--accent-soft)}
+.ts-solid .tab[aria-current] .ti{background:var(--accent);color:var(--accent-ink)}
+.ts-solid .tab .ti svg{width:22px;height:22px}
 .badge{position:absolute;top:3px;left:calc(50% + 5px);min-width:18px;height:18px;border-radius:9px;background:var(--missed);color:#fff;font-size:11px;display:grid;place-items:center;padding:0 5px}
 
 /* bits */
@@ -304,7 +316,7 @@ function makeBills(s, at){
 
 function seed(){
   const s = {
-    now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, sideOpen:false,
+    now:new Date(NOW0), me:'you', tab:'today', tabStyle:'fill', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, sideOpen:false,
     log:[], tmp:{}, form:{}, draft:null,
     accounts:{you:{id:'you', name:'You', initial:'Y'}, sam:{id:'sam', name:'Sam', initial:'S'}},
     recipients:[
@@ -1221,7 +1233,8 @@ function renderSide(){
   const recent = S.occurrences.filter(o => o.key >= iso(addDays(S.now,-3))).sort((a,b) => a.key < b.key ? 1 : -1).slice(0, 8)
     .map(o => { const p = pact(o.pactId); return `<tr><td>${esc(p.name)}</td><td>${occLabel(p, o.key).replace('Night of ','')}</td><td>${o.outcome === 'pending' ? 'not judged' : o.outcome}</td></tr>`; }).join('');
   $('#side').innerHTML = `<div class="spread"><span class="tag">PROTOTYPE · THROWAWAY</span><button class="btn sm closeside" data-act="side">Close</button></div>
-    <section><h2>Pact flows · round 7</h2><div class="muted" style="font-size:13.5px">New in this round: <b>weekly bills</b>. Every Wednesday at noon, each recipient's penalties that can no longer be excused become one bill, due 7 days later. Today shows money only once there's a bill ("Pay Rival Org $2" is due at noon), and an unpaid bill turns into an overdue alert. Today is reordered: Waiting for Oura, To do (soonest first), Missed (now with "I'll pay it"), Automatic, then Coming up and Waiting for approval. Done cards, and recurring pacts on days they aren't due, are gone. The tab bar is iOS style, new pacts sit at the top of Pacts, and pact pages no longer list payments. Advance to tomorrow noon to see the overdue alert and the new Oct 21 bill.</div></section>
+    <section><h2>Pact flows · round 8</h2><div class="muted" style="font-size:13.5px">Round 8 compares ways to mark the current tab: pick one under Tab bar style below. Everything else is round 7.</div><div class="label" style="margin-top:4px">Round 7</div><div class="muted" style="font-size:13.5px">New in this round: <b>weekly bills</b>. Every Wednesday at noon, each recipient's penalties that can no longer be excused become one bill, due 7 days later. Today shows money only once there's a bill ("Pay Rival Org $2" is due at noon), and an unpaid bill turns into an overdue alert. Today is reordered: Waiting for Oura, To do (soonest first), Missed (now with "I'll pay it"), Automatic, then Coming up and Waiting for approval. Done cards, and recurring pacts on days they aren't due, are gone. The tab bar is iOS style, new pacts sit at the top of Pacts, and pact pages no longer list payments. Advance to tomorrow noon to see the overdue alert and the new Oct 21 bill.</div></section>
+    <section><div class="label">Tab bar style · pick one</div><div class="row2">${Object.entries(TAB_STYLES).map(([k,[l]]) => `<button class="btn sm" style="${S.tabStyle === k ? 'background:var(--proto);color:var(--proto-ink);border-color:var(--proto)' : ''}" data-act="tabStyle" data-arg="${k}">${l}</button>`).join('')}</div><small class="muted">${TAB_STYLES[S.tabStyle][1]}</small></section>
     <section><div class="label">Signed in as</div><div class="seg">${Object.keys(S.accounts).map(a => `<button aria-pressed="${S.me === a}" data-act="as" data-arg="${a}">${acct(a).name}</button>`).join('')}</div><small class="muted">You own the bedtime and gym pacts and Sam reviews them. Sam owns a running pact that you review. Switch to act as the other person.</small></section>
     <section><div class="label">Jump to</div><div class="row2"><button class="btn sm" data-act="jump" data-arg="create">Create pact</button><button class="btn sm" data-act="jump" data-arg="review">Review</button><button class="btn sm" data-act="jump" data-arg="evidence">Submit evidence</button><button class="btn sm" data-act="jump" data-arg="ledgers">Ledgers</button></div>
       <table><tr><th>Screen</th><th>Design</th></tr>${Object.entries(CHOSEN).map(([k,v]) => `<tr><td>${SCREEN_NAME[k]}</td><td>${v} (chosen)</td></tr>`).join('')}</table></section>
@@ -1234,6 +1247,14 @@ function renderSide(){
     <section><div class="label">Questions this prototype raised</div><ul>
       <li>After a reviewer asks a question, the item waits on the owner (an alert on their Today) and leaves the review queue until they reply. Is that the right home for it?</li></ul></section>`;
 }
+const TAB_STYLES = {
+  plain:['Plain (round 7)', 'Only the colour changes, from grey to blue. The baseline you said is too subtle.'],
+  fill:['Filled icon', 'The current icon fills in and its outline thickens, and the label goes bold. This is how native iOS apps do it (Mail, Photos, App Store).'],
+  bar:['Top bar', 'A short blue bar sits on the tab bar’s top edge above the current tab, plus the bold label. It reads well at a glance, like a web tab.'],
+  tile:['Tile', 'A soft blue rounded tile sits behind the whole tab, icon and label together. It has the largest highlighted area of the subtle options.'],
+  pill:['Pill', 'A soft blue pill sits behind the icon only, with no animation, so there’s no flash. This is Material Design’s pattern, close to round 6.'],
+  solid:['Solid', 'The current icon is white in a solid blue pill. The strongest contrast, but also the heaviest look.'],
+};
 function renderSwitcher(){ $('#switcher').innerHTML = `<button class="ctl" data-act="side">Prototype controls</button>`; }
 
 /* ---------- shell ---------- */
@@ -1261,7 +1282,7 @@ function render(){
     const q = queueFor(S.me).length;
     html = `<header class="hdr gut">${top ? `<button class="iconbtn" data-act="back" aria-label="Back">${IC.back}</button>` : ''}<h1>${esc(title)}<span class="sub">${sub}</span></h1><button class="avatar" data-act="profile" aria-label="Profile">${acct(S.me).initial}</button></header>
       <main class="scroll gut">${body}</main>
-      <nav class="tabbar" aria-label="Main">${['today','pacts','review','ledgers'].map(t => `<button class="tab" data-act="tab" data-arg="${t}" ${S.tab === t ? `aria-current="${top ? 'true' : 'page'}"` : ''}>${IC[t]}${t[0].toUpperCase() + t.slice(1)}${t === 'review' && q ? `<span class="badge">${q}</span>` : ''}</button>`).join('')}</nav>`;
+      <nav class="tabbar ts-${S.tabStyle}" aria-label="Main">${['today','pacts','review','ledgers'].map(t => `<button class="tab" data-act="tab" data-arg="${t}" ${S.tab === t ? `aria-current="${top ? 'true' : 'page'}"` : ''}><span class="ti">${IC[t]}</span>${t[0].toUpperCase() + t.slice(1)}${t === 'review' && q ? `<span class="badge">${q}</span>` : ''}</button>`).join('')}</nav>`;
   }
   if (S.sheet) {
     const k = S.sheet.kind;
@@ -1345,6 +1366,7 @@ const ACT = {
   // prototype controls
   vprev:() => cycle(-1), vnext:() => cycle(1),
   side:() => { S.sideOpen = !S.sideOpen; },
+  tabStyle:a => { S.tabStyle = a; },
   as:a => { S.me = a; S.stack = []; S.sheet = null; S.form = {}; S.tmp = {}; S.draft = null; S.sideOpen = false; log(`Now signed in as ${acct(a).name}.`); },
   jump:a => { S.sheet = null; S.form = {}; S.draft = null; S.sideOpen = false;
     if (a === 'create') { S.tab = 'pacts'; S.stack = [{name:'create'}]; }
@@ -1354,7 +1376,7 @@ const ACT = {
   advance:() => { const t = addDays(sod(S.now), 1); t.setHours(12,0,0,0); advanceTo(t); S.sheet = null; },
   advance5:() => { advanceTo(new Date(+S.now + 5*6e4)); },
   oura:() => { if (!S.oura.you) { toast('Connect Oura as You first'); return; } S.oura.you = S.oura.you === 'ok' ? 'broken' : 'ok'; log(S.oura.you === 'ok' ? 'Oura reconnected.' : 'Oura connection dropped (simulated). You get an alert and a push notification.'); },
-  reset:() => { const v = S.variant; S = seed(); S.variant = v; },
+  reset:() => { const v = S.variant, ts = S.tabStyle; S = seed(); S.variant = v; S.tabStyle = ts; },
   invite:() => { S.tmp.invite = true; },
   copy:() => { try { navigator.clipboard.writeText('pact.app/i/7Kq2xV').then(() => toast('Link copied'), () => toast('Select the link to copy it')); } catch(e) { toast('Select the link to copy it'); } return 'skip'; },
   hist:a => { S.form['hist-' + a] = !S.form['hist-' + a]; },
