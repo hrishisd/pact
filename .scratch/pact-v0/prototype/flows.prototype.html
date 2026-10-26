@@ -61,13 +61,13 @@ small{font-size:12.5px}
 .avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;border:0;flex:none}
 .scroll{flex:1;overflow:auto;padding-block:14px 120px;display:flex;flex-direction:column;gap:14px}
 .tabbar{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface)}
-.tab{background:none;border:0;padding:8px 0 10px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11.5px;font-weight:600;color:var(--muted);position:relative}
-.tab svg{width:22px;height:22px}
-/* The current tab gets a filled pill and a bold label, and keeps it while a page is pushed on top. */
-.tab .pill{width:56px;height:30px;border-radius:15px;display:grid;place-items:center}
-.tab[aria-current]{color:var(--accent);font-weight:800}
-.tab[aria-current] .pill{background:var(--accent-soft)}
-.badge{position:absolute;top:2px;left:calc(50% + 6px);min-width:18px;height:18px;border-radius:9px;background:var(--missed);color:#fff;font-size:11px;display:grid;place-items:center;padding:0 5px}
+/* iOS-style tab bar: the current tab's icon and label take the accent colour, with no pill and no tap flash.
+   It stays coloured while a page is pushed on top. */
+.tab{background:none;border:0;padding:8px 0 10px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--muted);position:relative;-webkit-tap-highlight-color:transparent}
+.tab:focus:not(:focus-visible){outline:none}
+.tab svg{width:25px;height:25px}
+.tab[aria-current]{color:var(--accent)}
+.badge{position:absolute;top:3px;left:calc(50% + 5px);min-width:18px;height:18px;border-radius:9px;background:var(--missed);color:#fff;font-size:11px;display:grid;place-items:center;padding:0 5px}
 
 /* bits */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
@@ -229,6 +229,8 @@ textarea.inp{min-height:76px;resize:vertical}
 #side td,#side th{padding:3px 4px;text-align:left;border-bottom:1px solid var(--line)}
 #side th{color:var(--muted);font-weight:600}
 #side ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+.protonote{border:1.5px dashed var(--proto-line);border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:8px;font-size:13.5px}
+.protonote .tag{align-self:flex-start;background:var(--proto);color:var(--proto-ink);font-family:var(--f-mono);font-size:10.5px;padding:2px 7px;border-radius:6px;letter-spacing:.08em}
 #switcher{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:70;display:flex;align-items:center;gap:4px;background:var(--proto);color:var(--proto-ink);border-radius:999px;padding:5px;box-shadow:0 10px 28px -10px rgba(0,0,0,.55);max-width:calc(100vw - 24px)}
 #switcher button{background:none;border:0;color:inherit;height:34px;min-width:34px;border-radius:999px;font-size:16px}
 #switcher button:hover{background:rgba(127,127,127,.25)}
@@ -285,7 +287,19 @@ const cannedBed = key => CANNED[key] ?? (1395 + ([...key].reduce((a,c)=>a+c.char
 
 function addPenalty(s, occ, at, status, mult=1){
   const p = s.pacts.find(x => x.id === occ.pactId);
-  s.penalties.push({id:nid('pen'), pactId:p.id, occId:occ.id, owner:p.owner, recipientId:p.recipientId, amount:p.penalty*mult, addedAt:new Date(at), dueAt:new Date(+at + 7*DAYMS), status});
+  s.penalties.push({id:nid('pen'), pactId:p.id, occId:occ.id, owner:p.owner, recipientId:p.recipientId, amount:p.penalty*mult, addedAt:new Date(at), status});
+}
+// Every Wednesday at noon, each recipient gets one bill for the owed penalties whose 48-hour excuse window has closed.
+// That's all of the week before (Sunday night's bedtime is final at noon Monday). Anything later goes on the next bill.
+// A bill never changes once it's made, and it's due 7 days later.
+const BILL_DAY = 3, EXCUSE_MS = 48*HOUR, PAY_MS = 7*DAYMS;
+function makeBills(s, at){
+  const groups = {};
+  for (const x of s.penalties.filter(x => x.status === 'owed' && !x.billId && at - x.addedAt >= EXCUSE_MS)) (groups[x.owner + '|' + x.recipientId] ||= []).push(x);
+  return Object.values(groups).map(ps => {
+    const b = {id:nid('bill'), owner:ps[0].owner, recipientId:ps[0].recipientId, at:new Date(at), dueAt:new Date(+at + PAY_MS), amount:ps.reduce((a,x) => a + x.amount, 0)};
+    ps.forEach(x => x.billId = b.id); s.bills.push(b); return b;
+  });
 }
 
 function seed(){
@@ -306,7 +320,7 @@ function seed(){
       {id:'p-read', owner:'you', name:'Read 20 pages', desc:'A photo of the page I stopped on.', evidence:'photo', schedule:{kind:'fixed', days:[1,2,3,4,5]}, by:'22:00', penalty:3, recipientId:'rc-sam', reviewers:['sam'], reminders:[{time:'20:30', channel:'Push'}], stage:'active', createdAt:D(2026,10,21,7,37), start:'2026-10-21', end:'', thread:[]},
       {id:'p-run', owner:'sam', name:'Run 3× a week', desc:'A photo outside or a screenshot of the run.', evidence:'photo', schedule:{kind:'weekly', target:3}, by:null, penalty:10, recipientId:'rc-you', reviewers:['you'], reminders:[], stage:'active', start:'2026-10-05', end:'', thread:[]},
     ],
-    occurrences:[], evidence:[], excuses:[], payments:[], changes:[], penalties:[],
+    occurrences:[], evidence:[], excuses:[], payments:[], changes:[], penalties:[], bills:[],
   };
   const missed = {'2026-10-01':1474,'2026-10-03':1512,'2026-10-07':1460,'2026-10-14':1488,'2026-10-17':1555};
   for (let d = D(2026,9,28); d <= D(2026,10,20); d = addDays(d,1)) {
@@ -338,7 +352,9 @@ function seed(){
   s.excuses.push({id:nid('ex'), owner:'you', pactIds:['p-bed'], from:'2026-10-10', to:'2026-10-10', reason:"Friend's birthday party.", photos:[], status:'approved', at:D(2026,10,10,16,0), thread:[]});
   s.excuses.push({id:nid('ex'), owner:'you', pactIds:['p-gym'], from:'2026-10-12', to:'2026-10-16', reason:'Flu. Staying home this week.', photos:[], status:'approved', at:D(2026,10,12,8,0), thread:[]});
   s.excuses.push({id:'ex-sync', owner:'you', pactIds:['p-bed'], from:'2026-10-19', to:'2026-10-19', reason:'Ring synced late. The Oura app shows I got into bed at 11:48pm.', photos:[{src:PHOTO.oura, taken:D(2026,10,20,13,58)}], status:'pending', at:D(2026,10,20,14,5), thread:[]});
-  s.payments.push({id:nid('pay'), owner:'you', recipientId:'rc-org', amount:6, photos:[{src:PHOTO.receipt}], note:'Donation receipt', status:'approved', at:D(2026,10,9,18,0), thread:[]});
+  // The Oct 7 and Oct 14 bills. The Oct 14 one ($2 to Rival Org) is due at noon today and still unpaid.
+  makeBills(s, D(2026,10,7,12)); makeBills(s, D(2026,10,14,12));
+  s.payments.push({id:nid('pay'), owner:'you', recipientId:'rc-org', amount:4, photos:[{src:PHOTO.receipt}], note:'Donation receipt', status:'approved', at:D(2026,10,9,18,0), thread:[]});
   s.payments.push({id:'pay-sam', owner:'you', recipientId:'rc-sam', amount:5, photos:[{src:PHOTO.receipt, taken:D(2026,10,20,20,12)}], note:'Sent on Venmo', status:'pending', at:D(2026,10,20,20,15), thread:[]});
   s.changes.push({id:'cr-run', pactId:'p-run', owner:'sam', before:{penalty:10}, after:{penalty:5}, reason:'Money is tight this month.', at:D(2026,10,20,21,0), status:'pending', thread:[]});
   s.log.push({at:new Date(NOW0), text:'Prototype loaded. It is Wed Oct 21, 7:40am. You are signed in as You; Sam reviews your pacts.'});
@@ -450,6 +466,7 @@ function advanceTo(target){
     const noon = new Date(d); noon.setHours(12,0,0,0);
     const end = eod(d);
     if (noon > S.now && noon <= target) S.pacts.filter(p => p.stage==='active' && p.evidence==='oura').forEach(p => { const k = iso(addDays(d,-1)); if (scheduledOn(p, addDays(d,-1))) judgeNight(p, k, noon); });
+    if (noon > S.now && noon <= target && d.getDay() === BILL_DAY) for (const b of makeBills(S, noon)) log(`Wednesday bill for ${nameOf(b.owner)}: ${money(b.amount)} to ${rcp(b.recipientId).name}, due ${fmtDay(b.dueAt)}. A notification goes out.`);
     if (end > S.now && end <= target) S.pacts.filter(p => p.stage==='active' && p.evidence==='photo').forEach(p => {
       if (p.schedule.kind === 'fixed' && scheduledOn(p, d)) judgeDay(p, iso(d), end);
       if (p.schedule.kind === 'weekly' && d.getDay() === 0 && (!p.start || iso(weekStart(d)) >= p.start)) judgeWeek(p, iso(weekStart(d)), end);
@@ -461,9 +478,11 @@ function advanceTo(target){
   const before = overdueTotal(S.me);
   S.now = target;
   const after = overdueTotal(S.me);
-  if (after > before) log(`You are now ${money(after)} overdue. Sam gets notified.`);
+  if (after > before) log(`A bill is now overdue: ${money(after)} unpaid. Sam gets notified.`);
 }
 
+// Payments clear the oldest penalties first. "unpaid" counts approved payments only;
+// "uncovered" also counts payments awaiting approval, which is what decides whether you still need to act.
 function ledger(owner, recipientId){
   const pens = S.penalties.filter(x => x.owner === owner && x.recipientId === recipientId && x.status !== 'removed').sort((a,b) => a.addedAt - b.addedAt);
   const owedPens = pens.filter(x => x.status === 'owed');
@@ -472,10 +491,16 @@ function ledger(owner, recipientId){
   const pending = pays.filter(x => x.status === 'pending').reduce((a,x) => a + x.amount, 0);
   const held = pens.filter(x => x.status === 'held').reduce((a,x) => a + x.amount, 0);
   const added = owedPens.reduce((a,x) => a + x.amount, 0);
-  let left = paid, overdue = 0;
-  for (const x of owedPens) { const cover = Math.min(left, x.amount); left -= cover; if (x.dueAt <= S.now) overdue += x.amount - cover; }
+  let left = paid, leftP = paid + pending; const cover = {};
+  for (const x of owedPens) { const a = Math.min(left, x.amount), b = Math.min(leftP, x.amount); left -= a; leftP -= b; cover[x.id] = {unpaid:x.amount - a, uncovered:x.amount - b}; }
+  const bills = S.bills.filter(b => b.owner === owner && b.recipientId === recipientId).sort((a,b) => a.at - b.at).map(b => {
+    const ps = owedPens.filter(x => x.billId === b.id);
+    return {...b, unpaid:ps.reduce((a,x) => a + cover[x.id].unpaid, 0), uncovered:ps.reduce((a,x) => a + cover[x.id].uncovered, 0)};
+  });
+  const overdueBills = bills.filter(b => b.dueAt <= S.now && b.uncovered > 0), dueBills = bills.filter(b => b.dueAt > S.now && b.uncovered > 0);
   const owed = added - paid;
-  return {pens, pays, paid, pending, held, added, owed, shown:owed - pending, overdue};
+  return {pens, pays, paid, pending, held, added, owed, shown:owed - pending, bills, overdueBills, dueBills,
+    overdue:overdueBills.reduce((a,b) => a + b.uncovered, 0), billDue:dueBills.reduce((a,b) => a + b.uncovered, 0)};
 }
 function ledgersOf(owner){
   const ids = new Set([...S.pacts.filter(p => p.owner === owner).map(p => p.recipientId), ...S.penalties.filter(x => x.owner === owner).map(x => x.recipientId)]);
@@ -589,8 +614,9 @@ function alertsFor(me){
   }
   const mine = [...S.changes.filter(c=>c.owner===me).map(o=>({kind:'change',obj:o})), ...S.evidence.filter(e=>e.owner===me).map(o=>({kind:'evidence',obj:o})), ...S.excuses.filter(e=>e.owner===me).map(o=>({kind:'excuse',obj:o})), ...S.payments.filter(e=>e.owner===me).map(o=>({kind:'payment',obj:o}))];
   for (const m of mine) { const t = m.obj.thread; if (t && t.length && t[t.length-1].by !== me) out.push({tone:'info', html:`<b>${nameOf(t[t.length-1].by)} asked about</b> your ${KIND[m.kind].toLowerCase()} (${esc(pact(m.obj.pactId || m.obj.pactIds?.[0])?.name || '')}): “${esc(t[t.length-1].text)}” It’s waiting on your reply.`, actions:`<button class="btn sm" data-act="openItem" data-arg="${m.kind}:${m.obj.id}">Reply</button>`}); }
-  // A pending payment that covers the overdue amount needs nothing from you, so it moves to "Waiting for approval".
-  for (const {r, l} of ledgersOf(me)) if (l.overdue - l.pending > 0) out.push({tone:'bad', html:`<b>${money(l.overdue - l.pending)} overdue to ${esc(r.name)}.</b> Penalties are due 7 days after they’re added.`, actions:`<button class="btn sm" data-act="pay" data-arg="${r.id}">Record payment</button>`});
+  // A pending payment that covers the overdue bill needs nothing from you, so it moves to "Waiting for approval".
+  for (const {r, l} of ledgersOf(me)) if (l.overdue > 0) { const b = l.overdueBills[0];
+    out.push({tone:'bad', html:`<b>${money(l.overdue)} overdue to ${esc(r.name)}.</b> Your ${fmtDate(b.at)} bill was due ${fmtDay(b.dueAt)}. ${S.pacts.filter(p => p.owner === me && p.recipientId === r.id).flatMap(p => p.reviewers).filter((x,i,a) => a.indexOf(x) === i).map(nameOf).join(' and ') || 'Your reviewer'} has been told.`, actions:`<button class="btn sm" data-act="pay" data-arg="${r.id}|${l.overdue}">Record payment</button>`}); }
   return out;
 }
 
@@ -716,64 +742,102 @@ function heatmap(p){
 }
 
 /* ---------- Today ---------- */
-// Status pills: todo = needs you (green), wait = waiting for approval (tan), auto = handled by data.
-// Cards that need you sort to the top.
-const PILL = {todo:'c-todo', missed:'c-missed', wait:'c-wait', auto:'c-auto', done:'c-done', off:'c-draft'};
-const RANK = {todo:0, missed:1, wait:2, auto:3, done:4, off:5};
+// Today shows only what's still open, most actionable first. Done cards, and recurring pacts on days
+// they aren't due, don't show at all. The sections, in order:
+//   oura    last night isn't final yet, so syncing the ring might still save it
+//   todo    evidence you can submit today, and bills to pay, soonest due first
+//   missed  missed and still excusable: File excuse, or "I'll pay it" to clear it from Today
+//   auto    bedtime pacts that run tonight
+//   soon    pacts that haven't opened yet, under "Coming up"
+// Then "Waiting for approval" (nothing for you to do, so it's last) and Yesterday.
+const PILL = {oura:'c-pending', todo:'c-todo', missed:'c-missed', auto:'c-auto', soon:'c-draft'};
+const SEC = {oura:0, todo:1, missed:2, auto:3, soon:4};
 const reviewersText = p => p.reviewers.map(nameOf).join(' or ');
 function byTimeToday(p){ const [h,m] = p.by.split(':').map(Number); const t = sod(S.now); t.setHours(h,m); return t; }
 const byPassed = p => !!p.by && S.now > byTimeToday(p);
-function timeLeft(p){ const ms = Math.max(0, (p.by ? byTimeToday(p) : eod(S.now)) - S.now); return `${Math.floor(ms/HOUR)}h ${Math.floor((ms%HOUR)/6e4)}m`; }
+function fmtLeft(ms){ ms = Math.max(0, ms); const h = Math.floor(ms/HOUR); return h >= 48 ? `${Math.floor(h/24)}d ${h%24}h` : `${h}h ${Math.floor((ms%HOUR)/6e4)}m`; }
+const timeLeft = p => fmtLeft((p.by ? byTimeToday(p) : eod(S.now)) - S.now);
 const dueToday = p => `Due at ${p.by ? fmtHM(p.by) : 'midnight'} · ${timeLeft(p)}`;
 function submitActions(p){ return `<div class="row2"><button class="btn primary" data-act="evidence" data-arg="${p.id}">Submit evidence</button><button class="btn" data-act="excuse" data-arg="${p.id}|${todayKey()}">File excuse</button></div>`; }
+const tonightLine = p => `<div class="meta">Tonight: in bed by ${fmtHM(p.bedtime)}</div>`;
+const notOpenYet = p => !!p.start && todayKey() < p.start;
+const soonCard = p => ({p, sec:'soon', due:parseIso(p.start), label:p.schedule.kind === 'once' ? `Opens ${fmtDate(parseIso(p.start))}` : `Starts ${fmtDay(parseIso(p.start))}`, body:''});
 function evidenceCard(p){
-  const today = sod(S.now);
-  if (p.schedule.kind === 'fixed' && !scheduledOn(p, today)) {
-    let n = addDays(today,1); for (let i = 0; i < 8 && !scheduledOn(p, n); i++) n = addDays(n,1);
-    return {tone:'off', label:`Next: ${WD[n.getDay()]}`, body:''};
-  }
-  if (p.schedule.kind === 'once' && (todayKey() < (p.start || '') || todayKey() > p.schedule.deadline)) return {tone:'off', label:`Opens ${fmtDate(parseIso(p.start))}`, body:''};
+  const today = sod(S.now), k = p.schedule.kind;
+  if (notOpenYet(p)) return soonCard(p);
+  if (k === 'fixed' && !scheduledOn(p, today)) return null;
+  if (k === 'once' && todayKey() > p.schedule.deadline) return null;
   const occ = findOcc(p, occKey(p, today)), evs = occ ? evFor(occ) : [];
-  const todays = evs.filter(e => e.day === todayKey());
-  const pend = todays.find(e => e.status === 'pending'), appr = todays.find(e => e.status === 'approved');
-  let progress = '';
-  if (p.schedule.kind === 'weekly') {
+  if (occ && occ.outcome !== 'pending') return null;
+  // Done for today, or with a reviewer (then it's listed under Waiting for approval).
+  if (evs.some(e => e.day === todayKey() && e.status !== 'rejected')) return null;
+  let progress = '', due;
+  if (k === 'weekly') {
     const n = occ ? weekCount(occ) : 0, t = p.schedule.target, waiting = evs.filter(e => e.status === 'pending').length;
+    if (n + waiting >= t) return null;
     progress = `<div class="spread"><div class="dots">${Array.from({length:t}, (_,i) => `<i class="${i < n ? 'on' : i < n + waiting ? 'wait' : ''}"></i>`).join('')}</div><span class="num meta">${n} of ${t} this week</span></div>`;
-    if (n >= t) return {tone:'done', label:'Done this week', body:progress};
+    due = eod(addDays(weekStart(today), 6));
+  } else if (k === 'once') { due = parseIso(p.schedule.deadline); if (p.by) { const [h,m] = p.by.split(':').map(Number); due.setHours(h,m); } else due = eod(due); }
+  else due = p.by ? byTimeToday(p) : eod(today);
+  if (byPassed(p)) {
+    // Past today's due-by time. Weekly count and an early day of a One-time pact can try again tomorrow.
+    if (k === 'weekly' || (k === 'once' && p.schedule.deadline !== todayKey())) return null;
+    return {p, sec:'missed', due:byTimeToday(p), label:'Closed', body:`<div class="meta">Evidence was due by ${fmtHM(p.by)}.</div><div class="row2"><button class="btn" data-act="excuse" data-arg="${p.id}|${todayKey()}">File excuse</button></div>`};
   }
-  if (appr) return {tone:'done', label:'Done', body:progress};
-  if (pend) return {tone:'wait', label:`Waiting for ${reviewersText(p)}`, body:progress};
-  if (byPassed(p)) return {tone:'missed', label:'Closed', body:`${progress}<div class="meta">Evidence was due by ${fmtHM(p.by)}.</div><div class="row2"><button class="btn" data-act="excuse" data-arg="${p.id}|${todayKey()}">File excuse</button></div>`};
-  const inline = S.form.inline === p.id;
-  const due = p.schedule.kind === 'once' && p.schedule.deadline !== todayKey() ? `Due ${fmtDay(parseIso(p.schedule.deadline))}${p.by ? ' at ' + fmtHM(p.by) : ''}` : dueToday(p);
-  return {tone:'todo', label:'To do', body:`${progress}<div class="meta due">${due}</div>${inline ? evidenceInline(p) : submitActions(p)}`};
+  const dueText = k === 'weekly' ? `Due by ${fmtDay(due)}` : k === 'once' && p.schedule.deadline !== todayKey() ? `Due ${fmtDay(due)}${p.by ? ' at ' + fmtHM(p.by) : ''}` : dueToday(p);
+  return {p, sec:'todo', due, label:'To do', body:`${progress}<div class="meta due">${dueText}</div>${S.form.inline === p.id ? evidenceInline(p) : submitActions(p)}`};
 }
-function bedtimeCard(p){
-  const yk = iso(addDays(sod(S.now), -1)), occ = findOcc(p, yk);
-  // Last night only shows up when it needs something from you: a miss you can still excuse.
-  if (occ && occ.outcome === 'missed' && !excuseFor(p, yk, 'pending')) {
-    const left = 48 - (S.now - occ.judgedAt) / HOUR;
-    if (left > 0) return {tone:'missed', label:'Missed last night', body:`<div class="meta">${esc(occ.detail)} · ${money(p.penalty)} added</div><div class="row2"><button class="btn" data-act="excuse" data-arg="${p.id}|${yk}">File excuse · ${Math.floor(left)}h left</button></div><div class="meta">Tonight: in bed by ${fmtHM(p.bedtime)}</div>`};
-  }
-  if (!scheduledOn(p, sod(S.now))) return {tone:'off', label:'Not tonight', body:''};
-  return {tone:'auto', label:'Automatic', body:`<div>In bed by <b>${fmtHM(p.bedtime)}</b> tonight</div>`};
+function bedtimeCard(p, missedLastNight){
+  if (missedLastNight) return null; // the missed card carries tonight's line
+  const today = sod(S.now), yd = addDays(today, -1), occ = findOcc(p, iso(yd)), tonight = scheduledOn(p, today);
+  const noon = new Date(today); noon.setHours(12,0,0,0);
+  if (scheduledOn(p, yd) && (!occ || occ.outcome === 'pending') && S.now < noon)
+    return {p, sec:'oura', due:noon, label:'Waiting for Oura', body:`<div>Last night is final at noon, in ${fmtLeft(noon - S.now)}. If your ring hasn’t synced, open the Oura app.</div>${tonight ? tonightLine(p) : ''}`};
+  if (tonight) return {p, sec:'auto', due:dueAt(p, today), label:'Automatic', body:`<div>In bed by <b>${fmtHM(p.bedtime)}</b> tonight</div>`};
+  if (notOpenYet(p)) return soonCard(p);
+  return null;
+}
+// A miss you can still excuse stays on Today until you file an excuse, tap "I'll pay it", or its 48 hours run out.
+function missedCards(me){
+  return S.occurrences.filter(o => { const p = pact(o.pactId);
+      return p && p.owner === me && p.stage === 'active' && o.outcome === 'missed' && !o.accepted && o.judgedAt && S.now - o.judgedAt < EXCUSE_MS && !excuseFor(p, o.key, 'pending') && !excuseFor(p, o.key, 'approved'); })
+    .map(o => {
+      const p = pact(o.pactId), closes = new Date(+o.judgedAt + EXCUSE_MS), d = parseIso(o.key);
+      const lastNight = p.evidence === 'oura' && o.key === iso(addDays(sod(S.now), -1));
+      const when = p.evidence === 'oura' ? (lastNight ? 'last night' : `${WD[d.getDay()]} night`) : p.schedule.kind === 'weekly' ? 'last week' : p.schedule.kind === 'once' ? '' : o.key === iso(addDays(sod(S.now), -1)) ? 'yesterday' : WD[d.getDay()];
+      return {p, sec:'missed', due:closes, lastNight, amount:penaltiesOf(o).reduce((a,x) => a + x.amount, 0), label:`Missed${when ? ' ' + when : ''}`,
+        body:`<div class="meta">${esc(o.detail)}</div><div class="row2"><button class="btn" data-act="excuse" data-arg="${p.id}|${o.key}">File excuse · ${fmtLeft(closes - S.now)} left</button><button class="btn" data-act="acceptMiss" data-arg="${o.id}">I’ll pay it</button></div>${lastNight && scheduledOn(p, sod(S.now)) ? tonightLine(p) : ''}`};
+    });
+}
+// A bill is a To do once it's made. It goes away once it's paid or a payment covering it is waiting for approval.
+// An overdue bill is an alert instead.
+function billCards(me){
+  return ledgersOf(me).filter(x => x.l.billDue > 0).map(({r, l}) => { const b = l.dueBills[0];
+    return {sec:'todo', due:b.dueAt, amount:l.billDue, label:'To do', title:`Pay ${r.name}`, act:'openLedger', arg:r.id,
+      body:`<div class="meta due">Due ${+sod(b.dueAt) === +sod(S.now) ? 'today' : fmtDay(b.dueAt)} at noon · ${fmtLeft(b.dueAt - S.now)}</div><div class="meta">Your bill from ${fmtDay(b.at)}</div><div class="row2"><button class="btn primary" data-act="pay" data-arg="${r.id}|${l.billDue}">Record payment</button></div>`}; });
+}
+function todayCard(c){
+  const p = c.p, fresh = p && inWindow(p);
+  return `<article class="card tcard${fresh ? ' fresh' : ''}" data-act="${c.act || 'openPact'}" data-arg="${c.arg || p.id}"><div class="spread"><div class="row2"><h3>${esc(c.title || p.name)}</h3>${fresh ? newChip(p) : ''}</div><span class="chip ${PILL[c.sec]}">${c.label}</span></div><div class="meta pen">${money(c.amount ?? p.penalty)}</div>${c.body}</article>`;
 }
 function renderToday(){
   const me = S.me, today = sod(S.now);
   const active = S.pacts.filter(p => p.owner === me && p.stage === 'active');
-  const alerts = alertsFor(me).map(a => `<div class="alert ${a.tone}"><div>${a.html}</div><div class="row2">${a.actions}</div></div>`).join('');
-  const cards = active.map(p => ({p, ...(p.evidence === 'oura' ? bedtimeCard(p) : evidenceCard(p))})).sort((a,b) => RANK[a.tone] - RANK[b.tone])
-    .map(({p, tone, label, body}) => `<article class="card tcard${inWindow(p) ? ' fresh' : ''}" data-act="openPact" data-arg="${p.id}"><div class="spread"><div class="row2"><h3>${esc(p.name)}</h3>${inWindow(p) ? newChip(p) : ''}</div><span class="chip ${PILL[tone]}">${label}</span></div><div class="meta pen">${money(p.penalty)}</div>${body}</article>`).join('');
+  const alertList = alertsFor(me), alerts = alertList.map(a => `<div class="alert ${a.tone}"><div>${a.html}</div><div class="row2">${a.actions}</div></div>`).join('');
+  const missed = missedCards(me), lastNight = new Set(missed.filter(c => c.lastNight).map(c => c.p.id));
+  const all = [...missed, ...billCards(me), ...active.map(p => p.evidence === 'oura' ? bedtimeCard(p, lastNight.has(p.id)) : evidenceCard(p)).filter(Boolean)]
+    .sort((a,b) => (SEC[a.sec] - SEC[b.sec]) || (a.due - b.due));
+  const open = all.filter(c => c.sec !== 'soon'), soon = all.filter(c => c.sec === 'soon');
   const waiting = allItems().filter(i => i.owner === me && !awaitingOwner(i)).sort((a,b) => b.at - a.at);
   const waitList = waiting.length ? `<section class="stack"><div class="label">Waiting for approval</div><div class="cards">${waiting.map(i => itemRow(i, itemSub(i), `<span class="chip c-wait">${esc(i.pacts[0] ? reviewersText(i.pacts[0]) : 'Reviewer')}</span>`)).join('')}</div></section>` : '';
   const yk = iso(addDays(today,-1));
-  const yOcc = S.occurrences.filter(o => { const p = pact(o.pactId); return p.owner === me && o.key === yk && p.schedule.kind !== 'weekly'; });
-  const yesterday = yOcc.length ? `<section class="stack"><div class="label">Yesterday · ${fmtDay(addDays(today,-1))}</div><div class="list">${yOcc.map(o => { const p = pact(o.pactId); return `<div class="rowbtn"><span class="rt"><b>${esc(p.name)}</b><small>${esc(o.detail || (o.outcome === 'pending' ? (p.evidence === 'oura' ? 'Final at noon' : 'Waiting for review') : ''))}</small></span>${occChip(p, o)}</div>`; }).join('')}</div></section>` : '';
-  const total = ledgersOf(me).reduce((a,x) => a + Math.max(0, x.l.shown), 0), od = ledgersOf(me).reduce((a,x) => a + Math.max(0, x.l.overdue - x.l.pending), 0);
-  const empty = !active.length ? `<div class="card"><h3>No active pacts yet</h3><p class="muted" style="margin:0">Make one. It's Active as soon as you create it.</p><div class="row2"><button class="btn primary" data-act="create">Create a pact</button><button class="btn" data-act="profile">Invite a friend</button></div></div>` : '';
-  return `${alerts}${empty}${cards}${waitList}${yesterday}
-    <button class="card" style="text-align:left" data-act="tab" data-arg="ledgers"><div class="sumrow"><span class="label">Total owed</span>${od ? `<span class="chip c-missed">${money(od)} overdue</span>` : ''}</div><div class="bigmoney">${money(total)}</div></button>`;
+  // Last night's bedtime isn't in Yesterday until it's final: before noon it's the "Waiting for Oura" card.
+  const yOcc = S.occurrences.filter(o => { const p = pact(o.pactId); return p.owner === me && o.key === yk && p.schedule.kind !== 'weekly' && !(p.evidence === 'oura' && o.outcome === 'pending'); });
+  const yesterday = yOcc.length ? `<section class="stack"><div class="label">Yesterday · ${fmtDay(addDays(today,-1))}</div><div class="list">${yOcc.map(o => { const p = pact(o.pactId); return `<div class="rowbtn"><span class="rt"><b>${esc(p.name)}</b><small>${esc(o.detail || (o.outcome === 'pending' ? 'Waiting for review' : ''))}</small></span>${occChip(p, o)}</div>`; }).join('')}</div></section>` : '';
+  const empty = !active.length ? `<div class="card"><h3>No active pacts yet</h3><p class="muted" style="margin:0">Make one. It's Active as soon as you create it.</p><div class="row2"><button class="btn primary" data-act="create">Create a pact</button><button class="btn" data-act="profile">Invite a friend</button></div></div>`
+    : !open.length && !alertList.length ? `<div class="card"><h3>Nothing to do right now</h3><p class="muted" style="margin:0">Everything due so far is in. New things to do show up here.</p></div>` : '';
+  return `${alerts}${empty}${open.map(todayCard).join('')}
+    ${soon.length ? `<section class="stack"><div class="label">Coming up</div>${soon.map(todayCard).join('')}</section>` : ''}${waitList}${yesterday}`;
 }
 
 /* ---------- Evidence (3 variants) ---------- */
@@ -870,18 +934,20 @@ function paySheet(){
   const t = S.tmp, ls = ledgersOf(S.me).filter(x => x.l.shown > 0);
   const cur = ls.find(x => x.r.id === t.recipientId) || ls[0];
   if (cur && !t.recipientId) t.recipientId = cur.r.id;
-  const max = cur ? cur.l.shown : 0, amt = Number(t.amount ?? max);
+  const max = cur ? cur.l.shown : 0;
+  if (cur && t.amount === undefined) t.amount = (cur.l.overdue + cur.l.billDue) || max; // the open bills first, else everything owed
+  const amt = Number(t.amount);
   const ok = cur && amt > 0 && amt <= max && (t.photos || []).length;
   return `<h2>Record a payment</h2>
     ${ls.length ? `<label class="field"><span>Paid to</span><select class="inp" id="pay-r" data-tmp="recipientId" data-rerender>${ls.map(x => `<option value="${x.r.id}" ${x.r.id === t.recipientId ? 'selected' : ''}>${esc(x.r.name)} (${money(x.l.shown)} owed)</option>`).join('')}</select></label>
-    <label class="field"><span>Amount</span><input class="inp num" id="pay-amt" type="number" min="1" step="1" max="${max}" data-tmp="amount" data-rerender value="${esc(t.amount ?? max)}"><small>Up to ${money(max)}, what you currently owe.${amt > max ? ' <b style="color:var(--missed)">That’s more than you owe.</b>' : ''}</small></label>
+    <label class="field"><span>Amount</span><input class="inp num" id="pay-amt" type="number" min="1" step="1" max="${max}" data-tmp="amount" data-rerender value="${esc(t.amount)}"><small>Up to ${money(max)}, what you currently owe.${amt > max ? ' <b style="color:var(--missed)">That’s more than you owe.</b>' : ''}</small></label>
     <div class="field"><span>Screenshot of the payment</span>${photoPicker('pay', {sample:'receipt'})}</div>
     <label class="field"><span>Note (optional)</span><input class="inp" id="pay-note" data-tmp="note" placeholder="e.g. Sent on Venmo" value="${esc(t.note || '')}"></label>
     <div class="muted" style="font-size:13px">A reviewer checks the screenshot. Until then it shows as awaiting approval and doesn't reduce what you owe.</div>
     <button class="btn primary block" data-act="submitPay" ${ok ? '' : 'disabled'}>Send for approval</button>` : `<p class="muted">You don't owe anything right now.</p>`}`;
 }
 function submitPay(){
-  const t = S.tmp; const amt = Number(t.amount || ledger(S.me, t.recipientId).shown);
+  const t = S.tmp; const amt = Number(t.amount);
   S.payments.push({id:nid('pay'), owner:S.me, recipientId:t.recipientId, amount:amt, photos:t.photos || [], note:t.note || '', status:'pending', at:new Date(S.now), thread:[]});
   log(`${nameOf(S.me)} recorded a ${money(amt)} payment to ${rcp(t.recipientId).name}. Waiting for a reviewer.`);
   S.tmp = {}; S.sheet = null; toast('Payment sent for approval');
@@ -939,7 +1005,7 @@ function profileSheet(){
       ${S.tmp.invite ? `<div class="alert info"><div>Share this link. It works once and expires in 7 days. When your friend accepts, you can pick each other to review pacts.</div><div class="row2"><code class="mono" style="user-select:all">pact.app/i/7Kq2xV</code><button class="btn sm" data-act="copy">Copy</button><button class="btn sm" data-act="invitePreview">See what they see</button></div></div>` : `<button class="btn" data-act="invite">Invite a friend</button>`}</div>
     ${connectionsSection()}
     <div class="stack"><div class="label">Timezone</div><div>America/Los_Angeles <button class="link">Change</button></div></div>
-    <div class="stack"><div class="label">Notifications</div><div class="list">${[['Picked as a reviewer on a new pact','Push + email'],['New item to review','Push + email'],['Decision on your evidence or excuse','Push'],['New comment','Push'],['Occurrence judged Missed','Push'],['Data source problem','Push + email'],['Overdue balance','Push + email']].map(([a,b]) => `<div class="rowbtn"><span class="rt"><b style="font-weight:500">${a}</b><small>${b}</small></span><input type="checkbox" checked aria-label="${a}"></div>`).join('')}</div><small class="muted">Reminders are set on each pact.</small></div>`;
+    <div class="stack"><div class="label">Notifications</div><div class="list">${[['Picked as a reviewer on a new pact','Push + email'],['New item to review','Push + email'],['Decision on your evidence or excuse','Push'],['New comment','Push'],['Occurrence judged Missed','Push'],['Data source problem','Push + email'],['New bill','Push'],['Overdue bill','Push + email']].map(([a,b]) => `<div class="rowbtn"><span class="rt"><b style="font-weight:500">${a}</b><small>${b}</small></span><input type="checkbox" checked aria-label="${a}"></div>`).join('')}</div><small class="muted">Reminders are set on each pact.</small></div>`;
 }
 
 /* ---------- Create pact (3 variants) ---------- */
@@ -1046,12 +1112,13 @@ function renderPacts(){
   const grp = (label, ps) => ps.length ? `<section class="stack"><div class="label">${label}</div><div class="cards">${ps.map(p => `<button class="rowbtn${inWindow(p) ? ' fresh' : ''}" data-act="openPact" data-arg="${p.id}"><span class="rt"><b>${esc(p.name)}</b><small>${scheduleText(p)} · <span class="pen">${money(p.penalty)}</span></small></span>${stageChip(p)}</button>`).join('')}</div></section>` : '';
   const ended = mine.filter(p => p.stage === 'ended');
   return `<button class="btn primary" data-act="create">New pact</button>
-    ${grp('Active', mine.filter(p => p.stage === 'active'))}
+    ${grp('Active', mine.filter(p => p.stage === 'active').sort((a,b) => inWindow(b) - inWindow(a)))}
     ${ended.length ? `<details><summary class="label" style="cursor:pointer">Ended (${ended.length})</summary>${grp('', ended)}</details>` : ''}`;
 }
 function renderPact(id){
   const p = pact(id);
-  const waiting = allItems().filter(i => i.pacts.includes(p) && i.owner === S.me);
+  // Payments belong to a recipient, not a pact, so they're only on Today and in Ledgers.
+  const waiting = allItems().filter(i => i.kind !== 'payment' && i.pacts.includes(p) && i.owner === S.me);
   let actions = '';
   if (inWindow(p) && p.owner === S.me) { const n = minsLeft(p);
     actions = `<div class="alert fresh"><div><b>Free to edit or delete for ${n} more minute${n === 1 ? '' : 's'}.</b> Then ${p.reviewers.map(nameOf).join(', ')} get${p.reviewers.length === 1 ? 's' : ''} notified, and changes follow the usual rules: stricter ones apply at once, looser ones need approval.</div><div class="row2"><button class="btn sm" data-act="editPact" data-arg="${p.id}">Edit</button><button class="btn sm danger" data-act="deletePact" data-arg="${p.id}">Delete</button></div></div>`; }
@@ -1112,7 +1179,7 @@ function renderReview(){
   const q = queueFor(S.me);
   const asked = reviewsFor(S.me).filter(awaitingOwner);
   const askedNote = asked.length ? `<div class="cards">${asked.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${keyOf(i)}"><span class="chip c-wait">Waiting for ${nameOf(i.owner)}</span><span class="rt"><b>${esc(itemTitle(i))}</b><small>You asked: “${esc(i.obj.thread[i.obj.thread.length-1].text)}”</small></span></button>`).join('')}</div>` : '';
-  if (!q.length) return `<div class="card"><h3>Nothing to review</h3><p class="muted" style="margin:0">When ${friendsOf(S.me).map(nameOf).join(', ')} sends evidence, an excuse, a payment or a change, it shows up here.</p></div>${askedNote}${S.me === 'you' && !asked.length ? '<button class="btn" data-act="as" data-arg="sam">Switch to Sam to see their queue</button>' : ''}`;
+  if (!q.length) return `<div class="card"><h3>Nothing to review</h3><p class="muted" style="margin:0">When ${friendsOf(S.me).map(nameOf).join(', ')} sends evidence, an excuse, a payment or a change, it shows up here.</p></div>${askedNote}${S.me === 'you' && !asked.length ? `<div class="protonote"><span class="tag">PROTOTYPE ONLY</span><div>The real app never shows anyone else's queue. To try reviewing here, sign in as Sam, who reviews your pacts.</div><button class="btn sm" style="align-self:flex-start" data-act="as" data-arg="sam">Sign in as Sam</button></div>` : ''}`;
   {
     const idx = Math.min(S.form.ridx || 0, q.length - 1), i = q[idx], key = keyOf(i);
     const busy = S.form.rejecting === key || S.form.commenting === key;
@@ -1127,7 +1194,7 @@ function renderReview(){
 /* ---------- Ledgers ---------- */
 // Owed, one status line only when there's something to say, and lifetime paid. Held penalties show in the history.
 function ledgerSummary(r, l){
-  const status = [l.overdue - l.pending > 0 ? `<b style="color:var(--missed)">${money(l.overdue - l.pending)} overdue</b>` : '', l.pending ? `${money(l.pending)} payment awaiting approval` : ''].filter(Boolean).join(' · ');
+  const status = [l.overdue > 0 ? `<b style="color:var(--missed)">${money(l.overdue)} overdue</b>` : '', l.billDue ? `${money(l.billDue)} bill due ${fmtDay(l.dueBills[0].dueAt)}` : '', l.pending ? `${money(l.pending)} payment awaiting approval` : ''].filter(Boolean).join(' · ');
   return `<div class="sumrow"><div><div class="bigmoney">${money(Math.max(0, l.shown))}</div><div class="meta">owed</div>${status ? `<div class="meta">${status}</div>` : ''}</div>
       <button class="btn primary sm" data-act="pay" data-arg="${r.id}" ${l.shown > 0 ? '' : 'disabled'}>Record payment</button></div>
     <dl class="kv"><dt>Lifetime paid</dt><dd class="num">${money(l.paid)}</dd></dl>`;
@@ -1137,11 +1204,12 @@ function renderLedgers(){
   const ls = ledgersOf(S.me);
   if (!ls.length) return `<div class="card"><h3>No ledgers yet</h3><p class="muted" style="margin:0">Each recipient gets a ledger once a pact names them.</p></div>`;
   return ls.map(({r, l}) => `<article class="card tcard" data-act="openLedger" data-arg="${r.id}"><h3>${esc(r.name)}</h3>${ledgerSummary(r, l)}</article>`).join('')
-    + `<p class="muted" style="font-size:13px;margin:0">Penalties are due 7 days after they’re added. Payments clear the oldest first.</p>`;
+    + `<p class="muted" style="font-size:13px;margin:0">Every Wednesday at noon, last week’s penalties for each recipient become one bill, once you can no longer excuse them. You have 7 days to pay it. You can pay early here at any time, and payments clear the oldest penalties first.</p>`;
 }
 function renderLedger(id){
   const r = rcp(id), l = ledger(S.me, id);
-  const hist = [...l.pens.map(x => ({at:x.addedAt, html:`<span class="rt"><b>${esc(pact(x.pactId).name)}</b><small>${occLabel(pact(x.pactId), occById(x.occId).key)}${x.status === 'held' ? ' · on hold while an excuse waits for approval' : x.dueAt <= S.now ? '' : ` · due ${fmtDate(x.dueAt)}`}</small></span><span class="num" style="color:var(--missed)">+${money(x.amount)}</span>`})),
+  const billNote = x => { const b = S.bills.find(b => b.id === x.billId); return b ? ` · on the ${fmtDate(b.at)} bill` : ' · goes on a Wednesday bill once it can’t be excused'; };
+  const hist = [...l.pens.map(x => ({at:x.addedAt, html:`<span class="rt"><b>${esc(pact(x.pactId).name)}</b><small>${occLabel(pact(x.pactId), occById(x.occId).key)}${x.status === 'held' ? ' · on hold while an excuse waits for approval' : billNote(x)}</small></span><span class="num" style="color:var(--missed)">+${money(x.amount)}</span>`})),
                 ...l.pays.map(x => ({at:x.at, html:`<span class="rt"><b>Payment</b><small>${esc(x.note || '')} · ${PAY_STATUS[x.status]}</small></span><span class="num" style="color:${x.status === 'approved' ? 'var(--kept)' : 'var(--muted)'}">${x.status === 'rejected' ? '' : '−'}${money(x.amount)}</span>`}))].sort((a,b) => b.at - a.at);
   return `<section class="card">${ledgerSummary(r, l)}</section>
     <section class="stack"><div class="label">History</div><div class="list">${hist.map(h => `<div class="rowbtn">${h.html}<span class="age">${fmtDate(h.at)}</span></div>`).join('') || '<div class="rowbtn muted">Nothing yet</div>'}</div></section>`;
@@ -1153,11 +1221,11 @@ function renderSide(){
   const recent = S.occurrences.filter(o => o.key >= iso(addDays(S.now,-3))).sort((a,b) => a.key < b.key ? 1 : -1).slice(0, 8)
     .map(o => { const p = pact(o.pactId); return `<tr><td>${esc(p.name)}</td><td>${occLabel(p, o.key).replace('Night of ','')}</td><td>${o.outcome === 'pending' ? 'not judged' : o.outcome}</td></tr>`; }).join('');
   $('#side').innerHTML = `<div class="spread"><span class="tag">PROTOTYPE · THROWAWAY</span><button class="btn sm closeside" data-act="side">Close</button></div>
-    <section><h2>Pact flows · round 6</h2><div class="muted" style="font-size:13.5px">New in this round: no Drafts and no approval for new pacts. A pact is Active as soon as you create it, and for 10 minutes it's blue and free to edit or delete ("Read 20 pages" is one). Its first occurrence needs an hour's lead time. Occurrences say what they're waiting for instead of "Pending", ledger cards are simpler, the current tab is easier to see, and the invite says you can pick each other as reviewers.</div></section>
+    <section><h2>Pact flows · round 7</h2><div class="muted" style="font-size:13.5px">New in this round: <b>weekly bills</b>. Every Wednesday at noon, each recipient's penalties that can no longer be excused become one bill, due 7 days later. Today shows money only once there's a bill ("Pay Rival Org $2" is due at noon), and an unpaid bill turns into an overdue alert. Today is reordered: Waiting for Oura, To do (soonest first), Missed (now with "I'll pay it"), Automatic, then Coming up and Waiting for approval. Done cards, and recurring pacts on days they aren't due, are gone. The tab bar is iOS style, new pacts sit at the top of Pacts, and pact pages no longer list payments. Advance to tomorrow noon to see the overdue alert and the new Oct 21 bill.</div></section>
     <section><div class="label">Signed in as</div><div class="seg">${Object.keys(S.accounts).map(a => `<button aria-pressed="${S.me === a}" data-act="as" data-arg="${a}">${acct(a).name}</button>`).join('')}</div><small class="muted">You own the bedtime and gym pacts and Sam reviews them. Sam owns a running pact that you review. Switch to act as the other person.</small></section>
     <section><div class="label">Jump to</div><div class="row2"><button class="btn sm" data-act="jump" data-arg="create">Create pact</button><button class="btn sm" data-act="jump" data-arg="review">Review</button><button class="btn sm" data-act="jump" data-arg="evidence">Submit evidence</button><button class="btn sm" data-act="jump" data-arg="ledgers">Ledgers</button></div>
       <table><tr><th>Screen</th><th>Design</th></tr>${Object.entries(CHOSEN).map(([k,v]) => `<tr><td>${SCREEN_NAME[k]}</td><td>${v} (chosen)</td></tr>`).join('')}</table></section>
-    <section><div class="label">Clock</div><div class="num">${fmtDay(S.now)}, ${fmtTime(S.now)}</div><div class="row2"><button class="btn sm" data-act="advance5">Advance 5 minutes</button><button class="btn sm" data-act="advance">Advance to tomorrow, noon</button></div><small class="muted">Judges today's evidence pacts at the end of the day and last night's bedtime at noon. Penalties, overdue amounts, 48h excuse windows and 10-minute edit windows all follow the clock.</small>
+    <section><div class="label">Clock</div><div class="num">${fmtDay(S.now)}, ${fmtTime(S.now)}</div><div class="row2"><button class="btn sm" data-act="advance5">Advance 5 minutes</button><button class="btn sm" data-act="advance">Advance to tomorrow, noon</button></div><small class="muted">Judges today's evidence pacts at the end of the day and last night's bedtime at noon. Wednesday-noon bills, overdue bills, 48h excuse windows and 10-minute edit windows all follow the clock.</small>
       <label class="row2"><input type="checkbox" data-act="oura" ${S.oura.you === 'broken' ? 'checked' : ''}> Simulate your Oura connection dropping</label>
       <button class="btn sm" data-act="reset" style="align-self:flex-start">Reset everything</button></section>
     <section><div class="label">State</div><table><tr><th>Account</th><th>To review</th><th>Owes</th><th>Overdue</th></tr>${qs}</table>
@@ -1193,7 +1261,7 @@ function render(){
     const q = queueFor(S.me).length;
     html = `<header class="hdr gut">${top ? `<button class="iconbtn" data-act="back" aria-label="Back">${IC.back}</button>` : ''}<h1>${esc(title)}<span class="sub">${sub}</span></h1><button class="avatar" data-act="profile" aria-label="Profile">${acct(S.me).initial}</button></header>
       <main class="scroll gut">${body}</main>
-      <nav class="tabbar" aria-label="Main">${['today','pacts','review','ledgers'].map(t => `<button class="tab" data-act="tab" data-arg="${t}" ${S.tab === t ? `aria-current="${top ? 'true' : 'page'}"` : ''}><span class="pill">${IC[t]}</span>${t[0].toUpperCase() + t.slice(1)}${t === 'review' && q ? `<span class="badge">${q}</span>` : ''}</button>`).join('')}</nav>`;
+      <nav class="tabbar" aria-label="Main">${['today','pacts','review','ledgers'].map(t => `<button class="tab" data-act="tab" data-arg="${t}" ${S.tab === t ? `aria-current="${top ? 'true' : 'page'}"` : ''}>${IC[t]}${t[0].toUpperCase() + t.slice(1)}${t === 'review' && q ? `<span class="badge">${q}</span>` : ''}</button>`).join('')}</nav>`;
   }
   if (S.sheet) {
     const k = S.sheet.kind;
@@ -1219,7 +1287,10 @@ const ACT = {
   closeSheet:(a, el, e) => { if (e.target === el) { S.sheet = null; S.tmp = {}; } else return 'skip'; },
   create:() => { S.draft = null; S.form = {}; S.stack.push({name:'create'}); },
   openPact:a => { if (S.stack.length && S.stack[S.stack.length-1].id === a) return; S.stack.push({name:'pact', id:a}); S.form = {}; }, // Back returns to wherever you came from
-  openLedger:a => { S.stack = [{name:'ledger', id:a}]; S.tab = 'ledgers'; },
+  openLedger:a => { S.stack.push({name:'ledger', id:a}); S.form = {}; }, // pushed on the current tab, so Back returns there
+  acceptMiss:a => { const o = occById(a); o.accepted = true; const p = pact(o.pactId);
+    log(`${nameOf(S.me)} accepted the miss on "${p.name}" (${occLabel(p, o.key)}). It's off Today; the penalty stays and goes on a Wednesday bill. An excuse can still be filed from the pact page until the 48 hours are up.`);
+    toast('Okay. It goes on your next bill'); },
   openItem:a => { S.form = {}; S.tmp = {}; S.stack.push({name:'item', key:a}); },
   evidence:a => { S.tmp = {}; S.form.inline = a; },
   closeInline:() => { S.form.inline = null; S.tmp = {}; },
@@ -1230,7 +1301,7 @@ const ACT = {
   excuseFromCap:a => { S.stack.pop(); ACT.excuse(`${a}|${todayKey()}`); },
   exPact:(a, el) => { const s = new Set(S.tmp.pactIds || []); el.checked ? s.add(a) : s.delete(a); S.tmp.pactIds = [...s]; },
   submitExcuse:() => submitExcuse(),
-  pay:a => { S.tmp = {recipientId:a, photos:[]}; S.sheet = {kind:'pay'}; },
+  pay:a => { const [rid, amt] = (a || '').split('|'); S.tmp = {recipientId:rid || undefined, photos:[], ...(amt ? {amount:Number(amt)} : {})}; S.sheet = {kind:'pay'}; },
   submitPay:() => submitPay(),
   change:a => { S.tmp = {}; S.sheet = {kind:'change', pactId:a}; },
   crDay:a => { const d = Number(a), s = new Set(S.tmp.days); s.has(d) ? s.delete(d) : s.add(d); S.tmp.days = [...s]; },
@@ -1313,6 +1384,7 @@ document.addEventListener('change', e => {
   }
   if (t.type === 'checkbox' && t.dataset.act) { ACT[t.dataset.act]?.(t.dataset.arg, t, e); render(); return; }
   if (t.dataset.f !== undefined) { setField(t); if (t.tagName === 'SELECT') render(); return; }
+  if (t.dataset.tmp === 'recipientId') delete S.tmp.amount; // a new recipient starts from its own bill
   if (t.dataset.tmp !== undefined) { S.tmp[t.dataset.tmp] = t.value; if (t.dataset.rerender !== undefined) render(); else liveUpdate(); }
 });
 document.addEventListener('input', e => {
