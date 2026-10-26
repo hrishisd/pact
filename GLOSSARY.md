@@ -82,8 +82,12 @@ _Avoid_: Anti-charity, beneficiary, charity, payee
 The running total an owner owes one recipient: penalties from every pact with that recipient, minus the payments to it that have been approved.
 _Avoid_: Balance, debt, tab
 
+**Bill**:
+The penalties an owner owes one recipient, gathered once a week (Wednesday at noon) after they can no longer be excused, and due 7 days later. A bill never changes once it's made.
+_Avoid_: Invoice, statement, charge
+
 **Overdue**:
-Describes a penalty still unpaid after its due period has passed.
+Describes a bill still unpaid after its due date.
 _Avoid_: Late, delinquent, outstanding
 
 **Payment**:
