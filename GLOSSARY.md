@@ -14,9 +14,13 @@ _Avoid_: Commitment, contract, habit, task, goal
 The person who made a pact and is held to it.
 _Avoid_: Creator, user (when the role matters)
 
-**Draft / Active / Ended**:
-The stages a pact goes through. A Draft hasn't been approved by a reviewer yet and has nothing at stake. An Active pact is being held to. An Ended pact is past its end date or was ended through an approved change request.
-_Avoid_: Pending, live, archived
+**Active / Ended**:
+The stages a pact goes through. A pact is Active from the moment it's created; nobody approves it first. An Ended pact is past its end date or was ended through an approved change request.
+_Avoid_: Draft, pending, live, archived
+
+**Edit window**:
+The first 10 minutes after a pact is created, when the owner can edit or delete it freely. Its reviewers are notified when it closes. After it, stricter changes apply at once and looser ones need a change request.
+_Avoid_: Draft, grace period
 
 **Schedule**:
 When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. Mon, Wed, Fri, each day its own occurrence), **Weekly count** (e.g. 3× per week, the week being one occurrence), and **One-time** (one occurrence by a deadline).
@@ -27,8 +31,8 @@ One dated instance of a pact that gets judged on its own, e.g. "the night of Tue
 _Avoid_: Instance, check-in, day, session
 
 **Kept / Missed / Excused**:
-The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it.
-_Avoid_: Passed, failed, success, failure
+The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**.
+_Avoid_: Passed, failed, success, failure, pending
 
 ### Proof and review
 
@@ -53,7 +57,7 @@ A person the owner has picked to decide on their evidence, excuses, payments and
 _Avoid_: Referee, judge, verifier, buddy
 
 **Friend**:
-Another account you're connected with. Only friends can be picked as reviewers or as a person recipient.
+Another account you're connected with through an accepted invite. Only friends can be picked as reviewers or as a person recipient. Accepting an invite is agreeing that either of you can pick the other as a reviewer.
 _Avoid_: Contact, connection, follower, buddy
 
 **Review Queue**:

@@ -13,7 +13,7 @@ I also want missed bedtimes to be detected automatically from my Oura Ring rathe
 
 ## Solution
 
-Pact is a phone-first web app, installed to the home screen as a PWA, where an **owner** makes **pacts**. Each pact is a commitment with a schedule, a type of evidence, a penalty, and a **recipient** for that penalty. One or more **friends** act as **reviewers**. They approve the pact itself, check photo **evidence**, decide on **excuses**, and approve any **change request** that would make the pact less strict.
+Pact is a phone-first web app, installed to the home screen as a PWA, where an **owner** makes **pacts**. Each pact is a commitment with a schedule, a type of evidence, a penalty, and a **recipient** for that penalty. One or more **friends** act as **reviewers**. They check photo **evidence**, decide on **excuses**, and approve any **change request** that would make the pact less strict. A new pact needs no approval: it's Active as soon as it's created, and the owner has a 10-minute **edit window** to fix or delete it.
 
 Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. Bedtime pacts are judged automatically from Oura sleep data. Pacts with submitted evidence are judged by a reviewer. Each Missed occurrence adds its penalty to the owner's **ledger** for that recipient. The owner pays the recipient outside the app and records a **payment** with a screenshot, which a reviewer approves. Penalties become **Overdue** after 7 days, which triggers banners and reminders, and the reviewer is notified too.
 
@@ -30,7 +30,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Friends
 
 6. As a user, I want to generate an invite link and share it with my phone's share sheet, so that I can bring a friend into the app.
-7. As an invited person, I want to open the link, sign in with Google and accept, so that I become friends with the person who invited me.
+7. As an invited person, I want to open the link, sign in with Google and accept, so that I become friends with the person who invited me. The invite page says plainly that accepting means we can each pick the other as a reviewer.
 8. As a user, I want invite links to work only once and expire after 7 days, so that a forwarded or old link can't be used by a stranger.
 9. As an owner, I want to pick reviewers only from my friends, so that only people I trust review my pacts.
 
@@ -50,10 +50,10 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 21. As an owner, I want to pick a recipient from my saved list, or add a new one (a friend, or an organization with a name and link), so that I decide where my penalties go.
 22. As an owner, I want to choose one or more reviewers for each pact, so that the right friend checks each commitment.
 23. As an owner, I want to add reminders to a pact, each with a time and a channel (push, email or both), plus a date on One-time pacts, so that I'm nudged at the right moment.
-24. As an owner, I want to edit a Draft pact freely, so that I can get it right before anything is at stake.
-25. As an owner, I want to send a Draft pact for review, so that my reviewer can agree to its terms before it starts.
-26. As an owner, I want my pact to become Active only after a reviewer approves it, and to start on whichever comes later, the first full day or week afterwards or my start date, so that I'm never charged for terms nobody agreed to.
-27. As an owner, I want a rejected pact to come back to me as a Draft with the reviewer's comment, so that I can adjust it and send it again.
+24. As an owner, I want a pact to be Active as soon as I create it, with no approval step, so that I can make a pact that counts today.
+25. As an owner, I want to edit or delete a new pact freely for 10 minutes after I create it, so that I can fix a mistake before it counts. Editing doesn't restart the 10 minutes.
+26. As an owner, I want a pact's first occurrence to be the first one due at least an hour after I create it (for Weekly count, the week starting the next Monday), or my start date if that's later, so that nothing falls due while I can still edit it.
+27. As a reviewer, I want to be notified when a friend picks me for a new pact, once its 10-minute edit window has closed, so that I know what I'm holding them to without being pinged about typos.
 
 ### Keeping a pact: submitted evidence
 
@@ -91,7 +91,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Reviewing
 
 52. As a reviewer, I want a Review tab with a count badge, so that I know when someone is waiting on me.
-53. As a reviewer, I want new pacts and change requests shown first, then everything else oldest first, so that I handle time-sensitive items before they become blockers.
+53. As a reviewer, I want change requests shown first, then everything else oldest first, so that I handle time-sensitive items before they become blockers.
 54. As a reviewer, I want an evidence item to show just the evidence and the pact's description of what counts, so that I can judge it quickly. The app has already enforced when evidence can be submitted.
 55. As a reviewer, I want to approve an item, so that the owner gets credit, the excuse is granted, or the payment is counted.
 56. As a reviewer, I want to reject an item with a required reason, so that the owner knows why and can respond.
@@ -116,21 +116,21 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 69. As an owner, I want a Weekly count week that falls short to add one penalty per missing session, so that doing 1 of 3 costs more than doing 2 of 3.
 70. As an owner, I want one ledger per recipient that combines all pacts sharing that recipient, so that I make one payment per place.
 71. As an owner, I want to record a payment with an amount, a screenshot and an optional note, so that my reviewer can verify I paid.
-72. As an owner, I want my balance shown as "$50 owed · $20 pending" while a payment awaits approval, so that I can see what's settled and what isn't.
+72. As an owner, I want my ledger to say "$20 payment awaiting approval" under what I owe while a payment is being checked, so that I can see what's settled and what isn't.
 73. As an owner, I want a rejected payment to go back onto my balance, so that the ledger stays honest.
 74. As an owner, I want the app to stop me recording a payment larger than what I owe, so that ledgers never go negative.
 75. As a reviewer, I want to approve or reject payments for any recipient on pacts I review, so that payments are confirmed by someone other than the owner.
 76. As an owner, I want each penalty to fall due 7 days after it's added, so that I settle up regularly instead of letting debt pile up.
 77. As an owner, I want a red banner and a daily reminder while anything is overdue, so that I can't ignore it.
 78. As a reviewer, I want to be notified when a friend first goes overdue, and weekly after that, so that I can nudge them.
-79. As an owner, I want each ledger to show lifetime totals (all penalties added and all payments made), so that the real cost of missing pacts motivates me.
-80. As an owner, I want the Ledgers list to show each recipient with what I owe, what's on hold, lifetime penalties and lifetime paid, and to open a recipient for its full history with each penalty linked to its occurrence, so that the main view stays simple.
+79. As an owner, I want each ledger to show how much I've paid in its lifetime, so that the real cost of missing pacts motivates me.
+80. As an owner, I want the Ledgers list to show each recipient with what I owe, one status line only when something is overdue or a payment is awaiting approval, and lifetime paid, and to open a recipient for its full history with each penalty linked to its occurrence (held penalties are marked there), so that the main view stays simple.
 
 ### History and overview
 
 81. As an owner, I want Today to show a Yesterday summary, so that I can see how I did after alerts have cleared.
-82. As an owner, I want each pact page to show a GitHub-style heat map of Kept, Missed, Excused and pending occurrences, so that I can see patterns over time.
-83. As an owner, I want my Pacts tab to list Drafts first, then Active, with Ended pacts collapsed, so that what needs attention is at the top.
+82. As an owner, I want each pact page to show a GitHub-style heat map of Kept, Missed, Excused and not-yet-judged occurrences, so that I can see patterns over time.
+83. As an owner, I want my Pacts tab to list Active pacts, with Ended pacts collapsed, so that the list stays short.
 84. As an owner, I want Today to show my total owed across all ledgers, so that I always know where I stand.
 
 ### Notifications
@@ -138,28 +138,28 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 85. As an owner, I want each pact's reminders to fire only while the occurrence still needs evidence (on scheduled days for Fixed days; once, on its own date, for each One-time reminder), so that I'm not nagged about things I've already done.
 86. As an owner on a Weekly count pact, I want reminders to fire only on days without evidence and only until I've met the week's target, so that they stop once I'm done.
 87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to go off every scheduled night, even if I'm already in bed, so that I get a cue to start getting ready for bed. The app can't tell I'm in bed until my ring syncs, usually the next morning.
-88. As a user, I want to turn each kind of event notification (new review item, decision, comment, Missed occurrence, data-source problem, overdue) on or off and choose push and/or email for each, so that I control how much I'm contacted.
+88. As a user, I want to turn each kind of event notification (picked as a reviewer on a new pact, new review item, decision, comment, Missed occurrence, data-source problem, overdue) on or off and choose push and/or email for each, so that I control how much I'm contacted.
 
 ### Today and navigation
 
-89. As an owner, I want things waiting on someone else (evidence, excuses, payments, change requests, draft pacts) listed under "Waiting for approval" at the bottom of Today, each with an icon showing its kind, so that they stay visible without crowding what I need to do.
+89. As an owner, I want things waiting on someone else (evidence, excuses, payments, change requests) listed under "Waiting for approval" at the bottom of Today, each with an icon showing its kind, so that they stay visible without crowding what I need to do.
 90. As an owner, I want the overdue banner to go away once a pending payment covers the overdue amount, so that I'm only warned when there's something for me to do.
 91. As an owner, I want to tap a pact on Today to open its page, and Back to return me to Today, so that I can check details without losing my place.
-92. As an owner looking at my own Draft, I want it to say who it's waiting on instead of offering to approve it, so that it's clear only a reviewer can make it Active.
+92. As an owner, I want a pact in its edit window to stand out, with a blue "New · edit for 7 min" chip and edge on Today and in Pacts and a bar with Edit and Delete on its page, so that I can see it's still free to change. It returns to normal on its own when the window closes.
 
 ### Connections
 
 93. As an owner, I want my profile to list only the connections I've made (Oura in v0), each with its status and a Reconnect button when it needs one, so that I can fix a broken connection without hunting for it.
 94. As an owner, I want a warning that says how many active pacts use a connection before I disconnect it, so that I know their nights will count as Missed until I reconnect.
-95. As a reviewer, I want a pact's evidence kind fixed for its whole life, so that the proof I agreed to can't be swapped for something weaker.
+95. As a reviewer, I want a pact's evidence kind fixed for its whole life, so that its proof can't be swapped for something weaker.
 
 ## Implementation Decisions
 
 ### Architecture
 
 - **One deep module, the Pact core.** It holds every domain rule. Its interface is a set of **commands** and **queries**, each called as a particular account.
-  - **Commands:** create/edit/send-for-review pact; approve/reject/comment on a review item; submit evidence; file excuse; record payment; request change; add reviewer; create/accept invite; connect/disconnect Oura; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, due-date transition and reminder that's due by T.
-  - **Queries:** Today (cards with status, alerts, waiting for approval, Yesterday, total owed); the review queue and item detail; a pact page with its heat map; the pacts list; ledgers (balance, on hold, pending, overdue, lifetime totals) and a ledger's history.
+  - **Commands:** create pact; edit or delete a pact in its edit window; approve/reject/comment on a review item; submit evidence; file excuse; record payment; request change; add reviewer; create/accept invite; connect/disconnect Oura; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, due-date transition and reminder that's due by T.
+  - **Queries:** Today (cards with status, alerts, waiting for approval, Yesterday, total owed); the review queue and item detail; a pact page with its heat map; the pacts list; ledgers (owed, overdue, awaiting approval, lifetime paid) and a ledger's history, including held penalties.
 - **Four ports** sit outside the core, each with a production adapter and a fake for tests:
   - **Clock**: the current time. The core never reads system time directly.
   - **Oura source**: given an account and a date range, returns sleep periods in the Oura API's shape, or a "disconnected" error (token revoked or expired, membership lapsed).
@@ -173,17 +173,17 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 - **Account**: Google identity, display name, timezone.
 - **Connection**: account, service (Oura in v0), tokens, status (Connected | Needs reconnecting). Exists only once the owner has connected the service.
-- **Friendship**: two accounts. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
+- **Friendship**: two accounts. Either can pick the other as a reviewer or a person recipient; accepting an invite is agreeing to that. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
 - **Recipient**: owned by an account. Either a person (a friend's account) or an organization (name, link).
-- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date, optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more, each with accepted status), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Draft | Active | Ended), activation time.
+- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date, optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Active | Ended), created-at time (starts the edit window).
 - **Schedule**: one of three kinds:
   - **Fixed days**: a set of weekdays.
   - **Weekly count**: a target per Mon–Sun week.
   - **One-time**: a deadline.
-- **Occurrence**: pact, period (a date, a Mon–Sun week, or start-to-deadline), outcome (pending | Kept | Missed | Excused), judged-at time, and for bedtime pacts the observed bedtime.
+- **Occurrence**: pact, period (a date, a Mon–Sun week, or start-to-deadline), outcome (not judged yet | Kept | Missed | Excused), judged-at time, and for bedtime pacts the observed bedtime.
 - **Evidence**: occurrence (for Weekly count: the week plus the day it counts for), files (photos in v0), server-received time, decision.
 - **Excuse**: owner, pacts covered, date range, reason, photos, decision. The occurrences it covers are worked out from the pacts and the date range.
-- **Review item**: kind (New pact | Change request | Evidence | Excuse | Payment), subject, comment thread, decision (approve/reject, a reason when rejected, decided by, decided at). It's waiting on the owner whenever the latest comment is a reviewer's.
+- **Review item**: kind (Change request | Evidence | Excuse | Payment), subject, comment thread, decision (approve/reject, a reason when rejected, decided by, decided at). It's waiting on the owner whenever the latest comment is a reviewer's.
 - **Change request**: pact and the proposed new terms.
 - **Penalty**: occurrence, recipient, amount, added-at time, due-at time (added + 7 days), state (held, while a pending excuse covers it; or owed).
 - **Payment**: owner, recipient, amount, screenshot, note, decision.
@@ -191,14 +191,20 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ### Rules the core enforces
 
-**Activation and change**
-- A pact's first occurrence is whichever comes later: its start date, or the first full day (week, for Weekly count) after approval.
-- Rejecting a New pact returns it to Draft. Only Drafts can be edited directly.
-- A pact's evidence kind is set when it's created and never changes, not even in a Draft. Proving it a different way means making a new pact.
+**Creation and change**
+- A pact is Active as soon as it's created. There's no approval step and no Draft stage.
+- For 10 minutes after creation, the owner can edit or delete the pact freely. Editing doesn't restart the 10 minutes. After that, changes follow the rules below.
+- The pact's reviewers are notified when the edit window closes. A pact deleted inside the window notifies nobody.
+- A pact's first occurrence:
+  - Fixed days: the first scheduled day (night, for Oura Ring) whose due time is at least 1 hour after creation. The due time is the due-by time, the in-bed-by time, or midnight.
+  - Weekly count: the week starting the Monday after creation.
+  - One-time: the deadline must be at least 1 hour after creation.
+  - A start date can only push the first occurrence later.
+- A pact's evidence kind is set when it's created and never changes, not even in the edit window. Proving it a different way means making a new pact.
 - Oura Ring pacts use Fixed days only. Camera pacts can use any schedule.
 - A change that relaxes the pact (delete, pause, end, lower penalty, ease schedule, remove reviewer) creates a change request. The old terms stay in force until it's approved.
 - A change that only makes the pact stricter (higher penalty, more days) takes effect at once, with no review. A change that both relaxes and tightens is reviewed as a whole.
-- Adding a reviewer is immediate and takes effect once they accept. A pact can never have zero reviewers.
+- Adding a reviewer is immediate, and the new reviewer is notified. A pact can never have zero reviewers.
 - A pact is Ended when its end date passes or an approved change request ends it.
 
 **Judging pacts with submitted evidence**
@@ -230,11 +236,11 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 **Ledger**
 - Each Missed occurrence adds a penalty equal to the pact's amount. A short Weekly count week adds one penalty per missing day.
-- Owed = penalties not held − approved payments. Pending = payments awaiting a decision.
-- A new payment can't exceed owed minus pending.
+- Owed = penalties not held − approved payments. Awaiting approval = payments a reviewer hasn't decided yet.
+- A new payment can't exceed owed minus awaiting approval.
 - Payments are applied to penalties oldest first.
 - Overdue = the part of owed made up of penalties whose due-at time has passed.
-- Lifetime totals = all penalties ever added and all payments ever approved, per recipient.
+- Lifetime paid = all payments ever approved, per recipient.
 
 **Reminders**
 - Fixed days: fire on scheduled days, only if that day has no evidence.
@@ -252,14 +258,17 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ### Screens (settled with the prototype)
 
-- **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today.
-- **Today:** cards for each Active pact, sorted so the ones needing action come first. Each card has a status label on the right: **To do** (green), **Waiting for approval** (tan), **Automatic** (grey), **Done**, **Missed** (red). Evidence is submitted **inline on the card**. Alerts sit at the top, and only for things that need the owner. Pending items sit under "Waiting for approval" near the bottom, followed by Yesterday and the total owed. Each card shows its penalty as a bare amount in red ("$5"). An open Camera card shows the due time in orange as "Due at 9:00pm · 4h 12m", or "Due at midnight · 16h 19m" with no due-by time.
-- **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Send for review. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. The Reviewers and Reminders text depends on the kind: an Oura Ring pact has no photos to review, and its reminders go off every scheduled night. Editing a Draft skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both edit the same draft, so switching later is a layout change.
+- **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today. The current tab has a filled pill behind its icon and a bold label, and stays highlighted while a page is pushed on top of it.
+- **Today:** cards for each Active pact, sorted so the ones needing action come first. Each card has a status label on the right: **To do** (green), **Waiting for approval** (tan), **Automatic** (grey), **Done**, **Missed** (red). Evidence is submitted **inline on the card**. Alerts sit at the top, and only for things that need the owner. Items waiting on a reviewer sit under "Waiting for approval" near the bottom, followed by Yesterday and the total owed. A pact in its edit window has a blue "New · edit for 7 min" chip next to its name and a blue left edge, here and in the Pacts list; both go away when the window closes. Each card shows its penalty as a bare amount in red ("$5"). An open Camera card shows the due time in orange as "Due at 9:00pm · 4h 12m", or "Due at midnight · 16h 19m" with no due-by time.
+- **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Create pact. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. The Reviewers and Reminders text depends on the kind: an Oura Ring pact has no photos to review, and its reminders go off every scheduled night. The Check step says the pact is Active as soon as it's created and names its first occurrence (e.g. "Wed Oct 21, due 10:00pm"). Editing a pact in its edit window reuses the form and skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both fill in the same fields, so switching later is a layout change.
+- **Pact page:** in the edit window, a blue bar at the top says how many minutes are left, with Edit and Delete. After that it offers File excuse and Request change.
+- **Occurrence labels:** an occurrence that isn't judged yet says what it's waiting for: **Waiting for Oura**, **Waiting for approval** (a photo with a reviewer), or **Due today** ("This week" for Weekly count, the due date for One-time). A Missed occurrence with an excuse waiting reads **Missed · excuse waiting for approval**. The heat map legend calls them "Not judged yet". The UI never shows the word "pending".
 - **Lists:** rows you can tap are separate cards with a › chevron; rows you can't tap (Friends, Notifications, Connections, History) stay grouped in one block. The pacts list shows the penalty as a red amount too. The full wording, "$5 per miss", appears only in a pact's terms.
-- **Item kinds:** each review item kind has its own colour and icon: New pact blue +, Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
+- **Item kinds:** each review item kind has its own colour and icon: Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. Items waiting on the owner's reply are listed below the current item.
 - **Profile:** a Connections section lists only the connections the owner has made, and is hidden when there are none. Disconnecting warns how many active pacts use it.
-- **Ledgers:** one card per recipient showing what's owed, what's on hold, lifetime penalties, lifetime paid and Record payment. Tapping a card opens its history.
+- **Invite:** the page an invite link opens says that accepting makes you friends, so the inviter can pick you to review their pacts and you can pick them.
+- **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, or a payment awaiting approval), lifetime paid, and Record payment. Held penalties appear only in the history. Tapping a card opens its history.
 - **Theme:** light only. v0 ignores the system's dark-mode setting; a dark theme can come later.
 
 ## Testing Decisions
@@ -270,9 +279,9 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - an Oura source that returns sleep periods shaped like real API responses (seeded from a recorded real response once one is available) and can simulate "disconnected"
   - a recording notifier
   - an in-memory photo store
-- **Good tests are scenarios written in domain language**, e.g. "owner creates a Mon/Wed/Fri gym pact for $5 → reviewer approves → Monday ends with no evidence → occurrence is Missed and the recipient's ledger shows $5 owed → owner files an excuse within 48h → reviewer approves → occurrence is Excused and owed returns to $0". A test should survive any refactor that keeps behavior the same.
+- **Good tests are scenarios written in domain language**, e.g. "owner creates a Mon/Wed/Fri gym pact for $5 on Sunday → Monday ends with no evidence → occurrence is Missed and the recipient's ledger shows $5 owed → owner files an excuse within 48h → reviewer approves → occurrence is Excused and owed returns to $0". A test should survive any refactor that keeps behavior the same.
 - **Areas the scenarios must cover:**
-  - activation timing and start dates
+  - the edit window, first-occurrence lead time and start dates
   - each schedule kind
   - due-by times and which days accept evidence
   - the bedtime night window and the noon cutoff
@@ -288,7 +297,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - payment limits
   - oldest-first allocation
   - overdue transitions and notifications
-  - lifetime totals
+  - lifetime paid
   - reminder conditions
   - timezone handling
 - **Not tested at this seam:** the UI, Google sign-in, real Oura OAuth and HTTP calls, real push and email delivery, and real photo storage. These are thin adapters, verified by manual or smoke checks once the stack exists. One or two end-to-end browser smoke tests may be added later.
@@ -308,6 +317,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Travel and timezone-change handling beyond the rules above.
 - Sign in with Apple. It needs the $99/yr Apple Developer membership plus relay-email setup.
 - Unfriending.
+- Reviewers stepping down from a pact. A reviewer who wants off asks the owner to remove them.
 - Streaks, a cross-pact activity feed, or an overall heat map.
 - Currencies other than USD.
 - Choosing the tech stack. That's a separate decision.
@@ -318,10 +328,14 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **More Oura goals:** sleep at least X hours (Oura's total sleep, not time in bed, which is easy to game), and up by a time.
 - **More Oura schedules:** Weekly count, e.g. "in bed by midnight 5 nights a week".
 - **Richer Camera evidence:** video or a time-lapse.
+- **Text messages** (a rough idea that needs refining before it's built). Prompted by a reviewer who's happy to review but won't remember to open the app. v0's email notifications partly cover that case. Two possible stages:
+  1. SMS reminders for owners, and SMS nudges for reviewers that link straight to the review item.
+  2. Answering a review item by text, with Y/N or a comment.
+  - Sending texts needs a provider such as Twilio, at a fraction of a cent per text. US numbers also need A2P 10DLC registration, and replies need an inbound webhook. SMS would be one more Notifier channel.
 
 ## Further Notes
 
-- Vocabulary follows the project glossary: Pact, Owner, Reviewer, Friend, Schedule, Occurrence, Kept/Missed/Excused, Evidence, Evidence kind, Connection, Excuse, Review Queue, Change Request, Penalty, Recipient, Ledger, Payment, Overdue, Draft/Active/Ended.
+- Vocabulary follows the project glossary: Pact, Owner, Reviewer, Friend, Schedule, Occurrence, Kept/Missed/Excused, Evidence, Evidence kind, Connection, Excuse, Review Queue, Change Request, Penalty, Recipient, Ledger, Payment, Overdue, Active/Ended, Edit window.
 - **Oura API facts (researched 2026-10-24):**
   - OAuth2 only. Personal access tokens were removed in December 2025.
   - Refresh tokens are single-use, so each new one has to be stored.
@@ -331,5 +345,5 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - Data appears only after the Oura app syncs.
   - A night without the ring looks the same as an unsynced one: neither has a `long_sleep` period.
 - **Still to verify:** whether Oura's sleep timestamps include a UTC offset. The bedtime rules depend on it. Check against a live response before building the Oura adapter, and use that response as the seed for the fake.
-- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through five rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), and 7053336 gives One-time pacts one-off reminders with a date. It's the primary source for the Screens decisions above.
+- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through six rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), 7053336 gives One-time pacts one-off reminders with a date, and 5d3b7c5 replaces Drafts and approval with the 10-minute edit window, adds occurrence labels that say what they're waiting for, simplifies ledger cards and makes the current tab easier to see. It's the primary source for the Screens decisions above.
 - The first real users are the owner and one friend as reviewer, so anything involving several reviewers should be correct but kept minimal.
