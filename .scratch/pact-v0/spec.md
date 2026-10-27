@@ -352,6 +352,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **More evidence kinds:** GPS check-in, Apple Health, Strava. Each brings its own goals and schedules on the Goal step, and its own connection where it needs one.
 - **More Oura goals:** sleep at least X hours (Oura's total sleep, not time in bed, which is easy to game), and up by a time.
 - **More Oura schedules:** Weekly count, e.g. "in bed by midnight 5 nights a week".
+- **Anki evidence kind:** the owner connects their Anki account and picks the decks they care about, not all decks. An occurrence is Kept when every picked deck has zero due cards by its due-by time. Unverified: AnkiWeb has no public API as far as we know, and AnkiConnect is a desktop add-on that serves a local HTTP API, so the connection may need sync-server access or a small client on the owner's machine.
 - **Richer Camera evidence:** video or a time-lapse.
 - **Vacation mode:** the owner sets a date range and every pact is suspended for it: no occurrences, no reminders and no penalties. It's simpler than an excuse that covers every pact, and it could need no reviewer approval if it's set far enough ahead.
 - **Getting overdue bills paid:** v0 only notifies reviewers (when a bill first goes overdue, then weekly). Something with more social weight could follow, such as a text to the reviewer or a friend. The mechanism isn't designed yet.
