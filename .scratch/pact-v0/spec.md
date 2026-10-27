@@ -165,7 +165,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - **Oura source**: given an account and a date range, returns sleep periods in the Oura API's shape, or a "disconnected" error (token revoked or expired, membership lapsed).
   - **Notifier**: delivers a notification (recipient, kind, channel, payload).
   - **Photo store**: stores and fetches images, the v0 form of submitted evidence, returning the time the server received each one.
-- **Thin adapters outside the core:** the PWA user interface, Google sign-in, Oura OAuth, web push, email, and a scheduler that periodically calls "advance to now". The tech stack hasn't been chosen and will be decided separately.
+- **Thin adapters outside the core:** the PWA user interface, Google sign-in, Oura OAuth, web push, email, and a scheduler that periodically calls "advance to now". The tech stack is in ADR 0002: one server, with SQLite as the core's storage.
+- **Notifications are sent after commit.** A command saves the notifications it produces in the same transaction as its other changes, and they're delivered only after that transaction commits. A crash can therefore cause a duplicate notification but never a lost one, and duplicates are acceptable.
 - **No Oura webhooks in v0.** Nights are judged once at noon, and data that arrives later never changes a result. So the Oura adapter simply fetches the relevant sleep periods when a night is judged. Webhooks plus a daily catch-up poll can come later if late data starts to matter.
 - **Payments never move money in v0** (ADR 0001). Penalties go on a ledger, and a reviewer approves the owner's proof of payment.
 
@@ -298,6 +299,9 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - an Oura source that returns sleep periods shaped like real API responses (seeded from a recorded real response once one is available) and can simulate "disconnected"
   - a recording notifier
   - an in-memory photo store
+- **Storage is real SQLite, not a fake.** Each test gets its own temporary database file in WAL mode with the production pragmas. Storage isn't a port.
+- **Restart scenarios:** partway through a scenario, the test discards the core and builds a new one on the same database file, then carries on. Nothing that matters may live only in memory. This also covers catching up after downtime: advancing hours in one step catches up judgments, due dates and overdue changes, and drops reminders more than 15 minutes late.
+- **Mid-command failure scenarios:** a fake port fails partway through a command, e.g. the Oura source errors on its third call during "advance to T". Nothing from that command is half-applied, and the next tick completes the work.
 - **Good tests are scenarios written in domain language**, e.g. "owner creates a Mon/Wed/Fri gym pact for $5 on Sunday → Monday ends with no evidence → occurrence is Missed and the recipient's ledger shows $5 owed → owner files an excuse within 48h → reviewer approves → occurrence is Excused and owed returns to $0". A test should survive any refactor that keeps behavior the same.
 - **Areas the scenarios must cover:**
   - the edit window, first-occurrence lead time and start dates
@@ -322,7 +326,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - lifetime paid
   - reminder conditions
   - timezone handling
-- **Not tested at this seam:** the UI, Google sign-in, real Oura OAuth and HTTP calls, real push and email delivery, and real photo storage. These are thin adapters, verified by manual or smoke checks once the stack exists. One or two end-to-end browser smoke tests may be added later.
+- **Not tested at this seam:** the UI, Google sign-in, real Oura OAuth and HTTP calls, real push and email delivery, and real photo storage. These are thin adapters, verified by manual or smoke checks once the stack exists. One or two end-to-end browser smoke tests may be added later. SQLite's own crash safety and Litestream aren't tested in CI either. The practice restore in ADR 0002 covers backups.
 - **Prior art:** none. The repository has no code yet, so these tests set the pattern.
 
 ## Out of Scope
@@ -342,7 +346,6 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Reviewers stepping down from a pact. A reviewer who wants off asks the owner to remove them.
 - Streaks, a cross-pact activity feed, or an overall heat map.
 - Currencies other than USD.
-- Choosing the tech stack. That's a separate decision.
 
 ## Future Ideas
 
