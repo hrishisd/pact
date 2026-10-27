@@ -94,6 +94,8 @@ small{font-size:12.5px}
 .c-todo{background:var(--kept);color:var(--paper)}
 .c-wait{background:var(--wait-bg);color:var(--wait)}
 .c-auto{background:var(--sunk);color:var(--muted)}
+/* Round 9: a night Oura hasn't reported yet is something to act on, so it's orange like due times. */
+.c-due{background:#F8E6D4;color:var(--due)}
 .c-done{background:transparent;color:var(--kept);box-shadow:inset 0 0 0 1px var(--kept)}
 /* A pact in its 10-minute edit window: blue chip, blue left edge, blue bar on its page. */
 .c-new{background:var(--fresh-bg);color:var(--fresh)}
@@ -294,10 +296,10 @@ function addPenalty(s, occ, at, status, mult=1){
   const p = s.pacts.find(x => x.id === occ.pactId);
   s.penalties.push({id:nid('pen'), pactId:p.id, occId:occ.id, owner:p.owner, recipientId:p.recipientId, amount:p.penalty*mult, addedAt:new Date(at), status});
 }
-// Every Wednesday at noon, each recipient gets one bill for the owed penalties whose 48-hour excuse window has closed.
-// That's all of the week before (Sunday night's bedtime is final at noon Monday). Anything later goes on the next bill.
+// Every Wednesday at 6pm, each recipient gets one bill for the owed penalties whose 48-hour excuse window has closed.
+// That's all of the week before (Sunday night's bedtime is judged by 6pm Monday at the latest). Anything later goes on the next bill.
 // A bill never changes once it's made, and it's due 7 days later.
-const BILL_DAY = 3, EXCUSE_MS = 48*HOUR, PAY_MS = 7*DAYMS;
+const BILL_DAY = 3, BILL_HOUR = 18, EXCUSE_MS = 48*HOUR, PAY_MS = 7*DAYMS;
 function makeBills(s, at){
   const groups = {};
   for (const x of s.penalties.filter(x => x.status === 'owed' && !x.billId && at - x.addedAt >= EXCUSE_MS)) (groups[x.owner + '|' + x.recipientId] ||= []).push(x);
@@ -310,6 +312,8 @@ function makeBills(s, at){
 function seed(){
   const s = {
     now:new Date(NOW0), me:'you', tab:'today', stack:[], sheet:null, variant:'A', oura:{you:'ok', sam:null}, sideOpen:false,
+    // Nights whose sleep has reached Oura. Rings sync on their own at 8am unless noSync is on; last night (Oct 20) hasn't.
+    synced:new Set(), skipSync:new Set(['you|2026-10-20']), noSync:false, checking:false,
     log:[], tmp:{}, form:{}, draft:null,
     accounts:{you:{id:'you', name:'You', initial:'Y'}, sam:{id:'sam', name:'Sam', initial:'S'}},
     recipients:[
@@ -329,11 +333,11 @@ function seed(){
   };
   const missed = {'2026-10-01':1474,'2026-10-03':1512,'2026-10-07':1460,'2026-10-14':1488,'2026-10-17':1555};
   for (let d = D(2026,9,28); d <= D(2026,10,20); d = addDays(d,1)) {
-    const key = iso(d), judged = addDays(d,1); judged.setHours(12,0,0,0);
+    const key = iso(d), judged = addDays(d,1); judged.setHours(8,0,0,0);
     const occ = {id:nid('o'), pactId:'p-bed', key, outcome:'kept', detail:'In bed '+fmtMin(cannedBed(key)), judgedAt:judged};
     if (missed[key]) { occ.outcome='missed'; occ.detail='In bed '+fmtMin(missed[key]); s.occurrences.push(occ); addPenalty(s,occ,judged,'owed'); continue; }
     if (key==='2026-10-10') { occ.outcome='excused'; occ.detail='Excused: birthday party'; }
-    if (key==='2026-10-19') { occ.outcome='missed'; occ.detail='No Oura data by noon'; s.occurrences.push(occ); addPenalty(s,occ,judged,'held'); continue; }
+    if (key==='2026-10-19') { judged.setHours(18); occ.judgedAt=judged; occ.outcome='missed'; occ.detail='No Oura data by 6pm'; s.occurrences.push(occ); addPenalty(s,occ,judged,'held'); continue; }
     if (key==='2026-10-20') { occ.outcome='pending'; occ.detail=''; occ.judgedAt=null; }
     s.occurrences.push(occ);
   }
@@ -357,8 +361,8 @@ function seed(){
   s.excuses.push({id:nid('ex'), owner:'you', pactIds:['p-bed'], from:'2026-10-10', to:'2026-10-10', reason:"Friend's birthday party.", photos:[], status:'approved', at:D(2026,10,10,16,0), thread:[]});
   s.excuses.push({id:nid('ex'), owner:'you', pactIds:['p-gym'], from:'2026-10-12', to:'2026-10-16', reason:'Flu. Staying home this week.', photos:[], status:'approved', at:D(2026,10,12,8,0), thread:[]});
   s.excuses.push({id:'ex-sync', owner:'you', pactIds:['p-bed'], from:'2026-10-19', to:'2026-10-19', reason:'Ring synced late. The Oura app shows I got into bed at 11:48pm.', photos:[{src:PHOTO.oura, taken:D(2026,10,20,13,58)}], status:'pending', at:D(2026,10,20,14,5), thread:[]});
-  // The Oct 7 and Oct 14 bills. The Oct 14 one ($2 to Rival Org) is due at noon today and still unpaid.
-  makeBills(s, D(2026,10,7,12)); makeBills(s, D(2026,10,14,12));
+  // The Oct 7 and Oct 14 bills. The Oct 14 one ($2 to Rival Org) is due at 6pm today and still unpaid.
+  makeBills(s, D(2026,10,7,BILL_HOUR)); makeBills(s, D(2026,10,14,BILL_HOUR));
   s.payments.push({id:nid('pay'), owner:'you', recipientId:'rc-org', amount:4, photos:[{src:PHOTO.receipt}], note:'Donation receipt', status:'approved', at:D(2026,10,9,18,0), thread:[]});
   s.payments.push({id:'pay-sam', owner:'you', recipientId:'rc-sam', amount:5, photos:[{src:PHOTO.receipt, taken:D(2026,10,20,20,12)}], note:'Sent on Venmo', status:'pending', at:D(2026,10,20,20,15), thread:[]});
   s.changes.push({id:'cr-run', pactId:'p-run', owner:'sam', before:{penalty:10}, after:{penalty:5}, reason:'Money is tight this month.', at:D(2026,10,20,21,0), status:'pending', thread:[]});
@@ -441,10 +445,12 @@ function missOcc(p, occ, at, detail, mult=1){
   occ.outcome = 'missed'; occ.detail = detail; occ.judgedAt = new Date(at);
   addPenalty(S, occ, at, excuseFor(p, occ.key, 'pending') ? 'held' : 'owed', mult);
 }
-function judgeNight(p, key, at){
+// A night is judged as soon as Oura reports its first main sleep, or Missed at 6pm the next day if it never does.
+// A broken connection doesn't judge it early: it just can't be polled until it's reconnected.
+function judgeNight(p, key, at, hasData){
   const occ = getOcc(p, key); if (occ.outcome !== 'pending') return;
   if (excuseFor(p, key, 'approved')) { occ.outcome='excused'; occ.detail='Excused'; occ.judgedAt=at; return log(`${p.name}: ${occLabel(p,key)} → Excused (approved excuse).`); }
-  if (!ouraOk(p.owner)) { missOcc(p, occ, at, 'No Oura data by noon'); return log(`${p.name}: ${occLabel(p,key)} → Missed, no Oura data. ${money(p.penalty)} penalty.`); }
+  if (!hasData) { missOcc(p, occ, at, 'No Oura data by 6pm'); return log(`${p.name}: ${occLabel(p,key)} → Missed, no Oura data by 6pm. ${money(p.penalty)} penalty.`); }
   const bed = cannedBed(key);
   if (bed < deadlineMin(p.bedtime)) { occ.outcome='kept'; occ.detail='In bed '+fmtMin(bed); occ.judgedAt=at; log(`${p.name}: ${occLabel(p,key)} → Kept (in bed ${fmtMin(bed)}).`); }
   else { missOcc(p, occ, at, 'In bed '+fmtMin(bed)); log(`${p.name}: ${occLabel(p,key)} → Missed (in bed ${fmtMin(bed)}). ${money(p.penalty)} penalty.`); }
@@ -466,12 +472,29 @@ function judgeWeek(p, key, at){
   if (evFor(occ).some(e => e.status === 'pending')) { occ.detail='Week ended; photos still waiting for review'; return log(`${p.name}: ${occLabel(p,key)} ended with photos waiting for review.`); }
   missOcc(p, occ, at, `${n} of ${t}`, t - n); log(`${p.name}: ${occLabel(p,key)} → Missed (${n} of ${t}). ${t-n} × ${money(p.penalty)} penalty.`);
 }
+// The night of D runs from 6pm on D to 6pm on D+1, so at any moment exactly one night is open.
+const openNightKey = t => t.getHours() >= 18 ? iso(t) : iso(addDays(sod(t), -1));
+// The every-minute poll, and the check Today makes when it opens: only accounts with an open night are asked.
+function pollOura(at){
+  const k = openNightKey(at), judged = [];
+  for (const p of S.pacts.filter(p => p.stage === 'active' && p.evidence === 'oura' && ouraOk(p.owner) && scheduledOn(p, parseIso(k)))) {
+    const o = findOcc(p, k); if (o && o.outcome !== 'pending') continue;
+    if (S.synced.has(p.owner + '|' + k)) { judgeNight(p, k, at, true); judged.push(findOcc(p, k)); }
+  }
+  return judged;
+}
 function advanceTo(target){
   for (let d = sod(S.now); d <= target; d = addDays(d,1)) {
-    const noon = new Date(d); noon.setHours(12,0,0,0);
+    const at = h => { const t = new Date(d); t.setHours(h,0,0,0); return t; }, due = t => t > S.now && t <= target;
+    const yd = addDays(d,-1), yk = iso(yd), nights = S.pacts.filter(p => p.stage==='active' && p.evidence==='oura' && scheduledOn(p, yd));
     const end = eod(d);
-    if (noon > S.now && noon <= target) S.pacts.filter(p => p.stage==='active' && p.evidence==='oura').forEach(p => { const k = iso(addDays(d,-1)); if (scheduledOn(p, addDays(d,-1))) judgeNight(p, k, noon); });
-    if (noon > S.now && noon <= target && d.getDay() === BILL_DAY) for (const b of makeBills(S, noon)) log(`Wednesday bill for ${nameOf(b.owner)}: ${money(b.amount)} to ${rcp(b.recipientId).name}, due ${fmtDay(b.dueAt)}. A notification goes out.`);
+    // 8am: the ring syncs on its own (unless the prototype control is off), and the next poll judges the night.
+    if (due(at(8))) { for (const p of nights) if (!S.noSync && !S.skipSync.has(p.owner + '|' + yk)) S.synced.add(p.owner + '|' + yk); pollOura(at(8)); }
+    // 3pm: one push for a night that still has no data.
+    if (due(at(15))) for (const p of nights) { const o = findOcc(p, yk); if (!o || o.outcome === 'pending') log(`3pm push to ${nameOf(p.owner)}: "No Oura data for ${WD[yd.getDay()]} night yet. Sync your ring before 6pm or it counts as missed."`); }
+    // 6pm: a night Oura never reported is Missed. Then Wednesday's bills.
+    if (due(at(18))) { for (const p of nights) judgeNight(p, yk, at(18), false);
+      if (d.getDay() === BILL_DAY) for (const b of makeBills(S, at(BILL_HOUR))) log(`Wednesday bill for ${nameOf(b.owner)}: ${money(b.amount)} to ${rcp(b.recipientId).name}, due ${fmtDay(b.dueAt)} at 6pm. A notification goes out.`); }
     if (end > S.now && end <= target) S.pacts.filter(p => p.stage==='active' && p.evidence==='photo').forEach(p => {
       if (p.schedule.kind === 'fixed' && scheduledOn(p, d)) judgeDay(p, iso(d), end);
       if (p.schedule.kind === 'weekly' && d.getDay() === 0 && (!p.start || iso(weekStart(d)) >= p.start)) judgeWeek(p, iso(weekStart(d)), end);
@@ -612,7 +635,7 @@ function comment(key, text){
 /* alerts for the signed-in account */
 function alertsFor(me){
   const out = [];
-  if (!ouraOk(me) && S.pacts.some(p => p.owner === me && p.evidence === 'oura' && p.stage === 'active')) out.push({tone:'bad', html:`<b>${S.oura[me] ? 'Oura needs reconnecting.' : 'Oura is disconnected.'}</b> Nights without data count as Missed. Reconnect to stop that.`, actions:`<button class="btn sm" data-act="connect">Reconnect Oura</button>`});
+  if (!ouraOk(me) && S.pacts.some(p => p.owner === me && p.evidence === 'oura' && p.stage === 'active')) out.push({tone:'bad', html:`<b>${S.oura[me] ? 'Oura needs reconnecting.' : 'Oura is disconnected.'}</b> A night with no data by 6pm counts as Missed. Reconnect before then.`, actions:`<button class="btn sm" data-act="connect">Reconnect Oura</button>`});
   for (const e of S.evidence.filter(e => e.owner === me && e.status === 'rejected' && !e.ack)) {
     const p = pact(e.pactId), occ = occById(e.occId);
     out.push({tone:'bad', html:`<b>${nameOf(e.decidedBy)} rejected your evidence</b> for ${esc(p.name)} (${occLabel(p, occ.key)}): “${esc(e.reason)}”`, actions:`<button class="btn sm" data-act="openItem" data-arg="evidence:${e.id}">View</button><button class="btn sm" data-act="excuse" data-arg="${p.id}|${occ.key}">File excuse</button><button class="btn sm" data-act="ack" data-arg="${e.id}">Dismiss</button>`});
@@ -685,7 +708,7 @@ function occChip(p, o){
   if (out === 'excused') return chip('c-excused', 'Excused');
   if (out === 'missed') return excuseFor(p, o.key, 'pending') ? chip('c-missed', 'Missed · excuse waiting for approval') : chip('c-missed', 'Missed');
   if (o && evFor(o).some(e => e.status === 'pending')) return chip('c-wait', 'Waiting for approval');
-  if (p.evidence === 'oura') return chip('c-pending', 'Waiting for Oura');
+  if (p.evidence === 'oura') return chip('c-due', 'No Oura data');
   if (p.schedule.kind === 'weekly') return chip('c-open', 'This week');
   if (p.schedule.kind === 'once') return chip('c-open', `Due ${fmtDate(parseIso(p.schedule.deadline))}`);
   return chip('c-open', 'Due today');
@@ -749,13 +772,13 @@ function heatmap(p){
 /* ---------- Today ---------- */
 // Today shows only what's still open, most actionable first. Done cards, and recurring pacts on days
 // they aren't due, don't show at all. The sections, in order:
-//   oura    last night isn't final yet, so syncing the ring might still save it
+//   oura    Oura hasn't reported last night yet, so syncing the ring still counts
 //   todo    evidence you can submit today, and bills to pay, soonest due first
 //   missed  missed and still excusable: File excuse, or "I'll pay it" to clear it from Today
 //   auto    bedtime pacts that run tonight
 //   soon    pacts that haven't opened yet, under "Coming up"
 // Then "Waiting for approval" (nothing for you to do, so it's last) and Yesterday.
-const PILL = {oura:'c-pending', todo:'c-todo', missed:'c-missed', auto:'c-auto', soon:'c-draft'};
+const PILL = {oura:'c-due', todo:'c-todo', missed:'c-missed', auto:'c-auto', soon:'c-draft'};
 const SEC = {oura:0, todo:1, missed:2, auto:3, soon:4};
 const reviewersText = p => p.reviewers.map(nameOf).join(' or ');
 function byTimeToday(p){ const [h,m] = p.by.split(':').map(Number); const t = sod(S.now); t.setHours(h,m); return t; }
@@ -792,12 +815,14 @@ function evidenceCard(p){
   const dueText = k === 'weekly' ? `Due by ${fmtDay(due)}` : k === 'once' && p.schedule.deadline !== todayKey() ? `Due ${fmtDay(due)}${p.by ? ' at ' + fmtHM(p.by) : ''}` : dueToday(p);
   return {p, sec:'todo', due, label:'To do', body:`${progress}<div class="meta due">${dueText}</div>${S.form.inline === p.id ? evidenceInline(p) : submitActions(p)}`};
 }
+// Last night stays here until Oura reports it or 6pm comes. An excuse filed for it moves it to Waiting for approval.
 function bedtimeCard(p, missedLastNight){
   if (missedLastNight) return null; // the missed card carries tonight's line
-  const today = sod(S.now), yd = addDays(today, -1), occ = findOcc(p, iso(yd)), tonight = scheduledOn(p, today);
-  const noon = new Date(today); noon.setHours(12,0,0,0);
-  if (scheduledOn(p, yd) && (!occ || occ.outcome === 'pending') && S.now < noon)
-    return {p, sec:'oura', due:noon, label:'Waiting for Oura', body:`<div>Last night is final at noon, in ${fmtLeft(noon - S.now)}. If your ring hasn’t synced, open the Oura app.</div>${tonight ? tonightLine(p) : ''}`};
+  const today = sod(S.now), yd = addDays(today, -1), yk = iso(yd), occ = findOcc(p, yk), tonight = scheduledOn(p, today);
+  const cutoff = new Date(today); cutoff.setHours(18,0,0,0);
+  if (scheduledOn(p, yd) && (!occ || occ.outcome === 'pending') && S.now < cutoff && !excuseFor(p, yk, 'pending'))
+    return {p, sec:'oura', due:cutoff, label:S.checking ? 'Checking…' : 'No Oura data', pill:S.checking ? 'c-auto' : '',
+      body:`<div>${S.checking ? 'Checking Oura…' : `${WD[yd.getDay()]} night hasn’t synced. Open the Oura app.`}</div><div class="meta due">Counts as missed at 6pm · ${fmtLeft(cutoff - S.now)}</div>${tonight ? tonightLine(p) : ''}<div class="row2"><button class="btn sm" data-act="excuse" data-arg="${p.id}|${yk}">File excuse</button></div>`};
   if (tonight) return {p, sec:'auto', due:dueAt(p, today), label:'Automatic', body:`<div>In bed by <b>${fmtHM(p.bedtime)}</b> tonight</div>`};
   if (notOpenYet(p)) return soonCard(p);
   return null;
@@ -819,11 +844,11 @@ function missedCards(me){
 function billCards(me){
   return ledgersOf(me).filter(x => x.l.billDue > 0).map(({r, l}) => { const b = l.dueBills[0];
     return {sec:'todo', due:b.dueAt, amount:l.billDue, label:'To do', title:`Pay ${r.name}`, act:'openLedger', arg:r.id,
-      body:`<div class="meta due">Due ${+sod(b.dueAt) === +sod(S.now) ? 'today' : fmtDay(b.dueAt)} at noon · ${fmtLeft(b.dueAt - S.now)}</div><div class="meta">Your bill from ${fmtDay(b.at)}</div><div class="row2"><button class="btn primary" data-act="pay" data-arg="${r.id}|${l.billDue}">Record payment</button></div>`}; });
+      body:`<div class="meta due">Due ${+sod(b.dueAt) === +sod(S.now) ? 'today' : fmtDay(b.dueAt)} at 6pm · ${fmtLeft(b.dueAt - S.now)}</div><div class="meta">Your bill from ${fmtDay(b.at)}</div><div class="row2"><button class="btn primary" data-act="pay" data-arg="${r.id}|${l.billDue}">Record payment</button></div>`}; });
 }
 function todayCard(c){
   const p = c.p, fresh = p && inWindow(p);
-  return `<article class="card tcard${fresh ? ' fresh' : ''}" data-act="${c.act || 'openPact'}" data-arg="${c.arg || p.id}"><div class="spread"><div class="row2"><h3>${esc(c.title || p.name)}</h3>${fresh ? newChip(p) : ''}</div><span class="chip ${PILL[c.sec]}">${c.label}</span></div><div class="meta pen">${money(c.amount ?? p.penalty)}</div>${c.body}</article>`;
+  return `<article class="card tcard${fresh ? ' fresh' : ''}" data-act="${c.act || 'openPact'}" data-arg="${c.arg || p.id}"><div class="spread"><div class="row2"><h3>${esc(c.title || p.name)}</h3>${fresh ? newChip(p) : ''}</div><span class="chip ${c.pill || PILL[c.sec]}">${c.label}</span></div><div class="meta pen">${money(c.amount ?? p.penalty)}</div>${c.body}</article>`;
 }
 function renderToday(){
   const me = S.me, today = sod(S.now);
@@ -836,7 +861,7 @@ function renderToday(){
   const waiting = allItems().filter(i => i.owner === me && !awaitingOwner(i)).sort((a,b) => b.at - a.at);
   const waitList = waiting.length ? `<section class="stack"><div class="label">Waiting for approval</div><div class="cards">${waiting.map(i => itemRow(i, itemSub(i), `<span class="chip c-wait">${esc(i.pacts[0] ? reviewersText(i.pacts[0]) : 'Reviewer')}</span>`)).join('')}</div></section>` : '';
   const yk = iso(addDays(today,-1));
-  // Last night's bedtime isn't in Yesterday until it's final: before noon it's the "Waiting for Oura" card.
+  // Last night's bedtime isn't in Yesterday until it's judged: until then it's the "No Oura data" card.
   const yOcc = S.occurrences.filter(o => { const p = pact(o.pactId); return p.owner === me && o.key === yk && p.schedule.kind !== 'weekly' && !(p.evidence === 'oura' && o.outcome === 'pending'); });
   const yesterday = yOcc.length ? `<section class="stack"><div class="label">Yesterday · ${fmtDay(addDays(today,-1))}</div><div class="list">${yOcc.map(o => { const p = pact(o.pactId); return `<div class="rowbtn"><span class="rt"><b>${esc(p.name)}</b><small>${esc(o.detail || (o.outcome === 'pending' ? 'Waiting for review' : ''))}</small></span>${occChip(p, o)}</div>`; }).join('')}</div></section>` : '';
   const empty = !active.length ? `<div class="card"><h3>No active pacts yet</h3><p class="muted" style="margin:0">Make one. It's Active as soon as you create it.</p><div class="row2"><button class="btn primary" data-act="create">Create a pact</button><button class="btn" data-act="profile">Invite a friend</button></div></div>`
@@ -1029,7 +1054,7 @@ function fSource(){ const d = S.draft, st = S.oura[S.me];
   <small class="muted">You can't change this later. To prove it a different way, make a new pact.</small>`; }
 function fGoal(){ const d = S.draft;
   const name = `<label class="field"><span>Name</span><input class="inp" id="c-name" data-f="name" placeholder="${d.evidence === 'oura' ? '' : 'e.g. Gym'}" value="${esc(d.name)}">${d.evidence === 'oura' ? '<small>Shown on Today. Filled in from your bedtime until you change it.</small>' : '<small>Shown on Today.</small>'}</label>`;
-  if (d.evidence === 'oura') return `<label class="field"><span>In bed by</span><input class="inp" type="time" id="c-bed" data-f="bedtime" value="${d.bedtime}"><small>Uses Oura's "got into bed" time. Checked at noon the next day.</small></label>${name}`;
+  if (d.evidence === 'oura') return `<label class="field"><span>In bed by</span><input class="inp" type="time" id="c-bed" data-f="bedtime" value="${d.bedtime}"><small>Uses Oura's "got into bed" time. Judged as soon as your ring syncs, or missed if Oura has nothing by 6pm the next day.</small></label>${name}`;
   return `${name}<label class="field"><span>What will your photo show?</span><textarea class="inp" id="c-desc" data-f="desc" placeholder="e.g. Me at the gym with the equipment visible">${esc(d.desc)}</textarea><small>Your reviewer sees this when checking the evidence.</small></label>`; }
 function fSchedule(){ const d = S.draft; return `<div class="stack">
   ${d.evidence === 'oura' ? `<div class="field"><span>Which nights?</span></div>` : `<div class="seg" role="group" aria-label="Schedule type">${[['fixed','Fixed days'],['weekly','Weekly count'],['once','One-time']].map(([k,l]) => `<button aria-pressed="${d.kind === k}" data-act="cset" data-arg="kind=${k}">${l}</button>`).join('')}</div>`}
@@ -1209,7 +1234,7 @@ function renderLedgers(){
   const ls = ledgersOf(S.me);
   if (!ls.length) return `<div class="card"><h3>No ledgers yet</h3><p class="muted" style="margin:0">Each recipient gets a ledger once a pact names them.</p></div>`;
   return ls.map(({r, l}) => `<article class="card tcard" data-act="openLedger" data-arg="${r.id}"><h3>${esc(r.name)}</h3>${ledgerSummary(r, l)}</article>`).join('')
-    + `<p class="muted" style="font-size:13px;margin:0">Every Wednesday at noon, last week’s penalties for each recipient become one bill, once you can no longer excuse them. You have 7 days to pay it. You can pay early here at any time, and payments clear the oldest penalties first.</p>`;
+    + `<p class="muted" style="font-size:13px;margin:0">Every Wednesday at 6pm, last week’s penalties for each recipient become one bill, once you can no longer excuse them. You have 7 days to pay it. You can pay early here at any time, and payments clear the oldest penalties first.</p>`;
 }
 function renderLedger(id){
   const r = rcp(id), l = ledger(S.me, id);
@@ -1226,11 +1251,13 @@ function renderSide(){
   const recent = S.occurrences.filter(o => o.key >= iso(addDays(S.now,-3))).sort((a,b) => a.key < b.key ? 1 : -1).slice(0, 8)
     .map(o => { const p = pact(o.pactId); return `<tr><td>${esc(p.name)}</td><td>${occLabel(p, o.key).replace('Night of ','')}</td><td>${o.outcome === 'pending' ? 'not judged' : o.outcome}</td></tr>`; }).join('');
   $('#side').innerHTML = `<div class="spread"><span class="tag">PROTOTYPE · THROWAWAY</span><button class="btn sm closeside" data-act="side">Close</button></div>
-    <section><h2>Pact flows · round 8</h2><div class="muted" style="font-size:13.5px">New in this round: the current tab sits on a soft blue tile with a bold label, so it’s clear which tab you’re on. Chosen over a filled icon, a top bar, a pill and a solid pill.</div><div class="label" style="margin-top:4px">Round 7</div><div class="muted" style="font-size:13.5px">New in this round: <b>weekly bills</b>. Every Wednesday at noon, each recipient's penalties that can no longer be excused become one bill, due 7 days later. Today shows money only once there's a bill ("Pay Rival Org $2" is due at noon), and an unpaid bill turns into an overdue alert. Today is reordered: Waiting for Oura, To do (soonest first), Missed (now with "I'll pay it"), Automatic, then Coming up and Waiting for approval. Done cards, and recurring pacts on days they aren't due, are gone. The tab bar drops the pill, new pacts sit at the top of Pacts, and pact pages no longer list payments. Advance to tomorrow noon to see the overdue alert and the new Oct 21 bill.</div></section>
+    <section><h2>Pact flows · round 9</h2><div class="muted" style="font-size:13.5px">New in this round: last night is judged <b>as soon as your ring syncs</b>, or Missed at 6pm if Oura never has it. Until then Today shows an orange <b>No Oura data</b> card saying when it counts as missed. Opening Today checks Oura, so the card says “Checking…” for a moment. Press <b>Sync your ring now</b> to see it clear. You can also excuse last night before it’s judged. Bills move to Wednesday at 6pm, and the Pacts and Review headers lose their subtitles. Advance to 6pm (with Sync off) to see the 3pm push, the 6pm miss, the overdue alert and the new bill.</div><div class="label" style="margin-top:4px">Round 8</div><div class="muted" style="font-size:13.5px">The current tab sits on a soft blue tile with a bold label.</div></section>
     <section><div class="label">Signed in as</div><div class="seg">${Object.keys(S.accounts).map(a => `<button aria-pressed="${S.me === a}" data-act="as" data-arg="${a}">${acct(a).name}</button>`).join('')}</div><small class="muted">You own the bedtime and gym pacts and Sam reviews them. Sam owns a running pact that you review. Switch to act as the other person.</small></section>
     <section><div class="label">Jump to</div><div class="row2"><button class="btn sm" data-act="jump" data-arg="create">Create pact</button><button class="btn sm" data-act="jump" data-arg="review">Review</button><button class="btn sm" data-act="jump" data-arg="evidence">Submit evidence</button><button class="btn sm" data-act="jump" data-arg="ledgers">Ledgers</button></div>
       <table><tr><th>Screen</th><th>Design</th></tr>${Object.entries(CHOSEN).map(([k,v]) => `<tr><td>${SCREEN_NAME[k]}</td><td>${v} (chosen)</td></tr>`).join('')}</table></section>
-    <section><div class="label">Clock</div><div class="num">${fmtDay(S.now)}, ${fmtTime(S.now)}</div><div class="row2"><button class="btn sm" data-act="advance5">Advance 5 minutes</button><button class="btn sm" data-act="advance">Advance to tomorrow, noon</button></div><small class="muted">Judges today's evidence pacts at the end of the day and last night's bedtime at noon. Wednesday-noon bills, overdue bills, 48h excuse windows and 10-minute edit windows all follow the clock.</small>
+    <section><div class="label">Clock</div><div class="num">${fmtDay(S.now)}, ${fmtTime(S.now)}</div><div class="row2"><button class="btn sm" data-act="advance5">Advance 5 minutes</button><button class="btn sm" data-act="advance6">Advance to 6pm</button><button class="btn sm" data-act="advance">Advance to tomorrow, 9am</button></div><small class="muted">Judges today's evidence pacts at the end of the day. Last night's bedtime is judged when your ring syncs, or Missed at 6pm. Wednesday 6pm bills, overdue bills, 48h excuse windows and 10-minute edit windows all follow the clock.</small>
+      <div class="row2"><button class="btn sm" data-act="sync">Sync your ring now</button></div>
+      <label class="row2"><input type="checkbox" data-act="autosync" ${S.noSync ? '' : 'checked'}> Your ring syncs on its own at 8am</label>
       <label class="row2"><input type="checkbox" data-act="oura" ${S.oura.you === 'broken' ? 'checked' : ''}> Simulate your Oura connection dropping</label>
       <button class="btn sm" data-act="reset" style="align-self:flex-start">Reset everything</button></section>
     <section><div class="label">State</div><table><tr><th>Account</th><th>To review</th><th>Owes</th><th>Overdue</th></tr>${qs}</table>
@@ -1260,7 +1287,7 @@ function render(){
     else if (top?.name === 'pact') { const p = pact(top.id); title = p.name; sub = scheduleText(p); body = renderPact(top.id); }
     else if (top?.name === 'item') { const i = itemByKey(top.key); title = i ? KIND[i.kind] : 'Item'; sub = i ? esc(itemTitle(i)) : ''; body = renderItemPage(top.key); }
     else {
-      const T = {today:['Today', fmtDay(S.now)], pacts:['Pacts', 'Yours'], review:['Review', `${queueFor(S.me).length} waiting on you`], ledgers:['Ledgers', '']};
+      const T = {today:['Today', fmtDay(S.now)], pacts:['Pacts', ''], review:['Review', ''], ledgers:['Ledgers', '']};
       [title, sub] = T[S.tab]; body = {today:renderToday, pacts:renderPacts, review:renderReview, ledgers:renderLedgers}[S.tab]();
     }
     const q = queueFor(S.me).length;
@@ -1286,7 +1313,7 @@ function liveUpdate(){
 
 /* ---------- actions ---------- */
 const ACT = {
-  tab:a => { S.tab = a; S.stack = []; S.form = {}; S.sheet = null; },
+  tab:a => { S.tab = a; S.stack = []; S.form = {}; S.sheet = null; if (a === 'today') checkOura(); },
   back:() => { const t = S.stack.pop(); if (t?.name === 'create') S.draft = null; if (t?.name === 'capture') S.tmp = {}; S.form.rejecting = S.form.commenting = null; },
   profile:() => { S.tmp = {}; S.sheet = {kind:'profile'}; },
   closeSheet:(a, el, e) => { if (e.target === el) { S.sheet = null; S.tmp = {}; } else return 'skip'; },
@@ -1332,7 +1359,7 @@ const ACT = {
     pickSource(a);
   },
   connect:() => { S.sheet = null; S.tmp = {}; S.stack.push({name:'connect'}); },
-  connected:() => { const t = S.stack.pop(); S.oura[S.me] = 'ok'; log(`${nameOf(S.me)} connected Oura.`); if (t?.then === 'oura') pickSource('oura'); else toast('Oura connected'); },
+  connected:() => { const t = S.stack.pop(); S.oura[S.me] = 'ok'; log(`${nameOf(S.me)} connected Oura.`); pollOura(S.now); if (t?.then === 'oura') pickSource('oura'); else toast('Oura connected'); },
   disc:a => { if (a === 'ask') S.tmp.disc = true; else if (a === 'no') S.tmp.disc = false; else { S.oura[S.me] = null; S.tmp = {}; log(`${nameOf(S.me)} disconnected Oura. Nights on Oura pacts count as Missed until reconnected.`); toast('Oura disconnected'); } },
   cday:a => { const d = Number(a), s = new Set(S.draft.days); s.has(d) ? s.delete(d) : s.add(d); S.draft.days = [...s]; },
   ctarget:a => { S.draft.target = Math.max(1, Math.min(7, S.draft.target + Number(a))); },
@@ -1356,9 +1383,15 @@ const ACT = {
     else if (a === 'review') { if (!queueFor(S.me).length && queueFor('sam').length) S.me = 'sam'; S.tab = 'review'; S.stack = []; }
     else if (a === 'evidence') { S.me = 'you'; S.tab = 'today'; S.stack = []; const p = S.pacts.find(x => x.owner === 'you' && x.evidence === 'photo' && x.stage === 'active' && scheduledOn(x, S.now)); if (p) ACT.evidence(p.id); else toast('No photo pact due today. Advance the clock.'); }
     else { S.tab = a; S.stack = []; } },
-  advance:() => { const t = addDays(sod(S.now), 1); t.setHours(12,0,0,0); advanceTo(t); S.sheet = null; },
+  advance:() => { const t = addDays(sod(S.now), 1); t.setHours(9,0,0,0); advanceTo(t); S.sheet = null; },
+  advance6:() => { const t = sod(S.now); t.setHours(18,0,0,0); advanceTo(S.now < t ? t : addDays(t, 1)); S.sheet = null; },
+  // You opened the Oura app and it synced; coming back to Pact runs the check.
+  sync:() => { if (openNightKey(S.now) === todayKey()) { toast('Tonight hasn’t happened yet. Advance to tomorrow morning'); return; }
+    for (const p of S.pacts.filter(p => p.owner === S.me && p.evidence === 'oura')) { const k = S.me + '|' + openNightKey(S.now); S.skipSync.delete(k); S.synced.add(k); }
+    log(`${nameOf(S.me)}: ring synced in the Oura app.`); S.tab = 'today'; S.stack = []; S.sheet = null; S.sideOpen = false; checkOura(); },
+  autosync:(a, el) => { S.noSync = !el.checked; },
   advance5:() => { advanceTo(new Date(+S.now + 5*6e4)); },
-  oura:() => { if (!S.oura.you) { toast('Connect Oura as You first'); return; } S.oura.you = S.oura.you === 'ok' ? 'broken' : 'ok'; log(S.oura.you === 'ok' ? 'Oura reconnected.' : 'Oura connection dropped (simulated). You get an alert and a push notification.'); },
+  oura:() => { if (!S.oura.you) { toast('Connect Oura as You first'); return; } S.oura.you = S.oura.you === 'ok' ? 'broken' : 'ok'; log(S.oura.you === 'ok' ? 'Oura reconnected.' : 'Oura connection dropped (simulated). You get an alert and a push notification. Last night stays open until 6pm.'); if (S.oura.you === 'ok') pollOura(S.now); },
   reset:() => { const v = S.variant; S = seed(); S.variant = v; },
   invite:() => { S.tmp.invite = true; },
   copy:() => { try { navigator.clipboard.writeText('pact.app/i/7Kq2xV').then(() => toast('Link copied'), () => toast('Select the link to copy it')); } catch(e) { toast('Select the link to copy it'); } return 'skip'; },
@@ -1407,5 +1440,18 @@ function setField(t){
 }
 window.addEventListener('hashchange', () => { const v = readVariant(); if (v !== S.variant) setVariant(v); });
 
-S = seed(); S.variant = readVariant(); render();
+// Today asks the server to check Oura when it opens or comes back to the foreground, and every 30 seconds
+// while a No Oura data card is on screen. Only an account with a night still waiting on Oura is checked.
+const noDataCard = () => S.tab === 'today' && !S.stack.length && S.pacts.some(p => p.owner === S.me && p.evidence === 'oura' && p.stage === 'active' && bedtimeCard(p, false)?.sec === 'oura');
+function checkOura(){
+  if (S.checking || !noDataCard()) return;
+  S.checking = true; render();
+  setTimeout(() => { S.checking = false; const done = pollOura(S.now);
+    if (done.length) { const o = done[0]; toast(`${WD[parseIso(o.key).getDay()]} night: ${o.outcome === 'kept' ? 'Kept' : o.outcome === 'excused' ? 'Excused' : 'Missed'} · ${o.detail}`); }
+    render(); }, 1200);
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkOura(); });
+setInterval(() => checkOura(), 30000);
+
+S = seed(); S.variant = readVariant(); render(); checkOura();
 </script>
