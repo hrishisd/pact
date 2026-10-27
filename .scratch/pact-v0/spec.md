@@ -57,7 +57,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ### Keeping a pact: submitted evidence
 
-28. As an owner, I want Today to show only what's still open, most actionable first (Waiting for Oura, then To do with the soonest due first, then Missed, then Automatic, then Coming up, with Waiting for approval last), so that I can see at a glance what I have to do. Done cards, and recurring pacts on days they aren't due, don't appear.
+28. As an owner, I want Today to show only what's still open, most actionable first (No Oura data, then To do with the soonest due first, then Missed, then Automatic, then Coming up, with Waiting for approval last), so that I can see at a glance what I have to do. Done cards, and recurring pacts on days they aren't due, don't appear.
 29. As an owner, I want to submit evidence right on the Today card by taking a live photo with my camera, so that I can prove I kept the pact without leaving the screen.
 30. As an owner, I want to attach several photos to one piece of evidence, so that I can show more context when needed.
 31. As an owner, I want evidence accepted only on days it can count (scheduled days for Fixed days, any day for Weekly count, start to deadline for One-time) and only until its due-by time, so that the rules are clear and nobody can backfill evidence later.
@@ -68,18 +68,18 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Keeping a pact: Oura bedtime
 
 35. As an owner, I want my bedtime pact checked automatically against Oura's "got into bed" time, so that I don't have to submit anything.
-36. As an owner, I want each night judged at noon the next day, so that I have the morning to sync my ring.
-37. As an owner, I want the bedtime card on Today to show tonight's deadline and the cost, plus last night as "Waiting for Oura" until it's final at noon, or as Missed while I can still excuse it, so that Today shows only what I can act on. Waiting for Oura sits at the very top, because syncing my ring is a cheap thing I can still do about it.
-38. As an owner, I want a night with no Oura data by noon counted as Missed, so that taking the ring off or not syncing isn't a loophole.
+36. As an owner, I want each night judged as soon as Oura reports my main sleep, or at 6pm the next day if it hasn't, so that I see the result right after syncing and still have until the evening if I slept in.
+37. As an owner, I want the bedtime card on Today to show tonight's deadline and the cost, plus last night as "No Oura data" while Oura hasn't reported it, or as Missed while I can still excuse it, so that Today shows only what I can act on. No Oura data sits at the very top, in orange, saying when it counts as missed, because syncing my ring is a cheap thing I can still do about it. Opening the app checks Oura straight away, so a ring I've just synced clears without waiting.
+38. As an owner, I want a night with no Oura data by 6pm the next day counted as Missed, with one push at 3pm if it still has none, so that taking the ring off or not syncing isn't a loophole, but sleeping in and forgetting to sync doesn't catch me out.
 39. As an owner, I want naps ignored and only my main sleep judged, so that an evening nap doesn't count as going to bed.
 40. As an owner, I want a sleep that starts after midnight to count toward the previous date's night, so that falling asleep at 1am Wednesday counts as a late Tuesday night.
-41. As an owner, I want an alert in the app and on the pact, plus a notification, when my Oura connection breaks, so that I can reconnect before more nights are missed.
+41. As an owner, I want an alert in the app and on the pact, plus a notification, when my Oura connection breaks, and the night left not judged until 6pm, so that I can reconnect before it's counted as Missed.
 
 ### Excuses
 
 42. As an owner, I want to file an excuse ahead of time for a date range (e.g. a trip next weekend), so that I'm not penalized for days I know I'll miss.
 43. As an owner, I want to file an excuse on the day (e.g. I woke up sick), so that I'm covered from that point on.
-44. As an owner, I want to file an excuse up to 48 hours after an occurrence is judged Missed or my evidence is rejected, so that I can explain things after the fact.
+44. As an owner, I want to file an excuse for an occurrence that isn't judged yet (e.g. last night, when I forgot to wear the ring), or up to 48 hours after one is judged Missed or my evidence is rejected, so that I can explain things after the fact.
 45. As an owner, I want one excuse to cover several pacts at once, so that being sick for a week doesn't take five separate submissions.
 46. As an owner, I want to see exactly which occurrences an excuse will cover before I submit it, so that there are no surprises.
 47. As an owner, I want to attach photos to an excuse (e.g. a screenshot from the Oura app showing I was in bed on time), so that my reviewer has proof.
@@ -120,7 +120,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 73. As an owner, I want a rejected payment to go back onto my balance, so that the ledger stays honest.
 74. As an owner, I want the app to stop me recording a payment larger than what I owe, so that ledgers never go negative.
 75. As a reviewer, I want to approve or reject payments for any recipient on pacts I review, so that payments are confirmed by someone other than the owner.
-76. As an owner, I want my penalties for each recipient gathered into one bill every Wednesday at noon, once they can no longer be excused, and due 7 days later, so that I settle up once a week per recipient and never pay for something I could still excuse.
+76. As an owner, I want my penalties for each recipient gathered into one bill every Wednesday at 6pm, once they can no longer be excused, and due 7 days later, so that I settle up once a week per recipient and never pay for something I could still excuse.
 77. As an owner, I want an unpaid bill to turn into a red alert on Today and a daily reminder once it's overdue, so that I can't ignore it.
 78. As a reviewer, I want to be notified when a friend first goes overdue, and weekly after that, so that I can nudge them.
 79. As an owner, I want each ledger to show how much I've paid in its lifetime, so that the real cost of missing pacts motivates me.
@@ -131,7 +131,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 81. As an owner, I want Today to show a Yesterday summary, so that I can see how I did after alerts have cleared.
 82. As an owner, I want each pact page to show a GitHub-style heat map of Kept, Missed, Excused and not-yet-judged occurrences, so that I can see patterns over time.
 83. As an owner, I want my Pacts tab to list Active pacts, with any still in their edit window at the top and Ended pacts collapsed, so that what I can still change is easy to find and the list stays short.
-84. As an owner, I want Today to show no money until a bill exists, and then a To do card for it (e.g. "Pay Rival Org $12 · due Wed Nov 4 at noon") with Record payment, so that money shows up only when there's something to do. The card goes away once a payment covering the bill is paid or waiting for approval.
+84. As an owner, I want Today to show no money until a bill exists, and then a To do card for it (e.g. "Pay Rival Org $12 · due Wed Nov 4 at 6pm") with Record payment, so that money shows up only when there's something to do. The card goes away once a payment covering the bill is paid or waiting for approval.
 
 ### Notifications
 
@@ -158,7 +158,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Architecture
 
 - **One deep module, the Pact core.** It holds every domain rule. Its interface is a set of **commands** and **queries**, each called as a particular account.
-  - **Commands:** create pact; edit or delete a pact in its edit window; approve/reject/comment on a review item; submit evidence; file excuse; record payment; accept a miss ("I'll pay it"); request change; add reviewer; create/accept invite; connect/disconnect Oura; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, bill, due-date transition and reminder that's due by T.
+  - **Commands:** create pact; edit or delete a pact in its edit window; approve/reject/comment on a review item; submit evidence; file excuse; record payment; accept a miss ("I'll pay it"); request change; add reviewer; create/accept invite; connect/disconnect Oura; check Oura now; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, bill, due-date transition and reminder that's due by T.
   - **Queries:** Today (alerts, then cards in their sections, then waiting for approval and Yesterday); the review queue and item detail; a pact page with its heat map; the pacts list; ledgers (owed, overdue, bill due, awaiting approval, lifetime paid) and a ledger's history, including held penalties and which bill each penalty is on.
 - **Four ports** sit outside the core, each with a production adapter and a fake for tests:
   - **Clock**: the current time. The core never reads system time directly.
@@ -167,7 +167,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - **Photo store**: stores and fetches images, the v0 form of submitted evidence, returning the time the server received each one.
 - **Thin adapters outside the core:** the PWA user interface, Google sign-in, Oura OAuth, web push, email, and a scheduler that periodically calls "advance to now". The tech stack is in ADR 0002: one server, with SQLite as the core's storage.
 - **Notifications are sent after commit.** A command saves the notifications it produces in the same transaction as its other changes, and they're delivered only after that transaction commits. A crash can therefore cause a duplicate notification but never a lost one, and duplicates are acceptable.
-- **No Oura webhooks in v0.** Nights are judged once at noon, and data that arrives later never changes a result. So the Oura adapter simply fetches the relevant sleep periods when a night is judged. Webhooks plus a daily catch-up poll can come later if late data starts to matter.
+- **Oura is polled in v0, not hooked.** While an account has a bedtime night that isn't judged yet, each scheduler tick (every minute) fetches its sleep periods. Today also sends "check Oura now" when it opens or comes back to the foreground while it shows a No Oura data card, then every 30 seconds while the card is on screen; the core ignores a check less than 15 seconds after the last one for that account. An account with no night waiting on Oura causes no calls. Webhooks were rejected for v0: they need a public callback with a challenge handshake, signature checks, subscriptions renewed before they expire, and deduplication, and an expired subscription stops events silently, so a poll would be needed as a backstop anyway.
+- **Oura calls stay out of the way.** Sleep periods are fetched before the write transaction, never inside it, so a slow response can't block other writes. Each call times out after about 10 seconds. A connection's token refreshes go through one place, one at a time, because Oura's refresh tokens are single-use and two parallel refreshes would leave a dead token. A "disconnected" result marks the connection Needs reconnecting once, with one alert, and it isn't polled again until the owner reconnects.
 - **Payments never move money in v0** (ADR 0001). Penalties go on a ledger, and a reviewer approves the owner's proof of payment.
 
 ### Domain model (schema level)
@@ -187,7 +188,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Review item**: kind (Change request | Evidence | Excuse | Payment), subject, comment thread, decision (approve/reject, a reason when rejected, decided by, decided at). It's waiting on the owner whenever the latest comment is a reviewer's.
 - **Change request**: pact and the proposed new terms.
 - **Penalty**: occurrence, recipient, amount, added-at time, state (held, while a pending excuse covers it; or owed), and the bill it's on, once it's on one.
-- **Bill**: owner, recipient, created-at time (a Wednesday at noon), due-at time (created + 7 days), and its penalties. It never changes after it's created.
+- **Bill**: owner, recipient, created-at time (a Wednesday at 18:00), due-at time (created + 7 days), and its penalties. It never changes after it's created.
 - **Payment**: owner, recipient, amount, screenshot, note, decision.
 - **Alert**: account, optional pact, kind (data-source problem, rejected evidence, reviewer question awaiting reply, overdue bill not covered by pending payments), resolved state.
 
@@ -219,13 +220,14 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse can come from the library, since they're often screenshots.
 
 **Judging bedtime pacts**
-- The night of date D is the longest `long_sleep` period whose `bedtime_start` is between 18:00 on D and 18:00 on D+1. Times come from Oura's timestamps, in the timezone those timestamps carry.
-- Kept if `bedtime_start` is before the deadline. Otherwise Missed.
-- The night is judged at 12:00 on D+1. No qualifying period at that point means Missed.
-- A "disconnected" result from the Oura source also means Missed, and it raises a data-source alert and notification.
+- The night of date D is decided by the first `long_sleep` period Oura reports whose `bedtime_start` is between 18:00 on D and 18:00 on D+1. Times come from Oura's timestamps, in the timezone those timestamps carry.
+- The night is judged as soon as that period arrives: Kept if `bedtime_start` is before the deadline, otherwise Missed. A later period in the same window never changes it. This accepts a loophole: a sleep of 3 hours or more that starts before the deadline counts, even if the owner gets up again afterwards.
+- No qualifying period by 18:00 on D+1 means Missed, judged then.
+- A "disconnected" result raises a data-source alert and notification but doesn't judge the night. It stays not judged until 18:00 on D+1, so reconnecting in time still lets the data count.
+- At 15:00 on D+1, a night still not judged sends the owner one push (the data-source problem notification kind).
 
 **Excuses**
-- Can be filed for any future date range. For past dates, only within 48 hours of the covered occurrence being judged Missed or its evidence rejected.
+- Can be filed for any future date range and for any occurrence that isn't judged yet, such as last night before Oura reports it. For occurrences already judged, only within 48 hours of being judged Missed or having evidence rejected.
 - While an excuse is pending, the penalties it covers are held.
 - An approved excuse turns the covered occurrences into Excused and removes their penalties. A rejected excuse releases the held penalties to owed.
 - On Weekly count, covering any day of the week excuses the whole week.
@@ -245,9 +247,9 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Lifetime paid = all payments ever approved, per recipient.
 
 **Bills**
-- Every Wednesday at 12:00, each recipient gets one bill holding the owner's owed penalties whose 48-hour excuse window has closed and that aren't on a bill yet. In a normal week that's every penalty from the Mon–Sun week before: Sunday night's bedtime is judged at noon Monday, so its excuse window closes at noon Wednesday.
+- Every Wednesday at 18:00, each recipient gets one bill holding the owner's owed penalties whose 48-hour excuse window has closed and that aren't on a bill yet. In a normal week that's every penalty from the Mon–Sun week before: Sunday night's bedtime is judged by 18:00 Monday at the latest, so its excuse window has closed by 18:00 Wednesday.
 - A penalty that comes later (say, evidence rejected after its week ended, or a held penalty released when its excuse is rejected) goes on the next Wednesday's bill.
-- A bill never changes after it's created, since nothing on it can be excused any more. It's due 7 days later, at noon.
+- A bill never changes after it's created, since nothing on it can be excused any more. It's due 7 days later, at 18:00.
 - Accepting a miss ("I'll pay it") doesn't put its penalty on a bill any sooner.
 - The owner can pay at any time, before or after a bill. Payments still clear penalties oldest first, and a bill is paid once all its penalties are.
 - A new bill notifies the owner. No bill is made for a recipient with nothing to bill.
@@ -271,7 +273,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today. The current tab sits on a soft blue tile behind its icon and label, in the accent colour with a bold label, while the other tabs stay grey with a regular label. There's no highlight flash when a tab is tapped, and the tile stays while a page is pushed on top. Chosen over colour alone (too subtle), a filled icon, a bar on the top edge, a pill behind the icon, and a solid pill.
 - **Today:** only what's still open, in this order:
   1. Alerts, only for things that need the owner (including an overdue bill).
-  2. **Waiting for Oura** (grey-blue): last night's bedtime until it's final at noon, with a nudge to open the Oura app.
+  2. **No Oura data** (orange): last night's bedtime while Oura hasn't reported it, e.g. "Tue night hasn't synced. Open the Oura app." and, in orange, "Counts as missed at 6pm · 5h 20m". While a check runs the card says "Checking Oura…". There's no button to open the Oura app until we find a link that opens it.
   3. **To do** (green): evidence that can be submitted today, and bills to pay, soonest due first. A Weekly count pact mid-week or a One-time pact that's already open sorts by its own due date, below things due today.
   4. **Missed** (red): misses that can still be excused, with "File excuse · 31h left" and "I'll pay it". A Camera pact past today's due-by time shows here as **Closed**.
   5. **Automatic** (grey): bedtime pacts that run tonight. When last night is on the card above, tonight's deadline rides on that card instead.
@@ -282,7 +284,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   Done cards don't appear, and neither do recurring pacts on days they aren't due. Evidence submitted today moves the card into Waiting for approval. Evidence is submitted **inline on the card**. There's no total owed; money appears only as a bill's To do card or an overdue alert. When nothing is open, a "Nothing to do right now" card says so. A pact in its edit window has a blue "New · edit for 7 min" chip next to its name and a blue left edge, here and in the Pacts list; both go away when the window closes. Each card shows its penalty as a bare amount in red ("$5"). An open Camera card shows the due time in orange as "Due at 9:00pm · 4h 12m", or "Due at midnight · 16h 19m" with no due-by time.
 - **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Create pact. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. The Reviewers and Reminders text depends on the kind: an Oura Ring pact has no photos to review, and its reminders go off every scheduled night. The Check step says the pact is Active as soon as it's created and names its first occurrence (e.g. "Wed Oct 21, due 10:00pm"). Editing a pact in its edit window reuses the form and skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both fill in the same fields, so switching later is a layout change.
 - **Pact page:** in the edit window, a blue bar at the top says how many minutes are left, with Edit and Delete. After that it offers File excuse and Request change. Its "Waiting on" list holds that pact's evidence, excuses and change requests, never payments, which belong to a recipient rather than a pact.
-- **Occurrence labels:** an occurrence that isn't judged yet says what it's waiting for: **Waiting for Oura**, **Waiting for approval** (a photo with a reviewer), or **Due today** ("This week" for Weekly count, the due date for One-time). A Missed occurrence with an excuse waiting reads **Missed · excuse waiting for approval**. The heat map legend calls them "Not judged yet". The UI never shows the word "pending".
+- **Occurrence labels:** an occurrence that isn't judged yet says what it's waiting for: **No Oura data**, **Waiting for approval** (a photo with a reviewer), or **Due today** ("This week" for Weekly count, the due date for One-time). A Missed occurrence with an excuse waiting reads **Missed · excuse waiting for approval**. The heat map legend calls them "Not judged yet". The UI never shows the word "pending".
 - **Lists:** rows you can tap are separate cards with a › chevron; rows you can't tap (Friends, Notifications, Connections, History) stay grouped in one block. The pacts list shows the penalty as a red amount too. The full wording, "$5 per miss", appears only in a pact's terms.
 - **Item kinds:** each review item kind has its own colour and icon: Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. Items waiting on the owner's reply are listed below the current item.
@@ -307,10 +309,12 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - the edit window, first-occurrence lead time and start dates
   - each schedule kind
   - due-by times and which days accept evidence
-  - the bedtime night window and the noon cutoff
+  - the bedtime night window, judging on the first `long_sleep` that arrives, and the 6pm cutoff
+  - the 3pm no-data push
+  - checking Oura only while a night isn't judged, and ignoring check-now requests that come too fast
   - naps ignored
-  - no data, and disconnection
-  - excuse timing limits (ahead of time, and the 48-hour window)
+  - no data, and disconnection leaving the night not judged until 6pm
+  - excuse timing limits (ahead of time, before an occurrence is judged, and the 48-hour window)
   - multi-pact excuses
   - the Weekly count whole-week excuse
   - penalty holds
@@ -338,7 +342,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Reviewers viewing an owner's pact pages.
 - Evidence kinds other than Camera and Oura Ring, Oura goals other than in-bed-by, and Oura schedules other than Fixed days (see Future Ideas).
 - Showing reviewers evidence metadata such as capture time or notes.
-- Oura webhooks, and automatically re-judging nights when Oura data arrives late.
+- Oura webhooks (see Future Ideas), and re-judging a night when later Oura data arrives.
 - Weekly count excuses that cover only part of a week.
 - Travel and timezone-change handling beyond the rules above.
 - Sign in with Apple. It needs the $99/yr Apple Developer membership plus relay-email setup.
@@ -349,6 +353,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ## Future Ideas
 
+- **Oura webhooks:** Oura can notify an app when a sleep period is created (one app-wide subscription per data type and event, a challenge handshake, signed events carrying only the user and object ids, and subscriptions that must be renewed). They'd remove most polling, but the poll would stay as a backstop because an expired subscription stops events silently. The details come from third-party guides and need checking against Oura's own docs.
 - **More evidence kinds:** GPS check-in, Apple Health, Strava. Each brings its own goals and schedules on the Goal step, and its own connection where it needs one.
 - **More Oura goals:** sleep at least X hours (Oura's total sleep, not time in bed, which is easy to game), and up by a time.
 - **More Oura schedules:** Weekly count, e.g. "in bed by midnight 5 nights a week".
@@ -372,6 +377,10 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - Sleep periods come from the `sleep` collection endpoint, with `bedtime_start`, `bedtime_end`, `type`, `day` and `latency`. The `daily_sleep` endpoint only has scores.
   - Data appears only after the Oura app syncs.
   - A night without the ring looks the same as an unsynced one: neither has a `long_sleep` period.
-- **Still to verify:** whether Oura's sleep timestamps include a UTC offset. The bedtime rules depend on it. Check against a live response before building the Oura adapter, and use that response as the seed for the fake.
+- **Still to verify:**
+  - Whether Oura's sleep timestamps include a UTC offset. The bedtime rules depend on it. Check against a live response before building the Oura adapter, and use that response as the seed for the fake.
+  - Oura's API rate limit. Polling every minute is about 5 calls a minute for 5 users, which should be far below it.
+  - Whether Oura sleep of under about 3 hours is ever reported as `long_sleep`, since the first one decides the night.
+  - Whether the Oura iOS app has a link that opens it. If so, the No Oura data card gets an "Open Oura" button.
 - **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through eight rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), 7053336 gives One-time pacts one-off reminders with a date, and 5d3b7c5 replaces Drafts and approval with the 10-minute edit window, adds occurrence labels that say what they're waiting for, simplifies ledger cards and makes the current tab easier to see, and eb928fe adds weekly bills, reorders Today and hides what isn't open, adds "I'll pay it", and switches to an iOS-style tab bar, and 73a87b1 compares ways to mark the current tab (the Tile verdict follows it). It's the primary source for the Screens decisions above.
 - The first real users are the owner and one friend as reviewer, so anything involving several reviewers should be correct but kept minimal.

@@ -83,7 +83,7 @@ The running total an owner owes one recipient: penalties from every pact with th
 _Avoid_: Balance, debt, tab
 
 **Bill**:
-The penalties an owner owes one recipient, gathered once a week (Wednesday at noon) after they can no longer be excused, and due 7 days later. A bill never changes once it's made.
+The penalties an owner owes one recipient, gathered once a week (Wednesday at 6pm) after they can no longer be excused, and due 7 days later. A bill never changes once it's made.
 _Avoid_: Invoice, statement, charge
 
 **Overdue**:
