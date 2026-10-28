@@ -49,7 +49,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 20. As an owner, I want to set a penalty amount in USD on each pact, so that more important pacts can cost more to miss.
 21. As an owner, I want to pick a recipient from my saved list, or add a new one (a friend, or an organization with a name and link), so that I decide where my penalties go.
 22. As an owner, I want to choose one or more reviewers for each pact, so that the right friend checks each commitment.
-23. As an owner, I want to add reminders to a pact, each with a time and a channel (push, email or both), plus a date on One-time pacts, so that I'm nudged at the right moment.
+23. As an owner, I want to add reminders to a pact, each with a time, plus a date on One-time pacts, so that I'm nudged at the right moment.
 24. As an owner, I want a pact to be Active as soon as I create it, with no approval step, so that I can make a pact that counts today.
 25. As an owner, I want to edit or delete a new pact freely for 10 minutes after I create it, so that I can fix a mistake before it counts. Editing doesn't restart the 10 minutes.
 26. As an owner, I want a pact's first occurrence to be the first one due at least an hour after I create it (for Weekly count, the week starting the next Monday), or my start date if that's later, so that nothing falls due while I can still edit it.
@@ -138,7 +138,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 85. As an owner, I want each pact's reminders to fire only while the occurrence still needs evidence (on scheduled days for Fixed days; once, on its own date, for each One-time reminder), so that I'm not nagged about things I've already done.
 86. As an owner on a Weekly count pact, I want reminders to fire only on days without evidence and only until I've met the week's target, so that they stop once I'm done.
 87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to go off every scheduled night, even if I'm already in bed, so that I get a cue to start getting ready for bed. The app can't tell I'm in bed until my ring syncs, usually the next morning.
-88. As a user, I want to turn each kind of event notification (picked as a reviewer on a new pact, new review item, decision, comment, Missed occurrence, data-source problem, new bill, overdue bill) on or off and choose push and/or email for each, so that I control how much I'm contacted.
+88. As a user, I want to turn each kind of event notification (picked as a reviewer on a new pact, new review item, decision, comment, Missed occurrence, data-source problem, new bill, overdue bill) on or off, so that I control how much I'm contacted.
 
 ### Today and navigation
 
@@ -165,7 +165,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - **Oura source**: given an account and a date range, returns sleep periods in the Oura API's shape, or a "disconnected" error (token revoked or expired, membership lapsed).
   - **Notifier**: delivers a notification (recipient, kind, channel, payload).
   - **Photo store**: stores and fetches images, the v0 form of submitted evidence, returning the time the server received each one.
-- **Thin adapters outside the core:** the PWA user interface, Google sign-in, Oura OAuth, web push, email, and a scheduler that periodically calls "advance to now". The tech stack is in ADR 0002: one server, with SQLite as the core's storage.
+- **Thin adapters outside the core:** the PWA user interface, Google sign-in, Oura OAuth, web push, and a scheduler that periodically calls "advance to now". The tech stack is in ADR 0002: one server, with SQLite as the core's storage.
 - **Notifications are sent after commit.** A command saves the notifications it produces in the same transaction as its other changes, and they're delivered only after that transaction commits. A crash can therefore cause a duplicate notification but never a lost one, and duplicates are acceptable.
 - **Oura is polled in v0, not hooked.** While an account has a bedtime night that isn't judged yet, each scheduler tick (every minute) fetches its sleep periods. Today also sends "check Oura now" when it opens or comes back to the foreground while it shows a No Oura data card, then every 30 seconds while the card is on screen; the core ignores a check less than 15 seconds after the last one for that account. An account with no night waiting on Oura causes no calls. Webhooks were rejected for v0: they need a public callback with a challenge handshake, signature checks, subscriptions renewed before they expire, and deduplication, and an expired subscription stops events silently, so a poll would be needed as a backstop anyway.
 - **Oura calls stay out of the way.** Sleep periods are fetched before the write transaction, never inside it, so a slow response can't block other writes. Each call times out after about 10 seconds. A connection's token refreshes go through one place, one at a time, because Oura's refresh tokens are single-use and two parallel refreshes would leave a dead token. A "disconnected" result marks the connection Needs reconnecting once, with one alert, and it isn't polled again until the owner reconnects.
@@ -215,7 +215,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Weekly count: judged at the end of Sunday.
 - One-time: judged at the deadline.
 - No evidence at that point: Missed. Evidence still pending a decision at that point: the outcome waits for the decision.
-- Rejected evidence makes the occurrence Missed as of the rejection, unless the occurrence is still open and new evidence is submitted.
+- On Fixed days and One-time, rejected evidence makes the occurrence Missed as of the rejection, unless the occurrence is still open and new evidence is submitted.
+- On Weekly count, rejected evidence doesn't count toward the week's target, and the owner can make up the session on another day that week. The week still adds one penalty per session short of the target. Example: a 3× week with three photos submitted and one rejected adds one penalty; a week with no photos adds three.
 - Evidence is accepted only on days it can count (scheduled days for Fixed days, any day of the week for Weekly count, start to deadline for One-time) and only until the due-by time. For Weekly count, at most one day of evidence counts per calendar day.
 - Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse can come from the library, since they're often screenshots.
 
@@ -330,7 +331,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - lifetime paid
   - reminder conditions
   - timezone handling
-- **Not tested at this seam:** the UI, Google sign-in, real Oura OAuth and HTTP calls, real push and email delivery, and real photo storage. These are thin adapters, verified by manual or smoke checks once the stack exists. One or two end-to-end browser smoke tests may be added later. SQLite's own crash safety and Litestream aren't tested in CI either. The practice restore in ADR 0002 covers backups.
+- **Not tested at this seam:** the UI, Google sign-in, real Oura OAuth and HTTP calls, real push delivery, and real photo storage. These are thin adapters, verified by manual or smoke checks once the stack exists. One or two end-to-end browser smoke tests may be added later. SQLite's own crash safety and Litestream aren't tested in CI either. The practice restore in ADR 0002 covers backups.
 - **Prior art:** none. The repository has no code yet, so these tests set the pattern.
 
 ## Out of Scope
@@ -350,6 +351,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Reviewers stepping down from a pact. A reviewer who wants off asks the owner to remove them.
 - Streaks, a cross-pact activity feed, or an overall heat map.
 - Currencies other than USD.
+- Email and text-message notifications. v0 notifies by Web Push only (ADR 0002).
 
 ## Future Ideas
 
@@ -361,7 +363,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Richer Camera evidence:** video or a time-lapse.
 - **Vacation mode:** the owner sets a date range and every pact is suspended for it: no occurrences, no reminders and no penalties. It's simpler than an excuse that covers every pact, and it could need no reviewer approval if it's set far enough ahead.
 - **Getting overdue bills paid:** v0 only notifies reviewers (when a bill first goes overdue, then weekly). Something with more social weight could follow, such as a text to the reviewer or a friend. The mechanism isn't designed yet.
-- **Text messages** (a rough idea that needs refining before it's built). Prompted by a reviewer who's happy to review but won't remember to open the app. v0's email notifications partly cover that case. Two possible stages:
+- **Email notifications:** a second Notifier channel, for reviewers who won't remember to open the app and for operator alerts, which survive a database restore better by email than by push.
+- **Text messages** (a rough idea that needs refining before it's built). Prompted by a reviewer who's happy to review but won't remember to open the app. Two possible stages:
   1. SMS reminders for owners, and SMS nudges for reviewers that link straight to the review item.
   2. Answering a review item by text, with Y/N or a comment.
   - Sending texts needs a provider such as Twilio, at a fraction of a cent per text. US numbers also need A2P 10DLC registration, and replies need an inbound webhook. SMS would be one more Notifier channel.
