@@ -65,7 +65,7 @@ The list of items waiting for a reviewer's decision.
 _Avoid_: Inbox, to-do list
 
 **Change Request**:
-An owner's proposed edit to a pact that makes it less strict, such as deleting or pausing it or lowering the penalty. The pact stays as it is until a reviewer approves the change.
+An owner's proposed edit to a pact that makes it less strict, such as deleting it, lowering the penalty or changing the recipient. The pact stays as it is until a reviewer approves the change.
 _Avoid_: Edit, amendment
 
 ### Money

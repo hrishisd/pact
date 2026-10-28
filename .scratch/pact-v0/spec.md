@@ -104,7 +104,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Changing a pact
 
 62. As an owner, I want to request a change to an Active pact through the same form I used to create it, pre-filled, so that changing it is easy.
-63. As an owner, I want any change that makes a pact less strict (deleting, pausing, ending, lowering the penalty, easing the schedule, removing a reviewer) to need a reviewer's approval, and any change that only makes it stricter (raising the penalty, adding days) to take effect at once, so that I can't escape a commitment on a weak evening but can always raise the stakes.
+63. As an owner, I want any change that makes a pact less strict (deleting, ending, lowering the penalty, easing the schedule, removing a reviewer, changing the recipient or the description) to need a reviewer's approval, and any change that only makes it stricter (raising the penalty, adding days) to take effect at once, so that I can't escape a commitment on a weak evening but can always raise the stakes.
 64. As an owner, I want my pact to keep its current terms until the change is approved, so that it's always clear which rules apply.
 65. As a reviewer, I want a before/after comparison of a requested change, so that I can see exactly what is being relaxed.
 66. As an owner, I want to add a reviewer without anyone's approval, so that I can replace a reviewer who has stopped responding.
@@ -205,8 +205,14 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - A start date can only push the first occurrence later.
 - A pact's evidence kind is set when it's created and never changes, not even in the edit window. Proving it a different way means making a new pact.
 - Oura Ring pacts use Fixed days only. Camera pacts can use any schedule.
-- A change that relaxes the pact (delete, pause, end, lower penalty, ease schedule, remove reviewer) creates a change request. The old terms stay in force until it's approved.
-- A change that only makes the pact stricter (higher penalty, more days) takes effect at once, with no review. A change that both relaxes and tightens is reviewed as a whole.
+- A change that relaxes the pact creates a change request. The old terms stay in force until it's approved. These changes relax a pact:
+  - deleting or ending it, lowering the penalty, easing the schedule, or removing a reviewer
+  - any change of recipient, since only a reviewer can judge which recipient hurts more
+  - any change of description, since it defines what a photo must show
+  - a later due-by time, in-bed-by time, One-time deadline or start date; an earlier end date; removing a due-by time; adding an end date
+- A change that only makes the pact stricter takes effect at once, with no review: a higher penalty, more days, the opposite direction on any time field above, adding a due-by time, or removing an end date. A change that both relaxes and tightens is reviewed as a whole.
+- Changing the name or the reminders takes effect at once, with no review, since neither changes what counts.
+- Which occurrences a change applies to is still open (see Open questions under Further Notes).
 - Adding a reviewer is immediate, and the new reviewer is notified. A pact can never have zero reviewers.
 - A pact is Ended when its end date passes or an approved change request ends it.
 
@@ -371,6 +377,9 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ## Further Notes
 
+- **Open questions:** these block the change-request work, not the rest of v0. Research into how Beeminder, Forfeit and similar apps handle them is under way.
+  - **When a stricter change applies.** Occurrences due soon keep the old terms, so that moving today's due-by time earlier can't make today Missed at once. The cutoff isn't settled; one candidate copies the 1-hour first-occurrence rule.
+  - **When an approved relaxing change applies.** One candidate: every occurrence not yet judged when the reviewer approves. Judged occurrences, their penalties and bills never change. The rule must be consistent with the stricter case and simple to explain.
 - Vocabulary follows the project glossary: Pact, Owner, Reviewer, Friend, Schedule, Occurrence, Kept/Missed/Excused, Evidence, Evidence kind, Connection, Excuse, Review Queue, Change Request, Penalty, Recipient, Ledger, Bill, Payment, Overdue, Active/Ended, Edit window.
 - **Oura API facts (researched 2026-10-24):**
   - OAuth2 only. Personal access tokens were removed in December 2025.
