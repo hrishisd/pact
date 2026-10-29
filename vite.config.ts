@@ -20,7 +20,8 @@ export default defineConfig({
     // Lets an iPhone on the same Wi-Fi open the dev server.
     host: true,
     proxy: {
-      "/api": server,
+      // Trailing slash so the client module /api.ts isn't proxied too.
+      "/api/": server,
       "/health": server,
       [AUTH_ERROR_PATH]: server,
       [INVITE_REQUIRED_PATH]: server,
