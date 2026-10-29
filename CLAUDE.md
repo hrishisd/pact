@@ -14,6 +14,10 @@ Default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `read
 
 Debugging production (logs, health, the machine): see `docs/agents/production.md`.
 
+### Local development
+
+Running the app locally, signing in without Google, dev logs, resetting the dev database: see `docs/agents/local-dev.md`.
+
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

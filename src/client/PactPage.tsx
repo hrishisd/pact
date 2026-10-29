@@ -3,13 +3,13 @@
 import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type { PactTerms } from "../shared/types.ts";
-import { api } from "./api.ts";
+import { api, failureText } from "./api.ts";
 import { money, scheduleText } from "./format.ts";
 import { Empty } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
 
-type State = { kind: "loading" } | { kind: "loaded"; pact: Pact } | { kind: "not-found" } | { kind: "failed" };
+type State = { kind: "loading" } | { kind: "loaded"; pact: Pact } | { kind: "not-found" } | { kind: "failed"; error: unknown };
 
 const STAGE_CHIPS: Record<Pact["stage"], { label: string; className: string }> = {
   active: { label: "Active", className: "c-kept" },
@@ -25,7 +25,7 @@ export function PactPage({ pactId, onLoaded }: { pactId: string; onLoaded: (pact
         setState({ kind: "loaded", pact: result.pact });
         onLoaded(pactId, result.pact.name);
       },
-      () => setState({ kind: "failed" }),
+      (error: unknown) => setState({ kind: "failed", error }),
     );
   }, [pactId, onLoaded]);
 
@@ -35,7 +35,7 @@ export function PactPage({ pactId, onLoaded }: { pactId: string; onLoaded: (pact
     case "not-found":
       return <Empty title="Pact not found" body="It isn't one of your pacts." />;
     case "failed":
-      return <Empty title="This pact couldn't load" body="Check your connection and reopen Pact." />;
+      return <Empty title="This pact couldn't load" body={failureText(state.error, "Check your connection and reopen Pact.")} />;
     case "loaded":
       return <Terms pact={state.pact} />;
   }

@@ -1,6 +1,6 @@
 // The Pacts tab: the owner's Active pacts, each opening its page.
 
-import { api } from "./api.ts";
+import { api, failureText } from "./api.ts";
 import { money, scheduleText } from "./format.ts";
 import { Empty, useLoad } from "./ui.tsx";
 
@@ -9,7 +9,7 @@ export function Pacts({ onOpenPact, onCreate }: { onOpenPact: (id: string, name:
 
   return (
     <div className="stack">
-      {failed && <Empty title="Pacts couldn't load" body="Check your connection and reopen Pact." />}
+      {failed && <Empty title="Pacts couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />}
       {pacts?.length === 0 && <Empty title="No pacts yet" body="Pacts you create show up here." />}
       {pacts !== null && pacts.length > 0 && (
         <section className="stack">

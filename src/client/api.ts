@@ -62,8 +62,22 @@ export class ApiError extends Error {
   }
 }
 
+/** The request never got a response: the network, not the server, failed. */
+class NetworkError extends Error {}
+
+/**
+ * Says what failed, for an error state: `network` (which asks the user to check
+ * their connection) only when no response came back; anything else, a 500
+ * included, is on our side.
+ */
+export function failureText(error: unknown, network: string): string {
+  return error instanceof NetworkError ? network : "Something went wrong on our side. Try again in a minute.";
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { credentials: "same-origin", ...init });
+  const response = await fetch(path, { credentials: "same-origin", ...init }).catch((cause: unknown) => {
+    throw new NetworkError(`${path}: no response`, { cause });
+  });
   const body = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) throw new ApiError(response.status, (body as Partial<ApiErrorResponse> | null)?.error);
   return body as T;

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { invitePath } from "../shared/api.ts";
-import { api } from "./api.ts";
+import { api, failureText } from "./api.ts";
 import { initial } from "./format.ts";
 import { useLoad } from "./ui.tsx";
 
@@ -36,7 +36,7 @@ export function FriendsSection() {
 type InviteState =
   | { kind: "idle" }
   | { kind: "creating" }
-  | { kind: "failed" }
+  | { kind: "failed"; error: unknown }
   | { kind: "ready"; url: string; copied: boolean };
 
 /**
@@ -71,8 +71,8 @@ function InviteFriend() {
       setState({ kind: "ready", url, copied: false });
       if (canShare) await share(url);
       else await copy(url);
-    } catch {
-      setState({ kind: "failed" });
+    } catch (error) {
+      setState({ kind: "failed", error });
     }
   };
 
@@ -83,7 +83,7 @@ function InviteFriend() {
           Invite a friend
         </button>
         {state.kind === "failed" ? (
-          <p className="error">Couldn't make a link. Check your connection and try again.</p>
+          <p className="error">Couldn't make a link. {failureText(state.error, "Check your connection and try again.")}</p>
         ) : (
           <p className="muted small">Each link works once and expires in 7 days.</p>
         )}

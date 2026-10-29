@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
-import { ApiError, api, signInWithGoogle, signOut } from "./api.ts";
+import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { CreatePact } from "./CreatePact.tsx";
 import { initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
@@ -15,7 +15,7 @@ import { Centered, Empty } from "./ui.tsx";
 type Session =
   | { kind: "loading" }
   | { kind: "signed-out" }
-  | { kind: "failed" }
+  | { kind: "failed"; error: unknown }
   | { kind: "signed-in"; profile: MeResponse };
 
 /** A profile whose timezone the user has confirmed. */
@@ -34,7 +34,7 @@ export function App() {
       setSession({ kind: "signed-in", profile: await api.me() });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) return setSession({ kind: "signed-out" });
-      setSession({ kind: "failed" });
+      setSession({ kind: "failed", error });
     }
   }, []);
 
@@ -68,7 +68,7 @@ export function App() {
       return (
         <Centered>
           <h1>Pact couldn't load</h1>
-          <p className="muted">Check your connection and try again.</p>
+          <p className="muted">{failureText(session.error, "Check your connection and try again.")}</p>
           <button className="btn primary" onClick={() => void load()}>
             Try again
           </button>
@@ -192,8 +192,8 @@ function useSaveTimezone(profile: MeResponse, onSaved: (p: ConfirmedProfile) => 
       const result = await api.setTimezone(timezone);
       if (result.ok) onSaved({ ...profile, timezone: result.timezone });
       else setError("That timezone isn't recognised. Pick one from the list.");
-    } catch {
-      setError("Couldn't save. Check your connection and try again.");
+    } catch (error) {
+      setError(`Couldn't save. ${failureText(error, "Check your connection and try again.")}`);
     } finally {
       setSaving(false);
     }

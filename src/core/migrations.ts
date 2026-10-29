@@ -1,6 +1,9 @@
 // Schema migrations, applied in order on open. The database's `user_version`
 // records how many have run. Never edit a migration that has shipped; append
-// a new one. Times are stored as ISO 8601 UTC strings.
+// a new one. Opening checks this: db.ts records a fingerprint of each
+// migration's text when it applies it, and refuses to open a database whose
+// applied migrations no longer match (see docs/agents/local-dev.md to reset a
+// dev database). Times are stored as ISO 8601 UTC strings.
 
 export const migrations: readonly string[] = [
   // 1: walking skeleton

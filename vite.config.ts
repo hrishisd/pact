@@ -20,8 +20,9 @@ export default defineConfig({
     // Lets an iPhone on the same Wi-Fi open the dev server.
     host: true,
     proxy: {
-      // Trailing slash so the client module /api.ts isn't proxied too.
-      "/api/": server,
+      // Trailing slash so the client module /api.ts isn't proxied too. xfwd
+      // passes on the browser's host and address, which the dev sign-in checks.
+      "/api/": { target: server, changeOrigin: true, xfwd: true },
       "/health": server,
       [AUTH_ERROR_PATH]: server,
       [INVITE_REQUIRED_PATH]: server,

@@ -3,6 +3,7 @@
 .claude
 .scratch
 .dev-data
+.dev-data.nosync
 .env
 .env.*
 !.env.example

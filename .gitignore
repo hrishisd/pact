@@ -73,5 +73,7 @@ test-results/
 tmp/
 .temp/
 
-# Local development database (npm run dev)
+# Local development database (npm run dev). .nosync keeps iCloud Drive from syncing it;
+# .dev-data/ is where it lived before.
+.dev-data.nosync/
 .dev-data/

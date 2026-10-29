@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { WEEKDAYS, type CreatePactRefusal, type FirstOccurrence, type Friend, type Recipient, type Weekday } from "../shared/types.ts";
 import type { Json } from "../shared/api.ts";
-import { api } from "./api.ts";
+import { api, failureText } from "./api.ts";
 import { formatDate, initial } from "./format.ts";
 import { CameraIcon, RingIcon } from "./icons.tsx";
 import { TermsList } from "./PactPage.tsx";
@@ -96,7 +96,7 @@ export function CreatePact({
   const [tried, setTried] = useState(false);
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const top = useRef<HTMLDivElement>(null);
@@ -105,14 +105,14 @@ export function CreatePact({
   const problem = stepProblem(step, form);
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
 
-  const loadFriends = () => api.friends().then(setFriends, () => setLoadFailed(true));
+  const loadFriends = () => api.friends().then(setFriends, (error: unknown) => setLoadFailed({ error }));
   useEffect(() => {
     void loadFriends();
     api.recipients().then((list) => {
       setRecipients(list);
       // With only one saved recipient, it's the one.
       if (list.length === 1) setForm((f) => (f.recipientId === null ? { ...f, recipientId: list[0]!.id } : f));
-    }, () => setLoadFailed(true));
+    }, (error: unknown) => setLoadFailed({ error }));
   }, []);
 
   useEffect(() => {
@@ -147,8 +147,8 @@ export function CreatePact({
       });
       if (result.ok) return onCreated(result.pactId, form.name.trim());
       setCreateError(PROBLEMS[result.reason]);
-    } catch {
-      setCreateError("Couldn't create it. Check your connection and try again.");
+    } catch (error) {
+      setCreateError(`Couldn't create it. ${failureText(error, "Check your connection and try again.")}`);
     }
     setCreating(false);
   };
@@ -205,7 +205,9 @@ export function CreatePact({
           Step {stepIndex + 1} of {STEPS.length}
         </small>
       </div>
-      {loadFailed && <p className="error">Some of this couldn't load. Check your connection and reopen Pact.</p>}
+      {loadFailed && (
+        <p className="error">Some of this couldn't load. {failureText(loadFailed.error, "Check your connection and reopen Pact.")}</p>
+      )}
       {body}
       {tried && problem && <p className="error">{PROBLEMS[problem]}</p>}
       {createError && <p className="error">{createError}</p>}
@@ -434,8 +436,8 @@ function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipien
       const result = await api.addRecipient({ name });
       if (result.ok) return onSaved(result.recipient);
       setError("Enter a name.");
-    } catch {
-      setError("Couldn't save it. Check your connection and try again.");
+    } catch (error) {
+      setError(`Couldn't save it. ${failureText(error, "Check your connection and try again.")}`);
     }
     setSaving(false);
   };
@@ -515,7 +517,7 @@ function ReviewersStep({
   );
 }
 
-type FirstState = { kind: "loading" } | { kind: "loaded"; first: Json<FirstOccurrence> } | { kind: "failed" };
+type FirstState = { kind: "loading" } | { kind: "loaded"; first: Json<FirstOccurrence> } | { kind: "failed"; error: unknown };
 
 /** How often the Check step asks again, so the day it names stays the one Create would store. */
 const FIRST_OCCURRENCE_REFRESH_MS = 60_000;
@@ -531,8 +533,8 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
     };
     const load = () =>
       api.firstOccurrence({ schedule: { kind: "fixed-days", days } }).then(
-        (result) => show(result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed" }),
-        () => show({ kind: "failed" }),
+        (result) => show(result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason }),
+        (error: unknown) => show({ kind: "failed", error }),
       );
     void load();
     const timer = window.setInterval(() => void load(), FIRST_OCCURRENCE_REFRESH_MS);
@@ -571,7 +573,9 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
             </>
           )}
         </p>
-        {first.kind === "failed" && <p className="muted small">Couldn't load the first day. Check your connection.</p>}
+        {first.kind === "failed" && (
+          <p className="muted small">Couldn't load the first day. {failureText(first.error, "Check your connection.")}</p>
+        )}
       </div>
     </>
   );

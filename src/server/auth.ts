@@ -15,9 +15,15 @@
 // reads it back and passes it to the core, which decides whether it is still
 // usable. The client supplies it, which is fine: an invite token is itself the
 // credential, and the core checks it.
+//
+// Development only: `devSignIn` below signs in without Google, for agents and
+// local testing (see docs/agents/local-dev.md). It is server-only (no HTTP
+// route of Better Auth's own); app.ts calls it from /api/dev/sign-in, a route
+// that exists only outside production.
 
 import { APIError, betterAuth } from "better-auth";
-import { getOAuthState } from "better-auth/api";
+import { createAuthEndpoint, getOAuthState } from "better-auth/api";
+import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import type { PactCore } from "../core/index.ts";
 import { openWithPragmas } from "../core/db.ts";
@@ -88,6 +94,7 @@ export function createAuth(options: AuthOptions) {
         },
       },
     },
+    plugins: [devSignInPlugin(core)],
     telemetry: { enabled: false },
   };
 
@@ -105,5 +112,60 @@ export function createAuth(options: AuthOptions) {
     },
   };
 }
+
+/**
+ * DEVELOPMENT ONLY. Signs `email` in without Google: through the same core
+ * gate (the operator, or a usable invite token, which this claims), then a
+ * real Better Auth user and session, so every other route works unchanged.
+ * SERVER_ONLY keeps it off Better Auth's HTTP router: only `auth.api` reaches
+ * it, and app.ts mounts its caller only outside production.
+ */
+function devSignInPlugin(core: PactCore) {
+  return {
+    id: "pact-dev-sign-in",
+    endpoints: {
+      devSignIn: createAuthEndpoint(
+        "/dev/sign-in",
+        { method: "POST", body: devSignInBody, metadata: { SERVER_ONLY: true } },
+        async (ctx) => {
+          const { email, name, inviteToken } = ctx.body;
+          const result = await core.signIn({ email, name }, inviteToken === undefined ? {} : { inviteToken });
+          if (!result.ok) throw new APIError("FORBIDDEN", { code: INVITE_REQUIRED_CODE });
+          // The core has the account now, so the create hook's own core.signIn finds it and agrees.
+          const user =
+            (await ctx.context.internalAdapter.findUserByEmail(email))?.user ??
+            (await ctx.context.internalAdapter.createUser({ email, name, emailVerified: true }, { method: "dev-sign-in" }));
+          const session = await ctx.context.internalAdapter.createSession(user.id);
+          await setSessionCookie(ctx, { session, user });
+          return ctx.json({ ok: true });
+        },
+      ),
+    },
+  };
+}
+
+interface DevSignInBody {
+  email: string;
+  name: string;
+  inviteToken?: string;
+}
+
+/** A Standard Schema (what Better Auth takes for a body) for DevSignInBody, without a schema library. */
+const devSignInBody = {
+  "~standard": {
+    version: 1 as const,
+    vendor: "pact",
+    validate: (value: unknown) => {
+      const body = value as Partial<Record<keyof DevSignInBody, unknown>> | null;
+      const valid =
+        typeof body?.email === "string" &&
+        typeof body.name === "string" &&
+        (body.inviteToken === undefined || typeof body.inviteToken === "string");
+      return valid ? { value: value as DevSignInBody } : { issues: [{ message: "expected { email, name, inviteToken? }" }] };
+    },
+    // Type-only, for inference.
+    types: undefined as unknown as { input: DevSignInBody; output: DevSignInBody },
+  },
+};
 
 export type Auth = ReturnType<typeof createAuth>["auth"];

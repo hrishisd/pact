@@ -7,7 +7,10 @@ import { join } from "node:path";
 export interface Config {
   production: boolean;
   port: number;
-  /** SQLite file shared by the Pact core and Better Auth. Production: /data/pact.db. */
+  /**
+   * SQLite file shared by the Pact core and Better Auth. Production: /data/pact.db.
+   * Development: .dev-data.nosync/pact.db; iCloud Drive (the repo is in ~/Documents) skips `.nosync` names.
+   */
   dbPath: string;
   /** The operator's Google email: the one account that needs no invite. */
   operatorEmail: string;
@@ -48,7 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const config: Config = {
     production,
     port,
-    dbPath: read("PACT_DB_PATH", join(REPO_ROOT, ".dev-data", "pact.db")),
+    dbPath: read("PACT_DB_PATH", join(REPO_ROOT, ".dev-data.nosync", "pact.db")),
     operatorEmail: read("OPERATOR_EMAIL", "operator@example.test"),
     google: {
       clientId: read("GOOGLE_CLIENT_ID", "dev-google-client-id"),

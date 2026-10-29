@@ -14,6 +14,7 @@ import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  DEV_SIGN_IN_PATH,
   INVITE_REQUIRED_PATH,
   INVITE_TOKEN_SIGN_IN_KEY,
   invitePath,
@@ -49,7 +50,8 @@ const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 async function server({
   canonicalOrigin = null,
   diskUsedFraction = () => 0.5,
-}: { canonicalOrigin?: string | null; diskUsedFraction?: () => number } = {}) {
+  production = false,
+}: { canonicalOrigin?: string | null; diskUsedFraction?: () => number; production?: boolean } = {}) {
   const s = scenario();
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
@@ -62,7 +64,15 @@ async function server({
     google: { clientId: "test-client-id", clientSecret: "test-client-secret" },
   });
   await migrate();
-  const app = createApp({ core: s.core, auth, staticDir, canonicalOrigin, diskUsedFraction });
+  const app = createApp({
+    core: s.core,
+    auth,
+    staticDir,
+    canonicalOrigin,
+    diskUsedFraction,
+    production,
+    operatorEmail: OPERATOR,
+  });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
   onTestFinished(() => close());
 
@@ -384,6 +394,119 @@ describe("invites", () => {
 
     expect(response.headers.get("Location")).toMatch(REFUSED_SIGN_IN);
     expect(s.authRows()).toEqual({ user: 1, account: 1, session: 1 });
+  });
+});
+
+describe("dev sign-in", () => {
+  test("outside production, the operator signs in without Google and lands on Today", async () => {
+    const s = await server();
+
+    const response = await s.request(`${DEV_SIGN_IN_PATH}?as=operator`);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/");
+    expect(s.authRows()).toEqual({ user: 1, account: 0, session: 1 });
+    const me = await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(response) });
+    expect(me).toEqual({ status: 200, body: { email: OPERATOR, name: "owner", timezone: null } });
+  });
+
+  test("in production the route doesn't exist: it answers as any unknown API route, and signs no one in", async () => {
+    const s = await server({ production: true });
+
+    const response = await s.request(`${DEV_SIGN_IN_PATH}?as=operator`);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthenticated" });
+    expect(cookieFrom(response)).not.toContain("session_token");
+    expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
+  });
+
+  test("on a host that isn't loopback it is refused, as an unknown API route", async () => {
+    const s = await server();
+
+    for (const origin of ["http://192.168.1.20:5173", "https://pact.hrishisd.com"]) {
+      const response = await s.request(`${DEV_SIGN_IN_PATH}?as=operator`, { origin });
+      expect(response.status).toBe(401);
+    }
+    expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
+  });
+
+  test("through Vite's proxy, a browser that isn't on this machine is refused", async () => {
+    const s = await server();
+
+    // Vite's proxy rewrites Host to the server's; it forwards the browser's host and address.
+    for (const forwarded of [
+      { "X-Forwarded-Host": "192.168.1.20:5173", "X-Forwarded-For": "192.168.1.20" },
+      { "X-Forwarded-Host": "localhost:5173", "X-Forwarded-For": "192.168.1.20" },
+    ]) {
+      const response = await s.request(`${DEV_SIGN_IN_PATH}?as=operator`, {
+        origin: "http://localhost:3000",
+        headers: forwarded,
+      });
+      expect(response.status).toBe(401);
+    }
+    expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
+
+    const local = await s.request(`${DEV_SIGN_IN_PATH}?as=operator`, {
+      origin: "http://localhost:3000",
+      headers: { "X-Forwarded-Host": "localhost:5173", "X-Forwarded-For": "::1" },
+    });
+    expect(local.status).toBe(302);
+  });
+
+  test("Better Auth doesn't serve it over HTTP itself", async () => {
+    const s = await server();
+
+    const response = await s.request(`${AUTH_BASE_PATH}/dev/sign-in`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: OPERATOR, name: "owner" }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
+  });
+
+  test("a second person signs in with an invite token, claims it, and lands on the invite to accept", async () => {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+
+    const response = await s.request(`${DEV_SIGN_IN_PATH}?email=friend@example.test&name=Friend&invite=${owner.token}`);
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(invitePath(owner.token));
+    const cookie = cookieFrom(response);
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body).toMatchObject({
+      email: "friend@example.test",
+      name: "Friend",
+    });
+    // Claimed: a stranger now sees it as used.
+    expect((await s.api(API_PATHS.invite(owner.token))).body).toEqual({ ok: false, reason: "invite-used" });
+    const accept = await s.api<AcceptInviteResponse>(API_PATHS.acceptInvite(owner.token), { cookie, method: "POST" });
+    expect(accept.body).toMatchObject({ ok: true, friend: { name: "owner" } });
+  });
+
+  test("without a usable invite the core refuses, as it does Google's, and no auth rows are created", async () => {
+    const s = await server();
+
+    for (const query of ["email=stranger@example.test", "email=stranger@example.test&invite=no-such-invite"]) {
+      const response = await s.request(`${DEV_SIGN_IN_PATH}?${query}`);
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe(INVITE_REQUIRED_PATH);
+      expect(cookieFrom(response)).not.toContain("session_token");
+    }
+    expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
+  });
+
+  test("signing in again as the same person reuses the user and adds a session", async () => {
+    const s = await server();
+
+    await s.request(`${DEV_SIGN_IN_PATH}?as=operator`);
+    const again = await s.request(`${DEV_SIGN_IN_PATH}?email=${OPERATOR}`);
+
+    expect(again.status).toBe(302);
+    expect(s.authRows()).toEqual({ user: 1, account: 0, session: 2 });
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(again) })).status).toBe(200);
   });
 });
 

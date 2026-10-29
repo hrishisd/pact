@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
 import type { TodaySection } from "../shared/types.ts";
-import { api } from "./api.ts";
+import { api, failureText } from "./api.ts";
 import { formatDate, money, timeLeft } from "./format.ts";
 import { Empty, useLoad } from "./ui.tsx";
 
@@ -19,7 +19,7 @@ export function Today({
   const { data: today, failed } = useLoad(api.today);
   const now = useNow();
 
-  if (failed) return <Empty title="Today couldn't load" body="Check your connection and reopen Pact." />;
+  if (failed) return <Empty title="Today couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />;
   if (today === null) return null;
 
   // Story 4: a new user's first screen says what to do next.

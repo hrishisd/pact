@@ -38,6 +38,12 @@ export const AUTH_BASE_PATH = "/api/auth";
 /** Where Better Auth sends the browser, with ?error=<code>, when sign-in fails. */
 export const AUTH_ERROR_PATH = "/auth-error";
 
+/**
+ * Development only: signs in without Google (see docs/agents/local-dev.md).
+ * `?as=operator`, or `?email=…&name=…&invite=<token>` for anyone else.
+ */
+export const DEV_SIGN_IN_PATH = "/api/dev/sign-in";
+
 /** The plain page for a Google account that has no invite. */
 export const INVITE_REQUIRED_PATH = "/invite-required";
 

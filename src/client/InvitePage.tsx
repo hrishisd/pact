@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import type { AcceptInviteResponse, InviteLookupResponse, MeResponse } from "../shared/api.ts";
 import type { InviteUnusableReason } from "../shared/types.ts";
-import { api, signInWithInvite } from "./api.ts";
+import { api, failureText, signInWithInvite } from "./api.ts";
 import { GoogleIcon } from "./icons.tsx";
 import { initial } from "./format.ts";
 import { Centered } from "./ui.tsx";
@@ -13,7 +13,7 @@ type Refusal = Extract<AcceptInviteResponse, { ok: false }>["reason"];
 
 type State =
   | { kind: "loading" }
-  | { kind: "failed" }
+  | { kind: "failed"; error: unknown }
   | { kind: "open"; inviterName: string }
   | { kind: "refused"; reason: Refusal; inviterName?: string }
   | { kind: "accepted"; friendName: string };
@@ -31,7 +31,7 @@ export function InvitePage({
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
-  const [acceptFailed, setAcceptFailed] = useState(false);
+  const [acceptFailed, setAcceptFailed] = useState<{ error: unknown } | null>(null);
   // Google sign-in that went wrong comes back here with ?error=<code>.
   const [signInFailed] = useState(() => new URLSearchParams(window.location.search).has("error"));
 
@@ -40,19 +40,19 @@ export function InvitePage({
     api.invite(token).then(
       (lookup: InviteLookupResponse) =>
         setState(lookup.ok ? { kind: "open", inviterName: lookup.inviterName } : { kind: "refused", reason: lookup.reason }),
-      () => setState({ kind: "failed" }),
+      (error: unknown) => setState({ kind: "failed", error }),
     );
   };
   useEffect(load, [token]);
 
   const accept = async (inviterName: string) => {
     setBusy(true);
-    setAcceptFailed(false);
+    setAcceptFailed(null);
     try {
       const result = await api.acceptInvite(token);
       setState(result.ok ? { kind: "accepted", friendName: result.friend.name } : { kind: "refused", reason: result.reason, inviterName });
-    } catch {
-      setAcceptFailed(true);
+    } catch (error) {
+      setAcceptFailed({ error });
     } finally {
       setBusy(false);
     }
@@ -71,7 +71,7 @@ export function InvitePage({
       return (
         <Centered>
           <h1>This invite couldn't load</h1>
-          <p className="muted">Check your connection and try again.</p>
+          <p className="muted">{failureText(state.error, "Check your connection and try again.")}</p>
           <button className="btn primary" onClick={load}>
             Try again
           </button>
@@ -114,7 +114,9 @@ export function InvitePage({
           </div>
           {profile ? (
             <div className="stack">
-              {acceptFailed && <p className="error">Couldn't accept. Check your connection and try again.</p>}
+              {acceptFailed && (
+                <p className="error">Couldn't accept. {failureText(acceptFailed.error, "Check your connection and try again.")}</p>
+              )}
               <button className="btn primary block" disabled={busy} onClick={() => void accept(inviterName)}>
                 Accept
               </button>

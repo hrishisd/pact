@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
+import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { AccountId, PactCore, Schedule, Weekday } from "../core/index.ts";
 import { WEEKDAYS } from "../shared/types.ts";
@@ -12,7 +13,9 @@ import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  DEV_SIGN_IN_PATH,
   INVITE_REQUIRED_PATH,
+  invitePath,
   type AcceptInviteResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
@@ -47,14 +50,31 @@ export interface AppOptions {
   canonicalOrigin: string | null;
   /** How full the database's volume is, from 0 to 1. Production asks the filesystem; tests pass a fake. */
   diskUsedFraction: () => number;
+  /** In production the dev sign-in route doesn't exist. */
+  production: boolean;
+  /** The dev sign-in's `?as=operator`. */
+  operatorEmail: string;
 }
 
 /** /health fails once the volume is fuller than this (ADR 0003). */
 const MAX_DISK_USED_FRACTION = 0.8;
 
-type Env = { Variables: { accountId: AccountId } };
+/** Loopback, as URL hostnames (IPv6 in brackets) and as socket addresses. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
-export function createApp({ core, auth, staticDir, canonicalOrigin, diskUsedFraction }: AppOptions) {
+// Bindings are absent in tests (app.request), present under @hono/node-server.
+type Env = { Bindings: Partial<HttpBindings>; Variables: { accountId: AccountId } };
+
+export function createApp({
+  core,
+  auth,
+  staticDir,
+  canonicalOrigin,
+  diskUsedFraction,
+  production,
+  operatorEmail,
+}: AppOptions) {
   const app = new Hono<Env>();
 
   // Liveness, for Fly's check: the process serves and the database answers.
@@ -92,6 +112,33 @@ export function createApp({ core, auth, staticDir, canonicalOrigin, diskUsedFrac
   }
 
   app.on(["GET", "POST"], `${AUTH_BASE_PATH}/*`, (c) => auth.handler(c.req.raw));
+
+  // DEVELOPMENT ONLY: sign in without Google, for agents driving a browser or
+  // curl (docs/agents/local-dev.md). Never mounted in production, and refused
+  // unless the browser is on this machine (so a phone on the Wi-Fi can't use
+  // it). The core decides, as for Google: the operator, or a usable invite
+  // token, which this claims.
+  if (!production) {
+    app.get(DEV_SIGN_IN_PATH, async (c, next) => {
+      if (!fromThisMachine(c)) return next();
+      const as = c.req.query("as");
+      const email = as === "operator" ? operatorEmail : c.req.query("email");
+      if (!email) return apiError(c, 400, "invalid-request");
+      const name = c.req.query("name") ?? email.split("@")[0]!;
+      const inviteToken = c.req.query("invite");
+      try {
+        const { headers } = await auth.api.devSignIn({
+          body: { email, name, ...(inviteToken !== undefined && { inviteToken }) },
+          returnHeaders: true,
+        });
+        for (const cookie of headers.getSetCookie()) c.header("Set-Cookie", cookie, { append: true });
+      } catch {
+        return c.redirect(INVITE_REQUIRED_PATH);
+      }
+      // As Google's sign-in does: back to the invite, to accept it, or home.
+      return c.redirect(inviteToken === undefined ? "/" : invitePath(inviteToken));
+    });
+  }
 
   // The invite page shows to signed-out visitors, so its lookup needs no
   // session; with one, it's the account's view (a claimed invite is open to
@@ -220,6 +267,25 @@ export function createApp({ core, auth, staticDir, canonicalOrigin, diskUsedFrac
   );
 
   return app;
+}
+
+/**
+ * For the dev sign-in: whether the request came from a browser on this
+ * machine. Every host and address it names must be loopback: the Host, the
+ * socket's peer, and what Vite's proxy forwards (it rewrites Host to the
+ * server's, and appends the browser's real address to X-Forwarded-For).
+ */
+function fromThisMachine(c: Context<Env>): boolean {
+  const hosts = [c.req.header("Host"), c.req.header("X-Forwarded-Host")].filter((host) => host !== undefined);
+  const addresses = [
+    ...(c.req.header("X-Forwarded-For")?.split(",") ?? []),
+    ...(c.env?.incoming?.socket.remoteAddress === undefined ? [] : [c.env.incoming.socket.remoteAddress]),
+  ];
+  return (
+    LOOPBACK_HOSTS.has(new URL(c.req.url).hostname) &&
+    hosts.every((host) => LOOPBACK_HOSTS.has(new URL(`http://${host}`).hostname)) &&
+    addresses.every((address) => LOOPBACK_ADDRESSES.has(address.trim()))
+  );
 }
 
 function apiError(c: Context, status: 400 | 401 | 404, error: ApiErrorResponse["error"]) {

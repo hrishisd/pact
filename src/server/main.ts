@@ -1,7 +1,7 @@
 // The server's entry point: one process for the SPA, the API, Better Auth,
 // the Pact core and the scheduler.
 
-import { mkdirSync, statfsSync, type StatsFs } from "node:fs";
+import { mkdirSync, readFileSync, statfsSync, type StatsFs } from "node:fs";
 import { dirname, join } from "node:path";
 import { serve } from "@hono/node-server";
 import { createPactCore, logNotifier, stubOuraSource, stubPhotoStore, systemClock } from "../core/index.ts";
@@ -20,6 +20,16 @@ const logFile = startLogFile({ path: join(dataDir, "logs", "pact.log"), maxBytes
 // Node prints a crash's stack trace straight to the terminal, past process.stderr,
 // so the file gets its own copy. A monitor only watches: Node still prints it and exits.
 process.on("uncaughtExceptionMonitor", (error, origin) => logFile.append(`${origin}: ${error.stack ?? error}\n`));
+
+// Native modules (better-sqlite3) are built per Node major, so another Node crashes on them.
+// Development only: .nvmrc isn't in the image, whose Node is the Dockerfile's.
+if (!config.production) {
+  const pinned = readFileSync(join(import.meta.dirname, "..", "..", ".nvmrc"), "utf8").trim();
+  if (pinned.split(".")[0] !== process.versions.node.split(".")[0]) {
+    console.error(`Node ${process.versions.node} is running, but .nvmrc pins ${pinned}. Run under the pinned Node (fnm use).`);
+    process.exit(1);
+  }
+}
 
 const core = createPactCore({
   dbPath: config.dbPath,
@@ -50,6 +60,8 @@ const app = createApp({
   staticDir: config.staticDir,
   canonicalOrigin: config.canonicalOrigin,
   diskUsedFraction: () => usedFraction(statfsSync(dataDir)),
+  production: config.production,
+  operatorEmail: config.operatorEmail,
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(

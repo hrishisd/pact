@@ -12,11 +12,12 @@ export function Centered({ children }: { children: ReactNode }) {
 }
 
 /** What `load` resolves to (null until it does), or `failed` if it rejects. Loads once, on mount. */
-export function useLoad<T>(load: () => Promise<T>): { data: T | null; failed: boolean } {
+/** `failed` is the error when the load failed, for `failureText`; null otherwise. */
+export function useLoad<T>(load: () => Promise<T>): { data: T | null; failed: { error: unknown } | null } {
   const [data, setData] = useState<T | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<{ error: unknown } | null>(null);
   useEffect(() => {
-    load().then(setData, () => setFailed(true));
+    load().then(setData, (error: unknown) => setFailed({ error }));
   }, []);
   return { data, failed };
 }
