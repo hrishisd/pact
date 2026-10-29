@@ -1,0 +1,34 @@
+# 11 Change requests and adding reviewers
+
+Status: ready-for-agent
+Blocked by: 06
+
+Spec stories: 62–67, 83 (Ended), 95. Rules: Creation and change.
+
+## What to build
+
+After the edit window, an owner can change an Active pact: stricter changes apply at once, relaxing ones wait for a reviewer.
+
+- **Request change** on the pact page, through the create form pre-filled (no Source step; evidence kind never changes).
+- **Classification** in the core, covering the fields that exist so far:
+  - Relaxes (creates a change request): deleting or ending the pact, lowering the penalty, easing the schedule (fewer days), removing a reviewer, any change of recipient, any change of description.
+  - Stricter (takes effect at once): a higher penalty, more days.
+  - Name changes take effect at once with no review.
+  - A change that both relaxes and tightens is reviewed as a whole.
+  - Tickets 13–16 add their own fields to this classification.
+- **When it applies:** from when it's made (stricter) or approved (relaxing), to every occurrence that hasn't opened yet. Open occurrences keep the old terms; judged occurrences, their penalties and bills never change.
+- **Change request review item** (amber pencil), shown first in the Review tab, with a before/after comparison. Same Approve / Reject-with-reason flow.
+- **Ending:** an approved delete or end makes the pact **Ended**; it stops producing occurrences. Ended pacts sit collapsed at the bottom of Pacts.
+- **Adding a reviewer** is immediate and notifies the new reviewer. Removing one is a change request. A pact can never have zero reviewers.
+- **Pact page:** once a change is in force but not yet applied, say when the new terms start, e.g. "New terms start Fri Oct 30. Today keeps $5 per miss." The Waiting on list includes change requests.
+
+## Acceptance criteria (core scenarios)
+
+- [ ] Spec example: raising the penalty at 3pm Thursday on a daily pact → Thursday still costs the old amount, Friday the new.
+- [ ] Lowering the penalty → change request; old amount applies until approved, then from the next occurrence not yet open.
+- [ ] Recipient change, description change and reviewer removal each create a change request.
+- [ ] Penalty raised and a day removed in one change → one change request; nothing applies until approved.
+- [ ] Rejected change → terms unchanged.
+- [ ] Removing the only reviewer is refused; adding one notifies them at once.
+- [ ] Approved end → Ended, no further occurrences; already-judged penalties stay on the ledger.
+- [ ] A pending change request survives a restart.

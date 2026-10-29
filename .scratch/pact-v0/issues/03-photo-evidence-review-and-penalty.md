@@ -1,0 +1,52 @@
+# 03 Photo evidence, review, judging and the penalty ledger
+
+Status: ready-for-agent
+Blocked by: 02
+
+Spec stories: 28 (partly), 29–31, 33, 34 (in-app only), 52–56, 59–61 (in-app only), 68, 70, 80 (partly), 89 (evidence only).
+
+## What to build
+
+The owner proves a day with live photos on the Today card, a reviewer approves or rejects it, the day is judged, and a Missed day puts the penalty on the recipient's ledger.
+
+### Evidence
+- **Photo store adapter:** a private R2 bucket. The server serves a photo, or a short-lived link, only to the pact's owner or one of its reviewers. The store returns the time the server received each photo.
+- **Submit inline on the Today card:** live camera capture only (no photo library), several photos per piece of evidence.
+- Accepted only on the pact's scheduled days and only until the occurrence's due time (midnight). The core refuses anything else, so there's no backfilling.
+- Submitting moves the card into **Waiting for approval** at the bottom of Today, with the green camera Evidence icon in a coloured square and the kind name in the small line.
+- After a rejection the owner can resubmit while the occurrence is still open.
+
+### Review
+- **Review tab** with a count badge. One item at a time, with Reject (reason required), Approve, and Prev/Skip. Ask comes in ticket 12.
+- An Evidence item shows only the photos and the pact's description of what counts.
+- Any reviewer of the pact may decide; the first decision is final and removes the item from every reviewer's queue. Items never expire.
+- The owner sees the decision in the app (push arrives with ticket 05; the core records the notification now).
+
+### Judging (Fixed days, Camera)
+- At the end of each scheduled day (advance to T): no evidence → Missed; approved evidence → Kept; evidence still waiting → the outcome waits for the decision.
+- Rejected evidence makes the occurrence Missed as of the rejection, unless the occurrence is still open and new evidence is submitted.
+- A rejected-evidence **alert** shows on Today until resolved.
+
+### Ledger
+- Each Missed occurrence adds a **penalty** equal to the pact's amount to the owner's ledger for that recipient. One ledger per recipient across all pacts that share it.
+- **Ledgers tab:** one card per recipient with the big owed amount and lifetime paid ($0 for now). Tapping opens its history, pushed on the tab, with each penalty linked to its occurrence.
+
+### Today
+- **Missed** section (red): misses from the last 48 hours. File excuse and "I'll pay it" arrive in ticket 07.
+- Done (Kept) cards don't appear.
+
+## Acceptance criteria (core scenarios)
+
+- [ ] Mon/Wed/Fri $5 pact → Monday ends with no evidence → Missed, ledger shows $5 owed to the recipient.
+- [ ] Evidence submitted Monday, approved Tuesday → Kept, nothing owed.
+- [ ] Evidence submitted Monday, still waiting at midnight → not judged yet; rejected Tuesday → Missed as of the rejection, $5 owed.
+- [ ] Rejected Monday afternoon, resubmitted Monday evening, approved → Kept.
+- [ ] Evidence refused on a Tuesday for a Mon/Wed/Fri pact, and refused after midnight.
+- [ ] Two reviewers: the first to decide wins and the item leaves both queues; a second decision is refused.
+- [ ] Two pacts with the same recipient share one ledger.
+- [ ] A restart between submission and the day ending changes nothing.
+- [ ] Only the owner and the pact's reviewers can fetch a photo.
+
+## Notes
+
+- Still to verify (ADR 0002): whether iOS Safari keeps a photo's capture time in uploads. Not needed for v0 rules (the server-received time is what counts), but record the answer.
