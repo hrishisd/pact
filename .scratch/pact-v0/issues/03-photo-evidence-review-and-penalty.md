@@ -11,6 +11,8 @@ The owner proves a day with live photos on the Today card, a reviewer approves o
 
 ### Evidence
 - **Photo store adapter:** a private R2 bucket. The server serves a photo, or a short-lived link, only to the pact's owner or one of its reviewers. The store returns the time the server received each photo.
+- **Shrink before upload:** the browser redraws each photo so its long edge is at most 1280px and saves it as JPEG at quality ~0.6 (about 100–180 KB). Size and quality are one setting that's easy to change. This makes uploads fast on cellular and strips metadata, including GPS location. Excuse photos (ticket 07) go through the same step.
+- **Size cap:** the server refuses any photo over 1 MB. That's well above a shrunk photo and well below an iPhone original (3–5 MB), so it catches a resize that silently failed.
 - **Submit inline on the Today card:** live camera capture only (no photo library), several photos per piece of evidence.
 - Accepted only on the pact's scheduled days and only until the occurrence's due time (midnight). The core refuses anything else, so there's no backfilling.
 - Submitting moves the card into **Waiting for approval** at the bottom of Today, with the green camera Evidence icon in a coloured square and the kind name in the small line.
@@ -49,4 +51,5 @@ The owner proves a day with live photos on the Today card, a reviewer approves o
 
 ## Notes
 
-- Still to verify (ADR 0002): whether iOS Safari keeps a photo's capture time in uploads. Not needed for v0 rules (the server-received time is what counts), but record the answer.
+- Still to verify (ADR 0002): whether iOS Safari keeps a photo's capture time in uploads. Not needed for v0 rules (the server-received time is what counts), but record the answer. Shrinking before upload strips capture time anyway, so it's only available if read before the resize.
+- Once the camera flow works on a real iPhone, check that 1280px keeps small text (a treadmill display, a scale) readable, and that photos come out the right way up.
