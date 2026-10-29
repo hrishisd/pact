@@ -275,6 +275,21 @@ describe("health", () => {
     s.clock.set(new Date(s.clock.now().getTime() + 6 * 60 * 1000));
     expect((await s.request("/health")).status).toBe(503);
   });
+
+  test("liveness passes whatever the scheduler is doing, so a stuck scheduler doesn't take the app offline", async () => {
+    const s = await server();
+    const live = async () => {
+      const response = await s.request("/healthz");
+      return { status: response.status, body: await response.json() };
+    };
+    expect(await live()).toEqual({ status: 200, body: { ok: true } });
+
+    await s.core.advanceTo(s.clock.now());
+    s.clock.set(new Date(s.clock.now().getTime() + 6 * 60 * 1000));
+
+    expect((await s.request("/health")).status).toBe(503);
+    expect(await live()).toEqual({ status: 200, body: { ok: true } });
+  });
 });
 
 describe("spa", () => {

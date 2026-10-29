@@ -1,4 +1,4 @@
-// The HTTP surface: /health, Better Auth under /api/auth, the JSON API under
+// The HTTP surface: /health and /healthz, Better Auth under /api/auth, the JSON API under
 // /api, two plain sign-in error pages, and the built SPA with a fallback to
 // index.html for client-side routes.
 
@@ -14,6 +14,7 @@ import {
   INVITE_REQUIRED_PATH,
   type ApiErrorResponse,
   type HealthResponse,
+  type LivenessResponse,
   type MeResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
@@ -34,6 +35,14 @@ type Env = { Variables: { accountId: AccountId } };
 export function createApp({ core, auth, staticDir }: AppOptions) {
   const app = new Hono<Env>();
 
+  // Liveness, for Fly's check: the process serves and the database answers.
+  // It ignores the scheduler, so a stuck scheduler alerts via /health instead
+  // of taking the only machine out of rotation.
+  app.get("/healthz", (c) => {
+    core.lastTick();
+    const body: LivenessResponse = { ok: true };
+    return c.json(body);
+  });
   app.get("/health", (c) => {
     const health = core.health();
     const body: HealthResponse = { ok: health.ok, lastTick: health.lastTick?.toISOString() ?? null };

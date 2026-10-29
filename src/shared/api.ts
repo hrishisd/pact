@@ -35,7 +35,12 @@ export type SetTimezoneResponse = SetTimezoneResult;
 /** GET /api/today */
 export type TodayResponse = Today;
 
-/** GET /health */
+/** GET /healthz: liveness only (process up, database readable). */
+export interface LivenessResponse {
+  ok: true;
+}
+
+/** GET /health: fails when the scheduler has not ticked for 5 minutes. */
 export interface HealthResponse {
   ok: boolean;
   /** ISO 8601, or null before the first scheduler tick. */

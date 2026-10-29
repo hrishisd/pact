@@ -63,4 +63,4 @@ Done and checked locally: core skeleton with the four ports and fakes, SQLite (W
 
 Not yet verified (needs the operator, see `scripts/setup-operator.sh`): Docker image build (no local Docker daemon), Fly deploy and `ewr` availability/pricing, R2 replication and the practice restore, real Google sign-in, and Google sign-in inside the iPhone home-screen app. Record those results here.
 
-Decision: no Fly `http_service` health check on `/health`. With one machine, a failing check would take the app offline when only the scheduler is stuck; the external uptime monitor watches `/health` instead.
+Decision: two health endpoints. Fly's `http_service` check uses `/healthz` (liveness: process up, database readable), which also fails a deploy whose new version doesn't come up. `/health` (scheduler ticked in the last 5 minutes) is watched only by the external uptime monitor: with one machine, pointing Fly's check at it would take the whole app offline when only the scheduler is stuck.

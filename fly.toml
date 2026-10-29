@@ -29,9 +29,17 @@ kill_timeout = "30s"
   auto_start_machines = true
   min_machines_running = 1
 
-  # No Fly health check on /health: with one machine, a failing check would
-  # take the whole app offline when only the scheduler is stuck. An external
-  # uptime monitor watches /health and emails the operator instead (ADR 0002).
+  # Fly checks liveness only, which also makes a deploy fail when the new
+  # version doesn't come up. /health (scheduler freshness) is deliberately not
+  # checked here: with one machine, a failing check would take the whole app
+  # offline when only the scheduler is stuck. The external uptime monitor
+  # watches /health and emails the operator instead (ADR 0002).
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
 
 [[vm]]
   size = "shared-cpu-1x"
