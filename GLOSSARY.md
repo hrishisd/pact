@@ -27,7 +27,7 @@ When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. 
 _Avoid_: Frequency, recurrence, cadence
 
 **Occurrence**:
-One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact.
+One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact. An occurrence **opens** when its period starts (its date, its Mon–Sun week, or the pact's start for One-time). A change to a pact applies only to occurrences that haven't opened yet, except on One-time pacts.
 _Avoid_: Instance, check-in, day, session
 
 **Kept / Missed / Excused**:

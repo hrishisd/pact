@@ -105,7 +105,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 62. As an owner, I want to request a change to an Active pact through the same form I used to create it, pre-filled, so that changing it is easy.
 63. As an owner, I want any change that makes a pact less strict (deleting, ending, lowering the penalty, easing the schedule, removing a reviewer, changing the recipient or the description) to need a reviewer's approval, and any change that only makes it stricter (raising the penalty, adding days) to take effect at once, so that I can't escape a commitment on a weak evening but can always raise the stakes.
-64. As an owner, I want my pact to keep its current terms until the change is approved, so that it's always clear which rules apply.
+64. As an owner, I want my pact to keep its current terms until the change is approved, and any change to start with the first occurrence that hasn't opened yet, with the pact page showing when the new terms start, so that it's always clear which rules apply and today's rules never shift under me. Excuses, not change requests, cover an occurrence that's already open.
 65. As a reviewer, I want a before/after comparison of a requested change, so that I can see exactly what is being relaxed.
 66. As an owner, I want to add a reviewer without anyone's approval, so that I can replace a reviewer who has stopped responding.
 67. As an owner, I want a pact to always keep at least one reviewer, so that nobody is left to hold me accountable.
@@ -212,7 +212,11 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - a later due-by time, in-bed-by time, One-time deadline or start date; an earlier end date; removing a due-by time; adding an end date
 - A change that only makes the pact stricter takes effect at once, with no review: a higher penalty, more days, the opposite direction on any time field above, adding a due-by time, or removing an end date. A change that both relaxes and tightens is reviewed as a whole.
 - Changing the name or the reminders takes effect at once, with no review, since neither changes what counts.
-- Which occurrences a change applies to is still open (see Open questions under Further Notes).
+- A change takes effect when it's made (stricter) or approved (relaxing). From then it applies to every occurrence that hasn't opened yet. Occurrences already open keep the old terms, and judged occurrences, their penalties and bills never change. Change requests never rescue an open occurrence; excuses do that.
+- An occurrence opens when its period starts: at the start of its date for Fixed days (including a bedtime night), at 00:00 Monday for Weekly count, and at the pact's start for One-time.
+- One-time is the exception, since its only occurrence opens when the pact starts. A change applies to that open occurrence, as long as the new deadline is at least 1 hour after the change takes effect.
+- Example: raising the penalty at 3pm Thursday on a daily pact applies from Friday. Lowering a Weekly count target, approved on Wednesday, applies from next Monday.
+- v0 has no shortcut that skips approval for relaxing changes made well ahead.
 - Adding a reviewer is immediate, and the new reviewer is notified. A pact can never have zero reviewers.
 - A pact is Ended when its end date passes or an approved change request ends it.
 
@@ -290,7 +294,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
   Done cards don't appear, and neither do recurring pacts on days they aren't due. Evidence submitted today moves the card into Waiting for approval. Evidence is submitted **inline on the card**. There's no total owed; money appears only as a bill's To do card or an overdue alert. When nothing is open, a "Nothing to do right now" card says so. A pact in its edit window has a blue "New · edit for 7 min" chip next to its name and a blue left edge, here and in the Pacts list; both go away when the window closes. Each card shows its penalty as a bare amount in red ("$5"). An open Camera card shows the due time in orange as "Due at 9:00pm · 4h 12m", or "Due at midnight · 16h 19m" with no due-by time.
 - **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Create pact. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. The Reviewers and Reminders text depends on the kind: an Oura Ring pact has no photos to review, and its reminders go off every scheduled night. The Check step says the pact is Active as soon as it's created and names its first occurrence (e.g. "Wed Oct 21, due 10:00pm"). Editing a pact in its edit window reuses the form and skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both fill in the same fields, so switching later is a layout change.
-- **Pact page:** in the edit window, a blue bar at the top says how many minutes are left, with Edit and Delete. After that it offers File excuse and Request change. Its "Waiting on" list holds that pact's evidence, excuses and change requests, never payments, which belong to a recipient rather than a pact.
+- **Pact page:** in the edit window, a blue bar at the top says how many minutes are left, with Edit and Delete. After that it offers File excuse and Request change. Once a change is in force but not yet applied, the page says when the new terms start, e.g. "New terms start Fri Oct 30. Today keeps $5 per miss." Its "Waiting on" list holds that pact's evidence, excuses and change requests, never payments, which belong to a recipient rather than a pact.
 - **Occurrence labels:** an occurrence that isn't judged yet says what it's waiting for: **No Oura data**, **Waiting for approval** (a photo with a reviewer), or **Due today** ("This week" for Weekly count, the due date for One-time). A Missed occurrence with an excuse waiting reads **Missed · excuse waiting for approval**. The heat map legend calls them "Not judged yet". The UI never shows the word "pending".
 - **Lists:** rows you can tap are separate cards with a › chevron; rows you can't tap (Friends, Notifications, Connections, History) stay grouped in one block. The pacts list shows the penalty as a red amount too. The full wording, "$5 per miss", appears only in a pact's terms.
 - **Item kinds:** each review item kind has its own colour and icon: Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
@@ -327,7 +331,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - penalty holds
   - the first decision winning
   - a reviewer's question handing the item to the owner, and the reply handing it back
-  - change requests keeping the old terms
+  - change requests keeping the old terms, changes starting with the first occurrence not yet open, and the One-time exception
   - payment limits
   - oldest-first allocation
   - weekly bills: what goes on each, late penalties rolling to the next, and bills never changing
@@ -377,9 +381,6 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ## Further Notes
 
-- **Open questions:** these block the change-request work, not the rest of v0. Research into how Beeminder, Forfeit and similar apps handle them is under way.
-  - **When a stricter change applies.** Occurrences due soon keep the old terms, so that moving today's due-by time earlier can't make today Missed at once. The cutoff isn't settled; one candidate copies the 1-hour first-occurrence rule.
-  - **When an approved relaxing change applies.** One candidate: every occurrence not yet judged when the reviewer approves. Judged occurrences, their penalties and bills never change. The rule must be consistent with the stricter case and simple to explain.
 - Vocabulary follows the project glossary: Pact, Owner, Reviewer, Friend, Schedule, Occurrence, Kept/Missed/Excused, Evidence, Evidence kind, Connection, Excuse, Review Queue, Change Request, Penalty, Recipient, Ledger, Bill, Payment, Overdue, Active/Ended, Edit window.
 - **Oura API facts (researched 2026-10-24):**
   - OAuth2 only. Personal access tokens were removed in December 2025.
