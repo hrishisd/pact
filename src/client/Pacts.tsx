@@ -8,10 +8,7 @@ export function Pacts({ onOpenPact, onCreate }: { onOpenPact: (id: string, name:
   const { data: pacts, failed } = useLoad(api.pacts);
 
   return (
-    <>
-      <button className="btn primary" onClick={onCreate}>
-        New pact
-      </button>
+    <div className="stack">
       {failed && <Empty title="Pacts couldn't load" body="Check your connection and reopen Pact." />}
       {pacts?.length === 0 && <Empty title="No pacts yet" body="Pacts you create show up here." />}
       {pacts !== null && pacts.length > 0 && (
@@ -31,6 +28,12 @@ export function Pacts({ onOpenPact, onCreate }: { onOpenPact: (id: string, name:
           </div>
         </section>
       )}
-    </>
+      {/* Below the content (empty card or list); hidden while loading so it doesn't jump. */}
+      {(pacts !== null || failed) && (
+        <button className="btn primary" onClick={onCreate}>
+          New pact
+        </button>
+      )}
+    </div>
   );
 }
