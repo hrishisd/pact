@@ -22,13 +22,15 @@ import {
 } from "../shared/api.ts";
 import { createApp } from "./app.ts";
 import { createAuth, INVITE_REQUIRED_CODE } from "./auth.ts";
+import { loadConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:5173";
 /** The scenario harness's operator. */
 const OPERATOR = "owner@example.test";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
-async function server() {
+/** `canonicalOrigin` is the config's: null unless the server is in production. */
+async function server({ canonicalOrigin = null }: { canonicalOrigin?: string | null } = {}) {
   const s = scenario();
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
@@ -41,15 +43,16 @@ async function server() {
     google: { clientId: "test-client-id", clientSecret: "test-client-secret" },
   });
   await migrate();
-  const app = createApp({ core: s.core, auth, staticDir });
+  const app = createApp({ core: s.core, auth, staticDir, canonicalOrigin });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
   onTestFinished(() => close());
 
-  const request = (path: string, init: RequestInit & { cookie?: string } = {}) => {
+  /** `origin` is the one the browser is on: its host is the request's Host header. */
+  const request = (path: string, { origin = ORIGIN, ...init }: RequestInit & { cookie?: string; origin?: string } = {}) => {
     const headers = new Headers(init.headers);
-    headers.set("Origin", ORIGIN);
+    headers.set("Origin", origin);
     if (init.cookie) headers.set("Cookie", init.cookie);
-    return app.request(`${ORIGIN}${path}`, { ...init, headers });
+    return app.request(`${origin}${path}`, { ...init, headers });
   };
 
   return {
@@ -324,5 +327,74 @@ describe("spa", () => {
       expect(response.headers.get("Cache-Control")).toBe("no-cache");
     }
     expect((await s.request("/health")).headers.get("Cache-Control")).toBeNull();
+  });
+});
+
+describe("canonical host", () => {
+  const CANONICAL = "https://pact.example.test";
+  /** Fly's own hostname for the app, which also reaches it. */
+  const FLY_HOST = "https://pact-example.fly.dev";
+  const production = () =>
+    server({
+      canonicalOrigin: loadConfig({
+        NODE_ENV: "production",
+        PACT_DB_PATH: "/data/pact.db",
+        OPERATOR_EMAIL: OPERATOR,
+        GOOGLE_CLIENT_ID: "test-client-id",
+        GOOGLE_CLIENT_SECRET: "test-client-secret",
+        BETTER_AUTH_SECRET: "test-secret-0123456789-0123456789-0123456789",
+        BETTER_AUTH_URL: CANONICAL,
+      }).canonicalOrigin,
+    });
+
+  test("a page on another host redirects permanently to the same path and query on the canonical origin", async () => {
+    const s = await production();
+
+    const response = await s.request("/some/route?x=1&y=two", { origin: FLY_HOST });
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get("Location")).toBe(`${CANONICAL}/some/route?x=1&y=two`);
+  });
+
+  test("a POST on another host is redirected with 308, so it keeps its method and body", async () => {
+    const s = await production();
+
+    const response = await s.request(`${AUTH_BASE_PATH}/sign-in/social`, {
+      origin: FLY_HOST,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    });
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("Location")).toBe(`${CANONICAL}${AUTH_BASE_PATH}/sign-in/social`);
+  });
+
+  test("health checks answer on any host", async () => {
+    const s = await production();
+
+    for (const origin of [FLY_HOST, "http://172.19.0.2:8080"]) {
+      expect((await s.request("/healthz", { origin })).status).toBe(200);
+      expect((await s.request("/health", { origin })).status).toBe(503);
+    }
+  });
+
+  test("the canonical host is served, whatever the Host header's case or default port", async () => {
+    const s = await production();
+
+    // Behind Fly's proxy the request arrives as plain http, with the browser's Host header.
+    for (const origin of [CANONICAL, "http://pact.example.test", "http://PACT.Example.test:443"]) {
+      const page = await s.request("/some/client/route", { origin });
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("<div id=root>");
+    }
+  });
+
+  test("outside production every host is served", async () => {
+    const s = await server({ canonicalOrigin: loadConfig({ BETTER_AUTH_URL: CANONICAL }).canonicalOrigin });
+
+    const page = await s.request("/some/client/route", { origin: "http://localhost:3000" });
+
+    expect(page.status).toBe(200);
   });
 });

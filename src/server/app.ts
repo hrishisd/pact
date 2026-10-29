@@ -1,6 +1,6 @@
-// The HTTP surface: /health and /healthz, Better Auth under /api/auth, the JSON API under
-// /api, two plain sign-in error pages, and the built SPA with a fallback to
-// index.html for client-side routes.
+// The HTTP surface: /health and /healthz, a redirect to the canonical host,
+// Better Auth under /api/auth, the JSON API under /api, two plain sign-in error
+// pages, and the built SPA with a fallback to index.html for client-side routes.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,11 +28,13 @@ export interface AppOptions {
   auth: Auth;
   /** The Vite build output. When it has no index.html, only the API is served. */
   staticDir: string;
+  /** Requests on any other host redirect here; null serves every host. See Config. */
+  canonicalOrigin: string | null;
 }
 
 type Env = { Variables: { accountId: AccountId } };
 
-export function createApp({ core, auth, staticDir }: AppOptions) {
+export function createApp({ core, auth, staticDir, canonicalOrigin }: AppOptions) {
   const app = new Hono<Env>();
 
   // Liveness, for Fly's check: the process serves and the database answers.
@@ -48,6 +50,20 @@ export function createApp({ core, auth, staticDir }: AppOptions) {
     const body: HealthResponse = { ok: health.ok, lastTick: health.lastTick?.toISOString() ?? null };
     return c.json(body, health.ok ? 200 : 503);
   });
+
+  // The health routes above answer on any host: Fly's check and the uptime
+  // monitor may not use the canonical one. Behind Fly's proxy the request URL's
+  // host is the browser's Host header.
+  if (canonicalOrigin !== null) {
+    const canonical = new URL(canonicalOrigin);
+    app.use("*", async (c, next) => {
+      const url = new URL(c.req.url);
+      if (url.hostname === canonical.hostname) return next();
+      // 308, unlike 301, keeps a POST a POST.
+      const status = c.req.method === "GET" || c.req.method === "HEAD" ? 301 : 308;
+      return c.redirect(`${canonical.origin}${url.pathname}${url.search}`, status);
+    });
+  }
 
   app.on(["GET", "POST"], `${AUTH_BASE_PATH}/*`, (c) => auth.handler(c.req.raw));
 

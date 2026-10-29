@@ -18,6 +18,12 @@ export interface Config {
     /** The public origin the browser uses, e.g. https://pact.hrishisd.com. */
     url: string;
   };
+  /**
+   * Production only: the one origin the app answers on, BETTER_AUTH_URL's. Any
+   * other host (e.g. the fly.dev one) redirects here, so sign-in starts on the
+   * host its state cookie is checked on. Null in development, behind Vite's proxy.
+   */
+  canonicalOrigin: string | null;
   /** The built SPA (Vite output). */
   staticDir: string;
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
@@ -53,6 +59,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       // In development the browser talks to the Vite dev server, which proxies /api here.
       url: read("BETTER_AUTH_URL", "http://localhost:5173"),
     },
+    canonicalOrigin: null,
     staticDir: env.PACT_STATIC_DIR?.trim() || join(REPO_ROOT, "dist", "client"),
     restored: env.PACT_RESTORED === "1",
   };
@@ -60,6 +67,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (missing.length > 0) {
     throw new Error(`missing required environment variables: ${missing.join(", ")}`);
   }
+  if (production) config.canonicalOrigin = new URL(config.auth.url).origin;
   if (!Number.isInteger(port) || port <= 0) throw new Error(`PORT is not a port number: ${env.PORT}`);
   if (production && config.auth.secret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");
