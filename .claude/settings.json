@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "deny": ["Read(./.env)", "Read(./.env.operator)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-bash.sh" }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$CLAUDE_ENV_FILE\" ] && echo 'setopt NO_NOMATCH 2>/dev/null || true' >> \"$CLAUDE_ENV_FILE\" || true"
+          }
+        ]
+      }
+    ]
+  }
+}

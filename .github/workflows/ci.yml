@@ -1,4 +1,4 @@
-# Every push: typecheck, test and build. Pushes to main then deploy to Fly,
+# Every push: typecheck, lint, test and build. Pushes to main then deploy to Fly,
 # only if all of that passed (a failing test blocks the deploy).
 name: CI
 
@@ -15,6 +15,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run lint # shellcheck comes preinstalled on ubuntu-latest
       - run: npm test
       - run: npm run build
 

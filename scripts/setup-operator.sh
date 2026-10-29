@@ -111,7 +111,7 @@ ask() {
   current=$(_existing "$key" || true)
   # Readline needs the colour codes wrapped in \001..\002 to place the cursor.
   p="  $s$BOLD$e$prompt$s$RESET$e "
-  [[ -n "$current" ]] && p+="$s$DIM$e[Enter keeps current]$s$RESET$e "
+  [[ -n "$current" ]] && p+="$s$DIM${e}[Enter keeps current]$s$RESET$e "
   read -e -r -p "$p" input || rc=1
   if (( rc )) && [[ -z "$input" ]]; then return 1; fi
   [[ -z "$input" && -n "$current" ]] && input="$current"
@@ -163,19 +163,6 @@ set_secret() {
   fi
   SKIPPED+=("GitHub secret $name (set it manually: gh secret set $name)")
   warn "skipped GitHub secret $name: gh not ready; set it later"
-}
-
-# set_var NAME VALUE sets a GitHub Actions repo variable (non-secret).
-set_var() {
-  local name="$1" value="$2"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    if gh variable set "$name" --body "$value" >/dev/null 2>&1; then
-      printf '  %s✓ set%s GitHub variable %s\n' "$GREEN" "$RESET" "$name"
-      return
-    fi
-  fi
-  SKIPPED+=("GitHub variable $name")
-  warn "skipped GitHub variable $name, gh not ready; set it later"
 }
 
 # finish clears, then shows a closing summary of everything configured.
@@ -372,9 +359,11 @@ if confirm "Set these 8 secrets on '$FLY_APP' (staged: they apply on the next de
     "LITESTREAM_ENDPOINT=$LITESTREAM_ENDPOINT" \
     "LITESTREAM_ACCESS_KEY_ID=$LITESTREAM_ACCESS_KEY_ID" \
     "LITESTREAM_SECRET_ACCESS_KEY=$LITESTREAM_SECRET_ACCESS_KEY" \
-    | fly secrets import --stage -a "$FLY_APP" \
-    && printf '  %s✓ set%s 8 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP" \
-    || warn "fly secrets import failed: fix the error above and re-run this wizard"
+    | if fly secrets import --stage -a "$FLY_APP"; then
+        printf '  %s✓ set%s 8 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP"
+      else
+        warn "fly secrets import failed: fix the error above and re-run this wizard"
+      fi
   run fly secrets list -a "$FLY_APP"
 else
   SKIPPED+=("Fly secrets on $FLY_APP")
