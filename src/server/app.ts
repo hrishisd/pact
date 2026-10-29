@@ -243,9 +243,7 @@ export function createApp({
 
   // Better Auth redirects here, with ?error=<code>, when a sign-in fails.
   app.get(AUTH_ERROR_PATH, (c) =>
-    c.req.query("error") === INVITE_REQUIRED_CODE
-      ? c.redirect(INVITE_REQUIRED_PATH)
-      : c.html(signInFailedPage(), 400),
+    c.req.query("error") === INVITE_REQUIRED_CODE ? c.redirect(INVITE_REQUIRED_PATH) : c.html(signInFailedPage(), 400),
   );
   app.get(INVITE_REQUIRED_PATH, (c) => c.html(inviteRequiredPage(), 403));
 

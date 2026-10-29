@@ -4,12 +4,20 @@ import { api, failureText } from "./api.ts";
 import { money, scheduleText } from "./format.ts";
 import { Empty, useLoad } from "./ui.tsx";
 
-export function Pacts({ onOpenPact, onCreate }: { onOpenPact: (id: string, name: string) => void; onCreate: () => void }) {
+export function Pacts({
+  onOpenPact,
+  onCreate,
+}: {
+  onOpenPact: (id: string, name: string) => void;
+  onCreate: () => void;
+}) {
   const { data: pacts, failed } = useLoad(api.pacts);
 
   return (
     <div className="stack">
-      {failed && <Empty title="Pacts couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />}
+      {failed && (
+        <Empty title="Pacts couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
+      )}
       {pacts?.length === 0 && <Empty title="No pacts yet" body="Pacts you create show up here." />}
       {pacts !== null && pacts.length > 0 && (
         <section className="stack">

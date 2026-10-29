@@ -93,7 +93,8 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   me: () => call<MeResponse>(API_PATHS.me),
   today: () => call<TodayResponse>(API_PATHS.today),
-  setTimezone: (timezone: string) => post<SetTimezoneResponse>(API_PATHS.timezone, { timezone } satisfies SetTimezoneRequest),
+  setTimezone: (timezone: string) =>
+    post<SetTimezoneResponse>(API_PATHS.timezone, { timezone } satisfies SetTimezoneRequest),
   /** Works signed out. */
   invite: (token: string) => call<InviteLookupResponse>(API_PATHS.invite(encodeURIComponent(token))),
   createInvite: () => post<CreateInviteResponse>(API_PATHS.invites),
@@ -103,6 +104,7 @@ export const api = {
   addRecipient: (recipient: AddRecipientRequest) => post<AddRecipientResponse>(API_PATHS.recipients, recipient),
   pacts: () => call<PactsResponse>(API_PATHS.pacts),
   createPact: (pact: CreatePactRequest) => post<CreatePactResponse>(API_PATHS.pacts, pact),
-  firstOccurrence: (request: FirstOccurrenceRequest) => post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
+  firstOccurrence: (request: FirstOccurrenceRequest) =>
+    post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
   pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),
 };

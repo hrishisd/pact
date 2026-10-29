@@ -83,7 +83,9 @@ function InviteFriend() {
           Invite a friend
         </button>
         {state.kind === "failed" ? (
-          <p className="error">Couldn't make a link. {failureText(state.error, "Check your connection and try again.")}</p>
+          <p className="error">
+            Couldn't make a link. {failureText(state.error, "Check your connection and try again.")}
+          </p>
         ) : (
           <p className="muted small">Each link works once and expires in 7 days.</p>
         )}

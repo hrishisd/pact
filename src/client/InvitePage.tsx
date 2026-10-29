@@ -39,7 +39,9 @@ export function InvitePage({
     setState({ kind: "loading" });
     api.invite(token).then(
       (lookup: InviteLookupResponse) =>
-        setState(lookup.ok ? { kind: "open", inviterName: lookup.inviterName } : { kind: "refused", reason: lookup.reason }),
+        setState(
+          lookup.ok ? { kind: "open", inviterName: lookup.inviterName } : { kind: "refused", reason: lookup.reason },
+        ),
       (error: unknown) => setState({ kind: "failed", error }),
     );
   };
@@ -50,7 +52,11 @@ export function InvitePage({
     setAcceptFailed(null);
     try {
       const result = await api.acceptInvite(token);
-      setState(result.ok ? { kind: "accepted", friendName: result.friend.name } : { kind: "refused", reason: result.reason, inviterName });
+      setState(
+        result.ok
+          ? { kind: "accepted", friendName: result.friend.name }
+          : { kind: "refused", reason: result.reason, inviterName },
+      );
     } catch (error) {
       setAcceptFailed({ error });
     } finally {
@@ -115,7 +121,9 @@ export function InvitePage({
           {profile ? (
             <div className="stack">
               {acceptFailed && (
-                <p className="error">Couldn't accept. {failureText(acceptFailed.error, "Check your connection and try again.")}</p>
+                <p className="error">
+                  Couldn't accept. {failureText(acceptFailed.error, "Check your connection and try again.")}
+                </p>
               )}
               <button className="btn primary block" disabled={busy} onClick={() => void accept(inviterName)}>
                 Accept
@@ -154,8 +162,14 @@ function refusalText(reason: Refusal, inviterName: string | undefined): { title:
       title: "This invite link doesn't work",
       body: "Check you have the whole link, or ask your friend for a new one.",
     },
-    "invite-used": { title: "This invite has been used", body: "Each invite link works once. Ask your friend for a new one." },
-    "invite-expired": { title: "This invite has expired", body: "Invite links last 7 days. Ask your friend for a new one." },
+    "invite-used": {
+      title: "This invite has been used",
+      body: "Each invite link works once. Ask your friend for a new one.",
+    },
+    "invite-expired": {
+      title: "This invite has expired",
+      body: "Invite links last 7 days. Ask your friend for a new one.",
+    },
   };
   switch (reason) {
     case "own-invite":

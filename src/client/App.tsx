@@ -58,7 +58,9 @@ export function App() {
       setInviteToken(null);
       void load();
     };
-    return <InvitePage token={inviteToken} profile={session.kind === "signed-in" ? session.profile : null} onDone={leave} />;
+    return (
+      <InvitePage token={inviteToken} profile={session.kind === "signed-in" ? session.profile : null} onDone={leave} />
+    );
   }
 
   switch (session.kind) {
@@ -239,7 +241,12 @@ function Shell({
   else {
     title = TABS.find((t) => t.id === tab)!.label;
     if (tab === "today") {
-      subtitle = new Intl.DateTimeFormat("en-US", { timeZone: profile.timezone, weekday: "short", month: "short", day: "numeric" }).format(new Date());
+      subtitle = new Intl.DateTimeFormat("en-US", {
+        timeZone: profile.timezone,
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }).format(new Date());
     }
   }
 
@@ -268,12 +275,19 @@ function Shell({
             onInvite={() => setProfileOpen(true)}
           />
         )}
-        {!page && tab === "today" && <Today onOpenPact={openPact} onCreate={create} onInvite={() => setProfileOpen(true)} />}
+        {!page && tab === "today" && (
+          <Today onOpenPact={openPact} onCreate={create} onInvite={() => setProfileOpen(true)} />
+        )}
         {!page && tab === "pacts" && <Pacts onOpenPact={openPact} onCreate={create} />}
         {!page && tab === "review" && (
-          <Empty title="Nothing to review" body="When a friend picks you as a reviewer, their submitted evidence and excuses show up here." />
+          <Empty
+            title="Nothing to review"
+            body="When a friend picks you as a reviewer, their submitted evidence and excuses show up here."
+          />
         )}
-        {!page && tab === "ledgers" && <Empty title="No ledgers yet" body="Each recipient you name on a pact gets one ledger." />}
+        {!page && tab === "ledgers" && (
+          <Empty title="No ledgers yet" body="Each recipient you name on a pact gets one ledger." />
+        )}
       </main>
       <nav className="tabbar" aria-label="Main">
         {TABS.map(({ id, label, Icon }) => (
@@ -332,7 +346,13 @@ function ProfileSheet({
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="sheet gut" role="dialog" aria-modal="true" aria-label="Profile" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="sheet gut"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Profile"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="grab" />
         <div className="spread">
           <h2>Profile</h2>

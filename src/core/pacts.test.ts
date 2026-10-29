@@ -95,7 +95,9 @@ describe("what a pact needs", () => {
     const s = scenario();
     const { owner, reviewer, recipient } = await ownerWithReviewer(s);
 
-    const created = await owner.createPact(gymPact(recipient.id, reviewer, { name: " Gym ", description: " A photo\n" }));
+    const created = await owner.createPact(
+      gymPact(recipient.id, reviewer, { name: " Gym ", description: " A photo\n" }),
+    );
 
     if (!created.ok) throw new Error(created.reason);
     expect(owner.pact(created.pactId)).toMatchObject({ ok: true, pact: { name: "Gym", description: "A photo" } });
@@ -142,7 +144,10 @@ describe("reviewers and recipient", () => {
     if (!theirs.ok) throw new Error(theirs.reason);
 
     for (const recipientId of [theirs.recipient.id, "no-such-recipient"]) {
-      expect(await owner.createPact(gymPact(recipientId, reviewer))).toEqual({ ok: false, reason: "unknown-recipient" });
+      expect(await owner.createPact(gymPact(recipientId, reviewer))).toEqual({
+        ok: false,
+        reason: "unknown-recipient",
+      });
     }
     expect(owner.pacts()).toEqual([]);
     expect(await owner.createPact(gymPact(recipient.id, reviewer))).toMatchObject({ ok: true });
@@ -168,7 +173,12 @@ describe("the Pacts tab", () => {
 
     expect(owner.pacts()).toEqual([
       { id: gym.pactId, name: "Gym", schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] }, penaltyCents: 500 },
-      { id: reading.pactId, name: "Reading", schedule: { kind: "fixed-days", days: ["sat", "sun"] }, penaltyCents: 250 },
+      {
+        id: reading.pactId,
+        name: "Reading",
+        schedule: { kind: "fixed-days", days: ["sat", "sun"] },
+        penaltyCents: 250,
+      },
     ]);
     expect(owner.pact(gym.pactId)).toMatchObject({ ok: true, pact: { name: "Gym" } });
     expect(reviewer.pacts()).toEqual([]);
@@ -193,7 +203,9 @@ describe("first occurrence", () => {
     s.setClockTo(createdAt);
 
     const named = owner.firstOccurrence({ ...daily, days: [...daily.days] });
-    const created = await owner.createPact(gymPact(recipient.id, reviewer, { schedule: { ...daily, days: [...daily.days] } }));
+    const created = await owner.createPact(
+      gymPact(recipient.id, reviewer, { schedule: { ...daily, days: [...daily.days] } }),
+    );
 
     const expected = { date, dueAt: s.at(dueAt) };
     expect(named).toEqual({ ok: true, firstOccurrence: expected });

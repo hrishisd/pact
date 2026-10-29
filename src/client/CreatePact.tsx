@@ -3,7 +3,14 @@
 // the steps only stop the owner moving on with a field left empty.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { WEEKDAYS, type CreatePactRefusal, type FirstOccurrence, type Friend, type Recipient, type Weekday } from "../shared/types.ts";
+import {
+  WEEKDAYS,
+  type CreatePactRefusal,
+  type FirstOccurrence,
+  type Friend,
+  type Recipient,
+  type Weekday,
+} from "../shared/types.ts";
 import type { Json } from "../shared/api.ts";
 import { api, failureText } from "./api.ts";
 import { formatDate, initial } from "./format.ts";
@@ -108,11 +115,14 @@ export function CreatePact({
   const loadFriends = () => api.friends().then(setFriends, (error: unknown) => setLoadFailed({ error }));
   useEffect(() => {
     void loadFriends();
-    api.recipients().then((list) => {
-      setRecipients(list);
-      // With only one saved recipient, it's the one.
-      if (list.length === 1) setForm((f) => (f.recipientId === null ? { ...f, recipientId: list[0]!.id } : f));
-    }, (error: unknown) => setLoadFailed({ error }));
+    api.recipients().then(
+      (list) => {
+        setRecipients(list);
+        // With only one saved recipient, it's the one.
+        if (list.length === 1) setForm((f) => (f.recipientId === null ? { ...f, recipientId: list[0]!.id } : f));
+      },
+      (error: unknown) => setLoadFailed({ error }),
+    );
   }, []);
 
   useEffect(() => {
@@ -206,7 +216,9 @@ export function CreatePact({
         </small>
       </div>
       {loadFailed && (
-        <p className="error">Some of this couldn't load. {failureText(loadFailed.error, "Check your connection and reopen Pact.")}</p>
+        <p className="error">
+          Some of this couldn't load. {failureText(loadFailed.error, "Check your connection and reopen Pact.")}
+        </p>
       )}
       {body}
       {tried && problem && <p className="error">{PROBLEMS[problem]}</p>}
@@ -271,7 +283,12 @@ function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>
       <h2>Goal</h2>
       <label className="field">
         <span>Name</span>
-        <input className="inp" value={form.name} placeholder="e.g. Gym" onChange={(e) => update({ name: e.target.value })} />
+        <input
+          className="inp"
+          value={form.name}
+          placeholder="e.g. Gym"
+          onChange={(e) => update({ name: e.target.value })}
+        />
         <small>Shown on Today.</small>
       </label>
       <label className="field">
@@ -299,13 +316,22 @@ function ScheduleStep({ days, onDays }: { days: Weekday[]; onDays: (days: Weekda
         <span>Days</span>
         <div className="days" role="group" aria-label="Days">
           {WEEKDAYS.map((day) => (
-            <button key={day} aria-pressed={days.includes(day)} aria-label={DAY_BUTTONS[day].full} onClick={() => toggle(day)}>
+            <button
+              key={day}
+              aria-pressed={days.includes(day)}
+              aria-label={DAY_BUTTONS[day].full}
+              onClick={() => toggle(day)}
+            >
               {DAY_BUTTONS[day].short}
             </button>
           ))}
         </div>
       </div>
-      <button className="btn sm self-start" aria-pressed={everyDay} onClick={() => onDays(everyDay ? [] : [...WEEKDAYS])}>
+      <button
+        className="btn sm self-start"
+        aria-pressed={everyDay}
+        onClick={() => onDays(everyDay ? [] : [...WEEKDAYS])}
+      >
         Every day
       </button>
       <small className="muted">You can submit on scheduled days only, until midnight.</small>
@@ -446,7 +472,12 @@ function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipien
     <div className="card">
       <label className="field">
         <span>Name</span>
-        <input className="inp" value={name} placeholder="e.g. Sam, or City Food Bank" onChange={(e) => setName(e.target.value)} />
+        <input
+          className="inp"
+          value={name}
+          placeholder="e.g. Sam, or City Food Bank"
+          onChange={(e) => setName(e.target.value)}
+        />
       </label>
       {error && <p className="error">{error}</p>}
       <div className="row2">
@@ -481,7 +512,9 @@ function ReviewersStep({
         <h2>Reviewers</h2>
         <div className="card">
           <h3>No friends yet</h3>
-          <p className="muted">Only friends can review your pacts. Invite one, and they show up here once they accept.</p>
+          <p className="muted">
+            Only friends can review your pacts. Invite one, and they show up here once they accept.
+          </p>
           <div className="row2">
             <button className="btn primary" onClick={onInvite}>
               Invite a friend
@@ -517,7 +550,8 @@ function ReviewersStep({
   );
 }
 
-type FirstState = { kind: "loading" } | { kind: "loaded"; first: Json<FirstOccurrence> } | { kind: "failed"; error: unknown };
+type FirstState =
+  { kind: "loading" } | { kind: "loaded"; first: Json<FirstOccurrence> } | { kind: "failed"; error: unknown };
 
 /** How often the Check step asks again, so the day it names stays the one Create would store. */
 const FIRST_OCCURRENCE_REFRESH_MS = 60_000;
@@ -533,7 +567,10 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
     };
     const load = () =>
       api.firstOccurrence({ schedule: { kind: "fixed-days", days } }).then(
-        (result) => show(result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason }),
+        (result) =>
+          show(
+            result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
+          ),
         (error: unknown) => show({ kind: "failed", error }),
       );
     void load();
@@ -574,7 +611,9 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
           )}
         </p>
         {first.kind === "failed" && (
-          <p className="muted small">Couldn't load the first day. {failureText(first.error, "Check your connection.")}</p>
+          <p className="muted small">
+            Couldn't load the first day. {failureText(first.error, "Check your connection.")}
+          </p>
         )}
       </div>
     </>

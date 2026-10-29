@@ -56,10 +56,7 @@ export interface PactCore {
    * which the new account then claims: no one else can sign in with it or
    * accept it. Signing in doesn't use the invite up (accepting it does).
    */
-  signIn(
-    identity: { email: string; name: string },
-    options?: { inviteToken?: string },
-  ): Promise<SignInResult>;
+  signIn(identity: { email: string; name: string }, options?: { inviteToken?: string }): Promise<SignInResult>;
   /** The invite page's view of `token` for a signed-out visitor: a claimed invite shows as used. */
   invite(token: string): InviteLookup;
   /** The account signed in with `email` (whatever its case), or null if there is none. Never writes. */
@@ -189,9 +186,7 @@ class Core implements PactCore {
           .run(this.#clock.now().toISOString(), row.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.#db
-          .prepare(`UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?`)
-          .run(message, row.id);
+        this.#db.prepare(`UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?`).run(message, row.id);
         this.#log(
           `notification ${row.id} (${row.kind} to ${row.recipient_account_id}) not delivered, will retry: ${message}`,
         );
@@ -199,18 +194,14 @@ class Core implements PactCore {
     }
   }
 
-  signIn(
-    identity: { email: string; name: string },
-    options: { inviteToken?: string } = {},
-  ): Promise<SignInResult> {
+  signIn(identity: { email: string; name: string }, options: { inviteToken?: string } = {}): Promise<SignInResult> {
     return this.#command((): SignInResult => {
       const existing = this.accountIdForEmail(identity.email);
       if (existing !== null) return { ok: true, accountId: existing };
 
       const key = emailKey(identity.email);
       const isOperator =
-        key === this.#operatorEmailKey &&
-        !this.#db.prepare(`SELECT 1 FROM account WHERE is_operator = 1`).get();
+        key === this.#operatorEmailKey && !this.#db.prepare(`SELECT 1 FROM account WHERE is_operator = 1`).get();
       const invite = options.inviteToken === undefined ? undefined : this.#inviteRow(options.inviteToken);
       const invited = invite !== undefined && this.#inviteLookup(invite, null).ok;
       if (!isOperator && !invited) return { ok: false, reason: "invite-required" };
@@ -261,24 +252,21 @@ class Core implements PactCore {
   #areFriends(a: AccountId, b: AccountId): boolean {
     const [first, second] = friendshipPair(a, b);
     return (
-      this.#db
-        .prepare(`SELECT 1 FROM friendship WHERE account_a_id = ? AND account_b_id = ?`)
-        .get(first, second) !== undefined
+      this.#db.prepare(`SELECT 1 FROM friendship WHERE account_a_id = ? AND account_b_id = ?`).get(first, second) !==
+      undefined
     );
   }
 
   accountIdForEmail(email: string): AccountId | null {
     const row = this.#db.prepare(`SELECT id FROM account WHERE email_key = ?`).get(emailKey(email)) as
-      | { id: string }
-      | undefined;
+      { id: string } | undefined;
     return row?.id ?? null;
   }
 
   as(accountId: AccountId): AccountView {
     const account = () => {
-      const row = this.#db
-        .prepare(`SELECT email, name, timezone FROM account WHERE id = ?`)
-        .get(accountId) as { email: string; name: string; timezone: string | null } | undefined;
+      const row = this.#db.prepare(`SELECT email, name, timezone FROM account WHERE id = ?`).get(accountId) as
+        { email: string; name: string; timezone: string | null } | undefined;
       if (!row) throw new UnknownAccountError(accountId);
       return row;
     };
@@ -298,9 +286,7 @@ class Core implements PactCore {
           const now = this.#clock.now();
           const expiresAt = new Date(now.getTime() + INVITE_LIFETIME_MS);
           this.#db
-            .prepare(
-              `INSERT INTO invite (token, inviter_account_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
-            )
+            .prepare(`INSERT INTO invite (token, inviter_account_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
             .run(token, accountId, now.toISOString(), expiresAt.toISOString());
           return { token, expiresAt };
         }),
@@ -531,15 +517,13 @@ class Core implements PactCore {
 
   lastTick(): Date | null {
     const row = this.#db.prepare(`SELECT last_tick_at FROM scheduler_state WHERE id = 1`).get() as
-      | { last_tick_at: string }
-      | undefined;
+      { last_tick_at: string } | undefined;
     return row ? new Date(row.last_tick_at) : null;
   }
 
   health(): Health {
     const lastTick = this.lastTick();
-    const ok =
-      lastTick !== null && this.#clock.now().getTime() - lastTick.getTime() <= HEALTHY_TICK_AGE_MS;
+    const ok = lastTick !== null && this.#clock.now().getTime() - lastTick.getTime() <= HEALTHY_TICK_AGE_MS;
     return { ok, lastTick };
   }
 
@@ -548,8 +532,7 @@ class Core implements PactCore {
       () => {
         const lastTick = this.lastTick()?.toISOString() ?? null;
         const operator = this.#db.prepare(`SELECT id FROM account WHERE is_operator = 1`).get() as
-          | { id: string }
-          | undefined;
+          { id: string } | undefined;
         if (operator) {
           this.#enqueue({
             recipient: operator.id,

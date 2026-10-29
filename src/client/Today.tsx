@@ -19,7 +19,10 @@ export function Today({
   const { data: today, failed } = useLoad(api.today);
   const now = useNow();
 
-  if (failed) return <Empty title="Today couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />;
+  if (failed)
+    return (
+      <Empty title="Today couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
+    );
   if (today === null) return null;
 
   // Story 4: a new user's first screen says what to do next.
@@ -38,7 +41,12 @@ export function Today({
     );
   }
   if (today.alerts.length === 0 && today.sections.length === 0) {
-    return <Empty title="Nothing to do right now" body="When one of your pacts needs something from you, it shows up here." />;
+    return (
+      <Empty
+        title="Nothing to do right now"
+        body="When one of your pacts needs something from you, it shows up here."
+      />
+    );
   }
   return (
     <>
@@ -61,7 +69,13 @@ function Section({
   switch (section.kind) {
     case "to-do":
       return section.cards.map((card) => (
-        <PactCard key={card.pactId} name={card.name} penaltyCents={card.penaltyCents} chip={<span className="chip c-todo">To do</span>} onOpen={() => onOpenPact(card.pactId, card.name)}>
+        <PactCard
+          key={card.pactId}
+          name={card.name}
+          penaltyCents={card.penaltyCents}
+          chip={<span className="chip c-todo">To do</span>}
+          onOpen={() => onOpenPact(card.pactId, card.name)}
+        >
           <div className="meta due">Due at midnight · {timeLeft(Date.parse(card.dueAt) - now)}</div>
         </PactCard>
       ));

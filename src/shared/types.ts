@@ -3,9 +3,7 @@
 
 export type AccountId = string;
 
-export type SignInResult =
-  | { ok: true; accountId: AccountId }
-  | { ok: false; reason: "invite-required" };
+export type SignInResult = { ok: true; accountId: AccountId } | { ok: false; reason: "invite-required" };
 
 export interface Invite {
   /** Unguessable; the invite link carries it. */
@@ -19,8 +17,7 @@ export type InviteUnusableReason = "invite-not-found" | "invite-used" | "invite-
 
 /** The invite page's view of a token, read without an account. */
 export type InviteLookup =
-  | { ok: true; inviterName: string; expiresAt: Date }
-  | { ok: false; reason: InviteUnusableReason };
+  { ok: true; inviterName: string; expiresAt: Date } | { ok: false; reason: InviteUnusableReason };
 
 export interface Friend {
   id: AccountId;
@@ -29,8 +26,7 @@ export interface Friend {
 
 export type AcceptInviteResult =
   /** `friend` is the inviter. */
-  | { ok: true; friend: Friend }
-  | { ok: false; reason: InviteUnusableReason | "own-invite" | "already-friends" };
+  { ok: true; friend: Friend } | { ok: false; reason: InviteUnusableReason | "own-invite" | "already-friends" };
 
 /** Who a pact's penalties are meant to go to: just a name, saved per owner. */
 export interface Recipient {
@@ -98,8 +94,7 @@ export interface FirstOccurrence {
 }
 
 export type FirstOccurrenceResult =
-  | { ok: true; firstOccurrence: FirstOccurrence }
-  | { ok: false; reason: "no-days" | "no-timezone" };
+  { ok: true; firstOccurrence: FirstOccurrence } | { ok: false; reason: "no-days" | "no-timezone" };
 
 /** A card in the Pacts tab. */
 export interface PactSummary {
@@ -129,8 +124,7 @@ export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "p
 
 export type SetTimezoneResult =
   /** `timezone` is the zone's canonical IANA name, as stored. */
-  | { ok: true; timezone: string }
-  | { ok: false; reason: "invalid-timezone" };
+  { ok: true; timezone: string } | { ok: false; reason: "invalid-timezone" };
 
 export interface Profile {
   email: string;

@@ -37,9 +37,7 @@ export function openWithPragmas(path: string): Db {
 function migrate(db: Db, migrations: readonly string[]): void {
   const applied = db.pragma("user_version", { simple: true }) as number;
   if (applied > migrations.length) {
-    throw new Error(
-      `database is at schema version ${applied}, newer than this code knows (${migrations.length})`,
-    );
+    throw new Error(`database is at schema version ${applied}, newer than this code knows (${migrations.length})`);
   }
 
   const recorded = readFingerprints(db);

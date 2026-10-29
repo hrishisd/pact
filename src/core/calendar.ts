@@ -91,8 +91,7 @@ function offsetMs(instantMs: number, timezone: string): number {
     minute: "numeric",
     second: "numeric",
   }).formatToParts(new Date(instantMs));
-  const get = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((p) => p.type === type)?.value);
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value);
   const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
   return asUtc - Math.floor(instantMs / 1000) * 1000;
 }

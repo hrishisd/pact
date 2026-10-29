@@ -26,7 +26,9 @@ process.on("uncaughtExceptionMonitor", (error, origin) => logFile.append(`${orig
 if (!config.production) {
   const pinned = readFileSync(join(import.meta.dirname, "..", "..", ".nvmrc"), "utf8").trim();
   if (pinned.split(".")[0] !== process.versions.node.split(".")[0]) {
-    console.error(`Node ${process.versions.node} is running, but .nvmrc pins ${pinned}. Run under the pinned Node (fnm use).`);
+    console.error(
+      `Node ${process.versions.node} is running, but .nvmrc pins ${pinned}. Run under the pinned Node (fnm use).`,
+    );
     process.exit(1);
   }
 }
@@ -40,7 +42,11 @@ const core = createPactCore({
   operatorEmail: config.operatorEmail,
 });
 
-const { auth, migrate, close: closeAuth } = createAuth({
+const {
+  auth,
+  migrate,
+  close: closeAuth,
+} = createAuth({
   core,
   dbPath: config.dbPath,
   secret: config.auth.secret,

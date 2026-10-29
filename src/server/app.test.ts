@@ -77,7 +77,10 @@ async function server({
   onTestFinished(() => close());
 
   /** `origin` is the one the browser is on: its host is the request's Host header. */
-  const request = (path: string, { origin = ORIGIN, ...init }: RequestInit & { cookie?: string; origin?: string } = {}) => {
+  const request = (
+    path: string,
+    { origin = ORIGIN, ...init }: RequestInit & { cookie?: string; origin?: string } = {},
+  ) => {
     const headers = new Headers(init.headers);
     headers.set("Origin", origin);
     if (init.cookie) headers.set("Cookie", init.cookie);
@@ -142,8 +145,7 @@ async function server({
     authRows() {
       const db = new Database(s.dbPath, { readonly: true });
       try {
-        const count = (table: string) =>
-          (db.prepare(`SELECT count(*) AS n FROM "${table}"`).get() as { n: number }).n;
+        const count = (table: string) => (db.prepare(`SELECT count(*) AS n FROM "${table}"`).get() as { n: number }).n;
         return { user: count("auth_user"), account: count("auth_account"), session: count("auth_session") };
       } finally {
         db.close();
@@ -198,7 +200,9 @@ describe("sign-in", () => {
 
     // Trying again goes down the same path: there is no half-made user to sign in as.
     const again = await s.signIn("stranger@example.test");
-    expect(again.response.headers.get("Location")).toMatch(new RegExp(`^${AUTH_ERROR_PATH}\\?error=${INVITE_REQUIRED_CODE}`));
+    expect(again.response.headers.get("Location")).toMatch(
+      new RegExp(`^${AUTH_ERROR_PATH}\\?error=${INVITE_REQUIRED_CODE}`),
+    );
     expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
   });
 

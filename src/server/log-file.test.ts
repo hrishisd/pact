@@ -29,7 +29,10 @@ function setup() {
   return { dir, path: join(dir, "logs", "pact.log"), stdout, stderr };
 }
 
-const lines = (path: string) => readFileSync(path, "utf8").split("\n").filter((line) => line !== "");
+const lines = (path: string) =>
+  readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line !== "");
 
 test("every line either stream writes is copied to the file with a timestamp, and still reaches the stream", () => {
   const { path, stdout, stderr } = setup();

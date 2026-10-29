@@ -134,7 +134,10 @@ function devSignInPlugin(core: PactCore) {
           // The core has the account now, so the create hook's own core.signIn finds it and agrees.
           const user =
             (await ctx.context.internalAdapter.findUserByEmail(email))?.user ??
-            (await ctx.context.internalAdapter.createUser({ email, name, emailVerified: true }, { method: "dev-sign-in" }));
+            (await ctx.context.internalAdapter.createUser(
+              { email, name, emailVerified: true },
+              { method: "dev-sign-in" },
+            ));
           const session = await ctx.context.internalAdapter.createSession(user.id);
           await setSessionCookie(ctx, { session, user });
           return ctx.json({ ok: true });
@@ -161,7 +164,9 @@ const devSignInBody = {
         typeof body?.email === "string" &&
         typeof body.name === "string" &&
         (body.inviteToken === undefined || typeof body.inviteToken === "string");
-      return valid ? { value: value as DevSignInBody } : { issues: [{ message: "expected { email, name, inviteToken? }" }] };
+      return valid
+        ? { value: value as DevSignInBody }
+        : { issues: [{ message: "expected { email, name, inviteToken? }" }] };
     },
     // Type-only, for inference.
     types: undefined as unknown as { input: DevSignInBody; output: DevSignInBody },

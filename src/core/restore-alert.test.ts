@@ -40,9 +40,7 @@ describe("operator alert after a restore", () => {
 
     await s.core.raiseRestoreAlert();
 
-    expect(s.notifier.sentTo(owner).map((n) => n.payload)).toEqual([
-      { alert: "database-restored", lastTick: null },
-    ]);
+    expect(s.notifier.sentTo(owner).map((n) => n.payload)).toEqual([{ alert: "database-restored", lastTick: null }]);
     expect(s.logs).toContainEqual(expect.stringMatching(/OPERATOR_ALERT.*none/));
   });
 
