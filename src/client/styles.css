@@ -15,6 +15,7 @@
   --kept-bg: #dceee2;
   --missed: #ad3227;
   --missed-bg: #f6dfda;
+  --due: #b0520a;
   --scrim: rgba(14, 22, 18, 0.45);
   --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -162,6 +163,16 @@ p {
   letter-spacing: 0;
   min-height: 1.2em;
 }
+.iconbtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
 .avatar {
   width: 36px;
   height: 36px;
@@ -221,10 +232,11 @@ p {
   width: 22px;
   height: 22px;
 }
-.tab[aria-current="page"] {
+/* aria-current is "page" on a tab's own screen and "true" while a page is pushed on it. */
+.tab[aria-current] {
   color: var(--accent);
 }
-.tab[aria-current="page"] .tile {
+.tab[aria-current] .tile {
   background: var(--accent-soft);
   font-weight: 700;
 }
@@ -285,6 +297,11 @@ p {
   color: var(--missed);
   border-color: var(--missed);
 }
+.btn.sm {
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 10px;
+}
 .btn.block {
   width: 100%;
 }
@@ -319,6 +336,155 @@ p {
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 16px; /* 16px stops iOS zooming into the field */
+}
+
+.avatar.sm {
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
+}
+.avatar.lg {
+  width: 64px;
+  height: 64px;
+  font-size: 26px;
+}
+.invite-head {
+  align-items: center;
+  text-align: center;
+}
+
+/* Today's cards: tapping one opens its pact. */
+.tcard {
+  cursor: pointer;
+}
+.tcard:hover {
+  border-color: var(--muted);
+}
+.meta {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.pen,
+.meta.pen {
+  color: var(--missed);
+  font-weight: 700;
+}
+.due,
+.meta.due {
+  color: var(--due);
+  font-weight: 600;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.c-kept {
+  background: var(--kept-bg);
+  color: var(--kept);
+}
+.c-todo {
+  background: var(--kept);
+  color: var(--paper);
+}
+.c-soon {
+  background: var(--sunk);
+  color: var(--muted);
+}
+
+/* Lists. Rows you can tap are separate cards with a chevron; rows you can't tap
+   stay grouped in one .list block. */
+.list {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.list > * + * {
+  border-top: 1px solid var(--line);
+}
+.rowbtn {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  background: none;
+  border: 0;
+  text-align: left;
+  width: 100%;
+}
+.rowbtn .rt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rowbtn .rt small {
+  color: var(--muted);
+}
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cards > .rowbtn {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  touch-action: manipulation;
+}
+.cards > .rowbtn::after {
+  content: "\203A";
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  margin-left: 2px;
+}
+
+/* A pact's terms. */
+.kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  font-size: 14px;
+  margin: 0;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+  min-width: 0;
+}
+.kv a {
+  color: var(--accent);
+}
+
+.alert {
+  border-radius: 14px;
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid;
+}
+.alert.info {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.invite-link {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
 }
 
 /* ---------- sheets ---------- */
@@ -364,4 +530,178 @@ p {
       opacity: 0.6;
     }
   }
+}
+
+/* ---------- create pact ---------- */
+.steps {
+  display: flex;
+  gap: 4px;
+}
+.steps i {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.steps i.on {
+  background: var(--accent);
+}
+.scroll h2 {
+  font-size: 20px;
+}
+.field small {
+  color: var(--muted);
+  font-size: 13px;
+}
+textarea.inp {
+  min-height: 76px;
+  resize: vertical;
+}
+.self-start {
+  align-self: flex-start;
+}
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Evidence kind tiles. Tapping one moves to the next step. */
+.kind-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.kind-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 14px 12px;
+  min-height: 150px;
+}
+.kind-tile b {
+  font-family: var(--f-display);
+  font-size: 17px;
+}
+.kind-tile small {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.kind-tile .chip {
+  margin-top: auto;
+}
+.kind-tile:disabled {
+  cursor: not-allowed;
+  background: var(--paper);
+}
+.kind-tile:disabled b,
+.kind-tile:disabled .tico {
+  opacity: 0.55;
+}
+.tico {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--sunk);
+  display: grid;
+  place-items: center;
+  margin-bottom: 4px;
+}
+.tico svg {
+  width: 24px;
+  height: 24px;
+}
+/* Weekday picker, Monday first. */
+.days {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.days button {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-weight: 600;
+  font-size: 13px;
+  touch-action: manipulation;
+}
+.days button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.money-inp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.money-inp b {
+  font-size: 20px;
+}
+.money-inp .inp {
+  max-width: 140px;
+}
+/* A choice in a list: a recipient (button) or a reviewer (label with a checkbox). */
+.opt {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 10px 12px;
+  width: 100%;
+  cursor: pointer;
+}
+.opt[aria-pressed="true"],
+.opt:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.opt .rt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.opt small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.opt input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.glyph {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--sunk);
+  display: grid;
+  place-items: center;
+  font-family: var(--f-display);
+  font-weight: 700;
+  flex: none;
+}
+/* Back / Next, kept in reach at the bottom of the form. */
+.footbar {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  display: flex;
+  gap: 10px;
+  padding-block: 12px 4px;
+  background: linear-gradient(to bottom, transparent, var(--paper) 30%);
+}
+.btn.grow {
+  flex: 1;
 }

@@ -15,7 +15,20 @@ import {
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
   INVITE_REQUIRED_PATH,
+  INVITE_TOKEN_SIGN_IN_KEY,
+  invitePath,
+  type AcceptInviteResponse,
+  type AddRecipientResponse,
+  type CreateInviteResponse,
+  type CreatePactRequest,
+  type CreatePactResponse,
+  type FirstOccurrenceResponse,
+  type FriendsResponse,
   type HealthResponse,
+  type InviteLookupResponse,
+  type PactResponse,
+  type PactsResponse,
+  type RecipientsResponse,
   type MeResponse,
   type SetTimezoneResponse,
   type TodayResponse,
@@ -62,6 +75,7 @@ async function server({
   };
 
   return {
+    at: s.at,
     clock: s.clock,
     core: s.core,
     staticDir,
@@ -70,14 +84,19 @@ async function server({
      * Signs in through Google's redirect, as the browser would: starts sign-in,
      * then comes back to the callback with a code that Google's (faked) token
      * endpoint exchanges for `email`. Returns the callback's response and the
-     * cookies it set.
+     * cookies it set. With `inviteToken`, signs in as the invite page does.
      */
-    async signIn(email: string) {
+    async signIn(email: string, { inviteToken }: { inviteToken?: string } = {}) {
       fakeGoogle(email);
+      // As the invite page does: come back to the invite, carrying its token.
+      const fromInvite =
+        inviteToken === undefined
+          ? { callbackURL: "/" }
+          : { callbackURL: invitePath(inviteToken), additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: inviteToken } };
       const start = await request(`${AUTH_BASE_PATH}/sign-in/social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "google", callbackURL: "/", errorCallbackURL: AUTH_ERROR_PATH }),
+        body: JSON.stringify({ provider: "google", errorCallbackURL: AUTH_ERROR_PATH, ...fromInvite }),
       });
       const { url } = (await start.json()) as { url: string };
       const state = new URL(url).searchParams.get("state")!;
@@ -85,6 +104,21 @@ async function server({
         cookie: cookieFrom(start),
       });
       return { response, cookie: cookieFrom(response) };
+    },
+    /** A JSON request to the API, as the account whose `cookie` is given (none by default). */
+    async api<T = unknown>(
+      path: string,
+      { cookie = "", method = "GET", body }: { cookie?: string; method?: string; body?: unknown } = {},
+    ) {
+      const response = await request(path, {
+        method,
+        cookie,
+        ...(body !== undefined && {
+          headers: { "Content-Type": "application/json" },
+          body: typeof body === "string" ? body : JSON.stringify(body),
+        }),
+      });
+      return { status: response.status, body: (await response.json()) as T };
     },
     async setTimezone(cookie: string, timezone: string) {
       return request(API_PATHS.timezone, {
@@ -217,7 +251,13 @@ describe("sign-in", () => {
     expect(after.timezone).toBe("America/Los_Angeles");
 
     const today = await s.request(API_PATHS.today, { cookie });
-    expect(await today.json()).toEqual({ alerts: [], sections: [], waiting: [], yesterday: [] } satisfies TodayResponse);
+    expect(await today.json()).toEqual({
+      hasPacts: false,
+      alerts: [],
+      sections: [],
+      waiting: [],
+      yesterday: [],
+    } satisfies TodayResponse);
   });
 
   test("the operator signing in again gets the same account", async () => {
@@ -244,14 +284,261 @@ describe("sign-in", () => {
   });
 });
 
+/** The operator, signed in with a confirmed timezone, and an invite they made at "Mon 09:00". */
+async function operatorWithInvite(s: Awaited<ReturnType<typeof server>>) {
+  const { cookie } = await s.signIn(OPERATOR);
+  await s.setTimezone(cookie, "America/New_York");
+  const invite = await s.api<CreateInviteResponse>(API_PATHS.invites, { cookie, method: "POST" });
+  expect(invite.status).toBe(200);
+  return { cookie, token: invite.body.token };
+}
+
+const REFUSED_SIGN_IN = new RegExp(`^${AUTH_ERROR_PATH}\\?error=${INVITE_REQUIRED_CODE}`);
+
+describe("invites", () => {
+  test("the invite page's lookup works signed out and names the inviter", async () => {
+    const s = await server();
+    const { token } = await operatorWithInvite(s);
+
+    const lookup = await s.api<InviteLookupResponse>(API_PATHS.invite(token));
+
+    expect(lookup).toEqual({
+      status: 200,
+      body: { ok: true, inviterName: "owner", expiresAt: "2026-01-12T14:00:00.000Z" } satisfies InviteLookupResponse,
+    });
+    expect(await s.api(API_PATHS.invite("no-such-token"))).toEqual({
+      status: 200,
+      body: { ok: false, reason: "invite-not-found" },
+    });
+  });
+
+  test("a new Google account with an invite signs in, accepts, and both are friends", async () => {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+
+    const { response, cookie } = await s.signIn("friend@example.test", { inviteToken: owner.token });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(invitePath(owner.token));
+    expect(s.authRows()).toEqual({ user: 2, account: 2, session: 2 });
+    const accept = await s.api<AcceptInviteResponse>(API_PATHS.acceptInvite(owner.token), { cookie, method: "POST" });
+    expect(accept).toMatchObject({ status: 200, body: { ok: true, friend: { name: "owner" } } });
+
+    expect((await s.api<FriendsResponse>(API_PATHS.friends, { cookie })).body).toEqual([
+      { id: expect.any(String), name: "owner" },
+    ]);
+    expect((await s.api<FriendsResponse>(API_PATHS.friends, { cookie: owner.cookie })).body).toEqual([
+      { id: expect.any(String), name: "friend" },
+    ]);
+  });
+
+  test("a forwarded link: once a new account claims it, a stranger sees it as used and can't sign in", async () => {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+    const claimant = await s.signIn("friend@example.test", { inviteToken: owner.token });
+
+    expect((await s.api(API_PATHS.invite(owner.token))).body).toEqual({ ok: false, reason: "invite-used" });
+    expect((await s.api(API_PATHS.invite(owner.token), { cookie: claimant.cookie })).body).toMatchObject({
+      ok: true,
+      inviterName: "owner",
+    });
+    const stranger = await s.signIn("stranger@example.test", { inviteToken: owner.token });
+    expect(stranger.response.headers.get("Location")).toMatch(REFUSED_SIGN_IN);
+    expect(s.authRows()).toEqual({ user: 2, account: 2, session: 2 });
+  });
+
+  test("a used invite shows as used, can't be accepted again, and lets no new account in", async () => {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+    const first = await s.signIn("friend@example.test", { inviteToken: owner.token });
+    await s.api(API_PATHS.acceptInvite(owner.token), { cookie: first.cookie, method: "POST" });
+
+    expect((await s.api(API_PATHS.invite(owner.token))).body).toEqual({ ok: false, reason: "invite-used" });
+    const again = await s.api(API_PATHS.acceptInvite(owner.token), { cookie: first.cookie, method: "POST" });
+    expect(again).toEqual({ status: 200, body: { ok: false, reason: "invite-used" } });
+
+    const stranger = await s.signIn("stranger@example.test", { inviteToken: owner.token });
+    expect(stranger.response.headers.get("Location")).toMatch(REFUSED_SIGN_IN);
+    expect(s.authRows()).toEqual({ user: 2, account: 2, session: 2 });
+  });
+
+  test("an invite 7 days old shows as expired and can't be accepted", async () => {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+    const { cookie } = await s.signIn("friend@example.test", { inviteToken: owner.token });
+
+    s.clock.set(s.at("2026-01-12T14:00:00Z"));
+
+    expect((await s.api(API_PATHS.invite(owner.token))).body).toEqual({ ok: false, reason: "invite-expired" });
+    const accept = await s.api(API_PATHS.acceptInvite(owner.token), { cookie, method: "POST" });
+    expect(accept).toEqual({ status: 200, body: { ok: false, reason: "invite-expired" } });
+    expect((await s.api(API_PATHS.friends, { cookie })).body).toEqual([]);
+  });
+
+  test("an expired invite lets no new account in", async () => {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+    s.clock.set(s.at("2026-01-12T14:00:00Z"));
+
+    const { response } = await s.signIn("friend@example.test", { inviteToken: owner.token });
+
+    expect(response.headers.get("Location")).toMatch(REFUSED_SIGN_IN);
+    expect(s.authRows()).toEqual({ user: 1, account: 1, session: 1 });
+  });
+});
+
+describe("pacts", () => {
+  /** The operator and a friend, both signed in, with the friend saved as a recipient; and a pact to create. */
+  async function ownerWithFriend() {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+    const friend = await s.signIn("friend@example.test", { inviteToken: owner.token });
+    await s.api(API_PATHS.acceptInvite(owner.token), { cookie: friend.cookie, method: "POST" });
+    const friends = await s.api<FriendsResponse>(API_PATHS.friends, { cookie: owner.cookie });
+    const friendId = friends.body[0]!.id;
+    const added = await s.api<AddRecipientResponse>(API_PATHS.recipients, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { kind: "person", friendId },
+    });
+    if (!added.body.ok) throw new Error(added.body.reason);
+    const pact: CreatePactRequest = {
+      evidenceKind: "camera",
+      name: "Gym",
+      description: "Me at the gym",
+      schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
+      penaltyCents: 500,
+      recipientId: added.body.recipient.id,
+      reviewerIds: [friendId],
+    };
+    return { s, owner, friend, friendId, pact };
+  }
+
+  test("an owner creates a Camera pact and sees it on Today, in Pacts and on its page", async () => {
+    const { s, owner, pact, friendId } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    expect((await s.api<RecipientsResponse>(API_PATHS.recipients, { cookie })).body).toEqual([
+      { id: pact.recipientId, kind: "person", friendId, name: "friend" },
+    ] satisfies RecipientsResponse);
+    // Monday's midnight in New York.
+    const firstOccurrence = { date: "2026-01-05", dueAt: "2026-01-06T05:00:00.000Z" };
+
+    const check = await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: { schedule: pact.schedule } });
+    expect(check.body).toEqual({ ok: true, firstOccurrence } satisfies FirstOccurrenceResponse);
+
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: pact });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+
+    expect((await s.api(API_PATHS.today, { cookie })).body).toEqual({
+      hasPacts: true,
+      alerts: [],
+      sections: [{ kind: "to-do", cards: [{ pactId, name: "Gym", penaltyCents: 500, dueAt: firstOccurrence.dueAt }] }],
+      waiting: [],
+      yesterday: [],
+    } satisfies TodayResponse);
+    expect((await s.api(API_PATHS.pacts, { cookie })).body).toEqual([
+      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500 },
+    ] satisfies PactsResponse);
+    expect((await s.api(API_PATHS.pact(pactId), { cookie })).body).toEqual({
+      ok: true,
+      pact: {
+        id: pactId,
+        name: "Gym",
+        description: "Me at the gym",
+        evidenceKind: "camera",
+        schedule: pact.schedule,
+        penaltyCents: 500,
+        recipient: { id: pact.recipientId, kind: "person", friendId, name: "friend" },
+        reviewers: [{ id: friendId, name: "friend" }],
+        stage: "active",
+        firstOccurrence,
+      },
+    } satisfies PactResponse);
+  });
+
+  test("a reviewer who isn't a friend is refused as data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+
+    const created = await s.api(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { ...pact, reviewerIds: ["someone-else"] },
+    });
+
+    expect(created).toEqual({ status: 200, body: { ok: false, reason: "not-a-friend" } });
+    expect((await s.api(API_PATHS.pacts, { cookie: owner.cookie })).body).toEqual([]);
+  });
+
+  test("a malformed pact, recipient or schedule is an invalid request", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    const malformedPacts: unknown[] = [
+      "not json",
+      {},
+      { ...pact, evidenceKind: 3 },
+      { ...pact, name: null },
+      { ...pact, schedule: { kind: "fixed-days", days: ["monday"] } },
+      { ...pact, schedule: { kind: "weekly-count", days: ["mon"] } },
+      { ...pact, penaltyCents: "500" },
+      { ...pact, penaltyCents: 5.5 },
+      { ...pact, reviewerIds: "someone" },
+      { ...pact, reviewerIds: [1] },
+    ];
+
+    for (const sent of malformedPacts) {
+      const created = await s.api(API_PATHS.pacts, { cookie, method: "POST", body: sent });
+      expect({ sent, ...created }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
+    }
+    const recipient = await s.api(API_PATHS.recipients, { cookie, method: "POST", body: { kind: "pet" } });
+    expect(recipient).toEqual({ status: 400, body: { error: "invalid-request" } });
+    const check = await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: {} });
+    expect(check).toEqual({ status: 400, body: { error: "invalid-request" } });
+  });
+
+  test("someone else's pact, or one that doesn't exist, is not found, as data", async () => {
+    const { s, owner, friend, pact } = await ownerWithFriend();
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: pact,
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+
+    const other = await s.api(API_PATHS.pact(created.body.pactId), { cookie: friend.cookie });
+
+    const notFound = { status: 200, body: { ok: false, reason: "pact-not-found" } satisfies PactResponse };
+    expect(other).toEqual(notFound);
+    expect(await s.api(API_PATHS.pact("no-such-pact"), { cookie: owner.cookie })).toEqual(notFound);
+  });
+});
+
 describe("api", () => {
   test("every API route needs a session", async () => {
     const s = await server();
 
-    for (const path of [API_PATHS.me, API_PATHS.today]) {
+    const reads = [
+      API_PATHS.me,
+      API_PATHS.today,
+      API_PATHS.friends,
+      API_PATHS.recipients,
+      API_PATHS.pacts,
+      API_PATHS.pact("some-pact"),
+    ];
+    for (const path of reads) {
       const response = await s.request(path);
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ error: "unauthenticated" });
+    }
+    const writes = [
+      API_PATHS.invites,
+      API_PATHS.acceptInvite("some-token"),
+      API_PATHS.recipients,
+      API_PATHS.pacts,
+      API_PATHS.firstOccurrence,
+    ];
+    for (const path of writes) {
+      expect((await s.request(path, { method: "POST" })).status).toBe(401);
     }
   });
 
@@ -339,10 +626,12 @@ describe("spa", () => {
   test("client routes fall back to index.html; unknown API routes don't", async () => {
     const s = await server();
 
-    const page = await s.request("/some/client/route");
-    expect(page.status).toBe(200);
-    expect(page.headers.get("Cache-Control")).toBe("no-cache");
-    expect(await page.text()).toContain("<div id=root>");
+    for (const path of ["/some/client/route", invitePath("some-token")]) {
+      const page = await s.request(path);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("Cache-Control")).toBe("no-cache");
+      expect(await page.text()).toContain("<div id=root>");
+    }
 
     const { cookie } = await s.signIn(OPERATOR);
     expect((await s.request("/api/nope", { cookie })).status).toBe(404);

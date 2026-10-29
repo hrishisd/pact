@@ -19,12 +19,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { onTestFinished } from "vitest";
+import { zonedWallTimeToInstant } from "../calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
 import type { AccountId, SignInResult } from "../../shared/types.ts";
 import { FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
 
 /** A named account. Every AccountView query and command, plus its id. */
 export type AccountHandle = AccountView & { readonly id: AccountId; readonly name: string };
+
+/** As on the invite page: sign in carrying the invite link's token. */
+interface SignInOptions {
+  inviteToken?: string;
+}
 
 export interface Scenario {
   /** The current core. Replaced by `restart()`. */
@@ -45,9 +51,15 @@ export interface Scenario {
   /** The instant a time string names (see TIME STRINGS above). */
   at(when: string): Date;
   /** Signs in as `name`; throws if the sign-in is refused. */
-  signIn(name: string): Promise<AccountHandle>;
+  signIn(name: string, options?: SignInOptions): Promise<AccountHandle>;
   /** Signs in as `name` and returns the core's answer, refused or not. */
-  attemptSignIn(name: string): Promise<SignInResult>;
+  attemptSignIn(name: string, options?: SignInOptions): Promise<SignInResult>;
+  /**
+   * Makes `name` a friend of `inviter` the way people do: the inviter creates
+   * an invite (or `inviteToken` is used), `name` signs in with it and accepts.
+   * Throws if any step is refused. Returns the new friend's handle.
+   */
+  befriend(inviter: AccountHandle, name: string, inviteToken?: string): Promise<AccountHandle>;
   /** A scheduler tick: moves the clock to `when` and runs advance to T. */
   advanceTo(when: string): Promise<void>;
   /** Moves the clock only, as if the scheduler had stopped. */
@@ -110,11 +122,18 @@ export function scenario(): Scenario {
     logs,
     dbPath,
     at,
-    attemptSignIn: (name) => core.signIn({ email: emailFor(name), name }),
-    async signIn(name) {
-      const result = await s.attemptSignIn(name);
+    attemptSignIn: (name, options) => core.signIn({ email: emailFor(name), name }, options),
+    async signIn(name, options) {
+      const result = await s.attemptSignIn(name, options);
       if (!result.ok) throw new Error(`sign-in as ${name} refused: ${result.reason}`);
       return handle(result.accountId, name);
+    },
+    async befriend(inviter, name, inviteToken) {
+      const token = inviteToken ?? (await inviter.createInvite()).token;
+      const friend = await s.signIn(name, { inviteToken: token });
+      const accepted = await friend.acceptInvite(token);
+      if (!accepted.ok) throw new Error(`${name} could not accept ${inviter.name}'s invite: ${accepted.reason}`);
+      return friend;
     },
     async advanceTo(when) {
       clock.set(at(when));
@@ -143,36 +162,4 @@ function at(when: string): Date {
   const [, day, hh, mm] = match as unknown as [string, (typeof DAYS)[number], string, string];
   const { year, month, day: monday } = REFERENCE_WEEK_MONDAY;
   return zonedWallTimeToInstant(year, month, monday + DAYS.indexOf(day), Number(hh), Number(mm), TIMEZONE);
-}
-
-function zonedWallTimeToInstant(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  timezone: string,
-): Date {
-  const wall = Date.UTC(year, month - 1, day, hour, minute);
-  let instant = wall - offsetMs(wall, timezone);
-  instant = wall - offsetMs(instant, timezone);
-  return new Date(instant);
-}
-
-/** The zone's UTC offset at `instantMs`, in ms (negative west of UTC). */
-function offsetMs(instantMs: number, timezone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-  }).formatToParts(new Date(instantMs));
-  const get = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((p) => p.type === type)?.value);
-  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
-  return asUtc - Math.floor(instantMs / 1000) * 1000;
 }

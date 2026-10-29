@@ -5,8 +5,23 @@ import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  INVITE_TOKEN_SIGN_IN_KEY,
+  invitePath,
+  type AcceptInviteResponse,
+  type AddRecipientRequest,
+  type AddRecipientResponse,
   type ApiErrorResponse,
+  type CreateInviteResponse,
+  type CreatePactRequest,
+  type CreatePactResponse,
+  type FirstOccurrenceRequest,
+  type FirstOccurrenceResponse,
+  type FriendsResponse,
+  type InviteLookupResponse,
   type MeResponse,
+  type PactResponse,
+  type PactsResponse,
+  type RecipientsResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
   type TodayResponse,
@@ -17,6 +32,20 @@ export const authClient = createAuthClient({ basePath: AUTH_BASE_PATH });
 /** Starts Google sign-in; the browser leaves the app and comes back to `/`. */
 export function signInWithGoogle(): Promise<unknown> {
   return authClient.signIn.social({ provider: "google", callbackURL: "/", errorCallbackURL: AUTH_ERROR_PATH });
+}
+
+/**
+ * Starts Google sign-in from an invite page. The token rides through Google's
+ * redirect so a new account can be created; the browser comes back to the
+ * invite page either way (with ?error=<code> when sign-in fails) to accept.
+ */
+export function signInWithInvite(token: string): Promise<unknown> {
+  return authClient.signIn.social({
+    provider: "google",
+    callbackURL: invitePath(token),
+    errorCallbackURL: invitePath(token),
+    additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: token },
+  });
 }
 
 export async function signOut(): Promise<void> {
@@ -40,13 +69,26 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+function post<T>(path: string, body?: unknown): Promise<T> {
+  return call<T>(path, {
+    method: "POST",
+    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
+}
+
 export const api = {
   me: () => call<MeResponse>(API_PATHS.me),
   today: () => call<TodayResponse>(API_PATHS.today),
-  setTimezone: (timezone: string) =>
-    call<SetTimezoneResponse>(API_PATHS.timezone, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ timezone } satisfies SetTimezoneRequest),
-    }),
+  setTimezone: (timezone: string) => post<SetTimezoneResponse>(API_PATHS.timezone, { timezone } satisfies SetTimezoneRequest),
+  /** Works signed out. */
+  invite: (token: string) => call<InviteLookupResponse>(API_PATHS.invite(encodeURIComponent(token))),
+  createInvite: () => post<CreateInviteResponse>(API_PATHS.invites),
+  acceptInvite: (token: string) => post<AcceptInviteResponse>(API_PATHS.acceptInvite(encodeURIComponent(token))),
+  friends: () => call<FriendsResponse>(API_PATHS.friends),
+  recipients: () => call<RecipientsResponse>(API_PATHS.recipients),
+  addRecipient: (recipient: AddRecipientRequest) => post<AddRecipientResponse>(API_PATHS.recipients, recipient),
+  pacts: () => call<PactsResponse>(API_PATHS.pacts),
+  createPact: (pact: CreatePactRequest) => post<CreatePactResponse>(API_PATHS.pacts, pact),
+  firstOccurrence: (request: FirstOccurrenceRequest) => post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
+  pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),
 };

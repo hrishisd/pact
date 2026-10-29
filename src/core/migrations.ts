@@ -39,4 +39,75 @@ export const migrations: readonly string[] = [
   );
   CREATE INDEX outbox_undelivered ON outbox (id) WHERE delivered_at IS NULL;
   `,
+  // 2: invites, friends and recipients
+  `
+  -- A single-use invite link. The first new account made by signing in with
+  -- a usable token claims it, and only that account may then accept it (an
+  -- account that already existed may accept an unclaimed one). Accepting
+  -- makes the two accounts friends and uses the invite up.
+  CREATE TABLE invite (
+    token TEXT PRIMARY KEY,
+    inviter_account_id TEXT NOT NULL REFERENCES account (id),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    claimed_by_account_id TEXT REFERENCES account (id),
+    used_at TEXT,
+    used_by_account_id TEXT REFERENCES account (id),
+    CHECK ((used_at IS NULL) = (used_by_account_id IS NULL))
+  );
+
+  -- One row per pair of friends, the smaller account id first.
+  CREATE TABLE friendship (
+    account_a_id TEXT NOT NULL REFERENCES account (id),
+    account_b_id TEXT NOT NULL REFERENCES account (id),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (account_a_id, account_b_id),
+    CHECK (account_a_id < account_b_id)
+  );
+  CREATE INDEX friendship_b ON friendship (account_b_id);
+
+  -- An owner's saved recipients: a friend (by account) or an organization
+  -- (name and link). A person recipient's name is the friend's account name.
+  CREATE TABLE recipient (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    kind TEXT NOT NULL CHECK (kind IN ('person', 'organization')),
+    friend_account_id TEXT REFERENCES account (id),
+    name TEXT,
+    link TEXT,
+    created_at TEXT NOT NULL,
+    CHECK (
+      (kind = 'person' AND friend_account_id IS NOT NULL AND name IS NULL AND link IS NULL) OR
+      (kind = 'organization' AND friend_account_id IS NULL AND name IS NOT NULL AND link IS NOT NULL)
+    )
+  );
+  CREATE INDEX recipient_owner ON recipient (owner_account_id);
+  `,
+  // 3: pacts
+  `
+  -- A pact is Active from the moment it's created. Its evidence kind never
+  -- changes. first_occurrence is a "YYYY-MM-DD" day in the owner's timezone,
+  -- worked out once at creation.
+  CREATE TABLE pact (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    evidence_kind TEXT NOT NULL CHECK (evidence_kind IN ('camera', 'oura')),
+    schedule TEXT NOT NULL, -- JSON, the shared Schedule type
+    penalty_cents INTEGER NOT NULL CHECK (penalty_cents > 0),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    stage TEXT NOT NULL CHECK (stage IN ('active', 'ended')),
+    first_occurrence TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX pact_owner ON pact (owner_account_id);
+
+  CREATE TABLE pact_reviewer (
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    reviewer_account_id TEXT NOT NULL REFERENCES account (id),
+    PRIMARY KEY (pact_id, reviewer_account_id)
+  );
+  CREATE INDEX pact_reviewer_account ON pact_reviewer (reviewer_account_id);
+  `,
 ];

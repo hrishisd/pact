@@ -6,16 +6,31 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
-import type { AccountId, PactCore } from "../core/index.ts";
+import type { AccountId, PactCore, Schedule, Weekday } from "../core/index.ts";
+import { WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
   INVITE_REQUIRED_PATH,
+  type AcceptInviteResponse,
+  type AddRecipientRequest,
+  type AddRecipientResponse,
   type ApiErrorResponse,
+  type CreateInviteResponse,
+  type CreatePactRequest,
+  type CreatePactResponse,
+  type FirstOccurrenceRequest,
+  type FirstOccurrenceResponse,
+  type FriendsResponse,
   type HealthResponse,
+  type InviteLookupResponse,
+  type Json,
   type LivenessResponse,
   type MeResponse,
+  type PactResponse,
+  type PactsResponse,
+  type RecipientsResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
   type TodayResponse,
@@ -78,6 +93,17 @@ export function createApp({ core, auth, staticDir, canonicalOrigin, diskUsedFrac
 
   app.on(["GET", "POST"], `${AUTH_BASE_PATH}/*`, (c) => auth.handler(c.req.raw));
 
+  // The invite page shows to signed-out visitors, so its lookup needs no
+  // session; with one, it's the account's view (a claimed invite is open to
+  // the account that claimed it).
+  app.get(API_PATHS.invite(":token"), async (c) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const accountId = session && core.accountIdForEmail(session.user.email);
+    const token = c.req.param("token");
+    const body: InviteLookupResponse = json(accountId ? core.as(accountId).invite(token) : core.invite(token));
+    return c.json(body);
+  });
+
   // Every other /api route is made as the signed-in account. Better Auth
   // creates a user only after the core has made the account (see auth.ts), so
   // a session's email always finds one; this is a read, never a sign-in.
@@ -108,7 +134,61 @@ export function createApp({ core, auth, staticDir, canonicalOrigin, diskUsedFrac
   });
 
   app.get(API_PATHS.today, (c) => {
-    const body: TodayResponse = core.as(c.get("accountId")).today();
+    const body: TodayResponse = json(core.as(c.get("accountId")).today());
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.invites, async (c) => {
+    const body: CreateInviteResponse = json(await core.as(c.get("accountId")).createInvite());
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.acceptInvite(":token"), async (c) => {
+    const body: AcceptInviteResponse = await core.as(c.get("accountId")).acceptInvite(c.req.param("token"));
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.friends, (c) => {
+    const body: FriendsResponse = core.as(c.get("accountId")).friends();
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.recipients, (c) => {
+    const body: RecipientsResponse = core.as(c.get("accountId")).recipients();
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.recipients, async (c) => {
+    const recipient = parseNewRecipient(await c.req.json().catch(() => null));
+    if (!recipient) return apiError(c, 400, "invalid-request");
+    const body: AddRecipientResponse = await core.as(c.get("accountId")).addRecipient(recipient);
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.pacts, (c) => {
+    const body: PactsResponse = core.as(c.get("accountId")).pacts();
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.pacts, async (c) => {
+    const pact = parseNewPact(await c.req.json().catch(() => null));
+    if (!pact) return apiError(c, 400, "invalid-request");
+    const body: CreatePactResponse = await core.as(c.get("accountId")).createPact(pact);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.firstOccurrence, async (c) => {
+    const request = (await c.req.json().catch(() => null)) as Partial<
+      Record<keyof FirstOccurrenceRequest, unknown>
+    > | null;
+    const schedule = parseSchedule(request?.schedule);
+    if (!schedule) return apiError(c, 400, "invalid-request");
+    const body: FirstOccurrenceResponse = json(core.as(c.get("accountId")).firstOccurrence(schedule));
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.pact(":id"), (c) => {
+    const body: PactResponse = json(core.as(c.get("accountId")).pact(c.req.param("id")));
     return c.json(body);
   });
 
@@ -145,6 +225,65 @@ export function createApp({ core, auth, staticDir, canonicalOrigin, diskUsedFrac
 function apiError(c: Context, status: 400 | 401 | 404, error: ApiErrorResponse["error"]) {
   const body: ApiErrorResponse = { error };
   return c.json(body, status);
+}
+
+/**
+ * A core result as the client will receive it: c.json turns each Date into
+ * its ISO string, and this states that in the type.
+ */
+function json<T>(value: T): Json<T> {
+  return value as Json<T>;
+}
+
+// Request bodies are checked for shape only; the core judges their content.
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isWeekday(value: string): value is Weekday {
+  return (WEEKDAYS as readonly string[]).includes(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function parseSchedule(value: unknown): Schedule | null {
+  if (!isRecord(value) || value.kind !== "fixed-days") return null;
+  const { days } = value;
+  if (!isStringArray(days) || !days.every(isWeekday)) return null;
+  return { kind: "fixed-days", days };
+}
+
+function parseNewRecipient(value: unknown): AddRecipientRequest | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === "person" && typeof value.friendId === "string") {
+    return { kind: "person", friendId: value.friendId };
+  }
+  if (value.kind === "organization" && typeof value.name === "string" && typeof value.link === "string") {
+    return { kind: "organization", name: value.name, link: value.link };
+  }
+  return null;
+}
+
+function parseNewPact(value: unknown): CreatePactRequest | null {
+  if (!isRecord(value)) return null;
+  const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
+  const schedule = parseSchedule(value.schedule);
+  if (
+    (evidenceKind !== "camera" && evidenceKind !== "oura") ||
+    typeof name !== "string" ||
+    typeof description !== "string" ||
+    !schedule ||
+    typeof penaltyCents !== "number" ||
+    !Number.isSafeInteger(penaltyCents) ||
+    typeof recipientId !== "string" ||
+    !isStringArray(reviewerIds)
+  ) {
+    return null;
+  }
+  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds };
 }
 
 function readIndexHtml(staticDir: string): string | null {

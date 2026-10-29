@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { MeResponse, TodayResponse } from "../shared/api.ts";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, signInWithGoogle, signOut } from "./api.ts";
-import { GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
+import { CreatePact } from "./CreatePact.tsx";
+import { initial } from "./format.ts";
+import { FriendsSection } from "./Friends.tsx";
+import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
+import { InvitePage } from "./InvitePage.tsx";
+import { useNavigation, type TabId } from "./navigation.ts";
+import { PactPage } from "./PactPage.tsx";
+import { Pacts } from "./Pacts.tsx";
+import { Today } from "./Today.tsx";
+import { Centered, Empty } from "./ui.tsx";
 
 type Session =
   | { kind: "loading" }
@@ -18,6 +27,7 @@ function isConfirmed(profile: MeResponse): profile is ConfirmedProfile {
 
 export function App() {
   const [session, setSession] = useState<Session>({ kind: "loading" });
+  const [inviteToken, setInviteToken] = useState(() => inviteTokenFromPath(window.location.pathname));
 
   const load = useCallback(async () => {
     try {
@@ -32,9 +42,26 @@ export function App() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const onPop = () => setInviteToken(inviteTokenFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  if (session.kind === "loading") return <div className="screen" aria-busy="true" />;
+
+  // An invite link shows before the sign-in gate and the timezone screen:
+  // accept first, then the app asks for a timezone if it still needs one.
+  if (inviteToken !== null && session.kind !== "failed") {
+    const leave = () => {
+      window.history.replaceState(null, "", "/");
+      setInviteToken(null);
+      void load();
+    };
+    return <InvitePage token={inviteToken} profile={session.kind === "signed-in" ? session.profile : null} onDone={leave} />;
+  }
+
   switch (session.kind) {
-    case "loading":
-      return <div className="screen" aria-busy="true" />;
     case "signed-out":
       return <SignIn />;
     case "failed":
@@ -55,14 +82,6 @@ export function App() {
       return <Shell profile={profile} onProfile={updated} onSignedOut={signedOut} />;
     }
   }
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="screen centered gut">
-      <main className="stack-lg">{children}</main>
-    </div>
-  );
 }
 
 // ---------- Sign in ----------
@@ -184,32 +203,12 @@ function useSaveTimezone(profile: MeResponse, onSaved: (p: ConfirmedProfile) => 
 
 // ---------- App shell ----------
 
-const TABS = [
-  { id: "today", label: "Today", path: "/", Icon: TodayIcon },
-  { id: "pacts", label: "Pacts", path: "/pacts", Icon: PactsIcon },
-  { id: "review", label: "Review", path: "/review", Icon: ReviewIcon },
-  { id: "ledgers", label: "Ledgers", path: "/ledgers", Icon: LedgersIcon },
-] as const;
-type TabId = (typeof TABS)[number]["id"];
-
-function tabFromPath(pathname: string): TabId {
-  return TABS.find((t) => t.path === pathname)?.id ?? "today";
-}
-
-function useTab(): [TabId, (tab: TabId) => void] {
-  const [tab, setTab] = useState<TabId>(() => tabFromPath(window.location.pathname));
-  useEffect(() => {
-    const onPop = () => setTab(tabFromPath(window.location.pathname));
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
-  const go = (next: TabId) => {
-    const path = TABS.find((t) => t.id === next)!.path;
-    if (window.location.pathname !== path) window.history.pushState(null, "", path);
-    setTab(next);
-  };
-  return [tab, go];
-}
+const TABS: { id: TabId; label: string; Icon: typeof TodayIcon }[] = [
+  { id: "today", label: "Today", Icon: TodayIcon },
+  { id: "pacts", label: "Pacts", Icon: PactsIcon },
+  { id: "review", label: "Review", Icon: ReviewIcon },
+  { id: "ledgers", label: "Ledgers", Icon: LedgersIcon },
+];
 
 function Shell({
   profile,
@@ -220,38 +219,71 @@ function Shell({
   onProfile: (p: MeResponse) => void;
   onSignedOut: () => void;
 }) {
-  const [tab, setTab] = useTab();
+  const nav = useNavigation();
+  const { tab, page } = nav;
   const [profileOpen, setProfileOpen] = useState(false);
-  const current = TABS.find((t) => t.id === tab)!;
-  const subtitle: Record<TabId, string> = {
-    today: new Intl.DateTimeFormat("en-US", { timeZone: profile.timezone, weekday: "short", month: "short", day: "numeric" }).format(new Date()),
-    pacts: "",
-    review: "",
-    ledgers: "",
-  };
+  // Pact names learnt by loading their pages, for a page opened from a link.
+  const [pactNames, setPactNames] = useState<Record<string, string>>({});
+  const pactLoaded = useCallback(
+    (id: string, name: string) => setPactNames((names) => (names[id] === name ? names : { ...names, [id]: name })),
+    [],
+  );
+
+  const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
+  const create = () => nav.push({ kind: "create" });
+
+  let title: string;
+  let subtitle = "";
+  if (page?.kind === "pact") title = pactNames[page.id] ?? page.name ?? "";
+  else if (page?.kind === "create") title = "New pact";
+  else {
+    title = TABS.find((t) => t.id === tab)!.label;
+    if (tab === "today") {
+      subtitle = new Intl.DateTimeFormat("en-US", { timeZone: profile.timezone, weekday: "short", month: "short", day: "numeric" }).format(new Date());
+    }
+  }
 
   return (
     <div className="app">
       <header className="hdr gut">
+        {page && (
+          <button className="iconbtn" aria-label="Back" onClick={nav.back}>
+            <BackIcon />
+          </button>
+        )}
         <h1>
-          {current.label}
-          <span className="sub">{subtitle[tab]}</span>
+          {title}
+          <span className="sub">{subtitle}</span>
         </h1>
         <button className="avatar" aria-label="Profile" onClick={() => setProfileOpen(true)}>
           {initial(profile.name)}
         </button>
       </header>
       <main className="scroll gut">
-        {tab === "today" && <TodayTab />}
-        {tab === "pacts" && <Empty title="No pacts yet" body="Pacts you create show up here." />}
-        {tab === "review" && (
+        {page?.kind === "pact" && <PactPage key={page.id} pactId={page.id} onLoaded={pactLoaded} />}
+        {page?.kind === "create" && (
+          <CreatePact
+            onCancel={nav.back}
+            onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
+            onInvite={() => setProfileOpen(true)}
+          />
+        )}
+        {!page && tab === "today" && <Today onOpenPact={openPact} onCreate={create} onInvite={() => setProfileOpen(true)} />}
+        {!page && tab === "pacts" && <Pacts onOpenPact={openPact} onCreate={create} />}
+        {!page && tab === "review" && (
           <Empty title="Nothing to review" body="When a friend picks you as a reviewer, their submitted evidence and excuses show up here." />
         )}
-        {tab === "ledgers" && <Empty title="No ledgers yet" body="Each recipient you name on a pact gets one ledger." />}
+        {!page && tab === "ledgers" && <Empty title="No ledgers yet" body="Each recipient you name on a pact gets one ledger." />}
       </main>
       <nav className="tabbar" aria-label="Main">
         {TABS.map(({ id, label, Icon }) => (
-          <button key={id} className="tab" aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
+          // The current tab stays marked while a page is pushed on top of it.
+          <button
+            key={id}
+            className="tab"
+            aria-current={tab === id ? (page ? "true" : "page") : undefined}
+            onClick={() => nav.selectTab(id)}
+          >
             <span className="tile">
               <Icon />
               {label}
@@ -269,31 +301,6 @@ function Shell({
       )}
     </div>
   );
-}
-
-function Empty({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="card">
-      <h3>{title}</h3>
-      <p className="muted">{body}</p>
-    </div>
-  );
-}
-
-function TodayTab() {
-  const [today, setToday] = useState<TodayResponse | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    api.today().then(setToday, () => setFailed(true));
-  }, []);
-
-  if (failed) return <Empty title="Today couldn't load" body="Check your connection and reopen Pact." />;
-  if (today === null) return null;
-  // Alerts and cards arrive in later tickets; with none, Today says there's nothing open.
-  if (today.alerts.length === 0 && today.sections.length === 0) {
-    return <Empty title="Nothing to do right now" body="When one of your pacts needs something from you, it shows up here." />;
-  }
-  return null;
 }
 
 // ---------- Profile ----------
@@ -341,6 +348,8 @@ function ProfileSheet({
           </span>
         </div>
 
+        <FriendsSection />
+
         <section className="stack">
           <div className="label">Timezone</div>
           {changing ? (
@@ -382,10 +391,6 @@ function ProfileSheet({
 }
 
 // ---------- helpers ----------
-
-function initial(name: string): string {
-  return (name.trim()[0] ?? "?").toUpperCase();
-}
 
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || "there";

@@ -8,12 +8,20 @@
 // one Better Auth transaction after this hook, so a refusal leaves no user,
 // account or session row behind. Better Auth turns the thrown error into a
 // redirect to the error URL with `?error=invite_required`.
+//
+// Sign-in from an invite link carries the link's token in the OAuth state
+// (`additionalData` on sign-in, see INVITE_TOKEN_SIGN_IN_KEY), which Better
+// Auth keeps bound to this browser's flow across Google's redirect. The hook
+// reads it back and passes it to the core, which decides whether it is still
+// usable. The client supplies it, which is fine: an invite token is itself the
+// credential, and the core checks it.
 
 import { APIError, betterAuth } from "better-auth";
+import { getOAuthState } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import type { PactCore } from "../core/index.ts";
 import { openWithPragmas } from "../core/db.ts";
-import { AUTH_BASE_PATH, AUTH_ERROR_PATH } from "../shared/api.ts";
+import { AUTH_BASE_PATH, AUTH_ERROR_PATH, INVITE_TOKEN_SIGN_IN_KEY } from "../shared/api.ts";
 
 /** The `error` code Better Auth puts on the error redirect when the core refuses a sign-in. */
 export const INVITE_REQUIRED_CODE = "invite_required";
@@ -65,7 +73,11 @@ export function createAuth(options: AuthOptions) {
       user: {
         create: {
           before: async (user: { email: string; name: string }) => {
-            const result = await core.signIn({ email: user.email, name: user.name });
+            const inviteToken = (await getOAuthState())?.[INVITE_TOKEN_SIGN_IN_KEY];
+            const result = await core.signIn(
+              { email: user.email, name: user.name },
+              typeof inviteToken === "string" ? { inviteToken } : {},
+            );
             if (!result.ok) {
               throw new APIError("FORBIDDEN", {
                 code: INVITE_REQUIRED_CODE,
