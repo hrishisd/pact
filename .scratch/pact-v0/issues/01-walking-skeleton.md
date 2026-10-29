@@ -1,6 +1,6 @@
 # 01 Walking skeleton: deploy, sign-in, empty Today, CI, core test harness
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: `.scratch/pact-v0/spec.md`. Stack: ADR 0002.
