@@ -40,11 +40,16 @@ export interface LivenessResponse {
   ok: true;
 }
 
-/** GET /health: fails when the scheduler has not ticked for 5 minutes. */
+/**
+ * GET /health: fails (503) when the scheduler has not ticked for 5 minutes or
+ * the database's volume is more than 80% full.
+ */
 export interface HealthResponse {
   ok: boolean;
   /** ISO 8601, or null before the first scheduler tick. */
   lastTick: string | null;
+  /** How much of the database's volume is in use, as a percentage to one decimal place, e.g. 12.5. */
+  diskUsedPercent: number;
 }
 
 /** Body of every non-2xx /api response. */

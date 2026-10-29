@@ -30,25 +30,36 @@ export interface AppOptions {
   staticDir: string;
   /** Requests on any other host redirect here; null serves every host. See Config. */
   canonicalOrigin: string | null;
+  /** How full the database's volume is, from 0 to 1. Production asks the filesystem; tests pass a fake. */
+  diskUsedFraction: () => number;
 }
+
+/** /health fails once the volume is fuller than this (ADR 0003). */
+const MAX_DISK_USED_FRACTION = 0.8;
 
 type Env = { Variables: { accountId: AccountId } };
 
-export function createApp({ core, auth, staticDir, canonicalOrigin }: AppOptions) {
+export function createApp({ core, auth, staticDir, canonicalOrigin, diskUsedFraction }: AppOptions) {
   const app = new Hono<Env>();
 
   // Liveness, for Fly's check: the process serves and the database answers.
-  // It ignores the scheduler, so a stuck scheduler alerts via /health instead
-  // of taking the only machine out of rotation.
+  // It ignores the scheduler and the disk, so a stuck scheduler or a filling
+  // volume alerts via /health instead of taking the only machine out of rotation.
   app.get("/healthz", (c) => {
     core.lastTick();
     const body: LivenessResponse = { ok: true };
     return c.json(body);
   });
+  // For the uptime monitor: the scheduler is ticking and the volume has room.
   app.get("/health", (c) => {
     const health = core.health();
-    const body: HealthResponse = { ok: health.ok, lastTick: health.lastTick?.toISOString() ?? null };
-    return c.json(body, health.ok ? 200 : 503);
+    const diskUsed = diskUsedFraction();
+    const body: HealthResponse = {
+      ok: health.ok && diskUsed <= MAX_DISK_USED_FRACTION,
+      lastTick: health.lastTick?.toISOString() ?? null,
+      diskUsedPercent: Math.round(diskUsed * 1000) / 10,
+    };
+    return c.json(body, body.ok ? 200 : 503);
   });
 
   // The health routes above answer on any host: Fly's check and the uptime

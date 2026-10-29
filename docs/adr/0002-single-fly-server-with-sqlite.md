@@ -34,14 +34,14 @@ When a restore happens, the server raises an operator alert that gives the time 
 - **Notifications:** Web Push sent directly from our server using VAPID keys, with no push service in between. Email and text messages are deferred.
 - **Secrets:** configuration secrets live in Fly secrets. Oura tokens are encrypted in the database with a key from Fly secrets, because database backups leave Fly.
 - **Deploys:** every push to `main` runs the tests in GitHub Actions and, if they pass, deploys to Fly. There is no staging site. UI checks on a phone use the laptop's dev server over home Wi-Fi.
-- **Monitoring:** a `/health` endpoint fails if the last scheduler tick is more than 5 minutes old, and a free external uptime monitor emails the operator when it fails. Errors are read from Fly's logs, and data is fixed with SQL in a database shell. There is no error-tracking service and no admin UI.
+- **Monitoring:** a `/health` endpoint fails if the last scheduler tick is more than 5 minutes old or the volume is more than 80% full, and a free external uptime monitor emails the operator when it fails. Errors are read from a capped log file on the volume and from Fly's logs (ADR 0003), and data is fixed with SQL in a database shell. There is no error-tracking service and no admin UI.
 - **Operator alerts:** a log line tagged `OPERATOR_ALERT` plus a Web Push to the operator's account only. They are raised when reminders are dropped after downtime and when the database is restored on boot. The push subscription lives in the database, so after a restore from an old replica the push may not arrive, but the log line always does. Once email exists, operator alerts should go by email, which is more durable than push.
 - **After downtime:** judgments, due dates and overdue changes always catch up. Reminders more than 15 minutes late are dropped. Each drop is logged, and a summary goes out as an operator alert.
 - **Backups:** one practice restore is done during setup, before real data depends on it. Fly's automatic daily volume snapshots stay on (default 5-day retention) as a backstop behind Litestream.
 
 ## Known risk: backups can fail silently
 
-If Litestream can't reach R2 (expired credentials, a deleted bucket, a network fault), it logs the error and keeps retrying while the app runs normally. Nothing alerts the operator, and `/health` only watches the scheduler. We accept this for v0. The volume snapshots cover the last few days, and the boot-restore alert shows staleness at the moment it matters.
+If Litestream can't reach R2 (expired credentials, a deleted bucket, a network fault), it logs the error and keeps retrying while the app runs normally. Nothing alerts the operator. `/health` watches the scheduler and disk space, so it catches this only once Litestream's unsent changes fill the volume. We accept this for v0. The volume snapshots cover the last few days, and the boot-restore alert shows staleness at the moment it matters.
 
 Monitoring to consider after v0, with no decision on whether or when:
 

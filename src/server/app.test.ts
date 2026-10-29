@@ -29,8 +29,14 @@ const ORIGIN = "http://localhost:5173";
 const OPERATOR = "owner@example.test";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
-/** `canonicalOrigin` is the config's: null unless the server is in production. */
-async function server({ canonicalOrigin = null }: { canonicalOrigin?: string | null } = {}) {
+/**
+ * `canonicalOrigin` is the config's: null unless the server is in production.
+ * `diskUsedFraction` stands in for the volume's disk use: half full unless a test says otherwise.
+ */
+async function server({
+  canonicalOrigin = null,
+  diskUsedFraction = () => 0.5,
+}: { canonicalOrigin?: string | null; diskUsedFraction?: () => number } = {}) {
   const s = scenario();
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
@@ -43,7 +49,7 @@ async function server({ canonicalOrigin = null }: { canonicalOrigin?: string | n
     google: { clientId: "test-client-id", clientSecret: "test-client-secret" },
   });
   await migrate();
-  const app = createApp({ core: s.core, auth, staticDir, canonicalOrigin });
+  const app = createApp({ core: s.core, auth, staticDir, canonicalOrigin, diskUsedFraction });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
   onTestFinished(() => close());
 
@@ -277,6 +283,40 @@ describe("health", () => {
 
     s.clock.set(new Date(s.clock.now().getTime() + 6 * 60 * 1000));
     expect((await s.request("/health")).status).toBe(503);
+  });
+
+  test("passes with the volume up to 80% full and fails past it, reporting the disk use", async () => {
+    let diskUsed = 0.79;
+    const s = await server({ diskUsedFraction: () => diskUsed });
+    await s.core.advanceTo(s.clock.now());
+    const health = async () => {
+      const response = await s.request("/health");
+      return { status: response.status, body: (await response.json()) as HealthResponse };
+    };
+
+    expect(await health()).toMatchObject({ status: 200, body: { ok: true, diskUsedPercent: 79 } });
+    diskUsed = 0.8;
+    expect(await health()).toMatchObject({ status: 200, body: { ok: true, diskUsedPercent: 80 } });
+    diskUsed = 0.813;
+    expect(await health()).toMatchObject({ status: 503, body: { ok: false, diskUsedPercent: 81.3 } });
+  });
+
+  test("a stale tick fails however empty the disk is", async () => {
+    const s = await server({ diskUsedFraction: () => 0 });
+    await s.core.advanceTo(s.clock.now());
+    s.clock.set(new Date(s.clock.now().getTime() + 6 * 60 * 1000));
+
+    const response = await s.request("/health");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, diskUsedPercent: 0 });
+  });
+
+  test("liveness ignores the disk, so a full volume alerts without taking the app offline", async () => {
+    const s = await server({ diskUsedFraction: () => 0.99 });
+    await s.core.advanceTo(s.clock.now());
+
+    expect((await s.request("/health")).status).toBe(503);
+    expect((await s.request("/healthz")).status).toBe(200);
   });
 
   test("liveness passes whatever the scheduler is doing, so a stuck scheduler doesn't take the app offline", async () => {
