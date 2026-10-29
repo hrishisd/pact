@@ -1,6 +1,6 @@
 # 02 Invite a friend and create a Camera Fixed-days pact
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec stories: 4, 6–9, 10, 11, 14, 20–22, 24, 26 (Fixed days only), 83 (Active only), 91.
@@ -44,7 +44,7 @@ An owner invites a friend, then makes a Camera pact on a Fixed-days schedule wit
 - [x] Created at Mon 23:30 on a daily pact → first occurrence is Tuesday (Monday's midnight is under an hour away). Created Mon 10:00 → Monday.
 - [x] Today lists the open pact as To do and a not-yet-open one as Coming up, and leaves out a Mon/Wed/Fri pact on Tuesday.
 - [x] Days are computed in the owner's timezone (test with a non-UTC zone).
-- [ ] Manual: invite a second Google account on a phone, accept, create a pact with them as reviewer.
+- [x] Manual: invite a second Google account on a phone, accept, create a pact with them as reviewer.
 
 ## Out of this ticket
 
@@ -72,3 +72,5 @@ Left for the operator: the manual check (invite a second Google account on a pho
 - Recipients are just a name: no person/organization kinds, no link, no friend account, never notified. Names may repeat; a blank name is refused (`blank-name`). Migration 2 edited in place (not shipped). Spec and glossary updated.
 - Penalty step shows a single recipient slot: "Pick a recipient" (opens the new-recipient form when nothing is saved, otherwise a picker with "New recipient"), then the chosen name with Change. One saved recipient is preselected.
 - The New pact button moved below the Pacts list.
+
+**2026-10-29: manual check passed.** Deployed as 717af94; the operator checked the web app on a phone and it looks good. Closed.
