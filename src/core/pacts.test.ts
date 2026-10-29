@@ -2,12 +2,12 @@ import { describe, expect, test } from "vitest";
 import type { NewPact } from "../shared/types.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
-/** An owner in New York with one friend, "reviewer", who is also their saved recipient. */
+/** An owner in New York with one friend, "reviewer", and one saved recipient, "Sam". */
 async function ownerWithReviewer(s: Scenario, timezone = "America/New_York") {
   const owner = await s.signIn("owner");
   await owner.setTimezone(timezone);
   const reviewer = await s.befriend(owner, "reviewer");
-  const added = await owner.addRecipient({ kind: "person", friendId: reviewer.id });
+  const added = await owner.addRecipient({ name: "Sam" });
   if (!added.ok) throw new Error(added.reason);
   return { owner, reviewer, recipient: added.recipient };
 }
@@ -42,7 +42,7 @@ describe("creating a pact", () => {
         evidenceKind: "camera",
         schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
         penaltyCents: 500,
-        recipient: { id: recipient.id, kind: "person", friendId: reviewer.id, name: "reviewer" },
+        recipient: { id: recipient.id, name: "Sam" },
         reviewers: [{ id: reviewer.id, name: "reviewer" }],
         stage: "active",
         firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
@@ -83,7 +83,7 @@ describe("what a pact needs", () => {
     const s = scenario();
     const owner = await s.signIn("owner");
     const reviewer = await s.befriend(owner, "reviewer");
-    const added = await owner.addRecipient({ kind: "person", friendId: reviewer.id });
+    const added = await owner.addRecipient({ name: "Sam" });
     if (!added.ok) throw new Error(added.reason);
 
     expect(await owner.createPact(gymPact(added.recipient.id, reviewer))).toEqual({ ok: false, reason: "no-timezone" });
@@ -138,7 +138,7 @@ describe("reviewers and recipient", () => {
   test("the recipient must be one of the owner's own saved recipients", async () => {
     const s = scenario();
     const { owner, reviewer, recipient } = await ownerWithReviewer(s);
-    const theirs = await reviewer.addRecipient({ kind: "organization", name: "Shelter", link: "https://shelter.example" });
+    const theirs = await reviewer.addRecipient({ name: "Shelter" });
     if (!theirs.ok) throw new Error(theirs.reason);
 
     for (const recipientId of [theirs.recipient.id, "no-such-recipient"]) {

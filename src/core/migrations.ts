@@ -66,20 +66,13 @@ export const migrations: readonly string[] = [
   );
   CREATE INDEX friendship_b ON friendship (account_b_id);
 
-  -- An owner's saved recipients: a friend (by account) or an organization
-  -- (name and link). A person recipient's name is the friend's account name.
+  -- An owner's saved recipients. A recipient is just a name (a person or an
+  -- organization); it isn't an account. Names may repeat.
   CREATE TABLE recipient (
     id TEXT PRIMARY KEY,
     owner_account_id TEXT NOT NULL REFERENCES account (id),
-    kind TEXT NOT NULL CHECK (kind IN ('person', 'organization')),
-    friend_account_id TEXT REFERENCES account (id),
-    name TEXT,
-    link TEXT,
-    created_at TEXT NOT NULL,
-    CHECK (
-      (kind = 'person' AND friend_account_id IS NOT NULL AND name IS NULL AND link IS NULL) OR
-      (kind = 'organization' AND friend_account_id IS NULL AND name IS NOT NULL AND link IS NOT NULL)
-    )
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
   );
   CREATE INDEX recipient_owner ON recipient (owner_account_id);
   `,

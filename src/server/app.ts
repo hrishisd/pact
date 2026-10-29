@@ -257,14 +257,8 @@ function parseSchedule(value: unknown): Schedule | null {
 }
 
 function parseNewRecipient(value: unknown): AddRecipientRequest | null {
-  if (!isRecord(value)) return null;
-  if (value.kind === "person" && typeof value.friendId === "string") {
-    return { kind: "person", friendId: value.friendId };
-  }
-  if (value.kind === "organization" && typeof value.name === "string" && typeof value.link === "string") {
-    return { kind: "organization", name: value.name, link: value.link };
-  }
-  return null;
+  if (!isRecord(value) || typeof value.name !== "string") return null;
+  return { name: value.name };
 }
 
 function parseNewPact(value: unknown): CreatePactRequest | null {

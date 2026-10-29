@@ -47,7 +47,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 18. As an owner, I want to set an optional start date, so that I can create a pact now that begins later.
 19. As an owner, I want to set an optional end date on a recurring pact, so that it finishes automatically.
 20. As an owner, I want to set a penalty amount in USD on each pact, so that more important pacts can cost more to miss.
-21. As an owner, I want to pick a recipient from my saved list, or add a new one (a friend, or an organization with a name and link), so that I decide where my penalties go.
+21. As an owner, I want to pick a recipient from my saved list, or add a new one by name, so that I decide where my penalties go.
 22. As an owner, I want to choose one or more reviewers for each pact, so that the right friend checks each commitment.
 23. As an owner, I want to add reminders to a pact, each with a time, plus a date on One-time pacts, so that I'm nudged at the right moment.
 24. As an owner, I want a pact to be Active as soon as I create it, with no approval step, so that I can make a pact that counts today.
@@ -175,8 +175,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 - **Account**: Google identity, display name, timezone.
 - **Connection**: account, service (Oura in v0), tokens, status (Connected | Needs reconnecting). Exists only once the owner has connected the service.
-- **Friendship**: two accounts. Either can pick the other as a reviewer or a person recipient; accepting an invite is agreeing to that. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
-- **Recipient**: owned by an account. Either a person (a friend's account) or an organization (name, link).
+- **Friendship**: two accounts. Either can pick the other as a reviewer; accepting an invite is agreeing to that. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
+- **Recipient**: owned by an account; just a name.
 - **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date, optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Active | Ended), created-at time (starts the edit window).
 - **Schedule**: one of three kinds:
   - **Fixed days**: a set of weekdays.

@@ -57,7 +57,7 @@ A person the owner has picked to decide on their evidence, excuses, payments and
 _Avoid_: Referee, judge, verifier, buddy
 
 **Friend**:
-Another account you're connected with through an accepted invite. Only friends can be picked as reviewers or as a person recipient. Accepting an invite is agreeing that either of you can pick the other as a reviewer.
+Another account you're connected with through an accepted invite. Only friends can be picked as reviewers. Accepting an invite is agreeing that either of you can pick the other as a reviewer.
 _Avoid_: Contact, connection, follower, buddy
 
 **Review Queue**:
@@ -75,7 +75,7 @@ The fixed amount the owner owes for each missed occurrence of a pact.
 _Avoid_: Fine, stake, forfeit, charge
 
 **Recipient**:
-Where a pact's penalties are meant to go: a person (e.g. a friend) or an organization. Several pacts can share one recipient.
+Who a pact's penalties are meant to go to: anyone the owner names, such as a friend or an organization. It's just a name; a recipient isn't an account and is never notified. Several pacts can share one recipient.
 _Avoid_: Anti-charity, beneficiary, charity, payee
 
 **Ledger**:

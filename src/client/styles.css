@@ -661,6 +661,9 @@ textarea.inp {
   width: 100%;
   cursor: pointer;
 }
+.opt.static {
+  cursor: default;
+}
 .opt[aria-pressed="true"],
 .opt:has(input:checked) {
   border-color: var(--accent);

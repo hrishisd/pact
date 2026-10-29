@@ -32,20 +32,17 @@ export type AcceptInviteResult =
   | { ok: true; friend: Friend }
   | { ok: false; reason: InviteUnusableReason | "own-invite" | "already-friends" };
 
-/** Where a pact's penalties are meant to go. */
-export type Recipient =
-  /** `name` is the friend's. */
-  | { id: string; kind: "person"; friendId: AccountId; name: string }
-  | { id: string; kind: "organization"; name: string; link: string };
+/** Who a pact's penalties are meant to go to: just a name, saved per owner. */
+export interface Recipient {
+  id: string;
+  name: string;
+}
 
-export type NewRecipient =
-  | { kind: "person"; friendId: AccountId }
-  /** `link` is an http(s) URL. */
-  | { kind: "organization"; name: string; link: string };
+export interface NewRecipient {
+  name: string;
+}
 
-export type AddRecipientResult =
-  | { ok: true; recipient: Recipient }
-  | { ok: false; reason: "not-a-friend" | "invalid-recipient" };
+export type AddRecipientResult = { ok: true; recipient: Recipient } | { ok: false; reason: "blank-name" };
 
 /** The days of the week, Monday first, matching the Mon–Sun week. */
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;

@@ -87,7 +87,7 @@ export interface AccountView {
   acceptInvite(token: string): Promise<AcceptInviteResult>;
   /** Sorted by name. */
   friends(): Friend[];
-  /** Saves a recipient to this owner's list: a friend, or an organization with an http(s) link. */
+  /** Saves a recipient (a name, trimmed) to this owner's list. Names may repeat. */
   addRecipient(recipient: NewRecipient): Promise<AddRecipientResult>;
   /** This owner's saved recipients, sorted by name. */
   recipients(): Recipient[];
@@ -343,41 +343,17 @@ class Core implements PactCore {
       addRecipient: (recipient) =>
         this.#command((): AddRecipientResult => {
           account();
-          const id = randomUUID();
-          const now = this.#clock.now().toISOString();
-          if (recipient.kind === "person") {
-            if (!this.#areFriends(accountId, recipient.friendId)) return { ok: false, reason: "not-a-friend" };
-            const existing = this.#selectRecipients(
-              `recipient.owner_account_id = ? AND recipient.friend_account_id = ?`,
-              accountId,
-              recipient.friendId,
-            )[0];
-            if (existing) return { ok: true, recipient: existing };
-            this.#db
-              .prepare(
-                `INSERT INTO recipient (id, owner_account_id, kind, friend_account_id, created_at)
-                 VALUES (?, ?, 'person', ?, ?)`,
-              )
-              .run(id, accountId, recipient.friendId, now);
-            const friendName = (
-              this.#db.prepare(`SELECT name FROM account WHERE id = ?`).get(recipient.friendId) as { name: string }
-            ).name;
-            return { ok: true, recipient: { id, kind: "person", friendId: recipient.friendId, name: friendName } };
-          }
           const name = recipient.name.trim();
-          const link = recipient.link.trim();
-          if (name === "" || !isWebLink(link)) return { ok: false, reason: "invalid-recipient" };
+          if (name === "") return { ok: false, reason: "blank-name" };
+          const id = randomUUID();
           this.#db
-            .prepare(
-              `INSERT INTO recipient (id, owner_account_id, kind, name, link, created_at)
-               VALUES (?, ?, 'organization', ?, ?, ?)`,
-            )
-            .run(id, accountId, name, link, now);
-          return { ok: true, recipient: { id, kind: "organization", name, link } };
+            .prepare(`INSERT INTO recipient (id, owner_account_id, name, created_at) VALUES (?, ?, ?, ?)`)
+            .run(id, accountId, name, this.#clock.now().toISOString());
+          return { ok: true, recipient: { id, name } };
         }),
       recipients: () => {
         account();
-        return this.#selectRecipients(`recipient.owner_account_id = ?`, accountId);
+        return this.#selectRecipients(`owner_account_id = ?`, accountId);
       },
       createPact: (pact) =>
         this.#command((): CreatePactResult => {
@@ -460,7 +436,7 @@ class Core implements PactCore {
              ORDER BY account.name, account.id`,
           )
           .all(pactId) as { id: AccountId; name: string }[];
-        const [recipient] = this.#selectRecipients(`recipient.id = ?`, row.recipient_id);
+        const [recipient] = this.#selectRecipients(`id = ?`, row.recipient_id);
         if (!recipient) throw new Error(`pact ${row.id} has no recipient ${row.recipient_id}`);
         const pact: PactTerms = {
           id: row.id,
@@ -537,21 +513,9 @@ class Core implements PactCore {
 
   /** The recipients matching the SQL `condition` on `recipient`, sorted by name. */
   #selectRecipients(condition: string, ...params: string[]): Recipient[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT recipient.id, recipient.kind, recipient.friend_account_id,
-                COALESCE(recipient.name, friend.name) AS name, recipient.link
-         FROM recipient LEFT JOIN account AS friend ON friend.id = recipient.friend_account_id
-         WHERE ${condition}
-         ORDER BY name, recipient.id`,
-      )
-      .all(...params) as RecipientRow[];
-    return rows.map(
-      (row): Recipient =>
-        row.kind === "person"
-          ? { id: row.id, kind: "person", friendId: row.friend_account_id as AccountId, name: row.name }
-          : { id: row.id, kind: "organization", name: row.name, link: row.link as string },
-    );
+    return this.#db
+      .prepare(`SELECT id, name FROM recipient WHERE ${condition} ORDER BY name, id`)
+      .all(...params) as Recipient[];
   }
 
   advanceTo(t: Date): Promise<void> {
@@ -633,14 +597,6 @@ interface ActivePact {
   firstOccurrence: string;
 }
 
-interface RecipientRow {
-  id: string;
-  kind: Recipient["kind"];
-  friend_account_id: string | null;
-  name: string;
-  link: string | null;
-}
-
 interface PactRow {
   id: string;
   name: string;
@@ -675,13 +631,6 @@ function normalSchedule(schedule: Schedule): Schedule {
 
 function emailKey(email: string): string {
   return email.trim().toLowerCase();
-}
-
-/** True for an absolute http: or https: URL. */
-function isWebLink(text: string): boolean {
-  if (!URL.canParse(text)) return false;
-  const { protocol } = new URL(text);
-  return protocol === "http:" || protocol === "https:";
 }
 
 /** The IANA zone's canonical name, or null if `timezone` isn't an IANA zone. */

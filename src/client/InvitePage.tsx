@@ -110,10 +110,7 @@ export function InvitePage({
           </div>
           <div className="card">
             <b>Accepting makes you friends.</b>
-            <p>
-              {inviterName} can then pick you to review their pacts, and you can pick them. A reviewer checks the
-              evidence and decides on excuses.
-            </p>
+            <p>You can pick each other as reviewers on pacts. A reviewer checks evidence and decides on excuses.</p>
           </div>
           {profile ? (
             <div className="stack">

@@ -388,7 +388,7 @@ describe("invites", () => {
 });
 
 describe("pacts", () => {
-  /** The operator and a friend, both signed in, with the friend saved as a recipient; and a pact to create. */
+  /** The operator and a friend, both signed in, with a saved recipient, "Sam"; and a pact to create. */
   async function ownerWithFriend() {
     const s = await server();
     const owner = await operatorWithInvite(s);
@@ -399,7 +399,7 @@ describe("pacts", () => {
     const added = await s.api<AddRecipientResponse>(API_PATHS.recipients, {
       cookie: owner.cookie,
       method: "POST",
-      body: { kind: "person", friendId },
+      body: { name: "Sam" },
     });
     if (!added.body.ok) throw new Error(added.body.reason);
     const pact: CreatePactRequest = {
@@ -418,7 +418,7 @@ describe("pacts", () => {
     const { s, owner, pact, friendId } = await ownerWithFriend();
     const cookie = owner.cookie;
     expect((await s.api<RecipientsResponse>(API_PATHS.recipients, { cookie })).body).toEqual([
-      { id: pact.recipientId, kind: "person", friendId, name: "friend" },
+      { id: pact.recipientId, name: "Sam" },
     ] satisfies RecipientsResponse);
     // Monday's midnight in New York.
     const firstOccurrence = { date: "2026-01-05", dueAt: "2026-01-06T05:00:00.000Z" };
@@ -449,7 +449,7 @@ describe("pacts", () => {
         evidenceKind: "camera",
         schedule: pact.schedule,
         penaltyCents: 500,
-        recipient: { id: pact.recipientId, kind: "person", friendId, name: "friend" },
+        recipient: { id: pact.recipientId, name: "Sam" },
         reviewers: [{ id: friendId, name: "friend" }],
         stage: "active",
         firstOccurrence,
@@ -490,7 +490,7 @@ describe("pacts", () => {
       const created = await s.api(API_PATHS.pacts, { cookie, method: "POST", body: sent });
       expect({ sent, ...created }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
     }
-    const recipient = await s.api(API_PATHS.recipients, { cookie, method: "POST", body: { kind: "pet" } });
+    const recipient = await s.api(API_PATHS.recipients, { cookie, method: "POST", body: { name: 5 } });
     expect(recipient).toEqual({ status: 400, body: { error: "invalid-request" } });
     const check = await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: {} });
     expect(check).toEqual({ status: 400, body: { error: "invalid-request" } });

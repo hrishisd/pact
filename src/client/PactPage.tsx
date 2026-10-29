@@ -73,15 +73,7 @@ export function TermsList({
       <dt>Penalty</dt>
       <dd>{money(terms.penaltyCents)} per miss</dd>
       <dt>Recipient</dt>
-      <dd>
-        {recipient.kind === "organization" ? (
-          <a href={recipient.link} target="_blank" rel="noopener noreferrer">
-            {recipient.name}
-          </a>
-        ) : (
-          recipient.name
-        )}
-      </dd>
+      <dd>{recipient.name}</dd>
       <dt>{reviewers.length === 1 ? "Reviewer" : "Reviewers"}</dt>
       <dd>{reviewers.map((r) => r.name).join(", ")}</dd>
     </dl>

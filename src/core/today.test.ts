@@ -4,12 +4,12 @@ import { scenario, type Scenario } from "./testing/scenario.ts";
 
 const DAILY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-/** An owner with one friend, "reviewer", who is also their saved recipient. */
+/** An owner with one friend, "reviewer", and one saved recipient, "Sam". */
 async function ownerWithReviewer(s: Scenario, timezone = "America/New_York") {
   const owner = await s.signIn("owner");
   await owner.setTimezone(timezone);
   const reviewer = await s.befriend(owner, "reviewer");
-  const added = await owner.addRecipient({ kind: "person", friendId: reviewer.id });
+  const added = await owner.addRecipient({ name: "Sam" });
   if (!added.ok) throw new Error(added.reason);
   const createPact = async (name: string, days: Weekday[], penaltyCents = 500) => {
     const pact: NewPact = {

@@ -108,7 +108,11 @@ export function CreatePact({
   const loadFriends = () => api.friends().then(setFriends, () => setLoadFailed(true));
   useEffect(() => {
     void loadFriends();
-    api.recipients().then(setRecipients, () => setLoadFailed(true));
+    api.recipients().then((list) => {
+      setRecipients(list);
+      // With only one saved recipient, it's the one.
+      if (list.length === 1) setForm((f) => (f.recipientId === null ? { ...f, recipientId: list[0]!.id } : f));
+    }, () => setLoadFailed(true));
   }, []);
 
   useEffect(() => {
@@ -165,13 +169,9 @@ export function CreatePact({
         <PenaltyStep
           form={form}
           update={update}
-          friends={friends}
           recipients={recipients}
           onAdded={(recipient) => {
-            // Adding a friend who's already a recipient gives back that recipient.
-            setRecipients((list) =>
-              list?.some((r) => r.id === recipient.id) ? list : [...(list ?? []), recipient],
-            );
+            setRecipients((list) => [...(list ?? []), recipient]);
             update({ recipientId: recipient.id });
           }}
         />
@@ -314,17 +314,89 @@ function ScheduleStep({ days, onDays }: { days: Weekday[]; onDays: (days: Weekda
 function PenaltyStep({
   form,
   update,
-  friends,
   recipients,
   onAdded,
 }: {
   form: Form;
   update: (change: Partial<Form>) => void;
-  friends: Friend[] | null;
   recipients: Recipient[] | null;
   onAdded: (recipient: Recipient) => void;
 }) {
-  const [adding, setAdding] = useState<"person" | "organization" | null>(null);
+  // The new-recipient form goes back to the picker on Cancel when it was opened from there.
+  const [open, setOpen] = useState<"none" | "picker" | "form" | "form-from-picker">("none");
+  const chosen = recipients?.find((r) => r.id === form.recipientId);
+  const saved = recipients ?? [];
+
+  let slot: ReactNode;
+  if (open === "picker") {
+    slot = (
+      <div className="card">
+        <div className="stack">
+          {saved.map((r) => (
+            <button
+              key={r.id}
+              className="opt"
+              aria-pressed={form.recipientId === r.id}
+              onClick={() => {
+                update({ recipientId: r.id });
+                setOpen("none");
+              }}
+            >
+              <span className="glyph" aria-hidden="true">
+                {initial(r.name)}
+              </span>
+              <span className="rt">
+                <b>{r.name}</b>
+              </span>
+            </button>
+          ))}
+        </div>
+        <button className="link self-start" onClick={() => setOpen("form-from-picker")}>
+          New recipient
+        </button>
+        <button className="btn sm self-start" onClick={() => setOpen("none")}>
+          Cancel
+        </button>
+      </div>
+    );
+  } else if (open !== "none") {
+    slot = (
+      <NewRecipientForm
+        onSaved={(recipient) => {
+          setOpen("none");
+          onAdded(recipient);
+        }}
+        onCancel={() => setOpen(open === "form-from-picker" ? "picker" : "none")}
+      />
+    );
+  } else if (chosen) {
+    slot = (
+      <div className="opt static">
+        <span className="glyph" aria-hidden="true">
+          {initial(chosen.name)}
+        </span>
+        <span className="rt">
+          <b>{chosen.name}</b>
+        </span>
+        <button className="link" onClick={() => setOpen("picker")}>
+          Change
+        </button>
+      </div>
+    );
+  } else {
+    slot = (
+      <>
+        <button
+          className="btn block"
+          disabled={recipients === null}
+          onClick={() => setOpen(saved.length === 0 ? "form" : "picker")}
+        >
+          Pick a recipient
+        </button>
+        <small>Who you pay when you miss.</small>
+      </>
+    );
+  }
 
   return (
     <>
@@ -344,115 +416,40 @@ function PenaltyStep({
       </label>
       <div className="field">
         <span>Recipient</span>
-        {recipients?.length === 0 && <small>No recipients yet. Add one below.</small>}
-        {recipients?.map((r) => (
-          <button key={r.id} className="opt" aria-pressed={form.recipientId === r.id} onClick={() => update({ recipientId: r.id })}>
-            <span className="glyph" aria-hidden="true">
-              {initial(r.name)}
-            </span>
-            <span className="rt">
-              <b>{r.name}</b>
-              <small>{r.kind === "organization" ? r.link : "A friend"}</small>
-            </span>
-          </button>
-        ))}
-        {adding === null ? (
-          <div className="row2">
-            {friends !== null && friends.length > 0 && (
-              <button className="link" onClick={() => setAdding("person")}>
-                Add a person
-              </button>
-            )}
-            <button className="link" onClick={() => setAdding("organization")}>
-              Add an organization
-            </button>
-          </div>
-        ) : (
-          <AddRecipient
-            kind={adding}
-            friends={friends ?? []}
-            onAdded={(recipient) => {
-              setAdding(null);
-              onAdded(recipient);
-            }}
-            onCancel={() => setAdding(null)}
-          />
-        )}
+        {slot}
       </div>
     </>
   );
 }
 
-function AddRecipient({
-  kind,
-  friends,
-  onAdded,
-  onCancel,
-}: {
-  kind: "person" | "organization";
-  friends: Friend[];
-  onAdded: (recipient: Recipient) => void;
-  onCancel: () => void;
-}) {
-  const [friendId, setFriendId] = useState(friends[0]?.id ?? "");
+function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipient) => void; onCancel: () => void }) {
   const [name, setName] = useState("");
-  const [link, setLink] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ready = kind === "person" ? friendId !== "" : name.trim() !== "" && link.trim() !== "";
-  const add = async () => {
+  const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      const result = await api.addRecipient(
-        kind === "person" ? { kind, friendId } : { kind, name: name.trim(), link: link.trim() },
-      );
-      if (result.ok) return onAdded(result.recipient);
-      setError(result.reason === "not-a-friend" ? "You can only add a friend." : "Enter a name and a link starting with https://.");
+      const result = await api.addRecipient({ name });
+      if (result.ok) return onSaved(result.recipient);
+      setError("Enter a name.");
     } catch {
-      setError("Couldn't add it. Check your connection and try again.");
+      setError("Couldn't save it. Check your connection and try again.");
     }
     setSaving(false);
   };
 
   return (
     <div className="card">
-      {kind === "person" ? (
-        <label className="field">
-          <span>Friend</span>
-          <select className="inp" value={friendId} onChange={(e) => setFriendId(e.target.value)}>
-            {friends.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : (
-        <>
-          <label className="field">
-            <span>Organization</span>
-            <input className="inp" value={name} placeholder="e.g. City Food Bank" onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>Link</span>
-            <input
-              className="inp"
-              type="url"
-              inputMode="url"
-              value={link}
-              placeholder="https://"
-              onChange={(e) => setLink(e.target.value)}
-            />
-            <small>Where you'll pay them, like a donation page.</small>
-          </label>
-        </>
-      )}
+      <label className="field">
+        <span>Name</span>
+        <input className="inp" value={name} placeholder="e.g. Sam, or City Food Bank" onChange={(e) => setName(e.target.value)} />
+      </label>
       {error && <p className="error">{error}</p>}
       <div className="row2">
-        <button className="btn sm primary" disabled={!ready || saving} onClick={() => void add()}>
-          Add
+        <button className="btn sm primary" disabled={name.trim() === "" || saving} onClick={() => void save()}>
+          Save
         </button>
         <button className="btn sm" onClick={onCancel}>
           Cancel
