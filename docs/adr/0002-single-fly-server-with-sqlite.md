@@ -52,5 +52,5 @@ Monitoring to consider after v0, with no decision on whether or when:
 
 - ~~Fly's current pricing, and that `ewr` is still offered (fallback: `iad`).~~ Verified 2026-10-29: `ewr` works; about $3.85/month pay-as-you-go.
 - Whether Oura sleep timestamps carry a UTC offset (see the spec).
-- Whether iOS Safari keeps a photo's capture time in uploads.
+- ~~Whether iOS Safari keeps a photo's capture time in uploads.~~ Moot: photos are shrunk before upload, which strips capture time, and the rules only use server-received time (ticket 03).
 - ~~That Google sign-in completes inside the home-screen app on a real iPhone.~~ Verified 2026-10-29.

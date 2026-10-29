@@ -51,5 +51,5 @@ The owner proves a day with live photos on the Today card, a reviewer approves o
 
 ## Notes
 
-- Still to verify (ADR 0002): whether iOS Safari keeps a photo's capture time in uploads. Not needed for v0 rules (the server-received time is what counts), but record the answer. Shrinking before upload strips capture time anyway, so it's only available if read before the resize.
+- Capture time isn't used: shrinking before upload strips it, and the rules only use server-received time (ADR 0002).
 - Once the camera flow works on a real iPhone, check that 1280px keeps small text (a treadmill display, a scale) readable, and that photos come out the right way up.

@@ -371,6 +371,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **More Oura schedules:** Weekly count, e.g. "in bed by midnight 5 nights a week".
 - **Anki evidence kind:** the owner connects their Anki account and picks the decks they care about, not all decks. An occurrence is Kept when every picked deck has zero due cards by its due-by time. Unverified: AnkiWeb has no public API as far as we know, and AnkiConnect is a desktop add-on that serves a local HTTP API, so the connection may need sync-server access or a small client on the owner's machine.
 - **Richer Camera evidence:** video or a time-lapse.
+- **Photo upload evidence kind:** a separate kind, alongside Camera, where the owner picks a photo from the library (e.g. a screenshot from another app). Camera stays live-capture only, opening the camera directly.
 - **Vacation mode:** the owner sets a date range and every pact is suspended for it: no occurrences, no reminders and no penalties. It's simpler than an excuse that covers every pact, and it could need no reviewer approval if it's set far enough ahead.
 - **Getting overdue bills paid:** v0 only notifies reviewers (when a bill first goes overdue, then weekly). Something with more social weight could follow, such as a text to the reviewer or a friend. The mechanism isn't designed yet.
 - **Email notifications:** a second Notifier channel, for reviewers who won't remember to open the app and for operator alerts, which survive a database restore better by email than by push.
