@@ -120,7 +120,7 @@ function ConfirmTimezone({
       <div className="stack">
         <span className="label">Welcome, {firstName(profile.name)}</span>
         <h1>Is this your timezone?</h1>
-        <p className="muted">Pact uses it for your days, due times and deadlines.</p>
+        <p className="muted">We’ll use it for due times and deadlines.</p>
       </div>
       <div className="card">
         {picking ? (
