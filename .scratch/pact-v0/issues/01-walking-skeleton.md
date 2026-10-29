@@ -33,12 +33,12 @@ The thinnest end-to-end path through every layer, deployed to `pact.hrishisd.com
 
 ## Acceptance criteria
 
-- [ ] `git push` to `main` runs tests in CI and deploys to Fly when they pass; a failing test blocks the deploy.
-- [ ] The operator can sign in with Google on an iPhone home-screen install, confirm their timezone, and see the empty Today with the four tabs.
-- [ ] A different Google account without an invite is refused and no account is created.
-- [ ] `/health` returns OK while the scheduler runs and fails if ticks stop for 5 minutes.
-- [ ] Deleting the volume and redeploying restores the database from R2 and logs an `OPERATOR_ALERT` with the last tick time (this is also the practice restore ADR 0002 asks for).
-- [ ] Harness scenarios: advance to T records the tick; the tick survives a restart; changing timezone shows up in the profile query; a failing-port scenario leaves nothing half-applied.
+- [x] `git push` to `main` runs tests in CI and deploys to Fly when they pass; a failing test blocks the deploy.
+- [x] The operator can sign in with Google on an iPhone home-screen install, confirm their timezone, and see the empty Today with the four tabs.
+- [x] A different Google account without an invite is refused and no account is created.
+- [x] `/health` returns OK while the scheduler runs and fails if ticks stop for 5 minutes.
+- [x] Deleting the volume and redeploying restores the database from R2 and logs an `OPERATOR_ALERT` with the last tick time (this is also the practice restore ADR 0002 asks for).
+- [x] Harness scenarios: advance to T records the tick; the tick survives a restart; changing timezone shows up in the profile query; a failing-port scenario leaves nothing half-applied.
 
 ## Needs the operator
 
@@ -64,3 +64,14 @@ Done and checked locally: core skeleton with the four ports and fakes, SQLite (W
 Not yet verified (needs the operator, see `scripts/setup-operator.sh`): Docker image build (no local Docker daemon), Fly deploy and `ewr` availability/pricing, R2 replication and the practice restore, real Google sign-in, and Google sign-in inside the iPhone home-screen app. Record those results here.
 
 Decision: two health endpoints. Fly's `http_service` check uses `/healthz` (liveness: process up, database readable), which also fails a deploy whose new version doesn't come up. `/health` (scheduler ticked in the last 5 minutes) is watched only by the external uptime monitor: with one machine, pointing Fly's check at it would take the whole app offline when only the scheduler is stuck.
+
+**2026-10-29 — deployed and verified in production.**
+
+- Fly app `pact-hrishisd` in `ewr`, one `shared-cpu-1x` 512MB machine and one volume. Pricing checked against Fly's docs: pay-as-you-go, about $3.85/month (machine $3.69, 1GB volume $0.15; cert, snapshots, shared IPv4 free). A trial org stops machines after 5 minutes until a card is added; adding one fixed it.
+- CI on push: run 40907581561 and 40910723703 tested and deployed (releases v3, v4). The deploy job `needs: test`; a failing test blocking a deploy has not been exercised yet.
+- Operator signed in with Google from `https://pact.hrishisd.com`, from `https://pact-hrishisd.fly.dev` (now redirects to the canonical host), and inside the iPhone home-screen app.
+- Practice restore done: volume deleted, redeployed, database restored from R2, `OPERATOR_ALERT` logged with the last tick time.
+- Refusing an uninvited account and `/health` failing after 5 minutes without a tick are covered by tests; neither was tried deliberately in production.
+
+Bug found and fixed: sign-in started on the fly.dev host failed with Better Auth's "State not persisted correctly", because the host-only state cookie was set there while Google's callback goes to `BETTER_AUTH_URL`. Production now redirects every other host to the canonical origin (`/health` and `/healthz` excepted).
+
