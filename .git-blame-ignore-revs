@@ -1,0 +1,7 @@
+# Mechanical reformat commits (e.g. the one-time Prettier reformat) that `git blame` should skip,
+# so blame points at the commit that last changed a line's meaning, not its layout.
+# Enable locally with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub's blame view reads this file automatically.)
+#
+# One full commit hash per line, with a comment saying what it was.
+# Prettier reformat: <add the commit hash here after committing>

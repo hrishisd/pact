@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 // Avoided words that are fine in their everyday sense, so checking them
 // would mostly flag correct code ("every day", "integration test").
+// prettier-ignore
 const EVERYDAY_WORDS = new Set([
   "task", "goal", "user", "pending", "live", "day", "session", "passed", "failed",
   "success", "failure", "source", "link", "pass", "contact", "connection", "edit",
@@ -24,7 +25,12 @@ const avoidedWords = readFileSync("GLOSSARY.md", "utf8")
   .split("\n")
   .filter((line) => line.startsWith("_Avoid_:"))
   .flatMap((line) => line.slice("_Avoid_:".length).split(","))
-  .map((word) => word.replace(/\(.*\)/, "").trim().toLowerCase())
+  .map((word) =>
+    word
+      .replace(/\(.*\)/, "")
+      .trim()
+      .toLowerCase(),
+  )
   .filter((word) => word !== "" && !EVERYDAY_WORDS.has(word));
 
 const avoidedPattern = new RegExp(`\\b(${avoidedWords.map(escapeRegExp).join("|")})s?\\b`, "i");
@@ -33,15 +39,18 @@ const systemTimePattern = /\bDate\.now\(\)|\bnew Date\(\)/;
 
 const findings: string[] = [];
 for (const file of sourceFiles("src")) {
-  const inCore = file.startsWith("src/core/") && !file.startsWith("src/core/testing/") && file !== "src/core/adapters.ts";
+  const inCore =
+    file.startsWith("src/core/") && !file.startsWith("src/core/testing/") && file !== "src/core/adapters.ts";
   readFileSync(file, "utf8")
     .split("\n")
     .forEach((line, index) => {
       if (line.includes("conventions-ok")) return;
       const where = `${file}:${index + 1}`;
       const avoided = avoidedPattern.exec(line);
-      if (avoided && !ALLOWED_PHRASES.some((phrase) => line.includes(phrase))) findings.push(`${where}: "${avoided[0]}" is a word GLOSSARY.md says to avoid`);
-      if (inCore && systemTimePattern.test(line)) findings.push(`${where}: the core reads time only from the Clock port`);
+      if (avoided && !ALLOWED_PHRASES.some((phrase) => line.includes(phrase)))
+        findings.push(`${where}: "${avoided[0]}" is a word GLOSSARY.md says to avoid`);
+      if (inCore && systemTimePattern.test(line))
+        findings.push(`${where}: the core reads time only from the Clock port`);
     });
 }
 

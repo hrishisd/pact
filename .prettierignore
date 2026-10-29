@@ -1,0 +1,6 @@
+# Prettier also skips everything in .gitignore (dist, node_modules, .dev-data*, tmp, ...).
+package-lock.json
+src/client/public
+# Markdown is hand-written prose and tables (docs, specs, tickets); keep it as written.
+*.md
+.scratch

@@ -1,6 +1,6 @@
 # Coding standards
 
-Read at review time. `npm run lint` enforces the mechanical rules: unused code (knip), glossary words and system time in the core (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
+Read at review time. `npm run lint` enforces the mechanical rules: formatting (Prettier; run `npm run format` before committing), unused code (knip), glossary words and system time in the core (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
 
 ## The core owns every domain rule
 
