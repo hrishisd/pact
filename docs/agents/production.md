@@ -6,12 +6,14 @@ Pact runs on one Fly machine: app `pact-hrishisd`, with the volume at `/data`. S
 
 | Need | Command |
 |---|---|
-| The server's own output, back past restarts (capped at about 20 MB) | `fly ssh console -a pact-hrishisd -C "tail -n 500 /data/logs/pact.log"` |
-| Search it | `fly ssh console -a pact-hrishisd -C "grep -h OPERATOR_ALERT /data/logs/pact.log.1 /data/logs/pact.log"` |
-| Litestream's output, or the very latest lines | `fly logs -a pact-hrishisd --no-tail` (only about the last 100 lines) |
-| Older Fly logs (about 7 days, human only) | Grafana log search at fly-metrics.net. Ask the operator to search and paste. |
+Use `scripts/prod-log.sh`: it only reads logs, so it runs without a permission prompt. A raw `fly ssh console` opens a shell on the production machine and is gated.
 
-`-C` runs one command without a shell. For pipes or globs, wrap it: `-C "sh -c '…'"`. Ask for a bounded slice (`tail -n`, `grep`), never the whole file.
+| Need | Command |
+|---|---|
+| The server's own output, back past restarts (capped at about 20 MB) | `scripts/prod-log.sh tail 500` |
+| Search it (letters, digits, spaces and `_ . : -` only) | `scripts/prod-log.sh grep OPERATOR_ALERT` |
+| Litestream's output, or the very latest lines | `scripts/prod-log.sh fly` (only about the last 100 lines) |
+| Older Fly logs (about 7 days, human only) | Grafana log search at fly-metrics.net. Ask the operator to search and paste. |
 
 ## Health
 

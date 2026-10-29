@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "allow": ["Bash(scripts/prod-log.sh *)"],
     "deny": ["Read(./.env)", "Read(./.env.operator)"]
   },
   "hooks": {
