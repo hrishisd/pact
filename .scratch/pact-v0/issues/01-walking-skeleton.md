@@ -54,3 +54,13 @@ These need accounts and secrets only the operator can set up. Consider generatin
 ## Notes
 
 - Still to verify (ADR 0002): Fly pricing and `ewr`; Google sign-in completing inside the home-screen app on a real iPhone. Record the results under Comments.
+
+## Comments
+
+**2026-10-29 — implemented in code; operator steps outstanding.**
+
+Done and checked locally: core skeleton with the four ports and fakes, SQLite (WAL + production pragmas, migrations on boot), outbox delivered after commit, scheduler tick + `/health` 5-minute rule, Better Auth Google sign-in with invite-only refusal (tests confirm no core or auth rows on refusal), timezone confirm and change, app shell with the four tabs and empty Today, PWA manifest and icons, Dockerfile + Litestream 0.5.17 (30-day retention, restore on boot, `OPERATOR_ALERT` with the last tick), `fly.toml`, GitHub Actions CI/deploy. Harness scenarios cover the tick, restart, timezone in profile, and a failing port (clock fails inside the restore-alert command → nothing queued; notifier fails after commit → delivered on the next tick).
+
+Not yet verified (needs the operator, see `scripts/setup-operator.sh`): Docker image build (no local Docker daemon), Fly deploy and `ewr` availability/pricing, R2 replication and the practice restore, real Google sign-in, and Google sign-in inside the iPhone home-screen app. Record those results here.
+
+Decision: no Fly `http_service` health check on `/health`. With one machine, a failing check would take the app offline when only the scheduler is stuck; the external uptime monitor watches `/health` instead.

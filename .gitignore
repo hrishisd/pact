@@ -72,3 +72,6 @@ test-results/
 # Misc
 tmp/
 .temp/
+
+# Local development database (npm run dev)
+.dev-data/

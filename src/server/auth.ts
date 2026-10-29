@@ -1,0 +1,97 @@
+// Google sign-in, through Better Auth, inside the server.
+//
+// Better Auth owns sessions and its own tables (auth_user, auth_account,
+// auth_session, auth_verification), kept in the same SQLite file as the Pact core on a
+// connection of its own. The Pact core decides who may have an account:
+// before Better Auth creates a user, it asks `core.signIn`, and when the core
+// refuses, the hook throws. The user row and the account row are written in
+// one Better Auth transaction after this hook, so a refusal leaves no user,
+// account or session row behind. Better Auth turns the thrown error into a
+// redirect to the error URL with `?error=invite_required`.
+
+import { APIError, betterAuth } from "better-auth";
+import { getMigrations } from "better-auth/db/migration";
+import type { PactCore } from "../core/index.ts";
+import { openWithPragmas } from "../core/db.ts";
+import { AUTH_BASE_PATH, AUTH_ERROR_PATH } from "../shared/api.ts";
+
+/** The `error` code Better Auth puts on the error redirect when the core refuses a sign-in. */
+export const INVITE_REQUIRED_CODE = "invite_required";
+
+export interface AuthOptions {
+  core: PactCore;
+  dbPath: string;
+  secret: string;
+  /** Public origin, e.g. https://pact.hrishisd.com. */
+  baseURL: string;
+  google: { clientId: string; clientSecret: string };
+}
+
+const DAY_SECONDS = 24 * 60 * 60;
+
+export function createAuth(options: AuthOptions) {
+  const { core } = options;
+  const db = openWithPragmas(options.dbPath);
+
+  const config = {
+    database: db,
+    secret: options.secret,
+    baseURL: options.baseURL,
+    basePath: AUTH_BASE_PATH,
+    trustedOrigins: [new URL(options.baseURL).origin],
+    socialProviders: {
+      google: {
+        clientId: options.google.clientId,
+        clientSecret: options.google.clientSecret,
+        prompt: "select_account" as const,
+        // Sign-in is only through Google's redirect, never a posted id token.
+        disableIdTokenSignIn: true,
+      },
+    },
+    // The core owns the unprefixed names (its `account` table is a Pact account).
+    user: { modelName: "auth_user" },
+    account: { modelName: "auth_account" },
+    session: {
+      modelName: "auth_session",
+      // Long-lived and self-renewing: each day of use pushes expiry out to 60 days.
+      expiresIn: 60 * DAY_SECONDS,
+      updateAge: DAY_SECONDS,
+    },
+    verification: { modelName: "auth_verification" },
+    // Google is the only way in: no email/password, no account linking to other providers.
+    emailAndPassword: { enabled: false },
+    onAPIError: { errorURL: AUTH_ERROR_PATH },
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user: { email: string; name: string }) => {
+            const result = await core.signIn({ email: user.email, name: user.name });
+            if (!result.ok) {
+              throw new APIError("FORBIDDEN", {
+                code: INVITE_REQUIRED_CODE,
+                message: "Pact is invite-only. You need an invite to sign in.",
+              });
+            }
+          },
+        },
+      },
+    },
+    telemetry: { enabled: false },
+  };
+
+  const auth = betterAuth(config);
+
+  return {
+    auth,
+    /** Creates or updates Better Auth's tables. Run on every boot, before serving. */
+    async migrate(): Promise<void> {
+      const { runMigrations } = await getMigrations(config);
+      await runMigrations();
+    },
+    close(): void {
+      db.close();
+    },
+  };
+}
+
+export type Auth = ReturnType<typeof createAuth>["auth"];

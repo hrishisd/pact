@@ -1,0 +1,17 @@
+.git
+.github
+.claude
+.scratch
+.dev-data
+.env
+.env.*
+!.env.example
+node_modules
+dist
+tmp
+docs
+coverage
+*.db
+*.db-*
+**/*.test.ts
+src/core/testing

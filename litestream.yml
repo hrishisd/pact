@@ -1,0 +1,22 @@
+# Litestream 0.5 configuration (installed at /etc/litestream.yml in the image).
+#
+# Replicates the one SQLite file (Pact core and Better Auth tables) to a
+# Cloudflare R2 bucket. Values in ${...} come from the environment (fly.toml env and Fly secrets). Credentials are
+# read by Litestream itself from LITESTREAM_ACCESS_KEY_ID and
+# LITESTREAM_SECRET_ACCESS_KEY.
+
+# 30 days of point-in-time history: daily snapshots, each kept (with the
+# incremental files after it) for 720 hours. Durations take h, not d.
+snapshot:
+  interval: 24h
+  retention: 720h
+
+dbs:
+  - path: ${PACT_DB_PATH}
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: pact.db
+      # https://<account id>.r2.cloudflarestorage.com
+      endpoint: ${LITESTREAM_ENDPOINT}
+      region: auto
