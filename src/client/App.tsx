@@ -73,7 +73,7 @@ function SignIn() {
     <Centered>
       <div className="brand">
         <h1>Pact</h1>
-        <p className="muted">Pacts with money on the line, checked by your friends.</p>
+        <p className="muted">Commitments with money on the line, checked by your friends.</p>
       </div>
       <button
         className="btn block google"
@@ -225,8 +225,8 @@ function Shell({
   const current = TABS.find((t) => t.id === tab)!;
   const subtitle: Record<TabId, string> = {
     today: new Intl.DateTimeFormat("en-US", { timeZone: profile.timezone, weekday: "short", month: "short", day: "numeric" }).format(new Date()),
-    pacts: "Yours",
-    review: "Nothing waiting on you",
+    pacts: "",
+    review: "",
     ledgers: "",
   };
 
@@ -243,11 +243,11 @@ function Shell({
       </header>
       <main className="scroll gut">
         {tab === "today" && <TodayTab />}
-        {tab === "pacts" && <Empty title="No pacts yet" body="Pacts you make show up here, with how each one is going." />}
+        {tab === "pacts" && <Empty title="No pacts yet" body="Pacts you create show up here." />}
         {tab === "review" && (
-          <Empty title="Nothing to review" body="When a friend picks you as a reviewer, their evidence and excuses wait for you here." />
+          <Empty title="Nothing to review" body="When a friend picks you as a reviewer, their submitted evidence and excuses show up here." />
         )}
-        {tab === "ledgers" && <Empty title="No ledgers yet" body="Each recipient gets a ledger once a pact names them." />}
+        {tab === "ledgers" && <Empty title="No ledgers yet" body="Each recipient you name on a pact gets one ledger." />}
       </main>
       <nav className="tabbar" aria-label="Main">
         {TABS.map(({ id, label, Icon }) => (
