@@ -27,6 +27,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Only for the check below, which needs no dependencies. If this fails the check warns.
+      - uses: actions/setup-node@v7
+        continue-on-error: true
+        with:
+          node-version-file: .nvmrc
+      # Blocks only on a definitely missing variable; can't list secrets? It warns, read the log.
+      - run: scripts/check-fly-secrets.sh fly.toml timeout 60 flyctl secrets list -a pact-hrishisd --json
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       - run: flyctl deploy --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
