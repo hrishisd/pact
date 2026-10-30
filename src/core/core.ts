@@ -89,6 +89,8 @@ export interface PactCore {
   lastTick(): Date | null;
   /** Not ok when there's no tick in the last 5 minutes by the clock. */
   health(): Health;
+  /** How many migrations this database has applied. */
+  schemaVersion(): number;
   /** After a restore from backup: tells the operator how old the restored data is. */
   raiseRestoreAlert(): Promise<void>;
   /** Waits for any delivery in progress, then closes the database. */
@@ -1093,6 +1095,10 @@ class Core implements PactCore {
     const lastTick = this.lastTick();
     const ok = lastTick !== null && this.#clock.now().getTime() - lastTick.getTime() <= HEALTHY_TICK_AGE_MS;
     return { ok, lastTick };
+  }
+
+  schemaVersion(): number {
+    return this.#db.pragma("user_version", { simple: true }) as number;
   }
 
   async raiseRestoreAlert(): Promise<void> {

@@ -83,7 +83,7 @@ const app = createApp({
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(
-    `pact listening on :${info.port} (${config.production ? "production" : "development"}, db ${config.dbPath})`,
+    `pact listening on :${info.port} (${config.production ? "production" : "development"}, db ${config.dbPath}, schema ${core.schemaVersion()})`,
   );
 });
 

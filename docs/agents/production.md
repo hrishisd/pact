@@ -12,6 +12,7 @@ Use `scripts/prod-log.sh`: it only reads logs, so it runs without a permission p
 | Search it (letters, digits, spaces and `_ . : -` only) | `scripts/prod-log.sh grep OPERATOR_ALERT` |
 | Evidence upload sizes and times (one line per upload) | `scripts/prod-log.sh grep evidence-upload` |
 | Litestream's output, or the very latest lines | `scripts/prod-log.sh fly` (only about the last 100 lines) |
+| Database counts: `schema-version`, `penalty-totals`, `pact-cursors` | `scripts/prod-db.sh penalty-totals`. Read-only: fixed queries, aggregates only. It isn't on the allow list, so it may need the user's approval to run. |
 | Older Fly logs (about 7 days, human only) | Grafana log search at fly-metrics.net. Ask the operator to search and paste. |
 
 ## Health
