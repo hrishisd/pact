@@ -65,6 +65,8 @@ export interface AppOptions {
   production: boolean;
   /** The dev sign-in's `?as=operator`. */
   operatorEmail: string;
+  /** Where the app writes log lines. Default: console.log. */
+  log?: (line: string) => void;
 }
 
 /** Room for the multipart boundaries and headers around the photos. */
@@ -88,8 +90,20 @@ export function createApp({
   diskUsedFraction,
   production,
   operatorEmail,
+  log = (line) => console.log(line),
 }: AppOptions) {
   const app = new Hono<Env>();
+
+  /**
+   * One line per evidence upload, to see sizes and speeds in the server log.
+   * Nothing from the request's URL goes in, so a request can't forge a line.
+   */
+  const logUpload = (fields: Record<string, string | number>) =>
+    log(
+      `evidence-upload ${Object.entries(fields)
+        .map(([name, value]) => `${name}=${value}`)
+        .join(" ")}`,
+    );
 
   // Liveness, for Fly's check: the process serves and the database answers.
   // It ignores the scheduler and the disk, so a stuck scheduler or a filling
@@ -265,18 +279,42 @@ export function createApp({
     }),
     async (c) => {
       if (!c.req.header("Content-Type")?.startsWith("multipart/form-data")) return apiError(c, 400, "invalid-request");
+      // From the request's headers arriving to its last byte: most of the time
+      // the phone spends uploading, though not its connection setup.
+      const receiving = performance.now();
       const form = await c.req.parseBody({ all: true }).catch(() => null);
-      if (!form) return apiError(c, 400, "invalid-request");
+      const receiveMs = Math.round(performance.now() - receiving);
+      if (!form) {
+        logUpload({ outcome: "unreadable", receiveMs });
+        return apiError(c, 400, "invalid-request");
+      }
       const fields = [form[EVIDENCE_PHOTO_FIELD] ?? []].flat();
       const files = fields.filter(
         (field): field is File => field instanceof File && PHOTO_CONTENT_TYPES.includes(field.type),
       );
       if (files.length !== fields.length) return apiError(c, 400, "invalid-request");
-      if (files.some((file) => file.size > MAX_PHOTO_BYTES)) return apiError(c, 400, "photo-too-large");
+      const sizes = {
+        photos: files.length,
+        bytes: files.reduce((total, file) => total + file.size, 0),
+        largestBytes: Math.max(0, ...files.map((file) => file.size)),
+      };
+      if (files.some((file) => file.size > MAX_PHOTO_BYTES)) {
+        logUpload({ outcome: "photo-too-large", ...sizes, receiveMs });
+        return apiError(c, 400, "photo-too-large");
+      }
       const photos: Photo[] = await Promise.all(
         files.map(async (file) => ({ bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type })),
       );
+      const storing = performance.now();
       const body: SubmitEvidenceResponse = await core.as(c.get("accountId")).submitEvidence(c.req.param("id"), photos);
+      const storeMs = Math.round(performance.now() - storing);
+      logUpload({
+        outcome: body.ok ? "ok" : body.reason,
+        ...(body.ok && { evidence: body.evidenceId }),
+        ...sizes,
+        receiveMs,
+        storeMs,
+      });
       return c.json(body);
     },
   );

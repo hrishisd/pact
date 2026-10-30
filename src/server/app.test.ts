@@ -82,6 +82,7 @@ async function server({
     diskUsedFraction,
     production,
     operatorEmail: OPERATOR,
+    log: (line) => s.logs.push(line),
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
   onTestFinished(() => close());
@@ -101,6 +102,7 @@ async function server({
     at: s.at,
     clock: s.clock,
     core: s.core,
+    logs: s.logs,
     photoStore: s.photoStore,
     staticDir,
     request,
@@ -743,6 +745,51 @@ describe("evidence", () => {
     expect(today.body.waiting).toEqual([]);
     // Exactly at the cap is fine.
     expect((await submit(s, owner.cookie, pactId, [jpeg(MAX_PHOTO_BYTES)])).body).toMatchObject({ ok: true });
+  });
+
+  test("each upload logs one line with its sizes and timings, whatever became of it", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+    const uploadLines = () => s.logs.filter((line) => line.startsWith("evidence-upload "));
+
+    const submitted = await submit(s, owner.cookie, pactId, [jpeg(3, 1), jpeg(5, 2)]);
+    const { evidenceId } = submitted.body as { evidenceId: string };
+    expect(uploadLines()).toEqual([
+      expect.stringMatching(
+        new RegExp(
+          `^evidence-upload outcome=ok evidence=${evidenceId} photos=2 bytes=8 largestBytes=5 receiveMs=\\d+ storeMs=\\d+$`,
+        ),
+      ),
+    ]);
+
+    s.logs.length = 0;
+    s.clock.set(s.at("Tue 10:00"));
+    await submit(s, owner.cookie, pactId, [jpeg(4)]);
+    expect(uploadLines()).toEqual([
+      expect.stringMatching(
+        /^evidence-upload outcome=not-open photos=1 bytes=4 largestBytes=4 receiveMs=\d+ storeMs=\d+$/,
+      ),
+    ]);
+
+    s.logs.length = 0;
+    await submit(s, owner.cookie, pactId, [jpeg(MAX_PHOTO_BYTES + 1)]);
+    expect(uploadLines()).toEqual([
+      expect.stringMatching(
+        new RegExp(
+          `^evidence-upload outcome=photo-too-large photos=1 bytes=${MAX_PHOTO_BYTES + 1} largestBytes=${MAX_PHOTO_BYTES + 1} receiveMs=\\d+$`,
+        ),
+      ),
+    ]);
+
+    // What a connection dropping partway through an upload looks like to the server.
+    s.logs.length = 0;
+    const cutOff = await s.request(API_PATHS.evidence(pactId), {
+      method: "POST",
+      cookie: owner.cookie,
+      headers: { "Content-Type": "multipart/form-data; boundary=x" },
+      body: "--x\r\nnot the end of a form",
+    });
+    expect(cutOff.status).toBe(400);
+    expect(uploadLines()).toEqual([expect.stringMatching(/^evidence-upload outcome=unreadable receiveMs=\d+$/)]);
   });
 
   test("too many photos is the core's refusal, as data", async () => {

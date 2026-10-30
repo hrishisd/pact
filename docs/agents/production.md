@@ -12,6 +12,7 @@ Use `scripts/prod-log.sh`: it only reads logs, so it runs without a permission p
 |---|---|
 | The server's own output, back past restarts (capped at about 20 MB) | `scripts/prod-log.sh tail 500` |
 | Search it (letters, digits, spaces and `_ . : -` only) | `scripts/prod-log.sh grep OPERATOR_ALERT` |
+| Evidence upload sizes and times (one line per upload) | `scripts/prod-log.sh grep evidence-upload` |
 | Litestream's output, or the very latest lines | `scripts/prod-log.sh fly` (only about the last 100 lines) |
 | Older Fly logs (about 7 days, human only) | Grafana log search at fly-metrics.net. Ask the operator to search and paste. |
 
