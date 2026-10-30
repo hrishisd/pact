@@ -186,7 +186,7 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 
 
-# Pact operator setup: everything in ticket 01's "Needs the operator" list.
+# Pact operator setup: everything in ticket 01's "Needs the operator" list, plus ticket 03's photo bucket.
 #
 #   scripts/setup-operator.sh        (from the repo root)
 #

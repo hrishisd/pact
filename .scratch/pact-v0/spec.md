@@ -356,7 +356,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - reminder conditions
   - timezone handling
 - **Not tested at this seam:** the UI, Google sign-in, real Oura OAuth and HTTP calls, real push delivery, and real photo storage. These are thin adapters, verified by manual or smoke checks once the stack exists. One or two end-to-end browser smoke tests may be added later. SQLite's own crash safety and Litestream aren't tested in CI either. The practice restore in ADR 0002 covers backups.
-- **Prior art:** none. The repository has no code yet, so these tests set the pattern.
+- **Prior art:** `scenario()` in `src/core/testing/scenario.ts`, and the core's tests that use it.
 
 ## Out of Scope
 
