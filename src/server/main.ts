@@ -16,6 +16,7 @@ import { createApp } from "./app.ts";
 import { createAuth } from "./auth.ts";
 import { loadConfig } from "./config.ts";
 import { startLogFile } from "./log-file.ts";
+import { exitUnlessNativeBinaryLoads } from "./native-binary.ts";
 import { startScheduler } from "./scheduler.ts";
 
 const config = loadConfig();
@@ -38,6 +39,7 @@ if (!config.production) {
     );
     process.exit(1);
   }
+  exitUnlessNativeBinaryLoads();
 }
 
 const core = createPactCore({
