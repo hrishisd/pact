@@ -12,7 +12,7 @@ Turn penalties into one bill per recipient every Wednesday at 6pm, due a week la
 ### Bills
 - Every Wednesday at 18:00 (owner's timezone), each recipient gets one bill holding the owner's owed penalties whose 48-hour excuse window has closed and that aren't on a bill yet. Held penalties wait. No bill for a recipient with nothing to bill.
 - Due at 18:00 seven days later. A bill never changes after it's created.
-- A penalty that comes later (rejection after its week, a released hold) goes on the next Wednesday's bill. Accepting a miss doesn't bill it sooner.
+- A penalty that comes later (rejection after its week, a released hold) goes on the next Wednesday's bill. Accepting a miss (Take the L) doesn't bill it sooner.
 - A bill is paid once payments (applied oldest first) cover all its penalties. The owner can pay at any time.
 - New bill → notifies the owner (new bill kind).
 

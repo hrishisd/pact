@@ -16,25 +16,26 @@ The owner proves a day with live photos on the Today card, a reviewer approves o
 - **Submit inline on the Today card:** live camera capture only (no photo library), several photos per piece of evidence.
 - Accepted only on the pact's scheduled days and only until the occurrence's due time (midnight). The core refuses anything else, so there's no backfilling.
 - Submitting moves the card into **Waiting for approval** at the bottom of Today, with the green camera Evidence icon in a coloured square and the kind name in the small line.
-- After a rejection the owner can resubmit while the occurrence is still open.
+- A rejection is final. Evidence for a day whose evidence was rejected is refused.
 
 ### Review
 - **Review tab** with a count badge. One item at a time, with Reject (reason required), Approve, and Prev/Skip. Ask comes in ticket 12.
 - An Evidence item shows only the photos and the pact's description of what counts.
 - Any reviewer of the pact may decide; the first decision is final and removes the item from every reviewer's queue. Items never expire.
+- The reject form warns under the reason box before sending, e.g. "Rejecting makes Wednesday Missed and adds $5 to Hrishi's Red Cross ledger." (the occurrence's weekday, the owner's name, the penalty and the recipient).
 - The owner sees the decision in the app (push arrives with ticket 05; the core records the notification now).
 
 ### Judging (Fixed days, Camera)
 - At the end of each scheduled day (advance to T): no evidence → Missed; approved evidence → Kept; evidence still waiting → the outcome waits for the decision.
-- Rejected evidence makes the occurrence Missed as of the rejection, unless the occurrence is still open and new evidence is submitted.
-- A rejected-evidence **alert** shows on Today until resolved.
+- Rejected evidence makes the occurrence Missed as of the rejection, with its penalty, whether the day is still open or already past its due time. The occurrence takes no more evidence.
 
 ### Ledger
 - Each Missed occurrence adds a **penalty** equal to the pact's amount to the owner's ledger for that recipient. One ledger per recipient across all pacts that share it.
 - **Ledgers tab:** one card per recipient with the big owed amount and lifetime paid ($0 for now). Tapping opens its history, pushed on the tab, with each penalty linked to its occurrence.
 
 ### Today
-- **Missed** section (red): misses from the last 48 hours. File excuse and "I'll pay it" arrive in ticket 07.
+- A rejected-evidence **alert** at the top, one per rejected occurrence: "Sam rejected your evidence for Gym", the reason in quotes, "Wed Oct 28 is Missed · $5 to Red Cross", and a **Take the L** button with no confirmation. The pact leaves To do for that day. The alert stays until the owner taps Take the L, which only clears it; the ledger doesn't change. "File excuse" on the alert arrives in ticket 07.
+- **Missed** section (red): misses from the last 48 hours, but not days Missed through a rejection. File excuse and Take the L arrive in ticket 07.
 - Done (Kept) cards don't appear.
 
 ## Acceptance criteria (core scenarios)
@@ -42,7 +43,12 @@ The owner proves a day with live photos on the Today card, a reviewer approves o
 - [x] Mon/Wed/Fri $5 pact → Monday ends with no evidence → Missed, ledger shows $5 owed to the recipient.
 - [x] Evidence submitted Monday, approved Tuesday → Kept, nothing owed.
 - [x] Evidence submitted Monday, still waiting at midnight → not judged yet; rejected Tuesday → Missed as of the rejection, $5 owed.
-- [x] Rejected Monday afternoon, resubmitted Monday evening, approved → Kept.
+- [x] Rejected Monday afternoon, while the day is still open → Missed at once, $5 owed; the pact leaves To do; Today shows the alert with the reason and Take the L; the day isn't in the Missed section.
+- [x] Rejected Tuesday, after Monday's due time → the same alert.
+- [x] Take the L clears the alert; owed is unchanged.
+- [x] The alert is still there after 48 hours if Take the L wasn't tapped.
+- [x] Evidence for a day whose evidence was rejected is refused.
+- [x] The reject form shows the warning before the reviewer sends it.
 - [x] Evidence refused on a Tuesday for a Mon/Wed/Fri pact, and refused after midnight.
 - [x] Two reviewers: the first to decide wins and the item leaves both queues; a second decision is refused.
 - [x] Two pacts with the same recipient share one ledger.
@@ -52,6 +58,7 @@ The owner proves a day with live photos on the Today card, a reviewer approves o
 ## Notes
 
 - Capture time isn't used: shrinking before upload strips it, and the rules only use server-received time (ADR 0002).
+- Until ticket 07 lands, a disputed rejection is settled between the owner and the reviewer outside the app.
 - Once the camera flow works on a real iPhone, check that 1280px keeps small text (a treadmill display, a scale) readable, and that photos come out the right way up.
 
 ## Comments
@@ -86,3 +93,9 @@ Decided with the human:
 - **Reasons in the ledger.** Each penalty that came from rejected evidence now shows "Rejected by X: “reason”" in the ledger's history, not only on the Missed card for 48 hours.
 
 The spec was updated to match (Rules, Today alerts, Ledgers). I checked both in the browser preview.
+
+### 2026-10-30: a rejection is final; Take the L
+
+Decided with the human, after the prototype on branch `prototype/rejection-flow` (option C). A rejection now makes the day Missed at once, with its penalty, even while the day is still open, and the day takes no more evidence. Today shows it only as an alert with the reason and a **Take the L** button that clears it without changing the ledger; the reject form warns the reviewer first. This replaces "Take the miss" from 5ddce6b, and Take the L is now also the name for "I'll pay it" (ticket 07).
+
+Built and checked the same day: core tests cover the six criteria above, and in the browser preview the reviewer saw "Rejecting makes Saturday Missed and adds $5 to Hsdharam's Red Cross ledger.", the owner got the alert with Gym gone from To do, Take the L cleared it, and new photos for that day were refused (`already-judged`). Status stays ready-for-agent until the phone check passes.

@@ -137,22 +137,18 @@ export type SubmitEvidenceRefusal =
   | "evidence-waiting"
   /** Evidence for this occurrence was already approved. */
   | "already-approved"
-  /** This occurrence is already judged: the owner took the miss after a rejection. */
+  /** This occurrence is already judged: its evidence was rejected, which is final. */
   | "already-judged";
 
 export type SubmitEvidenceResult = { ok: true; evidenceId: string } | { ok: false; reason: SubmitEvidenceRefusal };
 
-export type AcceptRejectionRefusal =
+export type AcceptMissRefusal =
   /** Not this owner's pact, or no pact. */
   | "pact-not-found"
-  /**
-   * No occurrence of it is open now whose latest evidence was rejected: none
-   * is open, it has no evidence, new evidence is waiting or approved, or the
-   * miss was already taken.
-   */
+  /** The occurrence isn't Missed (not judged yet, Kept, or not on the schedule), or the miss was already accepted. */
   | "nothing-to-accept";
 
-export type AcceptRejectionResult = { ok: true } | { ok: false; reason: AcceptRejectionRefusal };
+export type AcceptMissResult = { ok: true } | { ok: false; reason: AcceptMissRefusal };
 
 /**
  * An item in a reviewer's Review Queue, oldest first. Items never expire.
@@ -175,6 +171,9 @@ export type ReviewItem =
     submittedAt: Date;
     /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
     occurrenceDate: string;
+    /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
+    penaltyCents: number;
+    recipientName: string;
   };
 
 /** A reviewer's decision on a Review Queue item. */
@@ -223,10 +222,10 @@ export interface Today {
 /** Something that needs the owner, shown first. */
 export type TodayAlert =
   /**
-   * A reviewer rejected the evidence for an occurrence that's still open, so
-   * the pact is back in To do. Submitting again resolves it, and so does
-   * taking the miss (`acceptRejection`), which adds `penaltyCents` to the
-   * ledger for `recipientName`.
+   * A reviewer rejected the evidence for an occurrence, which judged it
+   * Missed and added `penaltyCents` to the ledger for `recipientName`. Newest
+   * rejection first. It stays until the owner accepts the miss (Take the L,
+   * `acceptMiss`), which changes nothing else.
    */
   {
     kind: "evidence-rejected";
@@ -242,7 +241,10 @@ export type TodayAlert =
 export type TodaySection =
   /** Pacts whose occurrence is open today, soonest due first. */
   | { kind: "to-do"; cards: TodayToDoCard[] }
-  /** Occurrences judged Missed in the last 48 hours, latest first. */
+  /**
+   * Occurrences judged Missed in the last 48 hours, latest first, except
+   * those Missed through a rejection (alerts) and accepted misses.
+   */
   | { kind: "missed"; cards: TodayMissedCard[] }
   /** Pacts whose first occurrence hasn't opened yet, soonest first. */
   | { kind: "coming-up"; cards: TodayComingUpCard[] };
@@ -266,17 +268,12 @@ export interface EvidenceRejection {
   reason: string;
 }
 
-/** An occurrence judged Missed; `penaltyCents` is the penalty it added. */
+/** An occurrence judged Missed at its due time; `penaltyCents` is the penalty it added. */
 export interface TodayMissedCard extends TodayPactCard {
   /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
   occurrenceDate: string;
-  /** When it was judged Missed: its due time, or the rejection that came after it. */
+  /** When it was judged Missed. */
   missedAt: Date;
-  /**
-   * When it was Missed because its latest evidence was rejected: who rejected
-   * it and why. The owner sees the decision here once the day's alert is gone.
-   */
-  rejection?: EvidenceRejection;
 }
 
 export interface TodayComingUpCard extends TodayPactCard {

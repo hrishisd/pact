@@ -1,11 +1,12 @@
 // The Review tab: the account's Review Queue, one item at a time, with
-// Reject (a reason is required), Approve, and Prev/Skip.
+// Reject (a reason is required, and the form says what rejecting costs),
+// Approve, and Prev/Skip.
 
 import { useEffect, useRef, useState } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { formatDate } from "./format.ts";
+import { formatDate, money, weekdayName } from "./format.ts";
 import { CameraIcon } from "./icons.tsx";
 import { Empty, useLoad } from "./ui.tsx";
 
@@ -154,6 +155,10 @@ function EvidenceItem({
               onChange={(e) => setReason(e.target.value)}
             />
           </label>
+          <p className="small">
+            Rejecting makes {weekdayName(item.occurrenceDate)} Missed and adds {money(item.penaltyCents)} to{" "}
+            {item.ownerName}'s {item.recipientName} ledger.
+          </p>
           <div className="row2">
             <button className="btn" disabled={busy} onClick={() => setRejecting(false)}>
               Cancel

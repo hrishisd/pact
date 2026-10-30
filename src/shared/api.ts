@@ -3,7 +3,7 @@
 
 import type {
   AcceptInviteResult,
-  AcceptRejectionResult,
+  AcceptMissResult,
   AddRecipientResult,
   CreatePactResult,
   DecideResult,
@@ -93,7 +93,9 @@ export const API_PATHS = {
   firstOccurrence: "/api/pacts/first-occurrence",
   pact: <T extends string>(pactId: T) => `/api/pacts/${pactId}` as const,
   evidence: <T extends string>(pactId: T) => `/api/pacts/${pactId}/evidence` as const,
-  acceptRejection: <T extends string>(pactId: T) => `/api/pacts/${pactId}/accept-rejection` as const,
+  /** `date` is the occurrence's day, "YYYY-MM-DD". */
+  acceptMiss: <T extends string, D extends string>(pactId: T, date: D) =>
+    `/api/pacts/${pactId}/occurrences/${date}/accept-miss` as const,
   /**
    * GET: a photo's bytes and type, not JSON, for the pact's owner and
    * reviewers only. Anyone else gets the 404 an unknown photo does.
@@ -162,10 +164,11 @@ export type PactResponse = Json<PactResult>;
 export type SubmitEvidenceResponse = SubmitEvidenceResult;
 
 /**
- * POST /api/pacts/:id/accept-rejection (no body): the owner takes the miss
- * after a rejection. The core's refusals are 200s.
+ * POST /api/pacts/:id/occurrences/:date/accept-miss (no body): the owner
+ * accepts a Missed occurrence (Take the L). A date not shaped "YYYY-MM-DD"
+ * is a 400 "invalid-request"; the core's refusals are 200s.
  */
-export type AcceptRejectionResponse = AcceptRejectionResult;
+export type AcceptMissResponse = AcceptMissResult;
 
 /** GET /api/review: the signed-in account's Review Queue, oldest first. */
 export type ReviewQueueResponse = Json<ReviewItem[]>;

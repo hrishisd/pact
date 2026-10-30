@@ -59,14 +59,14 @@ describe("a ledger's history", () => {
       s.setClockTo(when);
       await by.decide(submitted.evidenceId, { kind: "reject", reason });
     };
-    // Monday: rejected, not resubmitted, Missed when the day ends.
+    // Monday: rejected while the day is open.
     s.setClockTo("Mon 13:00");
     await reject("Mon 15:00", reviewer, "Blurry");
-    // Wednesday: rejected, and the owner takes the miss.
+    // Wednesday: rejected after the day ended, and the owner takes the L.
     s.setClockTo("Wed 09:00");
-    await reject("Wed 10:00", second, "That's last week's photo");
-    s.setClockTo("Wed 11:00");
-    await owner.acceptRejection(gym);
+    await reject("Thu 10:00", second, "That's last week's photo");
+    s.setClockTo("Thu 11:00");
+    await owner.acceptMiss(gym, "2026-01-07");
     // Friday: no evidence.
 
     await s.advanceTo("Sat 00:00");
@@ -77,12 +77,12 @@ describe("a ledger's history", () => {
       expect.objectContaining({ occurrenceDate: "2026-01-09", addedAt: s.at("Sat 00:00") }),
       expect.objectContaining({
         occurrenceDate: "2026-01-07",
-        addedAt: s.at("Wed 11:00"),
+        addedAt: s.at("Thu 10:00"),
         rejection: { reviewerName: "second", reason: "That's last week's photo" },
       }),
       expect.objectContaining({
         occurrenceDate: "2026-01-05",
-        addedAt: s.at("Tue 00:00"),
+        addedAt: s.at("Mon 15:00"),
         rejection: { reviewerName: "reviewer", reason: "Blurry" },
       }),
     ]);

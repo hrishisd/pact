@@ -3,7 +3,7 @@ import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts
 import { scenario } from "./testing/scenario.ts";
 
 describe("the Review Queue", () => {
-  test("shows each reviewer the evidence submitted, with the pact's description and the photos in order", async () => {
+  test("shows each reviewer the evidence submitted, with the pact's description, the photos in order, and what rejecting would cost", async () => {
     const s = scenario();
     const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
@@ -21,6 +21,8 @@ describe("the Review Queue", () => {
       photoIds: s.photoStore.photoIds,
       submittedAt: s.at("Mon 18:00"),
       occurrenceDate: "2026-01-05",
+      penaltyCents: 500,
+      recipientName: "Sam",
     };
     expect(reviewer.reviewQueue()).toEqual([item]);
     expect(second.reviewQueue()).toEqual([item]);
@@ -156,59 +158,5 @@ describe("the owner's Today after a decision", () => {
     await reviewer.decide(evidenceId, { kind: "approve" });
 
     expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
-  });
-
-  test("rejected evidence while the day is open: the pact is back in To do, with an alert saying why and what taking the miss would cost", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceWaiting();
-    s.setClockTo("Mon 19:00");
-
-    await reviewer.decide(evidenceId, { kind: "reject", reason: "That's last week's photo" });
-
-    expect(owner.today()).toEqual({
-      hasPacts: true,
-      alerts: [
-        {
-          kind: "evidence-rejected",
-          pactId: gym,
-          name: "Gym",
-          reviewerName: "reviewer",
-          reason: "That's last week's photo",
-          occurrenceDate: "2026-01-05",
-          penaltyCents: 500,
-          recipientName: "Sam",
-        },
-      ],
-      sections: [{ kind: "to-do", cards: [{ pactId: gym, name: "Gym", penaltyCents: 500, dueAt: s.at("Tue 00:00") }] }],
-      waiting: [],
-      yesterday: [],
-    });
-  });
-
-  test("rejected Monday afternoon, resubmitted Monday evening: waiting again with the alert gone; then approved", async () => {
-    const s = scenario();
-    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
-    const gym = await createPact("Gym", MON_WED_FRI);
-    s.setClockTo("Mon 13:00");
-    const first = await owner.submitEvidence(gym, [photo(1)]);
-    if (!first.ok) throw new Error(first.reason);
-    s.setClockTo("Mon 15:00");
-    await reviewer.decide(first.evidenceId, { kind: "reject", reason: "Blurry" });
-
-    s.setClockTo("Mon 20:00");
-    const again = await owner.submitEvidence(gym, [photo(2)]);
-    if (!again.ok) throw new Error(again.reason);
-
-    expect(owner.today()).toMatchObject({
-      alerts: [],
-      sections: [],
-      waiting: [{ kind: "evidence", id: again.evidenceId, submittedAt: s.at("Mon 20:00") }],
-    });
-    expect(second.reviewQueue()).toEqual([expect.objectContaining({ id: again.evidenceId })]);
-
-    s.setClockTo("Mon 21:00");
-    expect(await second.decide(again.evidenceId, { kind: "approve" })).toEqual({ ok: true });
-
-    expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
-    expect(await owner.submitEvidence(gym, [photo(3)])).toEqual({ ok: false, reason: "already-approved" });
   });
 });

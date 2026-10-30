@@ -196,4 +196,11 @@ export const migrations: readonly string[] = [
   DROP INDEX occurrence_not_judged;
   ALTER TABLE occurrence DROP COLUMN due_at;
   `,
+  // 7: accepting a miss
+  `
+  -- When the owner accepted a Missed occurrence (Take the L), or NULL. It
+  -- only takes the occurrence off Today (its rejected-evidence alert, or its
+  -- Missed card); the ledger doesn't change.
+  ALTER TABLE occurrence ADD COLUMN miss_accepted_at TEXT;
+  `,
 ];

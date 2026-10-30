@@ -9,7 +9,7 @@ import {
   INVITE_TOKEN_SIGN_IN_KEY,
   invitePath,
   type AcceptInviteResponse,
-  type AcceptRejectionResponse,
+  type AcceptMissResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
   type ApiErrorResponse,
@@ -126,8 +126,8 @@ export const api = {
     photos.forEach((photo, i) => form.append(EVIDENCE_PHOTO_FIELD, photo, `photo-${i + 1}.jpg`));
     return postForm<SubmitEvidenceResponse>(API_PATHS.evidence(encodeURIComponent(pactId)), form);
   },
-  acceptRejection: (pactId: string) =>
-    post<AcceptRejectionResponse>(API_PATHS.acceptRejection(encodeURIComponent(pactId))),
+  acceptMiss: (pactId: string, occurrenceDate: string) =>
+    post<AcceptMissResponse>(API_PATHS.acceptMiss(encodeURIComponent(pactId), encodeURIComponent(occurrenceDate))),
   reviewQueue: () => call<ReviewQueueResponse>(API_PATHS.reviewQueue),
   decide: (itemId: string, decision: DecideRequest) =>
     post<DecideResponse>(API_PATHS.decide(encodeURIComponent(itemId)), decision),

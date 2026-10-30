@@ -1,4 +1,4 @@
-# 07 Excuses, penalty holds and "I'll pay it"
+# 07 Excuses, penalty holds and Take the L on Missed cards
 
 Status: ready-for-agent
 Blocked by: 03
@@ -14,7 +14,8 @@ The owner asks a reviewer to treat one or more occurrences as Excused, ahead of 
 - **Holds:** while an excuse is pending, the penalties it covers are held: they don't count toward owed, and the ledger history marks them held.
 - **Approved:** covered occurrences become Excused and their penalties are removed. Occurrences covered ahead of time are judged Excused when they would have been judged. **Rejected:** held penalties are released to owed, and covered occurrences not yet judged are judged normally.
 - **Review item:** Excuse kind (slate calendar with an X), showing the reason, photos and covered occurrences. Same Approve / Reject-with-reason flow; any reviewer of a covered pact may decide. Notifies reviewers (new review item) and the owner (decision).
-- **Today Missed card:** "File excuse · 31h left" and **I'll pay it**. I'll pay it records that the owner accepted the miss, which only takes the card off Today; it doesn't change the ledger, and the owner can still file an excuse from the pact page until the 48 hours are up.
+- **Today Missed card:** "File excuse · 31h left" and **Take the L**. Take the L records that the owner accepted the miss, which only takes the card off Today; it doesn't change the ledger, and the owner can still file an excuse from the pact page until the 48 hours are up.
+- **Rejected-evidence alert** (from ticket 03): gets "File excuse · 31h left" beside Take the L, with the 48 hours running from the rejection. After Take the L, an excuse can still be filed from the pact page within 48 hours of the rejection.
 - **Pact page:** File excuse button, and a "Waiting on" list holding the pact's evidence and excuses.
 - **Occurrence labels:** a Missed occurrence with an excuse waiting reads "Missed · excuse waiting for approval". The UI never says "pending".
 
@@ -26,7 +27,8 @@ The owner asks a reviewer to treat one or more occurrences as Excused, ahead of 
 - [ ] Excuse for next Fri–Sun filed Wednesday, approved Thursday → those days are Excused when they end, with no penalty.
 - [ ] One excuse covering two pacts over three days → one review item; approval excuses every covered occurrence on both.
 - [ ] Rejected evidence on Monday → excuse filed within 48h of the rejection is accepted.
-- [ ] I'll pay it removes the Missed card from Today, leaves owed unchanged, and an excuse is still accepted afterwards inside the window.
+- [ ] Take the L removes the Missed card from Today, leaves owed unchanged, and an excuse is still accepted afterwards inside the window.
+- [ ] The rejected-evidence alert shows "File excuse" with the time left counted from the rejection; after Take the L on the alert, an excuse is still accepted within 48 hours of the rejection.
 - [ ] A pending excuse survives a restart with its holds intact.
 
 ## Out of this ticket

@@ -13,7 +13,7 @@ import type { Clock, Notification, Notifier, OuraSource, Photo, PhotoStore } fro
 import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptInviteResult,
-  type AcceptRejectionResult,
+  type AcceptMissResult,
   type AccountId,
   type AddRecipientResult,
   type CreatePactResult,
@@ -80,10 +80,10 @@ export interface PactCore {
    * Runs everything due by `t`, records the tick, then delivers the outbox.
    * Judges every occurrence due by `t` that isn't judged yet, catching up on
    * any it missed while stopped: approved evidence makes it Kept; evidence
-   * still waiting leaves it for the decision; none, or only rejected
-   * evidence, makes it Missed and adds the pact's penalty to the owner's
-   * ledger for its recipient. Each is judged as of its due time. Running it
-   * again for the same `t` changes nothing.
+   * still waiting leaves it for the decision; none makes it Missed and adds
+   * the pact's penalty to the owner's ledger for its recipient. (Rejected
+   * evidence already judged it.) Each is judged as of its due time. Running
+   * it again for the same `t` changes nothing.
    */
   advanceTo(t: Date): Promise<void>;
   lastTick(): Date | null;
@@ -130,12 +130,12 @@ export interface AccountView {
    */
   submitEvidence(pactId: string, photos: Photo[]): Promise<SubmitEvidenceResult>;
   /**
-   * The owner takes the miss: while the occurrence of `pactId` open now has
-   * rejected evidence as its latest, the owner accepts the rejection instead
-   * of submitting again. The occurrence is Missed as of now, with its
-   * penalty, and takes no more evidence.
+   * The owner accepts a Missed occurrence of `pactId` (Take the L), dated
+   * `occurrenceDate` ("YYYY-MM-DD" in the owner's timezone). It only takes
+   * the occurrence off Today: its rejected-evidence alert, or its Missed card.
+   * The ledger doesn't change. A refusal changes nothing.
    */
-  acceptRejection(pactId: string): Promise<AcceptRejectionResult>;
+  acceptMiss(pactId: string, occurrenceDate: string): Promise<AcceptMissResult>;
   /**
    * A photo of some evidence, for the pact's owner or one of its reviewers;
    * anyone else is told it isn't found. A query: async only because the photo
@@ -147,10 +147,10 @@ export interface AccountView {
   /**
    * A reviewer of the item's pact decides it. The first decision is final:
    * the item leaves every reviewer's queue and the owner is told. A refusal
-   * changes nothing. Evidence decided after its occurrence's due time judges
-   * it there and then: approved, Kept; rejected, Missed with its penalty.
-   * Before then the occurrence stays open, and judging at its due time
-   * decides.
+   * changes nothing. A rejection is final: it judges the occurrence Missed
+   * there and then, with its penalty, whether it's still open or past its
+   * due time, and it takes no more evidence. An approval after the due time
+   * judges it Kept there and then; before it, judging at the due time does.
    */
   decide(itemId: string, decision: ReviewDecision): Promise<DecideResult>;
   /** One ledger per recipient this owner's pacts name, sorted by name. */
@@ -174,6 +174,13 @@ const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 /** A Missed occurrence stays on Today this long after it's judged. */
 const TODAY_MISSED_MS = 48 * 60 * 60 * 1000;
+/**
+ * SQL: the Missed `occurrence` row was judged through a rejection. Any
+ * rejected evidence will do: a rejection judges the occurrence at once.
+ */
+const MISSED_THROUGH_REJECTION = `EXISTS (SELECT 1 FROM evidence
+  WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
+    AND evidence.decision = 'rejected')`;
 
 class Core implements PactCore {
   readonly #db: Db;
@@ -553,20 +560,20 @@ class Core implements PactCore {
           return { ok: true, evidenceId };
         });
       },
-      acceptRejection: (pactId) =>
-        this.#command((): AcceptRejectionResult => {
-          const { timezone } = account();
-          const row = this.#db
-            .prepare(`SELECT schedule, first_occurrence FROM pact WHERE id = ? AND owner_account_id = ?`)
-            .get(pactId, accountId) as Pick<PactRow, "schedule" | "first_occurrence"> | undefined;
-          if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
-          const now = this.#clock.now();
-          const open = occurrences(occurrenceTermsOf(row), timezone).openAt(now);
-          if (!open || this.#isJudged(pactId, open.date) || this.#evidenceDecision(pactId, open.date) !== "rejected") {
-            return { ok: false, reason: "nothing-to-accept" };
-          }
-          this.#judge(pactId, open.date, "missed", now);
-          return { ok: true };
+      acceptMiss: (pactId, occurrenceDate) =>
+        this.#command((): AcceptMissResult => {
+          account();
+          const isOwn = this.#db
+            .prepare(`SELECT 1 FROM pact WHERE id = ? AND owner_account_id = ?`)
+            .get(pactId, accountId);
+          if (!isOwn) return { ok: false, reason: "pact-not-found" };
+          const accepted = this.#db
+            .prepare(
+              `UPDATE occurrence SET miss_accepted_at = ?
+               WHERE pact_id = ? AND date = ? AND outcome = 'missed' AND miss_accepted_at IS NULL`,
+            )
+            .run(this.#clock.now().toISOString(), pactId, occurrenceDate);
+          return accepted.changes === 1 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
         }),
       photo: async (photoId) => {
         account();
@@ -589,10 +596,12 @@ class Core implements PactCore {
         const rows = this.#db
           .prepare(
             `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
-                    pact.description, evidence.submitted_at, evidence.occurrence_date
+                    pact.description, evidence.submitted_at, evidence.occurrence_date,
+                    pact.penalty_cents, recipient.name AS recipient_name
              FROM evidence
              JOIN pact ON pact.id = evidence.pact_id
              JOIN account AS owner ON owner.id = pact.owner_account_id
+             JOIN recipient ON recipient.id = pact.recipient_id
              JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
              WHERE evidence.decision IS NULL
              ORDER BY evidence.submitted_at, evidence.id`,
@@ -605,6 +614,8 @@ class Core implements PactCore {
           description: string;
           submitted_at: string;
           occurrence_date: string;
+          penalty_cents: number;
+          recipient_name: string;
         }[];
         return rows.map((row) => ({
           kind: "evidence",
@@ -616,6 +627,8 @@ class Core implements PactCore {
           photoIds: this.#evidencePhotoIds(row.id),
           submittedAt: new Date(row.submitted_at),
           occurrenceDate: row.occurrence_date,
+          penaltyCents: row.penalty_cents,
+          recipientName: row.recipient_name,
         }));
       },
       decide: (itemId, decision) =>
@@ -713,9 +726,10 @@ class Core implements PactCore {
 
   /**
    * Records a reviewer's decision on waiting evidence and tells the owner.
-   * Once judging has reached the occurrence, it was waiting on this decision,
-   * so the decision judges the occurrence as of now. Before that it judges
-   * nothing: judging at the due time will.
+   * A rejection is final: it judges the occurrence Missed as of now, open or
+   * not. An approval judges it Kept as of now once judging has reached it,
+   * since it was waiting on this decision; before that, judging at the due
+   * time will.
    */
   #decideEvidence(evidence: EvidenceToDecide, decision: ReviewDecision, reviewerId: AccountId): void {
     const now = this.#clock.now();
@@ -729,7 +743,7 @@ class Core implements PactCore {
       .run(outcome, reviewerId, now.toISOString(), reason, evidence.id);
     if (
       !this.#isJudged(evidence.pact_id, evidence.occurrence_date) &&
-      this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now)
+      (outcome === "rejected" || this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now))
     ) {
       this.#judge(evidence.pact_id, evidence.occurrence_date, outcome === "approved" ? "kept" : "missed", now);
     }
@@ -777,8 +791,7 @@ class Core implements PactCore {
    * Whether `ownerId` may submit evidence with `photoCount` photos for
    * `pactId` at `at`, and if so for which occurrence: the one open at `at`,
    * unless evidence for it is already waiting or approved, or it's already
-   * judged. After a rejection the owner may submit again while it's open,
-   * unless they took the miss.
+   * judged (a rejection judges it Missed at once).
    */
   #evidenceAcceptance(
     ownerId: AccountId,
@@ -835,40 +848,27 @@ class Core implements PactCore {
   }
 
   /**
-   * To do: pacts with an occurrence open now that still needs evidence, with
-   * an alert when its latest evidence was rejected. Missed: occurrences
-   * judged Missed in the last 48 hours. Coming up: pacts whose first
+   * Alerts: occurrences Missed through a rejection, until accepted. To do:
+   * pacts with an occurrence open now that still needs evidence. Missed:
+   * other occurrences judged Missed in the last 48 hours and not accepted.
+   * Coming up: pacts whose first
    * occurrence hasn't opened yet. A pact on a day it isn't due appears in
    * neither To do nor Coming up. Empty sections are left out.
    */
   #todayCards(ownerId: AccountId, timezone: string): { alerts: TodayAlert[]; sections: TodaySection[] } {
     const now = this.#clock.now();
-    const alerts: TodayAlert[] = [];
     const toDo: TodayToDoCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
       const card = { pactId: pact.id, name: pact.name, penaltyCents: pact.penaltyCents };
       const { first, openAt } = occurrences(pact.terms, timezone);
       const open = openAt(now);
-      // Judged while still open: the owner took the miss, so it shows under Missed.
+      // Judged while still open: its evidence was rejected, so it's an alert.
       if (open && this.#isJudged(pact.id, open.date)) continue;
       if (open) {
         // Evidence waiting or approved: Waiting for approval, or done.
         const decision = this.#evidenceDecision(pact.id, open.date);
         if (decision === "waiting" || decision === "approved") continue;
-        if (decision === "rejected") {
-          const rejection = this.#rejection(pact.id, open.date);
-          if (!rejection) throw new Error(`no rejected evidence for pact ${pact.id} on ${open.date}`);
-          alerts.push({
-            kind: "evidence-rejected",
-            pactId: pact.id,
-            name: pact.name,
-            ...rejection,
-            occurrenceDate: open.date,
-            penaltyCents: pact.penaltyCents,
-            recipientName: pact.recipientName,
-          });
-        }
         toDo.push({ ...card, dueAt: open.dueAt });
       } else if (now.getTime() < first.opensAt.getTime()) {
         comingUp.push({ ...card, opensOn: first.date });
@@ -882,10 +882,46 @@ class Core implements PactCore {
     const missed = this.#recentlyMissed(ownerId, now);
     if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
-    return { alerts, sections };
+    return { alerts: this.#rejectedEvidenceAlerts(ownerId), sections };
   }
 
-  /** The owner's occurrences judged Missed in the 48 hours before `now`, latest first. */
+  /**
+   * One alert per occurrence of the owner's judged Missed through a
+   * rejection and not accepted yet, newest rejection first. No time limit.
+   */
+  #rejectedEvidenceAlerts(ownerId: AccountId): TodayAlert[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT pact.id, pact.name, occurrence.date, penalty.amount_cents, recipient.name AS recipient_name
+         FROM occurrence
+         JOIN pact ON pact.id = occurrence.pact_id
+         JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
+         JOIN recipient ON recipient.id = penalty.recipient_id
+         WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.miss_accepted_at IS NULL
+           AND ${MISSED_THROUGH_REJECTION}
+         ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
+      )
+      .all(ownerId) as { id: string; name: string; date: LocalDate; amount_cents: number; recipient_name: string }[];
+    return rows.map((row) => {
+      const rejection = this.#rejection(row.id, row.date);
+      if (!rejection) throw new Error(`no rejected evidence for pact ${row.id} on ${row.date}`);
+      return {
+        kind: "evidence-rejected",
+        pactId: row.id,
+        name: row.name,
+        ...rejection,
+        occurrenceDate: row.date,
+        penaltyCents: row.amount_cents,
+        recipientName: row.recipient_name,
+      };
+    });
+  }
+
+  /**
+   * The owner's occurrences judged Missed in the 48 hours before `now`,
+   * latest first, but not accepted misses, nor those Missed through a
+   * rejection: those are alerts.
+   */
   #recentlyMissed(ownerId: AccountId, now: Date): TodayMissedCard[] {
     const since = new Date(now.getTime() - TODAY_MISSED_MS);
     const rows = this.#db
@@ -895,6 +931,7 @@ class Core implements PactCore {
          JOIN pact ON pact.id = occurrence.pact_id
          JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
          WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.judged_at > ?
+           AND occurrence.miss_accepted_at IS NULL AND NOT ${MISSED_THROUGH_REJECTION}
          ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
       )
       .all(ownerId, since.toISOString()) as {
@@ -904,18 +941,13 @@ class Core implements PactCore {
       date: LocalDate;
       judged_at: string;
     }[];
-    return rows.map((row) => {
-      // Missed with evidence means all of it was rejected.
-      const rejection = this.#rejection(row.id, row.date);
-      return {
-        pactId: row.id,
-        name: row.name,
-        penaltyCents: row.amount_cents,
-        occurrenceDate: row.date,
-        missedAt: new Date(row.judged_at),
-        ...(rejection && { rejection }),
-      };
-    });
+    return rows.map((row) => ({
+      pactId: row.id,
+      name: row.name,
+      penaltyCents: row.amount_cents,
+      occurrenceDate: row.date,
+      missedAt: new Date(row.judged_at),
+    }));
   }
 
   /** Who rejected the latest rejected evidence for an occurrence, and why; null if none was rejected. */

@@ -62,7 +62,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 30. As an owner, I want to attach several photos to one piece of evidence, so that I can show more context when needed.
 31. As an owner, I want evidence accepted only on days it can count (scheduled days for Fixed days, any day for Weekly count, start to deadline for One-time) and only until its due-by time, so that the rules are clear and nobody can backfill evidence later.
 32. As an owner on a Weekly count pact, I want to see progress like "1 of 3 this week", so that I know how many sessions I still need.
-33. As an owner, I want to be able to resubmit evidence after a rejection while the occurrence is still open, so that I can fix bad evidence.
+33. As an owner, I want to be told at once when a reviewer rejects my evidence that the day is Missed, what it costs and why, so that I know where I stand. A rejection is final: the day takes no more evidence.
 34. As an owner, I want to be told when my evidence is approved or rejected, so that I know where I stand.
 
 ### Keeping a pact: Oura bedtime
@@ -86,7 +86,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 48. As an owner, I want an excuse to cover "the data was wrong" as well as "I had a good reason", so that there's one simple way to contest any outcome.
 49. As an owner, I want penalties covered by a pending excuse kept off my ledger until it's decided, so that I'm not asked to pay something that may be excused.
 50. As an owner on a Weekly count pact, I want an approved excuse for any day of the week to excuse the whole week, so that a sick week doesn't leave me with an impossible target.
-51. As an owner, I want a Missed occurrence I can still excuse to stay on Today with how long I have left, plus an "I'll pay it" button that clears it from Today without filing an excuse, so that I don't miss the window but am not nagged about a miss I've accepted. "I'll pay it" doesn't change the ledger, and I can still file an excuse from the pact page until the 48 hours are up.
+51. As an owner, I want a Missed occurrence I can still excuse to stay on Today with how long I have left, plus a "Take the L" button that clears it from Today without filing an excuse, so that I don't miss the window but am not nagged about a miss I've accepted. Take the L doesn't change the ledger, and I can still file an excuse from the pact page until the 48 hours are up.
 
 ### Reviewing
 
@@ -94,7 +94,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 53. As a reviewer, I want change requests shown first, then everything else oldest first, so that I handle time-sensitive items before they become blockers.
 54. As a reviewer, I want an evidence item to show just the evidence and the pact's description of what counts, so that I can judge it quickly. The app has already enforced when evidence can be submitted.
 55. As a reviewer, I want to approve an item, so that the owner gets credit, the excuse is granted, or the payment is counted.
-56. As a reviewer, I want to reject an item with a required reason, so that the owner knows why and can respond.
+56. As a reviewer, I want to reject an item with a required reason, so that the owner knows why and can contest it with an excuse. Before I reject evidence, I'm told what it will cost the owner.
 57. As a reviewer, I want to ask the owner a question about an item and have it leave my queue until they reply, so that my queue only holds things I can decide now.
 58. As an owner, I want a reviewer's question to show up on my Today as something to act on, and my reply to send the item back to the reviewer, so that nothing stalls.
 59. As a reviewer, I want the first decision made by any of the pact's reviewers to be final and to remove the item from everyone's queue, so that reviewers don't duplicate work.
@@ -158,7 +158,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Architecture
 
 - **One deep module, the Pact core.** It holds every domain rule. Its interface is a set of **commands** and **queries**, each called as a particular account.
-  - **Commands:** create pact; edit or delete a pact in its edit window; approve/reject/comment on a review item; submit evidence; file excuse; record payment; accept a miss ("I'll pay it"); take the miss after a rejection; request change; add reviewer; create/accept invite; connect/disconnect Oura; check Oura now; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, bill, due-date transition and reminder that's due by T.
+  - **Commands:** create pact; edit or delete a pact in its edit window; approve/reject/comment on a review item; submit evidence; file excuse; record payment; accept a miss (Take the L, on a Missed card or a rejected-evidence alert); request change; add reviewer; create/accept invite; connect/disconnect Oura; check Oura now; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, bill, due-date transition and reminder that's due by T.
   - **Queries:** Today (alerts, then cards in their sections, then waiting for approval and Yesterday); the review queue and item detail; a pact page with its heat map; the pacts list; ledgers (owed, overdue, bill due, awaiting approval, lifetime paid) and a ledger's history, including held penalties and which bill each penalty is on.
 - **Four ports** sit outside the core, each with a production adapter and a fake for tests:
   - **Clock**: the current time. The core never reads system time directly.
@@ -182,7 +182,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - **Fixed days**: a set of weekdays.
   - **Weekly count**: a target per Mon–Sun week.
   - **One-time**: a deadline.
-- **Occurrence**: pact, period (a date, a Mon–Sun week, or start-to-deadline), outcome (not judged yet | Kept | Missed | Excused), judged-at time, for bedtime pacts the observed bedtime, and whether the owner accepted a miss ("I'll pay it", which only takes it off Today).
+- **Occurrence**: pact, period (a date, a Mon–Sun week, or start-to-deadline), outcome (not judged yet | Kept | Missed | Excused), judged-at time, for bedtime pacts the observed bedtime, and whether the owner accepted a miss (Take the L, which only takes it off Today).
 - **Evidence**: occurrence (for Weekly count: the week plus the day it counts for), files (photos in v0), server-received time, decision.
 - **Excuse**: owner, pacts covered, date range, reason, photos, decision. The occurrences it covers are worked out from the pacts and the date range.
 - **Review item**: kind (Change request | Evidence | Excuse | Payment), subject, comment thread, decision (approve/reject, a reason when rejected, decided by, decided at). It's waiting on the owner whenever the latest comment is a reviewer's.
@@ -190,7 +190,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Penalty**: occurrence, recipient, amount, added-at time, state (held, while a pending excuse covers it; or owed), and the bill it's on, once it's on one.
 - **Bill**: owner, recipient, created-at time (a Wednesday at 18:00), due-at time (created + 7 days), and its penalties. It never changes after it's created.
 - **Payment**: owner, recipient, amount, screenshot, note, decision.
-- **Alert**: account, optional pact, kind (data-source problem, rejected evidence, reviewer question awaiting reply, overdue bill not covered by pending payments), resolved state.
+- **Alert**: account, optional pact, kind (data-source problem, rejected evidence (resolved by Take the L), reviewer question awaiting reply, overdue bill not covered by pending payments), resolved state.
 
 ### Rules the core enforces
 
@@ -225,8 +225,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Weekly count: judged at the end of Sunday.
 - One-time: judged at the deadline.
 - No evidence at that point: Missed. Evidence still pending a decision at that point: the outcome waits for the decision.
-- On Fixed days and One-time, rejected evidence makes the occurrence Missed as of the rejection, unless the occurrence is still open and new evidence is submitted.
-- While it's still open, the owner can instead take the miss from the rejected-evidence alert: the occurrence is Missed as of then, with its penalty, and takes no more evidence.
+- On Fixed days and One-time, a rejection is final straight away. Rejected evidence makes the occurrence Missed as of the rejection, with its penalty, whether the occurrence is still open or already past its due time. The occurrence takes no more evidence, so there's no resubmitting after a rejection.
+- Each rejection there raises a rejected-evidence alert for the owner. It stays until the owner taps Take the L, which only clears the alert: the penalty was already added at the rejection.
 - On Weekly count, rejected evidence doesn't count toward the week's target, and the owner can make up the session on another day that week. The week still adds one penalty per session short of the target. Example: a 3× week with three photos submitted and one rejected adds one penalty; a week with no photos adds three.
 - Evidence is accepted only on days it can count (scheduled days for Fixed days, any day of the week for Weekly count, start to deadline for One-time) and only until the due-by time. For Weekly count, at most one day of evidence counts per calendar day.
 - Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse can come from the library, since they're often screenshots.
@@ -262,7 +262,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Every Wednesday at 18:00, each recipient gets one bill holding the owner's owed penalties whose 48-hour excuse window has closed and that aren't on a bill yet. In a normal week that's every penalty from the Mon–Sun week before: Sunday night's bedtime is judged by 18:00 Monday at the latest, so its excuse window has closed by 18:00 Wednesday.
 - A penalty that comes later (say, evidence rejected after its week ended, or a held penalty released when its excuse is rejected) goes on the next Wednesday's bill.
 - A bill never changes after it's created, since nothing on it can be excused any more. It's due 7 days later, at 18:00.
-- Accepting a miss ("I'll pay it") doesn't put its penalty on a bill any sooner.
+- Accepting a miss (Take the L) doesn't put its penalty on a bill any sooner.
 - The owner can pay at any time, before or after a bill. Payments still clear penalties oldest first, and a bill is paid once all its penalties are.
 - A new bill notifies the owner. No bill is made for a recipient with nothing to bill.
 
@@ -286,10 +286,10 @@ The prototype settled these screens first. Where the app on `main` differs from 
 
 - **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today. The current tab sits on a soft blue tile behind its icon and label, in the accent colour with a bold label, while the other tabs stay grey with a regular label. There's no highlight flash when a tab is tapped, and the tile stays while a page is pushed on top. Chosen over colour alone (too subtle), a filled icon, a bar on the top edge, a pill behind the icon, and a solid pill.
 - **Today:** only what's still open, in this order:
-  1. Alerts, only for things that need the owner (including an overdue bill). The rejected-evidence alert offers Take the miss, which asks first: "Add $5 to Sam's ledger? You won't be able to send new photos for today."
+  1. Alerts, only for things that need the owner (including an overdue bill). Each rejected occurrence gets one alert: "Sam rejected your evidence for Gym", the reason in quotes, "Wed Oct 28 is Missed · $5 to Red Cross", then "File excuse · 31h left" (the 48 hours run from the rejection) and **Take the L**, with no confirmation. The pact leaves To do for that day, and the day doesn't also show under Missed. The alert stays until the owner taps Take the L, which only clears it; the ledger doesn't change. After that the day shows in the ledger history and on the pact page.
   2. **No Oura data** (orange): last night's bedtime while Oura hasn't reported it, e.g. "Tue night hasn't synced. Open the Oura app." and, in orange, "Counts as missed at 6pm · 5h 20m". While a check runs the card says "Checking Oura…". There's no button to open the Oura app until we find a link that opens it. A File excuse button covers a night without the ring, and an excuse filed for the night moves it to Waiting for approval.
   3. **To do** (green): evidence that can be submitted today, and bills to pay, soonest due first. A Weekly count pact mid-week or a One-time pact that's already open sorts by its own due date, below things due today.
-  4. **Missed** (red): misses that can still be excused, with "File excuse · 31h left" and "I'll pay it". A Camera pact past today's due-by time shows here as **Closed**.
+  4. **Missed** (red): misses that can still be excused, with "File excuse · 31h left" and **Take the L**. A Camera pact past today's due-by time shows here as **Closed**.
   5. **Automatic** (grey): bedtime pacts that run tonight. When last night is on the card above, tonight's deadline rides on that card instead.
   6. **Coming up**, under its own label: pacts that haven't opened yet ("Opens Nov 1", "Starts Mon Oct 26").
   7. **Waiting for approval**: items with a reviewer, last because there's nothing to do.
@@ -301,7 +301,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **Occurrence labels:** an occurrence that isn't judged yet says what it's waiting for: **No Oura data**, **Waiting for approval** (a photo with a reviewer), or **Due today** ("This week" for Weekly count, the due date for One-time). A Missed occurrence with an excuse waiting reads **Missed · excuse waiting for approval**. The heat map legend calls them "Not judged yet". The UI never shows the word "pending".
 - **Lists:** rows you can tap are separate cards with a › chevron; rows you can't tap (Friends, Notifications, Connections, History) stay grouped in one block. The pacts list shows the penalty as a red amount too. The full wording, "$5 per miss", appears only in a pact's terms.
 - **Item kinds:** each review item kind has its own colour and icon: Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
-- **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. Items waiting on the owner's reply are listed below the current item.
+- **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. On Fixed days and One-time evidence, the reject form warns under the reason box what rejecting costs, e.g. "Rejecting makes Wednesday Missed and adds $5 to Hrishi's Red Cross ledger." Items waiting on the owner's reply are listed below the current item.
 - **Profile:** a Connections section lists only the connections the owner has made, and is hidden when there are none. Disconnecting warns how many active pacts use it.
 - **Invite:** the page an invite link opens says that accepting makes you friends, so the inviter can pick you to review their pacts and you can pick them.
 - **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, "$4 bill due Wed Oct 28", or a payment awaiting approval), lifetime paid, and Record payment. Record payment starts at the open bills' amount. Held penalties appear only in the history, where each penalty also says which bill it's on, or that it goes on a Wednesday bill once it can't be excused. A penalty from rejected evidence says who rejected it and why. Tapping a card opens its history, pushed on the current tab.
@@ -314,6 +314,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - The New pact button sits below the Pacts list, or below its empty state.
   - The Penalty step has a single recipient slot: "Pick a recipient", then the chosen name with Change. A recipient is just a name.
   - The invite page explains that accepting lets you pick each other as reviewers, and what a reviewer does.
+  - A rejected photo makes the day Missed at once and shows on Today only as an alert with Take the L. The prototype's "I'll pay it" on Missed cards is called Take the L too.
 
 ## Testing Decisions
 
@@ -348,7 +349,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - weekly bills: what goes on each, late penalties rolling to the next, and bills never changing
   - overdue bills, the pending-payment cover, and notifications
   - Today's sections, their order, and what Today leaves out
-  - accepting a miss
+  - accepting a miss, and a rejection judging an occurrence Missed at once
   - lifetime paid
   - reminder conditions
   - timezone handling
@@ -407,5 +408,6 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - Oura's API rate limit. Polling every minute is about 5 calls a minute for 5 users, which should be far below it.
   - Whether Oura sleep of under about 3 hours is ever reported as `long_sleep`, since the first one decides the night.
   - Whether the Oura iOS app has a link that opens it. If so, the No Oura data card gets an "Open Oura" button.
-- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through nine rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), 7053336 gives One-time pacts one-off reminders with a date, and 5d3b7c5 replaces Drafts and approval with the 10-minute edit window, adds occurrence labels that say what they're waiting for, simplifies ledger cards and makes the current tab easier to see, and eb928fe adds weekly bills, reorders Today and hides what isn't open, adds "I'll pay it", and switches to an iOS-style tab bar, and 73a87b1 compares ways to mark the current tab (the Tile verdict follows it), and 38d88ea adds the No Oura data card, judging nights on sync with a 6pm cutoff, the check on open, and Wednesday 6pm bills. It was the primary source for the Screens decisions above. Where the app on `main` now differs from it, `main` wins (see Changes since the prototype).
+- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through nine rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), 7053336 gives One-time pacts one-off reminders with a date, and 5d3b7c5 replaces Drafts and approval with the 10-minute edit window, adds occurrence labels that say what they're waiting for, simplifies ledger cards and makes the current tab easier to see, and eb928fe adds weekly bills, reorders Today and hides what isn't open, adds "I'll pay it" (now Take the L), and switches to an iOS-style tab bar, and 73a87b1 compares ways to mark the current tab (the Tile verdict follows it), and 38d88ea adds the No Oura data card, judging nights on sync with a 6pm cutoff, the check on open, and Wednesday 6pm bills. It was the primary source for the Screens decisions above. Where the app on `main` now differs from it, `main` wins (see Changes since the prototype).
+- **Rejection prototype:** the branch `prototype/rejection-flow` compared ways to handle a rejected photo. Option C was chosen: a rejection is final at once, and Today shows it only as an alert with Take the L.
 - The first real users are the owner and one friend as reviewer, so anything involving several reviewers should be correct but kept minimal.

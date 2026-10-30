@@ -45,6 +45,14 @@ export function formatDate(isoDate: string): string {
   return `${part("weekday")} ${part("month")} ${part("day")}`;
 }
 
+/** A calendar date, "YYYY-MM-DD", as its weekday, "Wednesday". Never shifted into another timezone. */
+export function weekdayName(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number) as [number, number, number];
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(
+    new Date(Date.UTC(year, month - 1, day)),
+  );
+}
+
 /** Time left as "16h 19m", or "3d 4h" from 48 hours up. Never negative. */
 export function timeLeft(ms: number): string {
   const minutes = Math.floor(Math.max(0, ms) / 60_000);
