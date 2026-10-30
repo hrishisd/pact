@@ -42,9 +42,9 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 13. As an owner of an Oura Ring pact, I want to set an in-bed-by time (e.g. 12:00am), with the pact's name filled in from it until I change it, so that the app knows what counts as on time.
 14. As an owner, I want a Fixed days schedule (e.g. Mon/Wed/Fri, or every night), so that each of those days is held to the pact. It's the only schedule for Oura Ring pacts.
 15. As an owner of a Camera pact, I want a Weekly count schedule (e.g. 3× per week), so that I can choose which days I go.
-16. As an owner of a Camera pact, I want a One-time schedule with a deadline, so that I can commit to a single task such as filing my taxes.
-17. As an owner of a Camera pact, I want to optionally make evidence due by a set time of day (e.g. by 9:00am) instead of midnight, on Fixed days or Weekly count, so that I'm held to doing it early. A One-time deadline already has its own time.
-18. As an owner, I want to set an optional start date, so that I can create a pact now that begins later.
+16. As an owner of a Camera pact, I want a One-time schedule with a deadline, so that I can commit to a single task such as filing my taxes. By default the evidence is due on the deadline's date only; a **Submit anytime** toggle lets it count any time from creation until the deadline.
+17. As an owner of a Camera pact, I want to optionally make evidence due by a set time of day (e.g. by 9:00am) instead of midnight, on any schedule, so that I'm held to doing it early. On One-time it's the time on the deadline's date.
+18. As an owner, I want to set an optional start date on a recurring pact, so that I can create a pact now that begins later.
 19. As an owner, I want to set an optional end date on a recurring pact, so that it finishes automatically.
 20. As an owner, I want to set a penalty amount in USD on each pact, so that more important pacts can cost more to miss.
 21. As an owner, I want to pick a recipient from my saved list, or add a new one by name, so that I decide where my penalties go.
@@ -60,7 +60,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 28. As an owner, I want Today to show only what's still open, most actionable first (No Oura data, then To do with the soonest due first, then Missed, then Automatic, then Coming up, with Waiting for approval last), so that I can see at a glance what I have to do. Done cards, and recurring pacts on days they aren't due, don't appear.
 29. As an owner, I want to submit evidence right on the Today card by taking a live photo with my camera, so that I can prove I kept the pact without leaving the screen.
 30. As an owner, I want to attach several photos to one piece of evidence, so that I can show more context when needed.
-31. As an owner, I want evidence accepted only on days it can count (scheduled days for Fixed days, any day for Weekly count, start to deadline for One-time) and only until its due-by time, so that the rules are clear and nobody can backfill evidence later.
+31. As an owner, I want evidence accepted only on days it can count (scheduled days for Fixed days, any day for Weekly count, the deadline's date for One-time, or start to deadline with Submit anytime) and only until its due-by time, so that the rules are clear and nobody can backfill evidence later.
 32. As an owner on a Weekly count pact, I want to see progress like "1 of 3 this week", so that I know how many sessions I still need.
 33. As an owner, I want to be told at once when a reviewer rejects my evidence that the day is Missed, what it costs and why, so that I know where I stand. A rejection is final: the day takes no more evidence.
 34. As an owner, I want to be told when my evidence is approved or rejected, so that I know where I stand.
@@ -177,12 +177,12 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Connection**: account, service (Oura in v0), tokens, status (Connected | Needs reconnecting). Exists only once the owner has connected the service.
 - **Friendship**: two accounts. Either can pick the other as a reviewer; accepting an invite is agreeing to that. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
 - **Recipient**: owned by an account; just a name.
-- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date, optional end date, optional due-by time (Camera only, not One-time), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Active | Ended), created-at time (starts the edit window).
+- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date (recurring pacts), optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Active | Ended), created-at time (starts the edit window).
 - **Schedule**: one of three kinds:
   - **Fixed days**: a set of weekdays.
   - **Weekly count**: a target per Mon–Sun week.
-  - **One-time**: a deadline.
-- **Occurrence**: pact, period (a date, a Mon–Sun week, or start-to-deadline), outcome (not judged yet | Kept | Missed | Excused), judged-at time, for bedtime pacts the observed bedtime, and whether the owner accepted a miss (Take the L, which only takes it off Today).
+  - **One-time**: a deadline (a date, plus the due-by time if one is set) and Submit anytime (off by default).
+- **Occurrence**: pact, period (a date, a Mon–Sun week, or start-to-deadline for One-time with Submit anytime), outcome (not judged yet | Kept | Missed | Excused), judged-at time, for bedtime pacts the observed bedtime, and whether the owner accepted a miss (Take the L, which only takes it off Today).
 - **Evidence**: occurrence (for Weekly count: the week plus the day it counts for), files (photos in v0), server-received time, decision.
 - **Excuse**: owner, pacts covered, date range, reason, photos, decision. The occurrences it covers are worked out from the pacts and the date range.
 - **Review item**: kind (Change request | Evidence | Excuse | Payment), subject, comment thread, decision (approve/reject, a reason when rejected, decided by, decided at). It's waiting on the owner whenever the latest comment is a reviewer's.
@@ -201,7 +201,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - A pact's first occurrence:
   - Fixed days: the first scheduled day (night, for Oura Ring) whose due time is at least 1 hour after creation. The due time is the due-by time, the in-bed-by time, or midnight.
   - Weekly count: the week starting the Monday after creation.
-  - One-time: the deadline must be at least 1 hour after creation.
+  - One-time: the deadline must be at least 1 hour after creation. Start dates don't apply, since Submit anytime sets the window.
   - A start date can only push the first occurrence later.
 - A pact's evidence kind is set when it's created and never changes, not even in the edit window. Proving it a different way means making a new pact.
 - Oura Ring pacts use Fixed days only. Camera pacts can use any schedule.
@@ -210,11 +210,13 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - any change of recipient, since only a reviewer can judge which recipient hurts more
   - any change of description, since it defines what a photo must show
   - a later due-by time, in-bed-by time, One-time deadline or start date; an earlier end date; removing a due-by time; adding an end date
-- A change that only makes the pact stricter takes effect at once, with no review: a higher penalty, more days, the opposite direction on any time field above, adding a due-by time, or removing an end date. A change that both relaxes and tightens is reviewed as a whole.
+  - turning on Submit anytime
+  - any change to the date of a One-time pact without Submit anytime, since only a reviewer can judge whether another day is easier
+- A change that only makes the pact stricter takes effect at once, with no review: a higher penalty, more days, the opposite direction on any time field above, adding a due-by time, removing an end date, or turning off Submit anytime. A change that both relaxes and tightens is reviewed as a whole.
 - Changing the name or the reminders takes effect at once, with no review, since neither changes what counts.
 - A change takes effect when it's made (stricter) or approved (relaxing). From then it applies to every occurrence that hasn't opened yet. Occurrences already open keep the old terms, and judged occurrences, their penalties and bills never change. Change requests never rescue an open occurrence; excuses do that.
-- An occurrence opens when its period starts: at the start of its date for Fixed days (including a bedtime night), at 00:00 Monday for Weekly count, and at the pact's start for One-time.
-- One-time is the exception, since its only occurrence opens when the pact starts. A change applies to that open occurrence, as long as the new deadline is at least 1 hour after the change takes effect.
+- An occurrence opens when its period starts: at the start of its date for Fixed days (including a bedtime night), at 00:00 Monday for Weekly count, and for One-time at the start of the deadline's date, or at the pact's start with Submit anytime.
+- One-time is the exception, since it has only one occurrence. A change applies to it even once it's open, as long as the new deadline is at least 1 hour after the change takes effect. Evidence already submitted still counts.
 - Example: raising the penalty at 3pm Thursday on a daily pact applies from Friday. Lowering a Weekly count target, approved on Wednesday, applies from next Monday.
 - v0 has no shortcut that skips approval for relaxing changes made well ahead.
 - Adding a reviewer is immediate, and the new reviewer is notified. A pact can never have zero reviewers.
@@ -228,7 +230,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - On Fixed days and One-time, a rejection is final straight away. Rejected evidence makes the occurrence Missed as of the rejection, with its penalty, whether the occurrence is still open or already past its due time. The occurrence takes no more evidence, so there's no resubmitting after a rejection.
 - Each rejection there raises a rejected-evidence alert for the owner. It stays until the owner taps Take the L, which only clears the alert: the penalty was already added at the rejection.
 - On Weekly count, rejected evidence doesn't count toward the week's target, and the owner can make up the session on another day that week. The week still adds one penalty per session short of the target. Example: a 3× week with three photos submitted and one rejected adds one penalty; a week with no photos adds three.
-- Evidence is accepted only on days it can count (scheduled days for Fixed days, any day of the week for Weekly count, start to deadline for One-time) and only until the due-by time. For Weekly count, at most one day of evidence counts per calendar day.
+- Evidence is accepted only on days it can count (scheduled days for Fixed days, any day of the week for Weekly count, the deadline's date for One-time, or start to deadline with Submit anytime) and only until the due-by time. With Submit anytime, the due-by time limits only the deadline's date. For Weekly count, at most one day of evidence counts per calendar day.
 - Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse can come from the library, since they're often screenshots.
 
 **Judging bedtime pacts**
@@ -288,17 +290,17 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **Today:** only what's still open, in this order:
   1. Alerts, only for things that need the owner (including an overdue bill). Each rejected occurrence gets one alert: "Sam rejected your evidence for Gym", the reason in quotes, "Wed Oct 28 is Missed · $5 to Red Cross", then "File excuse · 31h left" (the 48 hours run from the rejection) and **Take the L**, with no confirmation. The pact leaves To do for that day, and the day doesn't also show under Missed. The alert stays until the owner taps Take the L, which only clears it; the ledger doesn't change. After that the day shows in the ledger history and on the pact page.
   2. **No Oura data** (orange): last night's bedtime while Oura hasn't reported it, e.g. "Tue night hasn't synced. Open the Oura app." and, in orange, "Counts as missed at 6pm · 5h 20m". While a check runs the card says "Checking Oura…". There's no button to open the Oura app until we find a link that opens it. A File excuse button covers a night without the ring, and an excuse filed for the night moves it to Waiting for approval.
-  3. **To do** (green): evidence that can be submitted today, and bills to pay, soonest due first. A Weekly count pact mid-week or a One-time pact that's already open sorts by its own due date, below things due today.
+  3. **To do** (green): evidence that can be submitted today, and bills to pay, soonest due first. A Weekly count pact mid-week or a One-time pact with Submit anytime sorts by its own due date, below things due today.
   4. **Missed** (red): misses that can still be excused, with "File excuse · 31h left" and **Take the L**. A Camera pact past today's due-by time shows here as **Closed**.
   5. **Automatic** (grey): bedtime pacts that run tonight. When last night is on the card above, tonight's deadline rides on that card instead.
-  6. **Coming up**, under its own label: pacts that haven't opened yet ("Opens Nov 1", "Starts Mon Oct 26").
+  6. **Coming up**, under its own label: pacts that haven't opened yet ("Opens Nov 1", "Starts Mon Oct 26"), including a One-time pact before its deadline's date.
   7. **Waiting for approval**: items with a reviewer, last because there's nothing to do.
   8. Yesterday.
 
   Done cards don't appear, and neither do recurring pacts on days they aren't due. Evidence submitted today moves the card into Waiting for approval. Evidence is submitted **inline on the card**. There's no total owed; money appears only as a bill's To do card or an overdue alert. When nothing is open, a "Nothing to do right now" card says so. A pact in its edit window has a blue "New · edit for 7 min" chip next to its name and a blue left edge, here and in the Pacts list; both go away when the window closes. Each card shows its penalty as a bare amount in red ("$5"). An open Camera card shows the due time in orange as "Due at 9:00pm · 4h 12m", or "Due at midnight · 16h 19m" with no due-by time.
-- **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Create pact. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. The Reviewers and Reminders text depends on the kind: an Oura Ring pact has no photos to review, and its reminders go off every scheduled night. The Check step says the pact is Active as soon as it's created and names its first occurrence (e.g. "Wed Oct 21, due 10:00pm"). Editing a pact in its edit window reuses the form and skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both fill in the same fields, so switching later is a layout change.
+- **Create pact:** a **step-by-step** form: Source → Goal → Schedule → Penalty (amount and recipient) → Reviewers → Reminders → Check → Create pact. Source is two tiles, Camera and Oura Ring, each with an icon and one line of explanation; tapping one moves straight to Goal. The Goal step depends on the kind: Camera asks for a name, then "What will your photo show?"; Oura Ring asks for the in-bed-by time and fills in the name from it. Oura Ring pacts only see Fixed days on the Schedule step. The Reviewers and Reminders text depends on the kind: an Oura Ring pact has no photos to review, and its reminders go off every scheduled night. For One-time, the Schedule step asks for the deadline's date and an optional time, plus a small **Submit anytime** toggle, off by default, with the line "Anytime from now until the selected deadline." The Check step says the pact is Active as soon as it's created and names its first occurrence (e.g. "Wed Oct 21, due 10:00pm"; for One-time "Thu Nov 12, due midnight", or "Anytime until Thu Nov 12, midnight" with Submit anytime). Editing a pact in its edit window reuses the form and skips the Source step. Chosen over a one-sentence fill-in-the-blanks builder because it extends more easily to richer penalty rules and several reviewers. Both fill in the same fields, so switching later is a layout change.
 - **Pact page:** in the edit window, a blue bar at the top says how many minutes are left, with Edit and Delete. After that it offers File excuse and Request change. Once a change is in force but not yet applied, the page says when the new terms start, e.g. "New terms start Fri Oct 30. Today keeps $5 per miss." Its "Waiting on" list holds that pact's evidence, excuses and change requests, never payments, which belong to a recipient rather than a pact.
-- **Occurrence labels:** an occurrence that isn't judged yet says what it's waiting for: **No Oura data**, **Waiting for approval** (a photo with a reviewer), or **Due today** ("This week" for Weekly count, the due date for One-time). A Missed occurrence with an excuse waiting reads **Missed · excuse waiting for approval**. The heat map legend calls them "Not judged yet". The UI never shows the word "pending".
+- **Occurrence labels:** an occurrence that isn't judged yet says what it's waiting for: **No Oura data**, **Waiting for approval** (a photo with a reviewer), or **Due today** ("This week" for Weekly count, the due date for One-time with Submit anytime). A Missed occurrence with an excuse waiting reads **Missed · excuse waiting for approval**. The heat map legend calls them "Not judged yet". The UI never shows the word "pending".
 - **Lists:** rows you can tap are separate cards with a › chevron; rows you can't tap (Friends, Notifications, Connections, History) stay grouped in one block. The pacts list shows the penalty as a red amount too. The full wording, "$5 per miss", appears only in a pact's terms.
 - **Item kinds:** each review item kind has its own colour and icon: Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. On Fixed days and One-time evidence, the reject form warns under the reason box what rejecting costs, e.g. "Rejecting makes Wednesday Missed and adds $5 to Hrishi's Red Cross ledger." Items waiting on the owner's reply are listed below the current item.
@@ -330,7 +332,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **Good tests are scenarios written in domain language**, e.g. "owner creates a Mon/Wed/Fri gym pact for $5 on Sunday → Monday ends with no evidence → occurrence is Missed and the recipient's ledger shows $5 owed → owner files an excuse within 48h → reviewer approves → occurrence is Excused and owed returns to $0". A test should survive any refactor that keeps behavior the same.
 - **Areas the scenarios must cover:**
   - the edit window, first-occurrence lead time and start dates
-  - each schedule kind
+  - each schedule kind, including One-time with and without Submit anytime
   - due-by times and which days accept evidence
   - the bedtime night window, judging on the first `long_sleep` that arrives, and the 6pm cutoff
   - the 3pm no-data push
@@ -389,6 +391,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - Manual upload of the Health app's Export All Health Data zip. Fine for a one-off backfill, not for daily judging.
 
   Filtering by source keeps hand-entered Mindful Minutes out, but an owner could still post fake numbers to the endpoint, so this is about as trustworthy as Camera evidence and a reviewer would need to see the session list. Unverified: that Shortcuts exposes the Mindful Minutes type and sample source, that Health Auto Export includes mindful minutes, and whether Waking Up has moved from Google Fit to Health Connect.
+- **One-time for more evidence kinds:** v0 keeps One-time to Camera. As more kinds arrive (Photo upload, Anki), they can offer One-time too. An Oura Ring One-time pact would be a single night, so it would only ever be due on its date.
 - **Richer Camera evidence:** video or a time-lapse.
 - **Photo upload evidence kind:** a separate kind, alongside Camera, where the owner picks a photo from the library (e.g. a screenshot from another app). Camera stays live-capture only, opening the camera directly.
 - **Vacation mode:** the owner sets a date range and every pact is suspended for it: no occurrences, no reminders and no penalties. It's simpler than an excuse that covers every pact, and it could need no reviewer approval if it's set far enough ahead.

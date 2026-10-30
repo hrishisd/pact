@@ -26,15 +26,22 @@ _Avoid_: Draft, grace period
 When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. Mon, Wed, Fri, each day its own occurrence), **Weekly count** (e.g. 3× per week, the week being one occurrence), and **One-time** (one occurrence by a deadline).
 _Avoid_: Frequency, recurrence, cadence
 
+**Deadline**:
+When a One-time pact is due: a date, plus its due-by time if one is set, or else midnight.
+
+**Submit anytime**:
+A setting on One-time pacts. Off, which is the default, evidence counts only on the deadline's date. On, it counts any time from the pact's creation until the deadline.
+_Avoid_: Flexible, open window
+
 **Occurrence**:
-One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact. An occurrence **opens** when its period starts (its date, its Mon–Sun week, or the pact's start for One-time). A change to a pact applies only to occurrences that haven't opened yet, except on One-time pacts.
+One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact. An occurrence **opens** when its period starts (its date, its Mon–Sun week, or for One-time the deadline's date, or the pact's start with Submit anytime). A change to a pact applies only to occurrences that haven't opened yet, except on One-time pacts.
 _Avoid_: Instance, check-in, day, session
 
 **Due time**:
 When an occurrence is due and judged: on Fixed days, the due-by time or in-bed-by time, or else midnight; for Weekly count, the end of Sunday; for One-time, the deadline.
 
 **Due-by time**:
-An optional time of day, such as 9:00am, that a Camera pact's evidence is due by each day instead of midnight. It doesn't apply to One-time pacts, whose deadline already has a time.
+An optional time of day, such as 9:00am, that a Camera pact's evidence is due by instead of midnight. On a recurring pact it applies each day; on a One-time pact it's the time of the deadline.
 
 **Kept / Missed / Excused**:
 The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**.
