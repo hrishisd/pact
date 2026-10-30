@@ -47,3 +47,15 @@ describe("photo store", () => {
     expect(config.photos).toEqual({ kind: "local-disk", dir: join("/tmp/pact-dev", "photos") });
   });
 });
+
+describe("deployed commit", () => {
+  test("is the one the image was built with", () => {
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, PACT_COMMIT: "ebb9f3c" }).commit).toBe("ebb9f3c");
+  });
+
+  test("missing or empty, it is null and production still starts", () => {
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET }).commit).toBeNull();
+    // A build without the arg sets the variable to an empty string.
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, PACT_COMMIT: "" }).commit).toBeNull();
+  });
+});

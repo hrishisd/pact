@@ -37,6 +37,8 @@ export interface Config {
   photos: ({ kind: "r2" } & R2Bucket) | { kind: "local-disk"; dir: string };
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
   restored: boolean;
+  /** The commit CI built the image from, reported by /health. Null when built without one; never required. */
+  commit: string | null;
 }
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
@@ -81,6 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         }
       : { kind: "local-disk", dir: join(dirname(dbPath), "photos") },
     restored: env.PACT_RESTORED === "1",
+    commit: env.PACT_COMMIT?.trim() || null,
   };
 
   if (missing.length > 0) {

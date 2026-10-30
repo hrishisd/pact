@@ -77,6 +77,7 @@ const app = createApp({
   auth,
   staticDir: config.staticDir,
   canonicalOrigin: config.canonicalOrigin,
+  commit: config.commit,
   diskUsedFraction: () => usedFraction(statfsSync(dataDir)),
   production: config.production,
   operatorEmail: config.operatorEmail,
