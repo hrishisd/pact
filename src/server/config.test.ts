@@ -1,0 +1,49 @@
+// Where photos go: a private R2 bucket in production, local disk in development.
+
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+import { loadConfig } from "./config.ts";
+
+/** Every variable production requires apart from the photo bucket's. */
+const PRODUCTION = {
+  NODE_ENV: "production",
+  PACT_DB_PATH: "/data/pact.db",
+  OPERATOR_EMAIL: "operator@example.test",
+  GOOGLE_CLIENT_ID: "client-id",
+  GOOGLE_CLIENT_SECRET: "client-secret",
+  BETTER_AUTH_SECRET: "a-production-secret-at-least-32-characters-long",
+  BETTER_AUTH_URL: "https://pact.example.test",
+};
+
+const PHOTOS_BUCKET = {
+  PHOTOS_BUCKET: "pact-photos",
+  PHOTOS_ENDPOINT: "https://0123abcd.r2.cloudflarestorage.com",
+  PHOTOS_ACCESS_KEY_ID: "access-key-id",
+  PHOTOS_SECRET_ACCESS_KEY: "secret-access-key",
+};
+
+describe("photo store", () => {
+  test("production stores photos in the R2 bucket the environment names", () => {
+    const config = loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET });
+
+    expect(config.photos).toEqual({
+      kind: "r2",
+      bucket: "pact-photos",
+      endpoint: "https://0123abcd.r2.cloudflarestorage.com",
+      accessKeyId: "access-key-id",
+      secretAccessKey: "secret-access-key",
+    });
+  });
+
+  test("production refuses to start without the photo bucket", () => {
+    expect(() => loadConfig(PRODUCTION)).toThrow(
+      "missing required environment variables: PHOTOS_BUCKET, PHOTOS_ENDPOINT, PHOTOS_ACCESS_KEY_ID, PHOTOS_SECRET_ACCESS_KEY",
+    );
+  });
+
+  test("development stores photos on disk next to the database", () => {
+    const config = loadConfig({ PACT_DB_PATH: "/tmp/pact-dev/pact.db" });
+
+    expect(config.photos).toEqual({ kind: "local-disk", dir: join("/tmp/pact-dev", "photos") });
+  });
+});

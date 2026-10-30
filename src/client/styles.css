@@ -218,6 +218,7 @@ p {
   touch-action: manipulation;
 }
 .tab .tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -242,6 +243,22 @@ p {
 }
 .tab:active {
   background: none;
+}
+/* The Review tab's count of items waiting for a decision. */
+.badge {
+  position: absolute;
+  top: 1px;
+  left: calc(50% + 6px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--missed);
+  color: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
 }
 
 /* ---------- components ---------- */
@@ -388,6 +405,10 @@ p {
   background: var(--kept-bg);
   color: var(--kept);
 }
+.c-missed {
+  background: var(--missed-bg);
+  color: var(--missed);
+}
 .c-todo {
   background: var(--kept);
   color: var(--paper);
@@ -448,6 +469,28 @@ p {
   margin-left: 2px;
 }
 
+/* Ledgers: the big owed amount, then lifetime paid. */
+.ledger-sum {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bigmoney {
+  font-family: var(--f-mono);
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-top: 4px;
+}
+.rt .link {
+  align-self: flex-start;
+  text-align: left;
+}
+.num {
+  font-family: var(--f-mono);
+}
+
 /* A pact's terms. */
 .kv {
   display: grid;
@@ -478,6 +521,10 @@ p {
 .alert.info {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+.alert.bad {
+  background: var(--missed-bg);
+  border-color: var(--missed);
 }
 .invite-link {
   font-family: var(--f-mono);
@@ -707,4 +754,122 @@ textarea.inp {
 }
 .btn.grow {
   flex: 1;
+}
+
+/* Evidence on a Today card: a camera button, then thumbnails of the photos
+   taken (each removable) with a tile to take another. */
+.evidence {
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+  cursor: default;
+}
+.evidence .btn svg {
+  width: 18px;
+  height: 18px;
+}
+.photos {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.thumb {
+  position: relative;
+}
+.thumb img,
+.ph-add {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--sunk);
+}
+.ph-add {
+  display: grid;
+  place-items: center;
+  border-style: dashed;
+  font-size: 26px;
+  color: var(--muted);
+}
+.thumb .remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--scrim);
+  color: var(--surface);
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  line-height: 1;
+}
+
+/* A review item kind's icon in a coloured square: Evidence is a green camera. */
+.kico {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.kico svg {
+  width: 20px;
+  height: 20px;
+}
+.k-evidence {
+  background: var(--kept-bg);
+  color: var(--kept);
+}
+
+/* A review item kind as a coloured badge with its icon, on Review. */
+.kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.kind svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Review: one item at a time, with its decision buttons kept in reach. */
+.counter {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+.big-photo {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--sunk);
+}
+.decide {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 8px;
+  padding-block: 10px 4px;
+  background: linear-gradient(to bottom, transparent, var(--paper) 25%);
+}
+.btn.ok {
+  background: var(--kept);
+  border-color: var(--kept);
+  color: var(--surface);
 }

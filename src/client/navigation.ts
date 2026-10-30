@@ -15,8 +15,14 @@ export const TAB_PATHS: Record<TabId, string> = {
   ledgers: "/ledgers",
 };
 
-/** A page pushed on top of a tab. A pact page may carry its name so the header shows it before the pact loads. */
-export type Page = { kind: "pact"; id: string; name?: string } | { kind: "create" };
+/**
+ * A page pushed on top of a tab. A pact or ledger page may carry its name so
+ * the header shows it before the page loads.
+ */
+export type Page =
+  | { kind: "pact"; id: string; name?: string }
+  | { kind: "create" }
+  | { kind: "ledger"; recipientId: string; name?: string };
 
 interface Route {
   tab: TabId;
@@ -32,7 +38,14 @@ interface Entry {
 const NEW_PACT_PATH = "/pacts/new";
 
 function pagePath(page: Page): string {
-  return page.kind === "create" ? NEW_PACT_PATH : `/pacts/${encodeURIComponent(page.id)}`;
+  switch (page.kind) {
+    case "create":
+      return NEW_PACT_PATH;
+    case "pact":
+      return `/pacts/${encodeURIComponent(page.id)}`;
+    case "ledger":
+      return `${TAB_PATHS.ledgers}/${encodeURIComponent(page.recipientId)}`;
+  }
 }
 
 function routePath(route: Route): string {
@@ -44,6 +57,8 @@ function routeFromPath(pathname: string): Route {
   if (pathname === NEW_PACT_PATH) return { tab: "pacts", stack: [{ kind: "create" }] };
   const pact = /^\/pacts\/([^/]+)$/.exec(pathname);
   if (pact) return { tab: "pacts", stack: [{ kind: "pact", id: decodeURIComponent(pact[1]!) }] };
+  const ledger = /^\/ledgers\/([^/]+)$/.exec(pathname);
+  if (ledger) return { tab: "ledgers", stack: [{ kind: "ledger", recipientId: decodeURIComponent(ledger[1]!) }] };
   const tab = (Object.keys(TAB_PATHS) as TabId[]).find((t) => TAB_PATHS[t] === pathname) ?? "today";
   return { tab, stack: [] };
 }

@@ -11,15 +11,29 @@ export function Centered({ children }: { children: ReactNode }) {
   );
 }
 
-/** What `load` resolves to (null until it does), or `failed` if it rejects. Loads once, on mount. */
-/** `failed` is the error when the load failed, for `failureText`; null otherwise. */
-export function useLoad<T>(load: () => Promise<T>): { data: T | null; failed: { error: unknown } | null } {
+/**
+ * What `load` resolves to (null until it does), or `failed` if it rejects.
+ * Loads on mount, and again on `reload()`, keeping the last data meanwhile.
+ * `failed` is the error when the load failed, for `failureText`; null otherwise.
+ */
+export function useLoad<T>(load: () => Promise<T>): {
+  data: T | null;
+  failed: { error: unknown } | null;
+  reload: () => void;
+} {
   const [data, setData] = useState<T | null>(null);
   const [failed, setFailed] = useState<{ error: unknown } | null>(null);
+  const [loads, setLoads] = useState(0);
   useEffect(() => {
-    load().then(setData, (error: unknown) => setFailed({ error }));
-  }, []);
-  return { data, failed };
+    load().then(
+      (loaded) => {
+        setData(loaded);
+        setFailed(null);
+      },
+      (error: unknown) => setFailed({ error }),
+    );
+  }, [loads]);
+  return { data, failed, reload: () => setLoads((n) => n + 1) };
 }
 
 export function Empty({ title, body, children }: { title: string; body: string; children?: ReactNode }) {

@@ -1,5 +1,5 @@
 // The four ports outside the Pact core. Each has a production adapter
-// (adapters.ts) and a fake for tests (testing/fakes.ts).
+// (adapters.ts, photo-stores.ts) and a fake for tests (testing/fakes.ts).
 
 import type { AccountId } from "../shared/types.ts";
 
@@ -39,7 +39,12 @@ export interface OuraSource {
   sleepPeriods(account: AccountId, range: OuraDateRange): Promise<OuraSleepResult>;
 }
 
-export type NotificationKind = "operator-alert";
+export type NotificationKind =
+  | "operator-alert"
+  /** To each reviewer of a pact: a new item in their Review Queue. */
+  | "review-item"
+  /** To the owner: a reviewer approved or rejected their evidence. */
+  | "evidence-decided";
 export type NotificationChannel = "push";
 
 export interface Notification {

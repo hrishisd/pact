@@ -5,6 +5,7 @@ import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  EVIDENCE_PHOTO_FIELD,
   INVITE_TOKEN_SIGN_IN_KEY,
   invitePath,
   type AcceptInviteResponse,
@@ -14,16 +15,22 @@ import {
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
+  type DecideRequest,
+  type DecideResponse,
   type FirstOccurrenceRequest,
   type FirstOccurrenceResponse,
   type FriendsResponse,
   type InviteLookupResponse,
+  type LedgerResponse,
+  type LedgersResponse,
   type MeResponse,
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type ReviewQueueResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
+  type SubmitEvidenceResponse,
   type TodayResponse,
 } from "../shared/api.ts";
 
@@ -90,6 +97,11 @@ function post<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+/** A multipart POST; the browser sets the Content-Type with its boundary. */
+function postForm<T>(path: string, form: FormData): Promise<T> {
+  return call<T>(path, { method: "POST", body: form });
+}
+
 export const api = {
   me: () => call<MeResponse>(API_PATHS.me),
   today: () => call<TodayResponse>(API_PATHS.today),
@@ -107,4 +119,15 @@ export const api = {
   firstOccurrence: (request: FirstOccurrenceRequest) =>
     post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
   pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),
+  /** `photos` are already shrunk (photos.ts), in the order taken. */
+  submitEvidence: (pactId: string, photos: Blob[]) => {
+    const form = new FormData();
+    photos.forEach((photo, i) => form.append(EVIDENCE_PHOTO_FIELD, photo, `photo-${i + 1}.jpg`));
+    return postForm<SubmitEvidenceResponse>(API_PATHS.evidence(encodeURIComponent(pactId)), form);
+  },
+  reviewQueue: () => call<ReviewQueueResponse>(API_PATHS.reviewQueue),
+  decide: (itemId: string, decision: DecideRequest) =>
+    post<DecideResponse>(API_PATHS.decide(encodeURIComponent(itemId)), decision),
+  ledgers: () => call<LedgersResponse>(API_PATHS.ledgers),
+  ledger: (recipientId: string) => call<LedgerResponse>(API_PATHS.ledger(encodeURIComponent(recipientId))),
 };

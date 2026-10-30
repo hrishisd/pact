@@ -88,6 +88,37 @@ describe("the occurrence open at a time", () => {
   });
 });
 
+describe("the occurrences due after a date, by a time", () => {
+  // Mon/Wed/Fri, first occurrence Wed 7 Jan 2026.
+  const terms: OccurrenceTerms = { schedule: fixedDays("mon", "wed", "fri"), firstOccurrence: "2026-01-07" };
+  const pact = occurrences(terms, NEW_YORK);
+  const dates = (after: string | null, t: string) => pact.dueAfter(after, new Date(t)).map((o) => o.date);
+
+  test("with no date yet, they start at the first occurrence, oldest first", () => {
+    expect(dates(null, "2026-01-13T12:00:00-05:00")).toEqual(["2026-01-07", "2026-01-09", "2026-01-12"]);
+  });
+
+  test("an occurrence counts once its due time has come, not before", () => {
+    expect(dates(null, "2026-01-07T23:59:59-05:00")).toEqual([]);
+    expect(pact.dueAfter(null, new Date("2026-01-08T00:00:00-05:00"))).toEqual([
+      {
+        date: "2026-01-07",
+        opensAt: new Date("2026-01-07T00:00:00-05:00"),
+        dueAt: new Date("2026-01-08T00:00:00-05:00"),
+      },
+    ]);
+  });
+
+  test("only those dated after the date given", () => {
+    expect(dates("2026-01-07", "2026-01-13T00:00:00-05:00")).toEqual(["2026-01-09", "2026-01-12"]);
+    expect(dates("2026-01-12", "2026-01-13T00:00:00-05:00")).toEqual([]);
+  });
+
+  test("never one before the first occurrence, whatever the date given", () => {
+    expect(dates("2026-01-01", "2026-01-08T00:00:00-05:00")).toEqual(["2026-01-07"]);
+  });
+});
+
 describe("daylight saving time", () => {
   const daily: OccurrenceTerms = {
     schedule: fixedDays("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -108,6 +139,19 @@ describe("daylight saving time", () => {
       opensAt: new Date(opensAt),
       dueAt: new Date(dueAt),
     });
+  });
+
+  test("over the week New York falls back, each day is due at its own midnight, the 25-hour Sunday included", () => {
+    const fallBackWeek = occurrences({ ...daily, firstOccurrence: "2026-10-30" }, NEW_YORK);
+
+    expect(fallBackWeek.dueAfter(null, new Date("2026-11-03T00:00:00-05:00"))).toEqual([
+      { date: "2026-10-30", opensAt: new Date("2026-10-30T04:00:00Z"), dueAt: new Date("2026-10-31T04:00:00Z") },
+      { date: "2026-10-31", opensAt: new Date("2026-10-31T04:00:00Z"), dueAt: new Date("2026-11-01T04:00:00Z") },
+      { date: "2026-11-01", opensAt: new Date("2026-11-01T04:00:00Z"), dueAt: new Date("2026-11-02T05:00:00Z") },
+      { date: "2026-11-02", opensAt: new Date("2026-11-02T05:00:00Z"), dueAt: new Date("2026-11-03T05:00:00Z") },
+    ]);
+    // An hour before Sunday's midnight is still Sunday: 25 hours after it opened, not 24.
+    expect(fallBackWeek.dueAfter("2026-10-31", new Date("2026-11-02T04:00:00Z"))).toEqual([]);
   });
 
   test("a pact created late on Santiago's short Saturday gets the full hour before its jump", () => {

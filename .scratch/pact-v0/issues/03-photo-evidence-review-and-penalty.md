@@ -39,17 +39,42 @@ The owner proves a day with live photos on the Today card, a reviewer approves o
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Mon/Wed/Fri $5 pact → Monday ends with no evidence → Missed, ledger shows $5 owed to the recipient.
-- [ ] Evidence submitted Monday, approved Tuesday → Kept, nothing owed.
-- [ ] Evidence submitted Monday, still waiting at midnight → not judged yet; rejected Tuesday → Missed as of the rejection, $5 owed.
-- [ ] Rejected Monday afternoon, resubmitted Monday evening, approved → Kept.
-- [ ] Evidence refused on a Tuesday for a Mon/Wed/Fri pact, and refused after midnight.
-- [ ] Two reviewers: the first to decide wins and the item leaves both queues; a second decision is refused.
-- [ ] Two pacts with the same recipient share one ledger.
-- [ ] A restart between submission and the day ending changes nothing.
-- [ ] Only the owner and the pact's reviewers can fetch a photo.
+- [x] Mon/Wed/Fri $5 pact → Monday ends with no evidence → Missed, ledger shows $5 owed to the recipient.
+- [x] Evidence submitted Monday, approved Tuesday → Kept, nothing owed.
+- [x] Evidence submitted Monday, still waiting at midnight → not judged yet; rejected Tuesday → Missed as of the rejection, $5 owed.
+- [x] Rejected Monday afternoon, resubmitted Monday evening, approved → Kept.
+- [x] Evidence refused on a Tuesday for a Mon/Wed/Fri pact, and refused after midnight.
+- [x] Two reviewers: the first to decide wins and the item leaves both queues; a second decision is refused.
+- [x] Two pacts with the same recipient share one ledger.
+- [x] A restart between submission and the day ending changes nothing.
+- [x] Only the owner and the pact's reviewers can fetch a photo.
 
 ## Notes
 
 - Capture time isn't used: shrinking before upload strips it, and the rules only use server-received time (ADR 0002).
 - Once the camera flow works on a real iPhone, check that 1280px keeps small text (a treadmill display, a scale) readable, and that photos come out the right way up.
+
+## Comments
+
+### 2026-10-30: built, waiting on the phone check
+
+What was done:
+- **Photo store.** It has an R2 adapter, used in production (`src/core/photo-stores.ts`, over the S3 API with `aws4fetch`), and a local-disk adapter, used in development (`.dev-data.nosync/photos`).
+- **Uploads and photo access.** One multipart upload carries each piece of evidence. Any photo over 1 MB gets a 400 `photo-too-large`. Only JPEG is accepted, and the core caps evidence at 10 photos. `GET /api/photos/:id` serves a photo to the pact's owner and its reviewers only, and answers 404 for anyone else (recorded in CODING_STANDARDS "Settled decisions").
+- **Shrinking.** Photos are shrunk in the browser before upload: `PHOTO_SHRINK` in `src/client/photos.ts` sets a long edge of 1280px and JPEG quality 0.6.
+- **Core rules.** `submitEvidence`, `reviewQueue`, `decide` (the first decision is final), judging in `advanceTo` (a per-pact cursor, catching up after downtime), penalties, `ledgers` and `ledger`.
+- **Screens.** Today has the inline Take photo, the rejected-evidence alert, Missed (with who rejected it and why) and Waiting for approval. Review has its badge, Reject (reason required), Approve and Prev/Skip. Ledgers has its tab and a history page.
+- **Migrations.** Migration 4 adds the tables. Migration 5 starts judging at the deploy date for pacts that already exist, so nothing before the deploy gets a penalty. Migration 6 drops a stale `occurrence.due_at`.
+- **Tests.** Every acceptance criterion has a test in `judging.test.ts`, `evidence.test.ts`, `review.test.ts`, `ledgers.test.ts` and `app.test.ts`. Migration 5 has its own test in `migrations.test.ts`.
+- **Browser check.** I checked it in the browser preview with dev sign-in, at phone width. Evidence was uploaded with curl, because the preview has no camera.
+
+Left for the human:
+- Create the private R2 bucket `pact-photos` with keys scoped to it, then set the Fly secrets `PHOTOS_BUCKET`, `PHOTOS_ENDPOINT`, `PHOTOS_ACCESS_KEY_ID` and `PHOTOS_SECRET_ACCESS_KEY` (stage 6 of `scripts/setup-operator.sh`).
+- On a real iPhone, check:
+  - that Take photo opens the camera and not the photo library
+  - that several photos can be taken
+  - that photos come out the right way up
+  - that 1280px keeps small text readable (a treadmill display, a scale)
+  - that uploads are quick on cellular
+
+Status stays ready-for-agent until the phone check passes.

@@ -1,7 +1,8 @@
-// Production adapters for the four ports. The server wires these into
-// createPactCore; tests use the fakes in testing/fakes.ts instead.
+// Production adapters for the four ports (the photo stores are in
+// photo-stores.ts). The server wires these into createPactCore; tests use the
+// fakes in testing/fakes.ts instead.
 
-import type { Clock, Notification, Notifier, OuraSource, PhotoStore } from "./ports.ts";
+import type { Clock, Notification, Notifier, OuraSource } from "./ports.ts";
 
 /** The one place system time is read. */
 export const systemClock: Clock = {
@@ -27,15 +28,5 @@ export function logNotifier(log: (line: string) => void = (line) => console.log(
 export const stubOuraSource: OuraSource = {
   async sleepPeriods() {
     throw new Error("Oura source not implemented yet (ticket 08)");
-  },
-};
-
-/** Photos aren't stored until ticket 03. Nothing calls this yet. */
-export const stubPhotoStore: PhotoStore = {
-  async store() {
-    throw new Error("photo store not implemented yet (ticket 03)");
-  },
-  async fetch() {
-    throw new Error("photo store not implemented yet (ticket 03)");
   },
 };

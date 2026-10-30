@@ -53,6 +53,8 @@ export class RecordingNotifier implements Notifier {
 export class InMemoryPhotoStore implements PhotoStore {
   readonly #clock: Clock;
   readonly #photos = new Map<string, Photo>();
+  /** Every photo id it has handed out, in order. */
+  readonly photoIds: string[] = [];
   #nextId = 1;
 
   constructor(clock: Clock) {
@@ -61,6 +63,7 @@ export class InMemoryPhotoStore implements PhotoStore {
 
   async store(photo: Photo): Promise<StoredPhoto> {
     const photoId = `photo-${this.#nextId++}`;
+    this.photoIds.push(photoId);
     this.#photos.set(photoId, { bytes: photo.bytes.slice(), contentType: photo.contentType });
     return { photoId, receivedAt: this.#clock.now() };
   }

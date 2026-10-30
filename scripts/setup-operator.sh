@@ -210,7 +210,7 @@ app_name() { sed -n 's/^app = "\(.*\)"/\1/p' fly.toml; }
 
 run_wizard() {
 
-TOTAL_STAGES=14
+TOTAL_STAGES=15
 
 banner "Pact: production setup (Fly, R2, Google sign-in, DNS, monitoring, practice restore)"
 
@@ -265,7 +265,7 @@ stage "Cloudflare R2: bucket for Litestream"
 open_url "https://dash.cloudflare.com/?to=/:account/r2/overview"
 step "R2 Object Storage → Create bucket."
 step "Name it e.g. pact-litestream. Location: Automatic, or a hint of Eastern North America. Storage class: Standard."
-step "Leave public access OFF. (Photos get their own private bucket in ticket 03.)"
+step "Leave public access OFF. (Photos get their own private bucket in stage 6.)"
 ask LITESTREAM_BUCKET "Bucket name:"
 write_env LITESTREAM_BUCKET "$LITESTREAM_BUCKET"
 step "On the R2 overview page, copy your Account ID (right-hand side, 'Account Details')."
@@ -286,6 +286,27 @@ write_env LITESTREAM_ACCESS_KEY_ID "$LITESTREAM_ACCESS_KEY_ID"
 write_env LITESTREAM_SECRET_ACCESS_KEY "$LITESTREAM_SECRET_ACCESS_KEY"
 
 # ── 6 ─────────────────────────────────────────────────────────────────────
+stage "Cloudflare R2: private bucket and access keys for photos"
+say "Evidence photos live in their own private bucket. Only the server reads it, and it"
+say "shows a photo only to the pact's owner and reviewers. Development keeps photos on local disk."
+open_url "https://dash.cloudflare.com/?to=/:account/r2/overview"
+step "R2 Object Storage → Create bucket."
+step "Name it e.g. pact-photos. Same location and storage class as '$LITESTREAM_BUCKET'."
+step "Leave public access OFF: no public bucket URL, no custom domain."
+ask PHOTOS_BUCKET "Bucket name:"
+write_env PHOTOS_BUCKET "$PHOTOS_BUCKET"
+write_env PHOTOS_ENDPOINT "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+open_url "https://dash.cloudflare.com/?to=/:account/r2/api-tokens"
+step "R2 → Manage API tokens → Create Account API token (or User API token)."
+step "Name: pact-photos. Permissions: Object Read & Write."
+step "Specify bucket(s): only '$PHOTOS_BUCKET'. TTL: forever."
+step "Create, then copy the S3 'Access Key ID' and 'Secret Access Key' (shown once)."
+ask PHOTOS_ACCESS_KEY_ID "Access Key ID:"
+ask_secret PHOTOS_SECRET_ACCESS_KEY "Secret Access Key (hidden):"
+write_env PHOTOS_ACCESS_KEY_ID "$PHOTOS_ACCESS_KEY_ID"
+write_env PHOTOS_SECRET_ACCESS_KEY "$PHOTOS_SECRET_ACCESS_KEY"
+
+# ── 7 ─────────────────────────────────────────────────────────────────────
 stage "Google sign-in: consent screen"
 open_url "https://console.cloud.google.com/auth/overview"
 step "Pick or create a project (e.g. 'Pact')."
@@ -295,7 +316,7 @@ note "Only the basic scopes (openid, email, profile) are used, so no Google veri
 note "Left in Testing, only listed test users could sign in at all."
 pause "Press Enter once the consent screen is set up."
 
-# ── 7 ─────────────────────────────────────────────────────────────────────
+# ── 8 ─────────────────────────────────────────────────────────────────────
 stage "Google sign-in: OAuth client"
 open_url "https://console.cloud.google.com/auth/clients"
 step "Create client → Application type: Web application → Name: Pact."
@@ -309,7 +330,7 @@ ask_secret GOOGLE_CLIENT_SECRET "Client secret (hidden):"
 write_env GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
 write_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
 
-# ── 8 ─────────────────────────────────────────────────────────────────────
+# ── 9 ─────────────────────────────────────────────────────────────────────
 stage "Operator email and session secret"
 say "The operator email is the Google account whose first sign-in creates the first account."
 say "Every other account will need an invite."
@@ -323,7 +344,7 @@ else
   say "Generated a new session secret."
 fi
 
-# ── 9 ─────────────────────────────────────────────────────────────────────
+# ── 10 ────────────────────────────────────────────────────────────────────
 stage "Local development .env"
 say "npm run dev reads .env. It gets the same Google client, your email, and its own session secret."
 OPERATOR_FILE="$ENV_FILE"
@@ -337,18 +358,19 @@ if [[ -z "$(_existing BETTER_AUTH_SECRET || true)" ]]; then
   write_env BETTER_AUTH_SECRET "$(openssl rand -base64 32)"
 fi
 ENV_FILE="$OPERATOR_FILE"
-BETTER_AUTH_SECRET="$PROD_AUTH_SECRET"   # stage 10 sends the production one to Fly
+BETTER_AUTH_SECRET="$PROD_AUTH_SECRET"   # stage 11 sends the production one to Fly
 pause
 
-# ── 10 ────────────────────────────────────────────────────────────────────
+# ── 11 ────────────────────────────────────────────────────────────────────
 stage "Fly secrets"
 say "These names are exactly what the server and litestream.yml read:"
 for name in OPERATOR_EMAIL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BETTER_AUTH_SECRET \
-            LITESTREAM_BUCKET LITESTREAM_ENDPOINT LITESTREAM_ACCESS_KEY_ID LITESTREAM_SECRET_ACCESS_KEY; do
+            LITESTREAM_BUCKET LITESTREAM_ENDPOINT LITESTREAM_ACCESS_KEY_ID LITESTREAM_SECRET_ACCESS_KEY \
+            PHOTOS_BUCKET PHOTOS_ENDPOINT PHOTOS_ACCESS_KEY_ID PHOTOS_SECRET_ACCESS_KEY; do
   note "  $name"
 done
 note "NODE_ENV, PORT, PACT_DB_PATH and BETTER_AUTH_URL=https://$DOMAIN are in fly.toml [env], not secrets."
-if confirm "Set these 8 secrets on '$FLY_APP' (staged: they apply on the next deploy)?"; then
+if confirm "Set these 12 secrets on '$FLY_APP' (staged: they apply on the next deploy)?"; then
   # Through stdin, so no secret shows up in the process list.
   printf '%s\n' \
     "OPERATOR_EMAIL=$OPERATOR_EMAIL" \
@@ -359,8 +381,12 @@ if confirm "Set these 8 secrets on '$FLY_APP' (staged: they apply on the next de
     "LITESTREAM_ENDPOINT=$LITESTREAM_ENDPOINT" \
     "LITESTREAM_ACCESS_KEY_ID=$LITESTREAM_ACCESS_KEY_ID" \
     "LITESTREAM_SECRET_ACCESS_KEY=$LITESTREAM_SECRET_ACCESS_KEY" \
+    "PHOTOS_BUCKET=$PHOTOS_BUCKET" \
+    "PHOTOS_ENDPOINT=$PHOTOS_ENDPOINT" \
+    "PHOTOS_ACCESS_KEY_ID=$PHOTOS_ACCESS_KEY_ID" \
+    "PHOTOS_SECRET_ACCESS_KEY=$PHOTOS_SECRET_ACCESS_KEY" \
     | if fly secrets import --stage -a "$FLY_APP"; then
-        printf '  %s✓ set%s 8 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP"
+        printf '  %s✓ set%s 12 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP"
       else
         warn "fly secrets import failed: fix the error above and re-run this wizard"
       fi
@@ -369,7 +395,7 @@ else
   SKIPPED+=("Fly secrets on $FLY_APP")
 fi
 
-# ── 11 ────────────────────────────────────────────────────────────────────
+# ── 12 ────────────────────────────────────────────────────────────────────
 stage "GitHub Actions: FLY_API_TOKEN, then first deploy"
 say "CI deploys with a deploy token scoped to this one app (.github/workflows/ci.yml)."
 if confirm "Create a Fly deploy token for '$FLY_APP' and store it as the GitHub secret FLY_API_TOKEN?"; then
@@ -388,7 +414,7 @@ run curl -fsS "https://$FLY_APP.fly.dev/health" || warn "/health didn't answer 2
 printf '\n'
 pause
 
-# ── 12 ────────────────────────────────────────────────────────────────────
+# ── 13 ────────────────────────────────────────────────────────────────────
 stage "DNS and certificate for $DOMAIN"
 run fly certs add "$DOMAIN" -a "$FLY_APP" || true
 say "flyctl just printed the DNS records it wants. The simplest is one CNAME:"
@@ -399,7 +425,7 @@ run fly certs check "$DOMAIN" -a "$FLY_APP" || true
 note "Issuing can take a few minutes. Re-check with: fly certs check $DOMAIN -a $FLY_APP"
 pause "Press Enter once the certificate shows as issued (or to come back to it later)."
 
-# ── 13 ────────────────────────────────────────────────────────────────────
+# ── 14 ────────────────────────────────────────────────────────────────────
 stage "Sign in on the iPhone, and an uptime monitor"
 step "On your iPhone, open https://$DOMAIN in Safari → Share → Add to Home Screen."
 step "Open Pact from the home screen, sign in with $OPERATOR_EMAIL, confirm the timezone, see Today."
@@ -412,7 +438,7 @@ step "URL: https://$DOMAIN/health   Interval: 5 minutes   Alert contact: your em
 note "/health turns 503 when the scheduler hasn't ticked for 5 minutes."
 pause "Press Enter once the monitor is created and shows Up."
 
-# ── 14 ────────────────────────────────────────────────────────────────────
+# ── 15 ────────────────────────────────────────────────────────────────────
 stage "Practice restore (ADR 0002): delete the volume, redeploy, read the alert"
 say "Do this now, before real data depends on backups. It throws away the volume."
 step "First, check Litestream is replicating: 'fly logs -a $FLY_APP' shows litestream lines with no errors,"

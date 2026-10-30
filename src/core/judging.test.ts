@@ -1,0 +1,316 @@
+// Judging Camera pacts: at the end of each scheduled day (advance to T), or
+// on a decision that comes after it, and the penalty a Missed occurrence adds
+// to the owner's ledger for the pact's recipient.
+
+import { describe, expect, test } from "vitest";
+import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { scenario, type AccountHandle } from "./testing/scenario.ts";
+import type { Today } from "../shared/types.ts";
+
+const MONDAY = "2026-01-05";
+
+describe("judging at the end of a scheduled day", () => {
+  test("Mon/Wed/Fri $5 pact: Monday ends with no evidence, so it's Missed and the ledger shows $5 owed to the recipient", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+
+    await s.advanceTo("Tue 00:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 500, paidCents: 0 })]);
+    expect(missedOn(owner.today())).toEqual([
+      { pactId: gym, name: "Gym", penaltyCents: 500, occurrenceDate: MONDAY, missedAt: s.at("Tue 00:00") },
+    ]);
+  });
+
+  test("evidence submitted Monday, approved Tuesday: Kept, nothing owed", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    const evidenceId = await submit(owner, gym);
+    await s.advanceTo("Tue 00:00");
+
+    s.setClockTo("Tue 08:00");
+    await reviewer.decide(evidenceId, { kind: "approve" });
+    await s.advanceTo("Tue 08:01");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 0 })]);
+    expect(owner.today()).toEqual(nothingOnToday);
+  });
+
+  test("evidence submitted Monday, still waiting at midnight: not judged yet; rejected Tuesday: Missed as of the rejection, $5 owed", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    const evidenceId = await submit(owner, gym);
+
+    await s.advanceTo("Tue 00:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+    expect(owner.today()).toEqual({ ...nothingOnToday, waiting: [expect.objectContaining({ id: evidenceId })] });
+
+    s.setClockTo("Tue 08:00");
+    await reviewer.decide(evidenceId, { kind: "reject", reason: "That's last week's photo" });
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
+    expect(owner.today()).toEqual({
+      ...nothingOnToday,
+      sections: [
+        {
+          kind: "missed",
+          cards: [
+            {
+              pactId: gym,
+              name: "Gym",
+              penaltyCents: 500,
+              occurrenceDate: MONDAY,
+              missedAt: s.at("Tue 08:00"),
+              rejection: { reviewerName: "reviewer", reason: "That's last week's photo" },
+            },
+          ],
+        },
+      ],
+    });
+    // The next tick doesn't judge it again.
+    await s.advanceTo("Tue 08:01");
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
+    expect(missedOn(owner.today())).toEqual([expect.objectContaining({ missedAt: s.at("Tue 08:00") })]);
+  });
+
+  test("a decision after midnight that comes before the next tick judges there and then, and the tick doesn't judge again", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    const evidenceId = await submit(owner, gym);
+    s.setClockTo("Tue 08:00");
+
+    await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
+    await s.advanceTo("Tue 08:01");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
+    expect(missedOn(owner.today())).toEqual([expect.objectContaining({ missedAt: s.at("Tue 08:00") })]);
+  });
+
+  test("evidence waiting when Monday ends in the owner's new timezone, rejected before Monday would have ended in the old one: Missed as of the rejection", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    const evidenceId = await submit(owner, gym);
+    // In Kiritimati (UTC+14) Monday ended at Mon 05:00 New York time.
+    await owner.setTimezone("Pacific/Kiritimati");
+    await s.advanceTo("Mon 19:00");
+
+    s.setClockTo("Mon 20:00");
+    await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
+    await s.advanceTo("Mon 20:01");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
+    expect(missedOn(owner.today())).toEqual([
+      expect.objectContaining({ pactId: gym, occurrenceDate: MONDAY, missedAt: s.at("Mon 20:00") }),
+    ]);
+  });
+
+  test("rejected Monday afternoon, resubmitted Monday evening, approved: Kept", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 13:00");
+    const first = await submit(owner, gym);
+    await s.advanceTo("Mon 15:00");
+    await reviewer.decide(first, { kind: "reject", reason: "Blurry" });
+    await s.advanceTo("Mon 20:00");
+    const again = await submit(owner, gym);
+    await s.advanceTo("Mon 21:00");
+    await second.decide(again, { kind: "approve" });
+
+    await s.advanceTo("Tue 00:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+    expect(owner.today()).toEqual(nothingOnToday);
+  });
+
+  test("rejected Monday afternoon and not resubmitted: Missed when Monday ends", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 13:00");
+    const evidenceId = await submit(owner, gym);
+    s.setClockTo("Mon 15:00");
+    await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+
+    await s.advanceTo("Tue 00:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
+    // The alert goes when Monday ends; the Missed card carries the rejection.
+    expect(missedOn(owner.today())).toEqual([
+      expect.objectContaining({
+        pactId: gym,
+        occurrenceDate: MONDAY,
+        missedAt: s.at("Tue 00:00"),
+        rejection: { reviewerName: "reviewer", reason: "Blurry" },
+      }),
+    ]);
+    expect(owner.today().alerts).toEqual([]);
+  });
+
+  test("evidence approved while Monday is open is judged Kept when Monday ends", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    const evidenceId = await submit(owner, gym);
+    s.setClockTo("Mon 19:00");
+    await reviewer.decide(evidenceId, { kind: "approve" });
+
+    await s.advanceTo("Wed 12:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+    expect(missedOn(owner.today())).toEqual([]);
+  });
+
+  test("two pacts with the same recipient share one ledger", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    const run = await createPact("Run", ["mon"]);
+
+    await s.advanceTo("Tue 00:00");
+
+    expect(owner.ledgers()).toEqual([{ recipientId: expect.any(String), name: "Sam", owedCents: 1000, paidCents: 0 }]);
+    expect(missedOn(owner.today()).map((card) => card.pactId)).toEqual([gym, run]);
+  });
+
+  test("a restart between submission and the day ending changes nothing", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    const evidenceId = await submit(owner, gym);
+
+    await s.restart();
+    await s.advanceTo("Tue 00:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+    expect(owner.today()).toEqual({ ...nothingOnToday, waiting: [expect.objectContaining({ id: evidenceId })] });
+
+    s.setClockTo("Tue 08:00");
+    await reviewer.decide(evidenceId, { kind: "approve" });
+    await s.restart();
+    await s.advanceTo("Tue 23:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+    expect(owner.today()).toEqual(nothingOnToday);
+  });
+});
+
+describe("judging over a week", () => {
+  test("a scheduler stopped from Monday to Thursday catches up in one tick: Monday and Wednesday Missed, one penalty each, as of their due times", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+
+    await s.advanceTo("Thu 10:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
+    // Monday was Missed at Tue 00:00, over 48 hours ago, so only Wednesday is on Today.
+    expect(missedOn(owner.today())).toEqual([
+      { pactId: gym, name: "Gym", penaltyCents: 500, occurrenceDate: "2026-01-07", missedAt: s.at("Thu 00:00") },
+    ]);
+  });
+
+  test("advancing to the same time twice, or with a restart mid-week, judges each occurrence once", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    await createPact("Gym", MON_WED_FRI);
+
+    await s.advanceTo("Tue 00:00");
+    await s.advanceTo("Tue 00:00");
+    await s.restart();
+    await s.advanceTo("Tue 12:00");
+    await s.advanceTo("Thu 00:00");
+    await s.advanceTo("Thu 00:00");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
+  });
+
+  test("days the schedule skips, and days before the first occurrence, are never judged", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    // Made Mon 09:00 for Tuesdays only: its first occurrence is Tue 6 Jan.
+    s.setClockTo("Mon 09:00");
+    await createPact("Swim", ["tue"]);
+    // Made Mon 23:30 for Mon/Wed/Fri: Monday is due within the hour, so it starts Wednesday.
+    s.setClockTo("Mon 23:30");
+    await createPact("Gym", MON_WED_FRI);
+
+    await s.advanceTo("Tue 23:59");
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+
+    await s.advanceTo("Thu 00:00");
+
+    expect(missedOn(owner.today()).map((card) => [card.name, card.occurrenceDate])).toEqual([
+      ["Gym", "2026-01-07"],
+      ["Swim", "2026-01-06"],
+    ]);
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
+  });
+
+  test("a Missed occurrence leaves Today 48 hours after it's judged, and stays on the ledger", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    await createPact("Gym", ["mon"]);
+    await s.advanceTo("Tue 00:00");
+
+    s.setClockTo("Wed 23:59");
+    expect(missedOn(owner.today())).toHaveLength(1);
+
+    s.setClockTo("Thu 00:00");
+    expect(missedOn(owner.today())).toEqual([]);
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
+  });
+});
+
+describe("Today's order", () => {
+  test("To do, then Missed, then Coming up, with Waiting for approval last", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", ["mon", "tue"]);
+    const run = await createPact("Run", ["mon", "tue"]);
+    const swim = await createPact("Swim", ["sun"]);
+    s.setClockTo("Tue 09:00");
+    await submit(owner, run);
+
+    await s.advanceTo("Tue 10:00");
+
+    const today = owner.today();
+    expect(today.sections.map((section) => section.kind)).toEqual(["to-do", "missed", "coming-up"]);
+    expect(today.sections.flatMap((section) => section.cards.map((card) => card.pactId))).toEqual([
+      gym,
+      gym,
+      run,
+      swim,
+    ]);
+    expect(today.waiting).toEqual([expect.objectContaining({ pactId: run })]);
+  });
+});
+
+const nothingOnToday: Today = { hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] };
+
+/** The owner submits a photo for the occurrence of `pactId` open now; returns the evidence's id. */
+async function submit(owner: AccountHandle, pactId: string): Promise<string> {
+  const submitted = await owner.submitEvidence(pactId, [photo()]);
+  if (!submitted.ok) throw new Error(submitted.reason);
+  return submitted.evidenceId;
+}
+
+/** The cards in Today's Missed section. */
+function missedOn(today: Today) {
+  return today.sections.find((section) => section.kind === "missed")?.cards ?? [];
+}

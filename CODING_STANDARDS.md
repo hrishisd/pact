@@ -36,3 +36,4 @@ Read at review time. `npm run lint` enforces the mechanical rules: formatting (P
 - Commands await outbox delivery. Revisit with Web Push (ticket 05).
 - `src/server/pages.ts` has its own hex colours: those pages are plain HTML with no shared stylesheet.
 - Light theme only.
+- The photo bytes route (`GET /api/photos/:id`) answers 404 for a photo the account may not see, not a 200 refusal: an `<img>` can't read a refusal body. The core still returns `photo-not-found`.

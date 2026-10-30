@@ -4,7 +4,14 @@
 import { mkdirSync, readFileSync, statfsSync, type StatsFs } from "node:fs";
 import { dirname, join } from "node:path";
 import { serve } from "@hono/node-server";
-import { createPactCore, logNotifier, stubOuraSource, stubPhotoStore, systemClock } from "../core/index.ts";
+import {
+  createPactCore,
+  localDiskPhotoStore,
+  logNotifier,
+  r2PhotoStore,
+  stubOuraSource,
+  systemClock,
+} from "../core/index.ts";
 import { createApp } from "./app.ts";
 import { createAuth } from "./auth.ts";
 import { loadConfig } from "./config.ts";
@@ -38,7 +45,10 @@ const core = createPactCore({
   clock: systemClock,
   notifier: logNotifier(),
   ouraSource: stubOuraSource,
-  photoStore: stubPhotoStore,
+  photoStore:
+    config.photos.kind === "r2"
+      ? r2PhotoStore(config.photos, systemClock)
+      : localDiskPhotoStore(config.photos.dir, systemClock),
   operatorEmail: config.operatorEmail,
 });
 

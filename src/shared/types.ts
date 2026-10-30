@@ -122,6 +122,62 @@ export interface PactTerms {
 
 export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "pact-not-found" };
 
+/** The most photos one piece of evidence may have. */
+export const MAX_EVIDENCE_PHOTOS = 10;
+
+export type SubmitEvidenceRefusal =
+  /** Not this owner's pact, or no pact. */
+  | "pact-not-found"
+  | "no-photos"
+  /** More than MAX_EVIDENCE_PHOTOS photos. */
+  | "too-many-photos"
+  /** No occurrence is open when the server receives the photos: a day the schedule skips, before the first occurrence, or past the due time. */
+  | "not-open"
+  /** Evidence for this occurrence is already waiting for a reviewer. */
+  | "evidence-waiting"
+  /** Evidence for this occurrence was already approved. */
+  | "already-approved";
+
+export type SubmitEvidenceResult = { ok: true; evidenceId: string } | { ok: false; reason: SubmitEvidenceRefusal };
+
+/**
+ * An item in a reviewer's Review Queue, oldest first. Items never expire.
+ * Change requests, excuses and payments join as other kinds.
+ */
+export type ReviewItem =
+  /** Photo evidence: the reviewer checks the photos against what counts. */
+  {
+    kind: "evidence";
+    /** The evidence's id. */
+    id: string;
+    pactId: string;
+    pactName: string;
+    ownerName: string;
+    /** The pact's description of what counts. */
+    description: string;
+    /** In the order taken; each is served at the photo path. */
+    photoIds: string[];
+    /** When the server received its last photo. */
+    submittedAt: Date;
+    /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+    occurrenceDate: string;
+  };
+
+/** A reviewer's decision on a Review Queue item. */
+export type ReviewDecision =
+  | { kind: "approve" }
+  /** `reason` tells the owner why; it can't be blank. */
+  | { kind: "reject"; reason: string };
+
+export type DecideRefusal =
+  /** Not in this account's Review Queue: no such item, or not a reviewer of its pact. */
+  | "item-not-found"
+  /** A reviewer of the pact has already decided it; the first decision is final. */
+  | "already-decided"
+  | "blank-reason";
+
+export type DecideResult = { ok: true } | { ok: false; reason: DecideRefusal };
+
 export type SetTimezoneResult =
   /** `timezone` is the zone's canonical IANA name, as stored. */
   { ok: true; timezone: string } | { ok: false; reason: "invalid-timezone" };
@@ -138,8 +194,8 @@ export interface Profile {
  * then Waiting for approval, then Yesterday. When alerts and sections are all
  * empty, the UI shows the "Nothing to do right now" card.
  *
- * Sections come in display order and an empty one is left out. The other
- * element types are `never` until the tickets that fill each part.
+ * Sections come in display order and an empty one is left out. Yesterday is
+ * `never` until the ticket that fills it.
  */
 export interface Today {
   /** False until the account has made a pact: a new account's Today says what to do first. */
@@ -150,10 +206,26 @@ export interface Today {
   yesterday: TodayYesterdayEntry[];
 }
 
-export type TodayAlert = never;
+/** Something that needs the owner, shown first. */
+export type TodayAlert =
+  /**
+   * A reviewer rejected the evidence for an occurrence that's still open, so
+   * the pact is back in To do. Submitting again resolves it.
+   */
+  {
+    kind: "evidence-rejected";
+    pactId: string;
+    name: string;
+    reviewerName: string;
+    reason: string;
+    /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+    occurrenceDate: string;
+  };
 export type TodaySection =
   /** Pacts whose occurrence is open today, soonest due first. */
   | { kind: "to-do"; cards: TodayToDoCard[] }
+  /** Occurrences judged Missed in the last 48 hours, latest first. */
+  | { kind: "missed"; cards: TodayMissedCard[] }
   /** Pacts whose first occurrence hasn't opened yet, soonest first. */
   | { kind: "coming-up"; cards: TodayComingUpCard[] };
 
@@ -170,12 +242,75 @@ export interface TodayToDoCard extends TodayPactCard {
   dueAt: Date;
 }
 
+/** Who rejected some evidence, and why. */
+export interface EvidenceRejection {
+  reviewerName: string;
+  reason: string;
+}
+
+/** An occurrence judged Missed; `penaltyCents` is the penalty it added. */
+export interface TodayMissedCard extends TodayPactCard {
+  /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  /** When it was judged Missed: its due time, or the rejection that came after it. */
+  missedAt: Date;
+  /**
+   * When it was Missed because its latest evidence was rejected: who rejected
+   * it and why. The owner sees the decision here once the day's alert is gone.
+   */
+  rejection?: EvidenceRejection;
+}
+
 export interface TodayComingUpCard extends TodayPactCard {
   /** The first occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
   opensOn: string;
 }
-export type TodayWaitingItem = never;
+
+/** Something of the owner's waiting for a reviewer's decision, newest first. */
+export type TodayWaitingItem =
+  /** Evidence still waiting, even once its occurrence is past due. */
+  {
+    kind: "evidence";
+    /** The evidence's id. */
+    id: string;
+    pactId: string;
+    name: string;
+    /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+    occurrenceDate: string;
+    /** When the server received its last photo. */
+    submittedAt: Date;
+  };
 export type TodayYesterdayEntry = never;
+
+/** What the owner owes one recipient, across every pact naming it. */
+export interface LedgerSummary {
+  recipientId: string;
+  name: string;
+  /** The penalties added for Missed occurrences, less approved payments (none until payments arrive). */
+  owedCents: number;
+  /** Approved payments, lifetime. */
+  paidCents: number;
+}
+
+/** A penalty on a ledger: what a Missed occurrence added. */
+export interface LedgerPenalty {
+  penaltyId: string;
+  pactId: string;
+  pactName: string;
+  /** The Missed occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  amountCents: number;
+  /** When it was added: when the occurrence was judged Missed. */
+  addedAt: Date;
+}
+
+/** One recipient's ledger: its summary and its penalties, newest first. */
+export interface Ledger {
+  summary: LedgerSummary;
+  history: LedgerPenalty[];
+}
+
+export type LedgerResult = { ok: true; ledger: Ledger } | { ok: false; reason: "recipient-not-found" };
 
 export interface Health {
   /** False when there has been no scheduler tick in the last 5 minutes. */

@@ -5,18 +5,24 @@ import type {
   AcceptInviteResult,
   AddRecipientResult,
   CreatePactResult,
+  DecideResult,
   FirstOccurrenceResult,
   Friend,
   Invite,
   InviteLookup,
+  LedgerResult,
+  LedgerSummary,
   NewPact,
   NewRecipient,
   PactResult,
   PactSummary,
   Profile,
   Recipient,
+  ReviewDecision,
+  ReviewItem,
   Schedule,
   SetTimezoneResult,
+  SubmitEvidenceResult,
   Today,
 } from "./types.ts";
 
@@ -85,7 +91,29 @@ export const API_PATHS = {
   pacts: "/api/pacts",
   firstOccurrence: "/api/pacts/first-occurrence",
   pact: <T extends string>(pactId: T) => `/api/pacts/${pactId}` as const,
+  evidence: <T extends string>(pactId: T) => `/api/pacts/${pactId}/evidence` as const,
+  /**
+   * GET: a photo's bytes and type, not JSON, for the pact's owner and
+   * reviewers only. Anyone else gets the 404 an unknown photo does.
+   */
+  photo: <T extends string>(photoId: T) => `/api/photos/${photoId}` as const,
+  reviewQueue: "/api/review",
+  decide: <T extends string>(itemId: T) => `/api/review/${itemId}/decision` as const,
+  ledgers: "/api/ledgers",
+  ledger: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}` as const,
 } as const;
+
+/**
+ * The largest photo the server accepts. A shrunk photo is about 100–180 KB and
+ * a phone's original 3–5 MB, so this catches a shrink that silently failed.
+ */
+export const MAX_PHOTO_BYTES = 1024 * 1024;
+
+/** The multipart field each photo of some evidence is sent in. */
+export const EVIDENCE_PHOTO_FIELD = "photo";
+
+/** The photo types the server accepts and serves back: JPEG, which the client always sends after shrinking. */
+export const PHOTO_CONTENT_TYPES: readonly string[] = ["image/jpeg"];
 
 /** POST /api/invites: a new single-use invite, expiring 7 days from now. */
 export type CreateInviteResponse = Json<Invite>;
@@ -122,6 +150,31 @@ export type PactsResponse = PactSummary[];
 /** GET /api/pacts/:id: the pact page. Someone else's pact, or none, is a 200 refusal. */
 export type PactResponse = Json<PactResult>;
 
+/**
+ * POST /api/pacts/:id/evidence: multipart form data with one `photo` file
+ * per photo, in the order taken. A photo over MAX_PHOTO_BYTES is a 400
+ * "photo-too-large"; a `photo` field that isn't a file, or a type outside
+ * PHOTO_CONTENT_TYPES, is a 400 "invalid-request". The core's refusals,
+ * "no-photos" and "too-many-photos" included, are 200s.
+ */
+export type SubmitEvidenceResponse = SubmitEvidenceResult;
+
+/** GET /api/review: the signed-in account's Review Queue, oldest first. */
+export type ReviewQueueResponse = Json<ReviewItem[]>;
+
+/**
+ * POST /api/review/:id/decision. A body of another shape is a 400
+ * "invalid-request"; the core's refusals ("blank-reason" included) are 200s.
+ */
+export type DecideRequest = ReviewDecision;
+export type DecideResponse = DecideResult;
+
+/** GET /api/ledgers: the Ledgers tab, one per recipient, sorted by name. */
+export type LedgersResponse = LedgerSummary[];
+
+/** GET /api/ledgers/:recipientId: a ledger's page. Another account's recipient, or none, is a 200 refusal. */
+export type LedgerResponse = Json<LedgerResult>;
+
 /** GET /api/me: the signed-in account's profile. */
 export type MeResponse = Profile;
 
@@ -157,5 +210,5 @@ export interface HealthResponse {
 
 /** Body of every non-2xx /api response. */
 export interface ApiErrorResponse {
-  error: "unauthenticated" | "invalid-request" | "not-found";
+  error: "unauthenticated" | "invalid-request" | "not-found" | "photo-too-large";
 }

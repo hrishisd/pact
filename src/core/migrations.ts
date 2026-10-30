@@ -106,4 +106,94 @@ export const migrations: readonly string[] = [
   );
   CREATE INDEX pact_reviewer_account ON pact_reviewer (reviewer_account_id);
   `,
+  // 4: evidence, judging and penalties
+  `
+  -- An occurrence gets a row once something happens to it: evidence arrives,
+  -- or it's judged. Its timing follows from the pact (occurrences.ts); due_at
+  -- is recorded with the row. outcome is NULL while it's not judged yet.
+  CREATE TABLE occurrence (
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    date TEXT NOT NULL, -- "YYYY-MM-DD" in the owner's timezone
+    due_at TEXT NOT NULL,
+    outcome TEXT CHECK (outcome IN ('kept', 'missed', 'excused')),
+    judged_at TEXT,
+    PRIMARY KEY (pact_id, date),
+    CHECK ((outcome IS NULL) = (judged_at IS NULL))
+  );
+  CREATE INDEX occurrence_not_judged ON occurrence (due_at) WHERE outcome IS NULL;
+
+  -- Judging's cursor: every occurrence of the pact on or before this date has
+  -- been judged or found to be waiting on a decision. NULL until the first.
+  ALTER TABLE pact ADD COLUMN judged_through TEXT;
+
+  -- Photo evidence for one occurrence, submitted by the pact's owner at the
+  -- time the server received its last photo. decision is NULL while it waits
+  -- for a reviewer; the first decision is final. After a rejection the owner
+  -- may submit again while the occurrence is open, so an occurrence can have
+  -- several rejected rows but at most one waiting and one approved.
+  CREATE TABLE evidence (
+    id TEXT PRIMARY KEY,
+    pact_id TEXT NOT NULL,
+    occurrence_date TEXT NOT NULL,
+    submitted_at TEXT NOT NULL,
+    decision TEXT CHECK (decision IN ('approved', 'rejected')),
+    decided_by_account_id TEXT REFERENCES account (id),
+    decided_at TEXT,
+    reject_reason TEXT,
+    FOREIGN KEY (pact_id, occurrence_date) REFERENCES occurrence (pact_id, date),
+    CHECK ((decision IS NULL) = (decided_at IS NULL)),
+    CHECK ((decision IS NULL) = (decided_by_account_id IS NULL)),
+    CHECK ((decision IS 'rejected') = (reject_reason IS NOT NULL))
+  );
+  CREATE INDEX evidence_occurrence ON evidence (pact_id, occurrence_date);
+  CREATE UNIQUE INDEX evidence_one_waiting ON evidence (pact_id, occurrence_date) WHERE decision IS NULL;
+  CREATE UNIQUE INDEX evidence_one_approved ON evidence (pact_id, occurrence_date) WHERE decision = 'approved';
+
+  -- The photos of one piece of evidence, in the order taken. photo_id is the
+  -- PhotoStore's; received_at is when the server received it.
+  CREATE TABLE evidence_photo (
+    evidence_id TEXT NOT NULL REFERENCES evidence (id),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    photo_id TEXT NOT NULL UNIQUE,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (evidence_id, position)
+  );
+
+  -- What a Missed occurrence adds to the owner's ledger for the recipient the
+  -- pact named at the time: the pact's penalty then. One per occurrence.
+  CREATE TABLE penalty (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    pact_id TEXT NOT NULL,
+    occurrence_date TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    added_at TEXT NOT NULL,
+    FOREIGN KEY (pact_id, occurrence_date) REFERENCES occurrence (pact_id, date),
+    UNIQUE (pact_id, occurrence_date)
+  );
+  CREATE INDEX penalty_ledger ON penalty (owner_account_id, recipient_id);
+  `,
+  // 5: no judging of days before evidence could be submitted
+  `
+  -- Pacts made before migration 4 have no judging cursor, so the first tick
+  -- would judge every scheduled day since their first occurrence Missed, with
+  -- a penalty each, though no evidence could be submitted then. Start their
+  -- judging after today's date in UTC instead. A migration has no Clock, so
+  -- this reads SQLite's; it runs once, as the release with judging boots.
+  -- It errs lenient: in every timezone, an occurrence dated after today in
+  -- UTC is due after now (UTC+14 is under a day ahead), so nothing due before
+  -- this runs is judged, though today's occurrence may not be judged either.
+  -- A cursor before a pact's first occurrence is harmless: judging starts
+  -- from the first occurrence then. On a fresh database there are no pacts.
+  UPDATE pact SET judged_through = date('now') WHERE judged_through IS NULL;
+  `,
+  // 6: occurrences don't record a due time
+  `
+  -- An occurrence's due time follows from the pact and the owner's timezone
+  -- now (occurrences.ts). The one recorded with the row went stale when the
+  -- owner changed timezone, and nothing reads it.
+  DROP INDEX occurrence_not_judged;
+  ALTER TABLE occurrence DROP COLUMN due_at;
+  `,
 ];

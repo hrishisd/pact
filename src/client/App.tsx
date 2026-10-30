@@ -6,11 +6,13 @@ import { initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
 import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
+import { LedgerPage, Ledgers } from "./Ledgers.tsx";
 import { useNavigation, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
 import { Pacts } from "./Pacts.tsx";
+import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
-import { Centered, Empty } from "./ui.tsx";
+import { Centered } from "./ui.tsx";
 
 type Session =
   | { kind: "loading" }
@@ -224,20 +226,20 @@ function Shell({
   const nav = useNavigation();
   const { tab, page } = nav;
   const [profileOpen, setProfileOpen] = useState(false);
-  // Pact names learnt by loading their pages, for a page opened from a link.
-  const [pactNames, setPactNames] = useState<Record<string, string>>({});
-  const pactLoaded = useCallback(
-    (id: string, name: string) => setPactNames((names) => (names[id] === name ? names : { ...names, [id]: name })),
-    [],
-  );
+  const reviewCount = useReviewCount(tab);
+  // Pact and recipient names learnt by loading their pages, for a page opened from a link.
+  const [pactNames, pactLoaded] = useLearntNames();
+  const [ledgerNames, ledgerLoaded] = useLearntNames();
 
   const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
+  const openLedger = (recipientId: string, name: string) => nav.push({ kind: "ledger", recipientId, name });
   const create = () => nav.push({ kind: "create" });
 
   let title: string;
   let subtitle = "";
   if (page?.kind === "pact") title = pactNames[page.id] ?? page.name ?? "";
   else if (page?.kind === "create") title = "New pact";
+  else if (page?.kind === "ledger") title = ledgerNames[page.recipientId] ?? page.name ?? "";
   else {
     title = TABS.find((t) => t.id === tab)!.label;
     if (tab === "today") {
@@ -279,15 +281,16 @@ function Shell({
           <Today onOpenPact={openPact} onCreate={create} onInvite={() => setProfileOpen(true)} />
         )}
         {!page && tab === "pacts" && <Pacts onOpenPact={openPact} onCreate={create} />}
-        {!page && tab === "review" && (
-          <Empty
-            title="Nothing to review"
-            body="When a friend picks you as a reviewer, their submitted evidence and excuses show up here."
+        {!page && tab === "review" && <Review onQueue={reviewCount.set} />}
+        {page?.kind === "ledger" && (
+          <LedgerPage
+            key={page.recipientId}
+            recipientId={page.recipientId}
+            onLoaded={ledgerLoaded}
+            onOpenPact={openPact}
           />
         )}
-        {!page && tab === "ledgers" && (
-          <Empty title="No ledgers yet" body="Each recipient you name on a pact gets one ledger." />
-        )}
+        {!page && tab === "ledgers" && <Ledgers onOpenLedger={openLedger} />}
       </main>
       <nav className="tabbar" aria-label="Main">
         {TABS.map(({ id, label, Icon }) => (
@@ -301,6 +304,11 @@ function Shell({
             <span className="tile">
               <Icon />
               {label}
+              {id === "review" && reviewCount.value > 0 && (
+                <span className="badge" aria-label={`${reviewCount.value} to review`}>
+                  {reviewCount.value}
+                </span>
+              )}
             </span>
           </button>
         ))}
@@ -315,6 +323,32 @@ function Shell({
       )}
     </div>
   );
+}
+
+/** Names by id, learnt as pages load; `learn` is stable, for a page's load effect. */
+function useLearntNames(): [Record<string, string>, (id: string, name: string) => void] {
+  const [names, setNames] = useState<Record<string, string>>({});
+  const learn = useCallback(
+    (id: string, name: string) => setNames((known) => (known[id] === name ? known : { ...known, [id]: name })),
+    [],
+  );
+  return [names, learn];
+}
+
+/**
+ * The Review tab's badge: how many items wait for this account's decision.
+ * Loaded on each tab change; the Review tab sets it whenever its queue loads.
+ */
+function useReviewCount(tab: TabId): { value: number; set: (length: number) => void } {
+  const [value, set] = useState(0);
+  useEffect(() => {
+    // A badge that fails to load just keeps its last count.
+    api.reviewQueue().then(
+      (queue) => set(queue.length),
+      () => {},
+    );
+  }, [tab]);
+  return { value, set };
 }
 
 // ---------- Profile ----------

@@ -7,15 +7,19 @@ import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import type { AccountId, PactCore, Schedule, Weekday } from "../core/index.ts";
-import { WEEKDAYS } from "../shared/types.ts";
+import { bodyLimit } from "hono/body-limit";
+import type { AccountId, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
+import { MAX_EVIDENCE_PHOTOS, WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
   DEV_SIGN_IN_PATH,
+  EVIDENCE_PHOTO_FIELD,
   INVITE_REQUIRED_PATH,
   invitePath,
+  MAX_PHOTO_BYTES,
+  PHOTO_CONTENT_TYPES,
   type AcceptInviteResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
@@ -23,19 +27,25 @@ import {
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
+  type DecideRequest,
+  type DecideResponse,
   type FirstOccurrenceRequest,
   type FirstOccurrenceResponse,
   type FriendsResponse,
   type HealthResponse,
   type InviteLookupResponse,
   type Json,
+  type LedgerResponse,
+  type LedgersResponse,
   type LivenessResponse,
   type MeResponse,
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type ReviewQueueResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
+  type SubmitEvidenceResponse,
   type TodayResponse,
 } from "../shared/api.ts";
 import { INVITE_REQUIRED_CODE, type Auth } from "./auth.ts";
@@ -55,6 +65,9 @@ export interface AppOptions {
   /** The dev sign-in's `?as=operator`. */
   operatorEmail: string;
 }
+
+/** Room for the multipart boundaries and headers around the photos. */
+const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 
 /** /health fails once the volume is fuller than this (ADR 0003). */
 const MAX_DISK_USED_FRACTION = 0.8;
@@ -239,6 +252,68 @@ export function createApp({
     return c.json(body);
   });
 
+  // Transport checks only: every photo is checked against the size cap before
+  // the core is called, which decides how many photos evidence may have. The
+  // body limit stops a huge upload being read at all: past it, some photo
+  // must be over the cap, or there are too many.
+  app.post(
+    API_PATHS.evidence(":id"),
+    bodyLimit({
+      maxSize: MAX_EVIDENCE_PHOTOS * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
+      onError: (c) => apiError(c, 400, "photo-too-large"),
+    }),
+    async (c) => {
+      if (!c.req.header("Content-Type")?.startsWith("multipart/form-data")) return apiError(c, 400, "invalid-request");
+      const form = await c.req.parseBody({ all: true }).catch(() => null);
+      if (!form) return apiError(c, 400, "invalid-request");
+      const fields = [form[EVIDENCE_PHOTO_FIELD] ?? []].flat();
+      const files = fields.filter(
+        (field): field is File => field instanceof File && PHOTO_CONTENT_TYPES.includes(field.type),
+      );
+      if (files.length !== fields.length) return apiError(c, 400, "invalid-request");
+      if (files.some((file) => file.size > MAX_PHOTO_BYTES)) return apiError(c, 400, "photo-too-large");
+      const photos: Photo[] = await Promise.all(
+        files.map(async (file) => ({ bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type })),
+      );
+      const body: SubmitEvidenceResponse = await core.as(c.get("accountId")).submitEvidence(c.req.param("id"), photos);
+      return c.json(body);
+    },
+  );
+
+  // Bytes, not JSON, so a photo the account may not see is a 404, as if it
+  // didn't exist. Private: only this browser may cache it.
+  app.get(API_PATHS.photo(":id"), async (c) => {
+    const result = await core.as(c.get("accountId")).photo(c.req.param("id"));
+    if (!result.ok) return apiError(c, 404, "not-found");
+    return c.body(result.photo.bytes as Uint8Array<ArrayBuffer>, 200, {
+      "Content-Type": result.photo.contentType,
+      "Cache-Control": "private",
+      "X-Content-Type-Options": "nosniff",
+    });
+  });
+
+  app.get(API_PATHS.reviewQueue, (c) => {
+    const body: ReviewQueueResponse = json(core.as(c.get("accountId")).reviewQueue());
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.decide(":id"), async (c) => {
+    const decision = parseDecision(await c.req.json().catch(() => null));
+    if (!decision) return apiError(c, 400, "invalid-request");
+    const body: DecideResponse = await core.as(c.get("accountId")).decide(c.req.param("id"), decision);
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.ledgers, (c) => {
+    const body: LedgersResponse = core.as(c.get("accountId")).ledgers();
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.ledger(":id"), (c) => {
+    const body: LedgerResponse = json(core.as(c.get("accountId")).ledger(c.req.param("id")));
+    return c.json(body);
+  });
+
   app.all("/api/*", (c) => apiError(c, 404, "not-found"));
 
   // Better Auth redirects here, with ?error=<code>, when a sign-in fails.
@@ -342,6 +417,13 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
     return null;
   }
   return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds };
+}
+
+function parseDecision(value: unknown): DecideRequest | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === "approve") return { kind: "approve" };
+  if (value.kind === "reject" && typeof value.reason === "string") return { kind: "reject", reason: value.reason };
+  return null;
 }
 
 function readIndexHtml(staticDir: string): string | null {

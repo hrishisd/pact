@@ -10,28 +10,37 @@ import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { scenario } from "../core/testing/scenario.ts";
+import { MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
   DEV_SIGN_IN_PATH,
+  EVIDENCE_PHOTO_FIELD,
   INVITE_REQUIRED_PATH,
   INVITE_TOKEN_SIGN_IN_KEY,
   invitePath,
+  MAX_PHOTO_BYTES,
   type AcceptInviteResponse,
   type AddRecipientResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
+  type DecideRequest,
+  type DecideResponse,
   type FirstOccurrenceResponse,
   type FriendsResponse,
   type HealthResponse,
   type InviteLookupResponse,
+  type LedgerResponse,
+  type LedgersResponse,
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
   type MeResponse,
+  type ReviewQueueResponse,
   type SetTimezoneResponse,
+  type SubmitEvidenceResponse,
   type TodayResponse,
 } from "../shared/api.ts";
 import { createApp } from "./app.ts";
@@ -91,6 +100,7 @@ async function server({
     at: s.at,
     clock: s.clock,
     core: s.core,
+    photoStore: s.photoStore,
     staticDir,
     request,
     /**
@@ -307,6 +317,32 @@ async function operatorWithInvite(s: Awaited<ReturnType<typeof server>>) {
   return { cookie, token: invite.body.token };
 }
 
+/** The operator and a friend, both signed in, with a saved recipient, "Sam"; and a pact to create. */
+async function ownerWithFriend() {
+  const s = await server();
+  const owner = await operatorWithInvite(s);
+  const friend = await s.signIn("friend@example.test", { inviteToken: owner.token });
+  await s.api(API_PATHS.acceptInvite(owner.token), { cookie: friend.cookie, method: "POST" });
+  const friends = await s.api<FriendsResponse>(API_PATHS.friends, { cookie: owner.cookie });
+  const friendId = friends.body[0]!.id;
+  const added = await s.api<AddRecipientResponse>(API_PATHS.recipients, {
+    cookie: owner.cookie,
+    method: "POST",
+    body: { name: "Sam" },
+  });
+  if (!added.body.ok) throw new Error(added.body.reason);
+  const pact: CreatePactRequest = {
+    evidenceKind: "camera",
+    name: "Gym",
+    description: "Me at the gym",
+    schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
+    penaltyCents: 500,
+    recipientId: added.body.recipient.id,
+    reviewerIds: [friendId],
+  };
+  return { s, owner, friend, friendId, pact };
+}
+
 const REFUSED_SIGN_IN = new RegExp(`^${AUTH_ERROR_PATH}\\?error=${INVITE_REQUIRED_CODE}`);
 
 describe("invites", () => {
@@ -515,32 +551,6 @@ describe("dev sign-in", () => {
 });
 
 describe("pacts", () => {
-  /** The operator and a friend, both signed in, with a saved recipient, "Sam"; and a pact to create. */
-  async function ownerWithFriend() {
-    const s = await server();
-    const owner = await operatorWithInvite(s);
-    const friend = await s.signIn("friend@example.test", { inviteToken: owner.token });
-    await s.api(API_PATHS.acceptInvite(owner.token), { cookie: friend.cookie, method: "POST" });
-    const friends = await s.api<FriendsResponse>(API_PATHS.friends, { cookie: owner.cookie });
-    const friendId = friends.body[0]!.id;
-    const added = await s.api<AddRecipientResponse>(API_PATHS.recipients, {
-      cookie: owner.cookie,
-      method: "POST",
-      body: { name: "Sam" },
-    });
-    if (!added.body.ok) throw new Error(added.body.reason);
-    const pact: CreatePactRequest = {
-      evidenceKind: "camera",
-      name: "Gym",
-      description: "Me at the gym",
-      schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
-      penaltyCents: 500,
-      recipientId: added.body.recipient.id,
-      reviewerIds: [friendId],
-    };
-    return { s, owner, friend, friendId, pact };
-  }
-
   test("an owner creates a Camera pact and sees it on Today, in Pacts and on its page", async () => {
     const { s, owner, pact, friendId } = await ownerWithFriend();
     const cookie = owner.cookie;
@@ -640,6 +650,271 @@ describe("pacts", () => {
   });
 });
 
+describe("evidence", () => {
+  /** A JPEG-typed file of `bytes` bytes, as the client sends a shrunk photo. */
+  const jpeg = (bytes = 3, fill = 1) =>
+    new File([new Uint8Array(bytes).fill(fill)], "photo.jpg", { type: "image/jpeg" });
+
+  /** The owner of a Mon/Wed/Fri Camera pact, created on Monday, that the friend reviews. */
+  async function ownerWithPact() {
+    const setup = await ownerWithFriend();
+    const created = await setup.s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: setup.owner.cookie,
+      method: "POST",
+      body: setup.pact,
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    return { ...setup, pactId: created.body.pactId };
+  }
+
+  /** Posts `files` as the evidence form's `photo` fields. */
+  async function submit(
+    s: Awaited<ReturnType<typeof server>>,
+    cookie: string,
+    pactId: string,
+    files: (File | string)[],
+  ) {
+    const form = new FormData();
+    for (const file of files) form.append(EVIDENCE_PHOTO_FIELD, file);
+    const response = await s.request(API_PATHS.evidence(pactId), { method: "POST", cookie, body: form });
+    return { status: response.status, body: (await response.json()) as unknown };
+  }
+
+  test("an owner submits photos; Today shows it waiting, and its photos are served to the owner and reviewer only", async () => {
+    const { s, owner, friend, pactId } = await ownerWithPact();
+    const stranger = await s.signIn("stranger@example.test", {
+      inviteToken: (await s.api<CreateInviteResponse>(API_PATHS.invites, { cookie: owner.cookie, method: "POST" })).body
+        .token,
+    });
+
+    const submitted = await submit(s, owner.cookie, pactId, [jpeg(3, 1), jpeg(5, 2)]);
+
+    expect(submitted).toEqual({
+      status: 200,
+      body: { ok: true, evidenceId: expect.any(String) } satisfies SubmitEvidenceResponse,
+    });
+    const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+    expect(today.body.sections).toEqual([]);
+    expect(today.body.waiting).toEqual([
+      {
+        kind: "evidence",
+        id: (submitted.body as { evidenceId: string }).evidenceId,
+        pactId,
+        name: "Gym",
+        occurrenceDate: "2026-01-05",
+        submittedAt: "2026-01-05T14:00:00.000Z",
+      },
+    ] satisfies TodayResponse["waiting"]);
+
+    const [first, second] = s.photoStore.photoIds;
+    for (const cookie of [owner.cookie, friend.cookie]) {
+      const response = await s.request(API_PATHS.photo(second!), { cookie });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("image/jpeg");
+      expect(response.headers.get("Cache-Control")).toBe("private");
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(5).fill(2));
+    }
+    for (const path of [API_PATHS.photo(first!), API_PATHS.photo("no-such-photo")]) {
+      const response = await s.request(path, { cookie: stranger.cookie });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "not-found" });
+    }
+  });
+
+  test("a refusal is data: evidence on a day the schedule skips", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+    s.clock.set(s.at("Tue 10:00"));
+
+    expect(await submit(s, owner.cookie, pactId, [jpeg()])).toEqual({
+      status: 200,
+      body: { ok: false, reason: "not-open" } satisfies SubmitEvidenceResponse,
+    });
+  });
+
+  test("a photo over the size cap is refused before the core sees any of them", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+
+    const submitted = await submit(s, owner.cookie, pactId, [jpeg(), jpeg(MAX_PHOTO_BYTES + 1)]);
+
+    expect(submitted).toEqual({ status: 400, body: { error: "photo-too-large" } });
+    expect(s.photoStore.photoIds).toEqual([]);
+    const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+    expect(today.body.waiting).toEqual([]);
+    // Exactly at the cap is fine.
+    expect((await submit(s, owner.cookie, pactId, [jpeg(MAX_PHOTO_BYTES)])).body).toMatchObject({ ok: true });
+  });
+
+  test("too many photos is the core's refusal, as data", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+
+    expect(
+      await submit(
+        s,
+        owner.cookie,
+        pactId,
+        Array.from({ length: MAX_EVIDENCE_PHOTOS + 1 }, () => jpeg()),
+      ),
+    ).toEqual({ status: 200, body: { ok: false, reason: "too-many-photos" } satisfies SubmitEvidenceResponse });
+    expect(s.photoStore.photoIds).toEqual([]);
+  });
+
+  test("a field that isn't a file, or a file that isn't a JPEG, is an invalid request", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+    const malformed: (File | string)[][] = [
+      ["not a file"],
+      [new File(["<script>"], "page.html", { type: "text/html" })],
+      [new File([new Uint8Array([0x89, 0x50])], "photo.png", { type: "image/png" })],
+    ];
+
+    for (const files of malformed) {
+      expect(await submit(s, owner.cookie, pactId, files)).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+    expect(s.photoStore.photoIds).toEqual([]);
+  });
+
+  describe("review", () => {
+    test("the reviewer sees the evidence in their queue, fetches its photos, and approves it once", async () => {
+      const { s, owner, friend, pactId } = await ownerWithPact();
+      const submitted = await submit(s, owner.cookie, pactId, [jpeg(3, 1), jpeg(4, 2)]);
+      const { evidenceId } = submitted.body as { evidenceId: string };
+
+      const queue = await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, { cookie: friend.cookie });
+
+      expect(queue).toEqual({
+        status: 200,
+        body: [
+          {
+            kind: "evidence",
+            id: evidenceId,
+            pactId,
+            pactName: "Gym",
+            ownerName: "owner",
+            description: "Me at the gym",
+            photoIds: s.photoStore.photoIds,
+            submittedAt: "2026-01-05T14:00:00.000Z",
+            occurrenceDate: "2026-01-05",
+          },
+        ] satisfies ReviewQueueResponse,
+      });
+      const photo = await s.request(API_PATHS.photo(queue.body[0]!.photoIds[1]!), { cookie: friend.cookie });
+      expect(photo.status).toBe(200);
+      expect(new Uint8Array(await photo.arrayBuffer())).toEqual(new Uint8Array(4).fill(2));
+
+      const approve = { kind: "approve" } satisfies DecideRequest;
+      const decided = await s.api(API_PATHS.decide(evidenceId), {
+        cookie: friend.cookie,
+        method: "POST",
+        body: approve,
+      });
+      expect(decided).toEqual({ status: 200, body: { ok: true } satisfies DecideResponse });
+      expect((await s.api(API_PATHS.reviewQueue, { cookie: friend.cookie })).body).toEqual([]);
+      const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+      expect(today.body).toMatchObject({ alerts: [], sections: [], waiting: [] });
+
+      // A refusal is data.
+      const again = await s.api(API_PATHS.decide(evidenceId), { cookie: friend.cookie, method: "POST", body: approve });
+      expect(again).toEqual({
+        status: 200,
+        body: { ok: false, reason: "already-decided" } satisfies DecideResponse,
+      });
+    });
+
+    test("a rejection with its reason shows on the owner's Today as an alert", async () => {
+      const { s, owner, friend, pactId } = await ownerWithPact();
+      const submitted = await submit(s, owner.cookie, pactId, [jpeg()]);
+      const { evidenceId } = submitted.body as { evidenceId: string };
+
+      const reject = { kind: "reject", reason: "Blurry" } satisfies DecideRequest;
+      const decided = await s.api(API_PATHS.decide(evidenceId), {
+        cookie: friend.cookie,
+        method: "POST",
+        body: reject,
+      });
+
+      expect(decided).toEqual({ status: 200, body: { ok: true } });
+      const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+      expect(today.body.alerts).toEqual([
+        {
+          kind: "evidence-rejected",
+          pactId,
+          name: "Gym",
+          reviewerName: "friend",
+          reason: "Blurry",
+          occurrenceDate: "2026-01-05",
+        },
+      ] satisfies TodayResponse["alerts"]);
+    });
+
+    test("a decision of the wrong shape is an invalid request; a blank reason is refused as data", async () => {
+      const { s, owner, friend, pactId } = await ownerWithPact();
+      const submitted = await submit(s, owner.cookie, pactId, [jpeg()]);
+      const { evidenceId } = submitted.body as { evidenceId: string };
+      const decide = (body: unknown) =>
+        s.api(API_PATHS.decide(evidenceId), { cookie: friend.cookie, method: "POST", body });
+
+      for (const body of ["not json", {}, { kind: "maybe" }, { kind: "reject" }, { kind: "reject", reason: 3 }]) {
+        expect(await decide(body)).toEqual({ status: 400, body: { error: "invalid-request" } });
+      }
+      expect(await decide({ kind: "reject", reason: " " })).toEqual({
+        status: 200,
+        body: { ok: false, reason: "blank-reason" },
+      });
+      expect((await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, { cookie: friend.cookie })).body).toHaveLength(1);
+    });
+  });
+});
+
+describe("ledgers", () => {
+  test("a Missed occurrence's penalty shows on the recipient's ledger, and its history", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: pact,
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    s.clock.set(s.at("Tue 00:00"));
+    await s.core.advanceTo(s.clock.now());
+
+    const ledgers = await s.api<LedgersResponse>(API_PATHS.ledgers, { cookie: owner.cookie });
+
+    const summary = { recipientId: pact.recipientId, name: "Sam", owedCents: 500, paidCents: 0 };
+    expect(ledgers).toEqual({ status: 200, body: [summary] satisfies LedgersResponse });
+    const ledger = await s.api(API_PATHS.ledger(pact.recipientId), { cookie: owner.cookie });
+    expect(ledger).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        ledger: {
+          summary,
+          history: [
+            {
+              penaltyId: expect.any(String),
+              pactId: created.body.pactId,
+              pactName: "Gym",
+              occurrenceDate: "2026-01-05",
+              amountCents: 500,
+              addedAt: "2026-01-06T05:00:00.000Z",
+            },
+          ],
+        },
+      } satisfies LedgerResponse,
+    });
+  });
+
+  test("another account's recipient, or none, is not found, as data", async () => {
+    const { s, friend, pact } = await ownerWithFriend();
+
+    const notFound = { status: 200, body: { ok: false, reason: "recipient-not-found" } satisfies LedgerResponse };
+    expect(await s.api(API_PATHS.ledger(pact.recipientId), { cookie: friend.cookie })).toEqual(notFound);
+    expect(await s.api(API_PATHS.ledger("no-such-recipient"), { cookie: friend.cookie })).toEqual(notFound);
+    expect((await s.api(API_PATHS.ledgers, { cookie: friend.cookie })).body).toEqual([]);
+  });
+});
+
 describe("api", () => {
   test("every API route needs a session", async () => {
     const s = await server();
@@ -651,6 +926,8 @@ describe("api", () => {
       API_PATHS.recipients,
       API_PATHS.pacts,
       API_PATHS.pact("some-pact"),
+      API_PATHS.photo("some-photo"),
+      API_PATHS.reviewQueue,
     ];
     for (const path of reads) {
       const response = await s.request(path);
@@ -663,6 +940,8 @@ describe("api", () => {
       API_PATHS.recipients,
       API_PATHS.pacts,
       API_PATHS.firstOccurrence,
+      API_PATHS.evidence("some-pact"),
+      API_PATHS.decide("some-item"),
     ];
     for (const path of writes) {
       expect((await s.request(path, { method: "POST" })).status).toBe(401);
@@ -800,6 +1079,10 @@ describe("canonical host", () => {
         GOOGLE_CLIENT_SECRET: "test-client-secret",
         BETTER_AUTH_SECRET: "test-secret-0123456789-0123456789-0123456789",
         BETTER_AUTH_URL: CANONICAL,
+        PHOTOS_BUCKET: "test-photos",
+        PHOTOS_ENDPOINT: "https://test-account.r2.cloudflarestorage.com",
+        PHOTOS_ACCESS_KEY_ID: "test-access-key-id",
+        PHOTOS_SECRET_ACCESS_KEY: "test-secret-access-key",
       }).canonicalOrigin,
     });
 

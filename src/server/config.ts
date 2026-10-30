@@ -2,7 +2,8 @@
 // See .env.example for every variable. In production (NODE_ENV=production)
 // a missing required variable stops the server before it serves anything.
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import type { R2Bucket } from "../core/index.ts";
 
 export interface Config {
   production: boolean;
@@ -29,6 +30,11 @@ export interface Config {
   canonicalOrigin: string | null;
   /** The built SPA (Vite output). */
   staticDir: string;
+  /**
+   * Where evidence photos are kept. Production: a private Cloudflare R2 bucket.
+   * Development: `photos/` next to the database, so it needs no bucket.
+   */
+  photos: ({ kind: "r2" } & R2Bucket) | { kind: "local-disk"; dir: string };
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
   restored: boolean;
 }
@@ -48,10 +54,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   };
 
   const port = Number(env.PORT ?? 3000);
+  const dbPath = read("PACT_DB_PATH", join(REPO_ROOT, ".dev-data.nosync", "pact.db"));
   const config: Config = {
     production,
     port,
-    dbPath: read("PACT_DB_PATH", join(REPO_ROOT, ".dev-data.nosync", "pact.db")),
+    dbPath,
     operatorEmail: read("OPERATOR_EMAIL", "operator@example.test"),
     google: {
       clientId: read("GOOGLE_CLIENT_ID", "dev-google-client-id"),
@@ -64,6 +71,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     canonicalOrigin: null,
     staticDir: env.PACT_STATIC_DIR?.trim() || join(REPO_ROOT, "dist", "client"),
+    photos: production
+      ? {
+          kind: "r2",
+          bucket: read("PHOTOS_BUCKET", ""),
+          endpoint: read("PHOTOS_ENDPOINT", ""),
+          accessKeyId: read("PHOTOS_ACCESS_KEY_ID", ""),
+          secretAccessKey: read("PHOTOS_SECRET_ACCESS_KEY", ""),
+        }
+      : { kind: "local-disk", dir: join(dirname(dbPath), "photos") },
     restored: env.PACT_RESTORED === "1",
   };
 
