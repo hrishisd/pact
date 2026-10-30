@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { migrations } from "./migrations.ts";
 import { scenario } from "./testing/scenario.ts";
 
 describe("health", () => {
@@ -36,4 +37,8 @@ describe("health", () => {
 
     expect(s.core.health().ok).toBe(true);
   });
+});
+
+test("the schema version counts the migrations applied", () => {
+  expect(scenario().core.schemaVersion()).toBe(migrations.length);
 });
