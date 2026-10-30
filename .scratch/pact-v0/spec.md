@@ -281,6 +281,8 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 
 ### Screens (settled with the prototype)
 
+The prototype settled these screens first. Where the app on `main` differs from it, `main` wins: those differences were made on purpose after using the real app, so don't restore the prototype's copy or layout. The prototype is the source only for screens that aren't built yet. When a ticket changes a built screen away from the prototype, add a line to **Changes since the prototype** at the end of this section.
+
 - **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today. The current tab sits on a soft blue tile behind its icon and label, in the accent colour with a bold label, while the other tabs stay grey with a regular label. There's no highlight flash when a tab is tapped, and the tile stays while a page is pushed on top. Chosen over colour alone (too subtle), a filled icon, a bar on the top edge, a pill behind the icon, and a solid pill.
 - **Today:** only what's still open, in this order:
   1. Alerts, only for things that need the owner (including an overdue bill).
@@ -303,6 +305,14 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Invite:** the page an invite link opens says that accepting makes you friends, so the inviter can pick you to review their pacts and you can pick them.
 - **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, "$4 bill due Wed Oct 28", or a payment awaiting approval), lifetime paid, and Record payment. Record payment starts at the open bills' amount. Held penalties appear only in the history, where each penalty also says which bill it's on, or that it goes on a Wednesday bill once it can't be excused. Tapping a card opens its history, pushed on the current tab.
 - **Theme:** light only. v0 ignores the system's dark-mode setting; a dark theme can come later.
+- **Changes since the prototype** (`main` wins over the prototype on each):
+  - Copy is short and plain throughout. New copy matches the existing empty states and timezone screen.
+  - The sign-in tagline is "Commitments with money on the line, checked by your friends." It's the one place the glossary's avoided word "commitment" is used on purpose.
+  - Pacts, Review and pushed pages have no subtitle under the title. Today keeps its date.
+  - A new user's Today keeps "Nothing to do right now" and adds a line suggesting they invite a friend and create a pact, with a button for each.
+  - The New pact button sits below the Pacts list, or below its empty state.
+  - The Penalty step has a single recipient slot: "Pick a recipient", then the chosen name with Change. A recipient is just a name.
+  - The invite page explains that accepting lets you pick each other as reviewers, and what a reviewer does.
 
 ## Testing Decisions
 
@@ -396,5 +406,5 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
   - Oura's API rate limit. Polling every minute is about 5 calls a minute for 5 users, which should be far below it.
   - Whether Oura sleep of under about 3 hours is ever reported as `long_sleep`, since the first one decides the night.
   - Whether the Oura iOS app has a link that opens it. If so, the No Oura data card gets an "Open Oura" button.
-- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through nine rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), 7053336 gives One-time pacts one-off reminders with a date, and 5d3b7c5 replaces Drafts and approval with the 10-minute edit window, adds occurrence labels that say what they're waiting for, simplifies ledger cards and makes the current tab easier to see, and eb928fe adds weekly bills, reorders Today and hides what isn't open, adds "I'll pay it", and switches to an iOS-style tab bar, and 73a87b1 compares ways to mark the current tab (the Tile verdict follows it), and 38d88ea adds the No Oura data card, judging nights on sync with a 6pm cutoff, the check on open, and Wednesday 6pm bills. It's the primary source for the Screens decisions above.
+- **Prototype:** a clickable throwaway prototype of these flows lives on the branch `prototype/pact-v0-flows`, not on main. It went through nine rounds: 3c0e6a0 has all variants, f159123 settles Create pact and Review, f2c1330 settles inline evidence, 66d9ead makes Create start with the evidence kind, 7aca1d8 applies UI comments (separate cards, red penalties, orange due times, kind icons, live photos only), 7053336 gives One-time pacts one-off reminders with a date, and 5d3b7c5 replaces Drafts and approval with the 10-minute edit window, adds occurrence labels that say what they're waiting for, simplifies ledger cards and makes the current tab easier to see, and eb928fe adds weekly bills, reorders Today and hides what isn't open, adds "I'll pay it", and switches to an iOS-style tab bar, and 73a87b1 compares ways to mark the current tab (the Tile verdict follows it), and 38d88ea adds the No Oura data card, judging nights on sync with a 6pm cutoff, the check on open, and Wednesday 6pm bills. It was the primary source for the Screens decisions above. Where the app on `main` now differs from it, `main` wins (see Changes since the prototype).
 - The first real users are the owner and one friend as reviewer, so anything involving several reviewers should be correct but kept minimal.
