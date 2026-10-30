@@ -30,6 +30,12 @@ _Avoid_: Frequency, recurrence, cadence
 One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact. An occurrence **opens** when its period starts (its date, its Mon–Sun week, or the pact's start for One-time). A change to a pact applies only to occurrences that haven't opened yet, except on One-time pacts.
 _Avoid_: Instance, check-in, day, session
 
+**Due time**:
+When an occurrence is due and judged: on Fixed days, the due-by time or in-bed-by time, or else midnight; for Weekly count, the end of Sunday; for One-time, the deadline.
+
+**Due-by time**:
+An optional time of day, such as 9:00am, that a Camera pact's evidence is due by each day instead of midnight. It doesn't apply to One-time pacts, whose deadline already has a time.
+
 **Kept / Missed / Excused**:
 The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**.
 _Avoid_: Passed, failed, success, failure, pending

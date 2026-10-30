@@ -6,11 +6,10 @@
 // reads. The core reads time only from the Clock port.
 
 import { randomBytes, randomUUID } from "node:crypto";
-import { firstFixedDaysOccurrence, localDateOf, midnightEnding, weekdayOf } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
+import { newOccurrenceTerms, occurrences, type OccurrenceTerms } from "./occurrences.ts";
 import type { Clock, Notification, Notifier, OuraSource, PhotoStore } from "./ports.ts";
 import {
-  WEEKDAYS,
   type AcceptInviteResult,
   type AccountId,
   type AddRecipientResult,
@@ -350,12 +349,13 @@ class Core implements PactCore {
           const description = pact.description.trim();
           if (name === "") return { ok: false, reason: "blank-name" };
           if (description === "") return { ok: false, reason: "blank-description" };
-          const schedule = normalSchedule(pact.schedule);
-          if (schedule.days.length === 0) return { ok: false, reason: "no-days" };
+          if (timezone === null) return { ok: false, reason: "no-timezone" };
+          const now = this.#clock.now();
+          const timing = newOccurrenceTerms(pact.schedule, now, timezone);
+          if (!timing.ok) return timing;
           if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
             return { ok: false, reason: "invalid-penalty" };
           }
-          if (timezone === null) return { ok: false, reason: "no-timezone" };
           const isOwnRecipient = this.#db
             .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
             .get(pact.recipientId, accountId);
@@ -364,8 +364,6 @@ class Core implements PactCore {
           if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
           if (!reviewerIds.every((id) => this.#areFriends(accountId, id))) return { ok: false, reason: "not-a-friend" };
 
-          const now = this.#clock.now();
-          const first = firstFixedDaysOccurrence(schedule.days, now, timezone);
           const id = randomUUID();
           this.#db
             .prepare(
@@ -379,10 +377,10 @@ class Core implements PactCore {
               name,
               description,
               pact.evidenceKind,
-              JSON.stringify(schedule),
+              JSON.stringify(timing.terms.schedule),
               pact.penaltyCents,
               pact.recipientId,
-              first.date,
+              timing.terms.firstOccurrence,
               now.toISOString(),
             );
           for (const reviewerId of reviewerIds) {
@@ -395,16 +393,16 @@ class Core implements PactCore {
       firstOccurrence: (schedule) => {
         const { timezone } = account();
         if (timezone === null) return { ok: false, reason: "no-timezone" };
-        const { days } = normalSchedule(schedule);
-        if (days.length === 0) return { ok: false, reason: "no-days" };
-        return { ok: true, firstOccurrence: firstFixedDaysOccurrence(days, this.#clock.now(), timezone) };
+        const timing = newOccurrenceTerms(schedule, this.#clock.now(), timezone);
+        if (!timing.ok) return timing;
+        return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
       },
       pacts: () => {
         account();
-        return this.#activePacts(accountId).map(({ id, name, schedule, penaltyCents }) => ({
+        return this.#activePacts(accountId).map(({ id, name, terms, penaltyCents }) => ({
           id,
           name,
-          schedule,
+          schedule: terms.schedule,
           penaltyCents,
         }));
       },
@@ -424,17 +422,19 @@ class Core implements PactCore {
           .all(pactId) as { id: AccountId; name: string }[];
         const [recipient] = this.#selectRecipients(`id = ?`, row.recipient_id);
         if (!recipient) throw new Error(`pact ${row.id} has no recipient ${row.recipient_id}`);
+        const terms = occurrenceTermsOf(row);
+        const first = occurrences(terms, timezone).first;
         const pact: PactTerms = {
           id: row.id,
           name: row.name,
           description: row.description,
           evidenceKind: row.evidence_kind,
-          schedule: JSON.parse(row.schedule) as Schedule,
+          schedule: terms.schedule,
           penaltyCents: row.penalty_cents,
           recipient,
           reviewers,
           stage: row.stage,
-          firstOccurrence: { date: row.first_occurrence, dueAt: midnightEnding(row.first_occurrence, timezone) },
+          firstOccurrence: { date: first.date, dueAt: first.dueAt },
         };
         return { ok: true, pact };
       },
@@ -453,21 +453,22 @@ class Core implements PactCore {
   }
 
   /**
-   * To do: Fixed-days pacts whose occurrence is open today (today, in the
-   * owner's timezone, is a scheduled day on or after the first occurrence).
-   * Coming up: pacts whose first occurrence hasn't opened yet. A pact on a
-   * day it isn't due appears in neither. Empty sections are left out.
+   * To do: pacts with an occurrence open now. Coming up: pacts whose first
+   * occurrence hasn't opened yet. A pact on a day it isn't due appears in
+   * neither. Empty sections are left out.
    */
   #todaySections(ownerId: AccountId, timezone: string): TodaySection[] {
-    const today = localDateOf(this.#clock.now(), timezone);
+    const now = this.#clock.now();
     const toDo: TodayToDoCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
       const card = { pactId: pact.id, name: pact.name, penaltyCents: pact.penaltyCents };
-      if (today < pact.firstOccurrence) {
-        comingUp.push({ ...card, opensOn: pact.firstOccurrence });
-      } else if (pact.schedule.days.includes(weekdayOf(today))) {
-        toDo.push({ ...card, dueAt: midnightEnding(today, timezone) });
+      const { first, openAt } = occurrences(pact.terms, timezone);
+      const open = openAt(now);
+      if (open) {
+        toDo.push({ ...card, dueAt: open.dueAt });
+      } else if (now.getTime() < first.opensAt.getTime()) {
+        comingUp.push({ ...card, opensOn: first.date });
       }
     }
     // Rows come sorted by name, and the sorts are stable.
@@ -491,9 +492,8 @@ class Core implements PactCore {
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
-      schedule: JSON.parse(row.schedule) as Schedule,
       penaltyCents: row.penalty_cents,
-      firstOccurrence: row.first_occurrence,
+      terms: occurrenceTermsOf(row),
     }));
   }
 
@@ -571,13 +571,17 @@ function friendshipPair(a: AccountId, b: AccountId): [AccountId, AccountId] {
   return a < b ? [a, b] : [b, a];
 }
 
-/** An Active pact as Today and the Pacts tab read it. `firstOccurrence` is its "YYYY-MM-DD" day. */
+/** An Active pact as Today and the Pacts tab read it. */
 interface ActivePact {
   id: string;
   name: string;
-  schedule: Schedule;
   penaltyCents: number;
-  firstOccurrence: string;
+  terms: OccurrenceTerms;
+}
+
+/** A pact row's occurrence terms: the one place a stored schedule is read. */
+function occurrenceTermsOf(row: Pick<PactRow, "schedule" | "first_occurrence">): OccurrenceTerms {
+  return { schedule: JSON.parse(row.schedule) as Schedule, firstOccurrence: row.first_occurrence };
 }
 
 interface PactRow {
@@ -605,11 +609,6 @@ export class UnknownAccountError extends Error {
     super(`no account ${accountId}`);
     this.name = "UnknownAccountError";
   }
-}
-
-/** `schedule` with its days Monday first and without repeats, as stored. */
-function normalSchedule(schedule: Schedule): Schedule {
-  return { kind: "fixed-days", days: WEEKDAYS.filter((day) => schedule.days.includes(day)) };
 }
 
 function emailKey(email: string): string {

@@ -9,7 +9,7 @@ Spec stories: 17–19, 26 (start date), 83 (Ended). Rules: Creation and change, 
 
 The optional time fields on a pact.
 
-- **Due-by time** (Camera only, any schedule): evidence is due by a set time of day instead of midnight. Fixed days are judged at the due-by time. Evidence after it is refused. The Today card shows "Due at 9:00pm · 4h 12m". Past today's due-by time, a Camera pact shows under Missed as **Closed**.
+- **Due-by time** (Camera only; Fixed days and Weekly count, since a One-time deadline has its own time): evidence is due by a set time of day instead of midnight. Fixed days are judged at the due-by time; a Weekly count week is still judged at the end of Sunday, and the due-by time only limits each day's evidence. Evidence after it is refused. The Today card shows "Due at 9:00pm · 4h 12m". Past today's due-by time, a Camera pact shows under Missed as **Closed**.
 - **Start date:** creates a pact now that begins later. It can only push the first occurrence later. Shows under Coming up ("Starts Mon Oct 26").
 - **End date** (recurring pacts): the pact becomes Ended when it passes and produces no further occurrences.
 - First occurrence uses the due-by time as the due time for the 1-hour lead rule.

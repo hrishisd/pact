@@ -1,13 +1,12 @@
 // Calendar math in an IANA timezone, shared by the core and the scenario
 // harness. A local date is a "YYYY-MM-DD" string naming a calendar day in
-// some zone; which zone is always the caller's to say.
+// some zone; which zone is always the caller's to say. No Pact rules live
+// here: when occurrences open and fall due is occurrences.ts's to say.
 
 import { WEEKDAYS, type Weekday } from "../shared/types.ts";
 
 /** "YYYY-MM-DD": a calendar day in some timezone. */
 export type LocalDate = string;
-
-const HOUR_MS = 60 * 60 * 1000;
 
 /** The instant the wall-clock time `year-month-day hour:minute` names in `timezone`. */
 export function zonedWallTimeToInstant(
@@ -47,31 +46,18 @@ export function weekdayOf(date: LocalDate): Weekday {
   return WEEKDAYS[(new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7] as Weekday;
 }
 
-/** Midnight at the end of `date` in `timezone`: when a Fixed-days occurrence on that day is due. */
-export function midnightEnding(date: LocalDate, timezone: string): Date {
-  const [year, month, day] = splitDate(addDays(date, 1));
-  return zonedWallTimeToInstant(year, month, day, 0, 0, timezone);
-}
-
 /**
- * A Fixed-days pact's first occurrence: the first scheduled day, in
- * `timezone`, whose due time (midnight ending it) is at least 1 hour after
- * `createdAt`. `days` must not be empty.
+ * The first instant of `date` in `timezone`. That's its midnight, except where
+ * the clocks jump forward at midnight (as in Chile): midnight never happens
+ * there, and the day starts when the jump lands.
  */
-export function firstFixedDaysOccurrence(
-  days: readonly Weekday[],
-  createdAt: Date,
-  timezone: string,
-): { date: LocalDate; dueAt: Date } {
-  if (days.length === 0) throw new Error("a Fixed-days schedule needs at least one day");
-  // A day within an hour of its end can be skipped, so look one day past a full week.
-  for (let date = localDateOf(createdAt, timezone), i = 0; i <= 7; date = addDays(date, 1), i++) {
-    const dueAt = midnightEnding(date, timezone);
-    if (days.includes(weekdayOf(date)) && dueAt.getTime() - createdAt.getTime() >= HOUR_MS) {
-      return { date, dueAt };
-    }
-  }
-  throw new Error("unreachable: every scheduled weekday recurs within 8 days");
+export function startOfDay(date: LocalDate, timezone: string): Date {
+  const [year, month, day] = splitDate(date);
+  const midnight = zonedWallTimeToInstant(year, month, day, 0, 0, timezone);
+  if (localDateOf(midnight, timezone) === date) return midnight;
+  // `midnight` fell just before the jump; the offset there puts the wall
+  // time 00:00 at the jump itself.
+  return new Date(Date.UTC(year, month - 1, day) - offsetMs(midnight.getTime(), timezone));
 }
 
 function splitDate(date: LocalDate): [number, number, number] {
