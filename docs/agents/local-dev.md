@@ -4,6 +4,7 @@
 
 - `npm run dev` runs the API server on :3000 (`node --watch`, restarts on server edits) and Vite on :5173, which proxies `/api/` to :3000. Use http://localhost:5173.
 - For the in-app browser preview, `.claude/launch.json` has the config `pact-dev`. It runs under the Node `.nvmrc` pins (`fnm exec --using=.nvmrc`); on another Node major the server refuses to start, because better-sqlite3 is built for one.
+- If better-sqlite3's binary got built for another Node, the server and `npm test` stop with one line saying so (the `NODE_MODULE_VERSION` error underneath isn't a test failure). Rebuild it: `fnm exec --using=.nvmrc npm rebuild better-sqlite3`.
 - A dev server another session (or the human's terminal) started may already hold the ports. Check before starting one: `lsof -iTCP:3000 -iTCP:5173 -sTCP:LISTEN`. If both are listening, use them; don't start a second.
 - `.env` is unreadable to agents (a Read deny rule, and `.claude/hooks/guard-bash.sh` blocks any command naming it). Read `.env.example` for the variables and their dev defaults. The real `OPERATOR_EMAIL` is in `.env`; you don't need it (see below).
 
