@@ -217,6 +217,8 @@ export interface HealthResponse {
   lastTick: string | null;
   /** How much of the database's volume is in use, as a percentage to one decimal place, e.g. 12.5. */
   diskUsedPercent: number;
+  /** The commit this image was built from, or null when built without one (local dev, a manual `fly deploy`). */
+  commit: string | null;
 }
 
 /** Body of every non-2xx /api response. */

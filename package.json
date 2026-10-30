@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "lint": "prettier --check . && knip && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-conventions.ts && shellcheck scripts/*.sh .claude/hooks/*.sh .githooks/*",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build",
     "icons": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/generate-icons.ts",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },

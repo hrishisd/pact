@@ -7,6 +7,10 @@
 - A dev server another session (or the human's terminal) started may already hold the ports. Check before starting one: `lsof -iTCP:3000 -iTCP:5173 -sTCP:LISTEN`. If both are listening, use them; don't start a second.
 - `.env` is unreadable to agents (a Read deny rule, and `.claude/hooks/guard-bash.sh` blocks any command naming it). Read `.env.example` for the variables and their dev defaults. The real `OPERATOR_EMAIL` is in `.env`; you don't need it (see below).
 
+## Checking a change
+
+`npm run check` runs typecheck, lint, test and build in that order, stopping at the first failure. CI's `test` job runs the same command, so passing it locally means the same four steps pass there.
+
 ## Signing in without Google
 
 Development only: `GET /api/dev/sign-in` signs in and redirects. It doesn't exist in production, and it answers only to a browser on this machine (localhost, 127.0.0.1, ::1). It goes through the same gate as Google (`core.signIn`), then makes a real Better Auth session, so every screen works as after a Google sign-in.

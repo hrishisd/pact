@@ -14,10 +14,7 @@ jobs:
           node-version-file: .nvmrc # same Node as the Dockerfile
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint # shellcheck comes preinstalled on ubuntu-latest
-      - run: npm test
-      - run: npm run build
+      - run: npm run check # shellcheck comes preinstalled on ubuntu-latest
 
   deploy:
     needs: test
@@ -27,6 +24,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only
+      - run: flyctl deploy --remote-only --build-arg PACT_COMMIT=${{ github.sha }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

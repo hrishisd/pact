@@ -18,5 +18,9 @@ Use `scripts/prod-log.sh`: it only reads logs, so it runs without a permission p
 
 ## Health
 
-- `curl -sS https://pact.hrishisd.com/health` reports the scheduler tick and disk use. It fails when the tick is stale or the volume is over 80% full.
+- `curl -sS https://pact.hrishisd.com/health` reports the scheduler tick, disk use and the deployed `commit` (null for an image built without one, such as a manual `fly deploy`). It fails when the tick is stale or the volume is over 80% full.
 - `/healthz` is liveness only. Fly's own check uses it.
+
+## Waiting for a deploy
+
+`scripts/wait-deploy.sh [SHA]` (default: HEAD) waits for the commit's CI run on main, watches it, then polls `/health` until it reports that commit. It only reads, and exits non-zero on a CI failure, a time limit, or another commit being live. Use it after pushing to main instead of hand-building the wait.

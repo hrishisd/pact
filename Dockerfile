@@ -46,5 +46,9 @@ COPY src/server ./src/server
 COPY --from=litestream /usr/local/bin/litestream /usr/local/bin/litestream
 COPY litestream.yml /etc/litestream.yml
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# The commit /health reports: set by CI, empty for a manual `fly deploy`. Last,
+# because it changes every build and would invalidate the layers after it.
+ARG PACT_COMMIT=""
+ENV PACT_COMMIT=$PACT_COMMIT
 EXPOSE 8080
 ENTRYPOINT ["docker-entrypoint.sh"]

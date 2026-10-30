@@ -55,13 +55,20 @@ const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 /**
  * `canonicalOrigin` is the config's: null unless the server is in production.
+ * `commit` is the config's: null unless the image was built with one.
  * `diskUsedFraction` stands in for the volume's disk use: half full unless a test says otherwise.
  */
 async function server({
   canonicalOrigin = null,
+  commit = null,
   diskUsedFraction = () => 0.5,
   production = false,
-}: { canonicalOrigin?: string | null; diskUsedFraction?: () => number; production?: boolean } = {}) {
+}: {
+  canonicalOrigin?: string | null;
+  commit?: string | null;
+  diskUsedFraction?: () => number;
+  production?: boolean;
+} = {}) {
   const s = scenario();
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
@@ -79,6 +86,7 @@ async function server({
     auth,
     staticDir,
     canonicalOrigin,
+    commit,
     diskUsedFraction,
     production,
     operatorEmail: OPERATOR,
@@ -1106,6 +1114,14 @@ describe("health", () => {
     const response = await s.request("/health");
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ ok: false, diskUsedPercent: 0 });
+  });
+
+  test("reports the deployed commit, or null for an image built without one", async () => {
+    const health = async (s: Awaited<ReturnType<typeof server>>) =>
+      (await (await s.request("/health")).json()) as HealthResponse;
+
+    expect((await health(await server({ commit: "ebb9f3c" }))).commit).toBe("ebb9f3c");
+    expect((await health(await server())).commit).toBeNull();
   });
 
   test("liveness ignores the disk, so a full volume alerts without taking the app offline", async () => {

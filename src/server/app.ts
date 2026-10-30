@@ -59,6 +59,8 @@ export interface AppOptions {
   staticDir: string;
   /** Requests on any other host redirect here; null serves every host. See Config. */
   canonicalOrigin: string | null;
+  /** The deployed commit, for /health. See Config. */
+  commit: string | null;
   /** How full the database's volume is, from 0 to 1. Production asks the filesystem; tests pass a fake. */
   diskUsedFraction: () => number;
   /** In production the dev sign-in route doesn't exist. */
@@ -87,6 +89,7 @@ export function createApp({
   auth,
   staticDir,
   canonicalOrigin,
+  commit,
   diskUsedFraction,
   production,
   operatorEmail,
@@ -121,6 +124,7 @@ export function createApp({
       ok: health.ok && diskUsed <= MAX_DISK_USED_FRACTION,
       lastTick: health.lastTick?.toISOString() ?? null,
       diskUsedPercent: Math.round(diskUsed * 1000) / 10,
+      commit,
     };
     return c.json(body, body.ok ? 200 : 503);
   });
