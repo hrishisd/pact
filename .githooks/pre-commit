@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Formats the staged files with Prettier before each commit (lint-staged
+# config in package.json). `npm install` points git here (the prepare script).
+set -euo pipefail
+exec npx --no -- lint-staged
