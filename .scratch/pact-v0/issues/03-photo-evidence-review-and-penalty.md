@@ -1,6 +1,6 @@
 # 03 Photo evidence, review, judging and the penalty ledger
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec stories: 28 (partly), 29–31, 33, 34 (in-app only), 52–56, 59–61 (in-app only), 68, 70, 80 (partly), 89 (evidence only).
@@ -99,3 +99,18 @@ The spec was updated to match (Rules, Today alerts, Ledgers). I checked both in 
 Decided with the human, after the prototype on branch `prototype/rejection-flow` (option C). A rejection now makes the day Missed at once, with its penalty, even while the day is still open, and the day takes no more evidence. Today shows it only as an alert with the reason and a **Take the L** button that clears it without changing the ledger; the reject form warns the reviewer first. This replaces "Take the miss" from 5ddce6b, and Take the L is now also the name for "I'll pay it" (ticket 07).
 
 Built and checked the same day: core tests cover the six criteria above, and in the browser preview the reviewer saw "Rejecting makes Saturday Missed and adds $5 to Hsdharam's Red Cross ledger.", the owner got the alert with Gym gone from To do, Take the L cleared it, and new photos for that day were refused (`already-judged`). Status stays ready-for-agent until the phone check passes.
+
+### 2026-10-30: phone check passed
+
+Deployed as 8afca84 (Fly release v16) with the private R2 bucket and its four `PHOTOS_*` secrets. The operator reported that all of these passed in production:
+
+- **After the deploy:** Today looked normal and Ledgers showed $0 for pacts that existed before, so migration 5 backdated nothing. This was checked on the Ledgers screen, not with a database query.
+- **iPhone camera:** Take photo opened the rear camera straight away, with no photo library. Two photos were added and sent. In Review, both were upright and small text was readable.
+- **Reviewer on a second phone:** the Review badge showed the item, and approving took the owner's card off Today.
+- **Rejection:** the form showed the warning, the owner got the red alert with the reason, the pact left To do, Take the L cleared the alert, and the ledger history showed who rejected it and why.
+
+The production logs show no errors from the test run. Upload speed on cellular wasn't reported separately.
+
+Still open: the throwaway pacts made for this check stay Active. The app can't end one yet, and judging doesn't read `stage`, so each one adds its penalty on every scheduled day without evidence. Ticket 06's delete only works in the first 10 minutes, and ticket 16's end date applies when a pact is created. Ending an existing pact needs an approved change request (ticket 11), and that work must make judging stop for Ended pacts.
+
+Closed.
