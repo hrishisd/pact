@@ -24,3 +24,7 @@ The optional time fields on a pact.
 - [ ] End date Friday → Friday is judged, Saturday never opens, pact Ended.
 - [ ] Moving the due-by time later → change request; earlier → applies from the next occurrence not yet open.
 - [ ] Today shows a Camera pact past its due-by time as Closed under Missed.
+
+## Notes
+
+- Trap: `#pactsToJudge` in `src/core/core.ts` selects every pact with no filter on `stage`, so judging keeps adding a penalty for an Ended pact, and setting `stage = 'ended'` alone doesn't stop it. Ticket 11 has the same trap, so check whether it's already fixed; either way, the End date scenario needs Saturday to add no penalty.

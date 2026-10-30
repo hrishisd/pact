@@ -32,3 +32,7 @@ After the edit window, an owner can change an Active pact: stricter changes appl
 - [ ] Removing the only reviewer is refused; adding one notifies them at once.
 - [ ] Approved end → Ended, no further occurrences; already-judged penalties stay on the ledger.
 - [ ] A pending change request survives a restart.
+
+## Notes
+
+- Trap: `#pactsToJudge` in `src/core/core.ts` selects every pact with no filter on `stage`, so judging keeps adding a penalty for an Ended pact, and setting `stage = 'ended'` alone doesn't stop it. `#judgingReached` also calls it and throws if the pact is missing, so a filter inside it isn't enough on its own.

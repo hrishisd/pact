@@ -4,8 +4,6 @@ Pact runs on one Fly machine: app `pact-hrishisd`, with the volume at `/data`. S
 
 ## Reading logs
 
-| Need | Command |
-|---|---|
 Use `scripts/prod-log.sh`: it only reads logs, so it runs without a permission prompt. A raw `fly ssh console` opens a shell on the production machine and is gated.
 
 | Need | Command |
