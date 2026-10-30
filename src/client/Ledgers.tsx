@@ -1,5 +1,6 @@
 // The Ledgers tab: one card per recipient, each opening its ledger's page with
-// the penalties Missed occurrences added. Bills and payments come later.
+// the penalties Missed occurrences added, and who rejected the evidence when
+// that's why. Bills and payments come later.
 
 import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
@@ -97,6 +98,11 @@ export function LedgerPage({
                       {penalty.pactName}
                     </button>
                     <small>Missed {formatDate(penalty.occurrenceDate)}</small>
+                    {penalty.rejection && (
+                      <small>
+                        Rejected by {penalty.rejection.reviewerName}: “{penalty.rejection.reason}”
+                      </small>
+                    )}
                   </span>
                   <span className="pen num">+{money(penalty.amountCents)}</span>
                 </div>

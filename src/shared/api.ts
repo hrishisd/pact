@@ -3,6 +3,7 @@
 
 import type {
   AcceptInviteResult,
+  AcceptRejectionResult,
   AddRecipientResult,
   CreatePactResult,
   DecideResult,
@@ -92,6 +93,7 @@ export const API_PATHS = {
   firstOccurrence: "/api/pacts/first-occurrence",
   pact: <T extends string>(pactId: T) => `/api/pacts/${pactId}` as const,
   evidence: <T extends string>(pactId: T) => `/api/pacts/${pactId}/evidence` as const,
+  acceptRejection: <T extends string>(pactId: T) => `/api/pacts/${pactId}/accept-rejection` as const,
   /**
    * GET: a photo's bytes and type, not JSON, for the pact's owner and
    * reviewers only. Anyone else gets the 404 an unknown photo does.
@@ -158,6 +160,12 @@ export type PactResponse = Json<PactResult>;
  * "no-photos" and "too-many-photos" included, are 200s.
  */
 export type SubmitEvidenceResponse = SubmitEvidenceResult;
+
+/**
+ * POST /api/pacts/:id/accept-rejection (no body): the owner takes the miss
+ * after a rejection. The core's refusals are 200s.
+ */
+export type AcceptRejectionResponse = AcceptRejectionResult;
 
 /** GET /api/review: the signed-in account's Review Queue, oldest first. */
 export type ReviewQueueResponse = Json<ReviewItem[]>;

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
+  type AcceptRejectionRefusal,
   type SubmitEvidenceRefusal,
   type TodayAlert,
   type TodaySection,
@@ -59,7 +60,7 @@ export function Today({
         />
       )}
       {today.alerts.map((alert) => (
-        <Alert key={`${alert.kind}:${alert.pactId}`} alert={alert} />
+        <Alert key={`${alert.kind}:${alert.pactId}`} alert={alert} onChanged={reload} />
       ))}
       {today.sections.map((section) => (
         <Section key={section.kind} section={section} now={now} onOpenPact={onOpenPact} onChanged={reload} />
@@ -131,20 +132,81 @@ function Section({
 }
 
 /** Something that needs the owner, first on Today. */
-function Alert({ alert }: { alert: Json<TodayAlert> }) {
+function Alert({ alert, onChanged }: { alert: Json<TodayAlert>; onChanged: () => void }) {
   switch (alert.kind) {
     case "evidence-rejected":
-      return (
-        <div className="alert bad" role="status">
-          <b>
-            {alert.reviewerName} rejected your evidence for {alert.name}
-          </b>
-          <span>“{alert.reason}”</span>
-          <span className="muted small">Take new photos on its card below.</span>
-        </div>
-      );
+      return <RejectedEvidenceAlert alert={alert} onTaken={onChanged} />;
   }
 }
+
+/**
+ * Rejected evidence for an occurrence still open: take new photos on the
+ * card, or take the miss, which asks first because it can't be undone.
+ */
+function RejectedEvidenceAlert({
+  alert,
+  onTaken,
+}: {
+  alert: Extract<Json<TodayAlert>, { kind: "evidence-rejected" }>;
+  /** After the miss is taken: Today reloads. */
+  onTaken: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const take = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.acceptRejection(alert.pactId);
+      if (result.ok) return onTaken();
+      setError(ACCEPT_REJECTION_REFUSAL_TEXT[result.reason]);
+    } catch (failure) {
+      setError(failureText(failure, "Couldn't send. Check your connection and try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="alert bad" role="status">
+      <b>
+        {alert.reviewerName} rejected your evidence for {alert.name}
+      </b>
+      <span>“{alert.reason}”</span>
+      {confirming ? (
+        <>
+          <span>
+            Add {money(alert.penaltyCents)} to {alert.recipientName}'s ledger? You won't be able to send new photos for
+            today.
+          </span>
+          <div className="row2">
+            <button className="btn sm" disabled={busy} onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+            <button className="btn sm danger" disabled={busy} onClick={() => void take()}>
+              {busy ? "Sending…" : "Take the miss"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <span className="muted small">Take new photos on its card below.</span>
+          <button className="btn sm danger self-start" onClick={() => setConfirming(true)}>
+            Take the miss
+          </button>
+        </>
+      )}
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
+const ACCEPT_REJECTION_REFUSAL_TEXT: Record<AcceptRejectionRefusal, string> = {
+  "pact-not-found": "This pact wasn't found.",
+  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
+};
 
 /** Waiting for approval, last on Today: each item with its kind's icon in a coloured square. */
 function Waiting({
@@ -282,6 +344,7 @@ const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "not-open": "This occurrence is closed. Evidence counts only until its due time.",
   "evidence-waiting": "Evidence for today is already waiting for approval.",
   "already-approved": "Evidence for today is already approved.",
+  "already-judged": "Today was already judged Missed, so new photos can't count.",
 };
 
 /** A Today card: the pact's name, a chip, its penalty in red, then whatever the section adds. Tapping it opens the pact. */

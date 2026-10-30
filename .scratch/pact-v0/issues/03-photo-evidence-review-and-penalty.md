@@ -78,3 +78,11 @@ Left for the human:
   - that uploads are quick on cellular
 
 Status stays ready-for-agent until the phone check passes.
+
+### 2026-10-30: take the miss, and rejection reasons in the ledger
+
+Decided with the human:
+- **Take the miss.** While the day is still open, the rejected-evidence alert on Today has a **Take the miss** button. It asks first: "Add $5 to Red Cross's ledger? You won't be able to send new photos for today." Confirming makes the day Missed at once, with its penalty, and the server then refuses new evidence for that day (`already-judged`). The core command is `acceptRejection`, and the route is `POST /api/pacts/:id/accept-rejection`.
+- **Reasons in the ledger.** Each penalty that came from rejected evidence now shows "Rejected by X: “reason”" in the ledger's history, not only on the Missed card for 48 hours.
+
+The spec was updated to match (Rules, Today alerts, Ledgers). I checked both in the browser preview.

@@ -136,9 +136,23 @@ export type SubmitEvidenceRefusal =
   /** Evidence for this occurrence is already waiting for a reviewer. */
   | "evidence-waiting"
   /** Evidence for this occurrence was already approved. */
-  | "already-approved";
+  | "already-approved"
+  /** This occurrence is already judged: the owner took the miss after a rejection. */
+  | "already-judged";
 
 export type SubmitEvidenceResult = { ok: true; evidenceId: string } | { ok: false; reason: SubmitEvidenceRefusal };
+
+export type AcceptRejectionRefusal =
+  /** Not this owner's pact, or no pact. */
+  | "pact-not-found"
+  /**
+   * No occurrence of it is open now whose latest evidence was rejected: none
+   * is open, it has no evidence, new evidence is waiting or approved, or the
+   * miss was already taken.
+   */
+  | "nothing-to-accept";
+
+export type AcceptRejectionResult = { ok: true } | { ok: false; reason: AcceptRejectionRefusal };
 
 /**
  * An item in a reviewer's Review Queue, oldest first. Items never expire.
@@ -210,7 +224,9 @@ export interface Today {
 export type TodayAlert =
   /**
    * A reviewer rejected the evidence for an occurrence that's still open, so
-   * the pact is back in To do. Submitting again resolves it.
+   * the pact is back in To do. Submitting again resolves it, and so does
+   * taking the miss (`acceptRejection`), which adds `penaltyCents` to the
+   * ledger for `recipientName`.
    */
   {
     kind: "evidence-rejected";
@@ -220,6 +236,8 @@ export type TodayAlert =
     reason: string;
     /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
     occurrenceDate: string;
+    penaltyCents: number;
+    recipientName: string;
   };
 export type TodaySection =
   /** Pacts whose occurrence is open today, soonest due first. */
@@ -302,6 +320,8 @@ export interface LedgerPenalty {
   amountCents: number;
   /** When it was added: when the occurrence was judged Missed. */
   addedAt: Date;
+  /** When the occurrence was Missed because its latest evidence was rejected: who rejected it and why. */
+  rejection?: EvidenceRejection;
 }
 
 /** One recipient's ledger: its summary and its penalties, newest first. */

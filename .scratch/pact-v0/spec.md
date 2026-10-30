@@ -158,7 +158,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 ### Architecture
 
 - **One deep module, the Pact core.** It holds every domain rule. Its interface is a set of **commands** and **queries**, each called as a particular account.
-  - **Commands:** create pact; edit or delete a pact in its edit window; approve/reject/comment on a review item; submit evidence; file excuse; record payment; accept a miss ("I'll pay it"); request change; add reviewer; create/accept invite; connect/disconnect Oura; check Oura now; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, bill, due-date transition and reminder that's due by T.
+  - **Commands:** create pact; edit or delete a pact in its edit window; approve/reject/comment on a review item; submit evidence; file excuse; record payment; accept a miss ("I'll pay it"); take the miss after a rejection; request change; add reviewer; create/accept invite; connect/disconnect Oura; check Oura now; manage recipients, reminders and notification settings; and **advance to time T**, which runs every judgment, bill, due-date transition and reminder that's due by T.
   - **Queries:** Today (alerts, then cards in their sections, then waiting for approval and Yesterday); the review queue and item detail; a pact page with its heat map; the pacts list; ledgers (owed, overdue, bill due, awaiting approval, lifetime paid) and a ledger's history, including held penalties and which bill each penalty is on.
 - **Four ports** sit outside the core, each with a production adapter and a fake for tests:
   - **Clock**: the current time. The core never reads system time directly.
@@ -226,6 +226,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - One-time: judged at the deadline.
 - No evidence at that point: Missed. Evidence still pending a decision at that point: the outcome waits for the decision.
 - On Fixed days and One-time, rejected evidence makes the occurrence Missed as of the rejection, unless the occurrence is still open and new evidence is submitted.
+- While it's still open, the owner can instead take the miss from the rejected-evidence alert: the occurrence is Missed as of then, with its penalty, and takes no more evidence.
 - On Weekly count, rejected evidence doesn't count toward the week's target, and the owner can make up the session on another day that week. The week still adds one penalty per session short of the target. Example: a 3× week with three photos submitted and one rejected adds one penalty; a week with no photos adds three.
 - Evidence is accepted only on days it can count (scheduled days for Fixed days, any day of the week for Weekly count, start to deadline for One-time) and only until the due-by time. For Weekly count, at most one day of evidence counts per calendar day.
 - Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse can come from the library, since they're often screenshots.
@@ -285,7 +286,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 
 - **Navigation:** bottom tabs Today · Pacts · Review · Ledgers, plus a profile menu. Opening a pact from Today pushes its page, and Back returns to Today. The current tab sits on a soft blue tile behind its icon and label, in the accent colour with a bold label, while the other tabs stay grey with a regular label. There's no highlight flash when a tab is tapped, and the tile stays while a page is pushed on top. Chosen over colour alone (too subtle), a filled icon, a bar on the top edge, a pill behind the icon, and a solid pill.
 - **Today:** only what's still open, in this order:
-  1. Alerts, only for things that need the owner (including an overdue bill).
+  1. Alerts, only for things that need the owner (including an overdue bill). The rejected-evidence alert offers Take the miss, which asks first: "Add $5 to Sam's ledger? You won't be able to send new photos for today."
   2. **No Oura data** (orange): last night's bedtime while Oura hasn't reported it, e.g. "Tue night hasn't synced. Open the Oura app." and, in orange, "Counts as missed at 6pm · 5h 20m". While a check runs the card says "Checking Oura…". There's no button to open the Oura app until we find a link that opens it. A File excuse button covers a night without the ring, and an excuse filed for the night moves it to Waiting for approval.
   3. **To do** (green): evidence that can be submitted today, and bills to pay, soonest due first. A Weekly count pact mid-week or a One-time pact that's already open sorts by its own due date, below things due today.
   4. **Missed** (red): misses that can still be excused, with "File excuse · 31h left" and "I'll pay it". A Camera pact past today's due-by time shows here as **Closed**.
@@ -303,7 +304,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. Items waiting on the owner's reply are listed below the current item.
 - **Profile:** a Connections section lists only the connections the owner has made, and is hidden when there are none. Disconnecting warns how many active pacts use it.
 - **Invite:** the page an invite link opens says that accepting makes you friends, so the inviter can pick you to review their pacts and you can pick them.
-- **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, "$4 bill due Wed Oct 28", or a payment awaiting approval), lifetime paid, and Record payment. Record payment starts at the open bills' amount. Held penalties appear only in the history, where each penalty also says which bill it's on, or that it goes on a Wednesday bill once it can't be excused. Tapping a card opens its history, pushed on the current tab.
+- **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, "$4 bill due Wed Oct 28", or a payment awaiting approval), lifetime paid, and Record payment. Record payment starts at the open bills' amount. Held penalties appear only in the history, where each penalty also says which bill it's on, or that it goes on a Wednesday bill once it can't be excused. A penalty from rejected evidence says who rejected it and why. Tapping a card opens its history, pushed on the current tab.
 - **Theme:** light only. v0 ignores the system's dark-mode setting; a dark theme can come later.
 - **Changes since the prototype** (`main` wins over the prototype on each):
   - Copy is short and plain throughout. New copy matches the existing empty states and timezone screen.

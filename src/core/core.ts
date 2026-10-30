@@ -13,6 +13,7 @@ import type { Clock, Notification, Notifier, OuraSource, Photo, PhotoStore } fro
 import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptInviteResult,
+  type AcceptRejectionResult,
   type AccountId,
   type AddRecipientResult,
   type CreatePactResult,
@@ -128,6 +129,13 @@ export interface AccountView {
    * item. A refusal writes nothing (photos already stored stay unused).
    */
   submitEvidence(pactId: string, photos: Photo[]): Promise<SubmitEvidenceResult>;
+  /**
+   * The owner takes the miss: while the occurrence of `pactId` open now has
+   * rejected evidence as its latest, the owner accepts the rejection instead
+   * of submitting again. The occurrence is Missed as of now, with its
+   * penalty, and takes no more evidence.
+   */
+  acceptRejection(pactId: string): Promise<AcceptRejectionResult>;
   /**
    * A photo of some evidence, for the pact's owner or one of its reviewers;
    * anyone else is told it isn't found. A query: async only because the photo
@@ -545,6 +553,21 @@ class Core implements PactCore {
           return { ok: true, evidenceId };
         });
       },
+      acceptRejection: (pactId) =>
+        this.#command((): AcceptRejectionResult => {
+          const { timezone } = account();
+          const row = this.#db
+            .prepare(`SELECT schedule, first_occurrence FROM pact WHERE id = ? AND owner_account_id = ?`)
+            .get(pactId, accountId) as Pick<PactRow, "schedule" | "first_occurrence"> | undefined;
+          if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
+          const now = this.#clock.now();
+          const open = occurrences(occurrenceTermsOf(row), timezone).openAt(now);
+          if (!open || this.#isJudged(pactId, open.date) || this.#evidenceDecision(pactId, open.date) !== "rejected") {
+            return { ok: false, reason: "nothing-to-accept" };
+          }
+          this.#judge(pactId, open.date, "missed", now);
+          return { ok: true };
+        }),
       photo: async (photoId) => {
         account();
         const viewable = this.#db
@@ -647,14 +670,19 @@ class Core implements PactCore {
           ok: true,
           ledger: {
             summary,
-            history: history.map((row) => ({
-              penaltyId: row.id,
-              pactId: row.pact_id,
-              pactName: row.pact_name,
-              occurrenceDate: row.occurrence_date,
-              amountCents: row.amount_cents,
-              addedAt: new Date(row.added_at),
-            })),
+            history: history.map((row) => {
+              // Missed with evidence means all of it was rejected.
+              const rejection = this.#rejection(row.pact_id, row.occurrence_date);
+              return {
+                penaltyId: row.id,
+                pactId: row.pact_id,
+                pactName: row.pact_name,
+                occurrenceDate: row.occurrence_date,
+                amountCents: row.amount_cents,
+                addedAt: new Date(row.added_at),
+                ...(rejection && { rejection }),
+              };
+            }),
           },
         };
       },
@@ -748,8 +776,9 @@ class Core implements PactCore {
   /**
    * Whether `ownerId` may submit evidence with `photoCount` photos for
    * `pactId` at `at`, and if so for which occurrence: the one open at `at`,
-   * unless evidence for it is already waiting or approved. After a rejection
-   * the owner may submit again while it's open.
+   * unless evidence for it is already waiting or approved, or it's already
+   * judged. After a rejection the owner may submit again while it's open,
+   * unless they took the miss.
    */
   #evidenceAcceptance(
     ownerId: AccountId,
@@ -769,6 +798,7 @@ class Core implements PactCore {
     const decision = this.#evidenceDecision(pactId, occurrence.date);
     if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
     if (decision === "approved") return { ok: false, reason: "already-approved" };
+    if (this.#isJudged(pactId, occurrence.date)) return { ok: false, reason: "already-judged" };
     return { ok: true, occurrence };
   }
 
@@ -820,6 +850,8 @@ class Core implements PactCore {
       const card = { pactId: pact.id, name: pact.name, penaltyCents: pact.penaltyCents };
       const { first, openAt } = occurrences(pact.terms, timezone);
       const open = openAt(now);
+      // Judged while still open: the owner took the miss, so it shows under Missed.
+      if (open && this.#isJudged(pact.id, open.date)) continue;
       if (open) {
         // Evidence waiting or approved: Waiting for approval, or done.
         const decision = this.#evidenceDecision(pact.id, open.date);
@@ -833,6 +865,8 @@ class Core implements PactCore {
             name: pact.name,
             ...rejection,
             occurrenceDate: open.date,
+            penaltyCents: pact.penaltyCents,
+            recipientName: pact.recipientName,
           });
         }
         toDo.push({ ...card, dueAt: open.dueAt });
@@ -902,15 +936,20 @@ class Core implements PactCore {
   #activePacts(ownerId: AccountId): ActivePact[] {
     const rows = this.#db
       .prepare(
-        `SELECT id, name, schedule, penalty_cents, first_occurrence FROM pact
-         WHERE owner_account_id = ? AND stage = 'active'
-         ORDER BY name, created_at, id`,
+        `SELECT pact.id, pact.name, pact.schedule, pact.penalty_cents, pact.first_occurrence,
+                recipient.name AS recipient_name
+         FROM pact JOIN recipient ON recipient.id = pact.recipient_id
+         WHERE pact.owner_account_id = ? AND pact.stage = 'active'
+         ORDER BY pact.name, pact.created_at, pact.id`,
       )
-      .all(ownerId) as Pick<PactRow, "id" | "name" | "schedule" | "penalty_cents" | "first_occurrence">[];
+      .all(ownerId) as (Pick<PactRow, "id" | "name" | "schedule" | "penalty_cents" | "first_occurrence"> & {
+      recipient_name: string;
+    })[];
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       penaltyCents: row.penalty_cents,
+      recipientName: row.recipient_name,
       terms: occurrenceTermsOf(row),
     }));
   }
@@ -1073,6 +1112,7 @@ interface ActivePact {
   id: string;
   name: string;
   penaltyCents: number;
+  recipientName: string;
   terms: OccurrenceTerms;
 }
 

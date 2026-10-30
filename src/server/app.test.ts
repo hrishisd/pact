@@ -22,6 +22,7 @@ import {
   invitePath,
   MAX_PHOTO_BYTES,
   type AcceptInviteResponse,
+  type AcceptRejectionResponse,
   type AddRecipientResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
@@ -844,8 +845,50 @@ describe("evidence", () => {
           reviewerName: "friend",
           reason: "Blurry",
           occurrenceDate: "2026-01-05",
+          penaltyCents: 500,
+          recipientName: "Sam",
         },
       ] satisfies TodayResponse["alerts"]);
+    });
+
+    test("after a rejection the owner takes the miss: Missed on Today and the ledger; refusals are data", async () => {
+      const { s, owner, friend, pactId, pact } = await ownerWithPact();
+      const submitted = await submit(s, owner.cookie, pactId, [jpeg()]);
+      const { evidenceId } = submitted.body as { evidenceId: string };
+      await s.api(API_PATHS.decide(evidenceId), {
+        cookie: friend.cookie,
+        method: "POST",
+        body: { kind: "reject", reason: "Blurry" } satisfies DecideRequest,
+      });
+      const take = (cookie: string, id = pactId) => s.api(API_PATHS.acceptRejection(id), { cookie, method: "POST" });
+
+      expect(await take(friend.cookie)).toEqual({
+        status: 200,
+        body: { ok: false, reason: "pact-not-found" } satisfies AcceptRejectionResponse,
+      });
+      expect(await take(owner.cookie)).toEqual({ status: 200, body: { ok: true } satisfies AcceptRejectionResponse });
+      expect(await take(owner.cookie)).toEqual({
+        status: 200,
+        body: { ok: false, reason: "nothing-to-accept" } satisfies AcceptRejectionResponse,
+      });
+
+      const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+      expect(today.body.alerts).toEqual([]);
+      expect(today.body.sections).toEqual([
+        {
+          kind: "missed",
+          cards: [expect.objectContaining({ pactId, rejection: { reviewerName: "friend", reason: "Blurry" } })],
+        },
+      ]);
+      const ledger = await s.api<LedgerResponse>(API_PATHS.ledger(pact.recipientId), { cookie: owner.cookie });
+      expect(ledger.body).toMatchObject({
+        ok: true,
+        ledger: { summary: { owedCents: 500 }, history: [{ rejection: { reviewerName: "friend", reason: "Blurry" } }] },
+      });
+      expect(await submit(s, owner.cookie, pactId, [jpeg()])).toEqual({
+        status: 200,
+        body: { ok: false, reason: "already-judged" } satisfies SubmitEvidenceResponse,
+      });
     });
 
     test("a decision of the wrong shape is an invalid request; a blank reason is refused as data", async () => {
@@ -942,6 +985,7 @@ describe("api", () => {
       API_PATHS.firstOccurrence,
       API_PATHS.evidence("some-pact"),
       API_PATHS.decide("some-item"),
+      API_PATHS.acceptRejection("some-pact"),
     ];
     for (const path of writes) {
       expect((await s.request(path, { method: "POST" })).status).toBe(401);

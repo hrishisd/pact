@@ -158,7 +158,7 @@ describe("the owner's Today after a decision", () => {
     expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
   });
 
-  test("rejected evidence while the day is open: the pact is back in To do, with an alert saying why", async () => {
+  test("rejected evidence while the day is open: the pact is back in To do, with an alert saying why and what taking the miss would cost", async () => {
     const { s, owner, reviewer, gym, evidenceId } = await evidenceWaiting();
     s.setClockTo("Mon 19:00");
 
@@ -174,6 +174,8 @@ describe("the owner's Today after a decision", () => {
           reviewerName: "reviewer",
           reason: "That's last week's photo",
           occurrenceDate: "2026-01-05",
+          penaltyCents: 500,
+          recipientName: "Sam",
         },
       ],
       sections: [{ kind: "to-do", cards: [{ pactId: gym, name: "Gym", penaltyCents: 500, dueAt: s.at("Tue 00:00") }] }],

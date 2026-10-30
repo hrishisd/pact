@@ -21,6 +21,7 @@ import {
   MAX_PHOTO_BYTES,
   PHOTO_CONTENT_TYPES,
   type AcceptInviteResponse,
+  type AcceptRejectionResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
   type ApiErrorResponse,
@@ -282,6 +283,11 @@ export function createApp({
 
   // Bytes, not JSON, so a photo the account may not see is a 404, as if it
   // didn't exist. Private: only this browser may cache it.
+  app.post(API_PATHS.acceptRejection(":id"), async (c) => {
+    const body: AcceptRejectionResponse = await core.as(c.get("accountId")).acceptRejection(c.req.param("id"));
+    return c.json(body);
+  });
+
   app.get(API_PATHS.photo(":id"), async (c) => {
     const result = await core.as(c.get("accountId")).photo(c.req.param("id"));
     if (!result.ok) return apiError(c, 404, "not-found");
