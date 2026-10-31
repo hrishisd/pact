@@ -8,6 +8,8 @@ import {
   EVIDENCE_PHOTO_FIELD,
   INVITE_TOKEN_SIGN_IN_KEY,
   invitePath,
+  PAYMENT_AMOUNT_FIELD,
+  PAYMENT_NOTE_FIELD,
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientRequest,
@@ -28,6 +30,7 @@ import {
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type RecordPaymentResponse,
   type ReviewQueueResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
@@ -82,6 +85,11 @@ export function failureText(error: unknown, network: string): string {
   return error instanceof NetworkError ? network : "Something went wrong on our side. Try again in a minute.";
 }
 
+/** `failureText` for an upload, except that a photo the server found too large gets `tooLarge`. */
+export function uploadFailureText(error: unknown, tooLarge: string, network: string): string {
+  return error instanceof ApiError && error.code === "photo-too-large" ? tooLarge : failureText(error, network);
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin", ...init }).catch((cause: unknown) => {
     throw new NetworkError(`${path}: no response`, { cause });
@@ -133,4 +141,12 @@ export const api = {
     post<DecideResponse>(API_PATHS.decide(encodeURIComponent(itemId)), decision),
   ledgers: () => call<LedgersResponse>(API_PATHS.ledgers),
   ledger: (recipientId: string) => call<LedgerResponse>(API_PATHS.ledger(encodeURIComponent(recipientId))),
+  /** `screenshot` is already shrunk (photos.ts). */
+  recordPayment: (recipientId: string, payment: { amountCents: number; note: string }, screenshot: Blob) => {
+    const form = new FormData();
+    form.append(PAYMENT_AMOUNT_FIELD, String(payment.amountCents));
+    form.append(PAYMENT_NOTE_FIELD, payment.note);
+    form.append(EVIDENCE_PHOTO_FIELD, screenshot, "screenshot.jpg");
+    return postForm<RecordPaymentResponse>(API_PATHS.payments(encodeURIComponent(recipientId)), form);
+  },
 };

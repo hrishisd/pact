@@ -19,6 +19,7 @@ import type {
   PactSummary,
   Profile,
   Recipient,
+  RecordPaymentResult,
   ReviewDecision,
   ReviewItem,
   Schedule,
@@ -97,14 +98,17 @@ export const API_PATHS = {
   acceptMiss: <T extends string, D extends string>(pactId: T, date: D) =>
     `/api/pacts/${pactId}/occurrences/${date}/accept-miss` as const,
   /**
-   * GET: a photo's bytes and type, not JSON, for the pact's owner and
-   * reviewers only. Anyone else gets the 404 an unknown photo does.
+   * GET: a photo's bytes and type, not JSON. Evidence photos are for the
+   * pact's owner and reviewers; a payment's screenshot for the owner and the
+   * reviewers of any of their pacts with its recipient. Anyone else gets the
+   * 404 an unknown photo does.
    */
   photo: <T extends string>(photoId: T) => `/api/photos/${photoId}` as const,
   reviewQueue: "/api/review",
   decide: <T extends string>(itemId: T) => `/api/review/${itemId}/decision` as const,
   ledgers: "/api/ledgers",
   ledger: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}` as const,
+  payments: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}/payments` as const,
 } as const;
 
 /**
@@ -113,8 +117,14 @@ export const API_PATHS = {
  */
 export const MAX_PHOTO_BYTES = 1024 * 1024;
 
-/** The multipart field each photo of some evidence is sent in. */
+/** The multipart field each photo of some evidence, or a payment's screenshot, is sent in. */
 export const EVIDENCE_PHOTO_FIELD = "photo";
+
+/** The payment form's field for the amount paid, in US cents, as decimal digits (e.g. "1000" for $10). */
+export const PAYMENT_AMOUNT_FIELD = "amountCents";
+
+/** The payment form's optional note field. */
+export const PAYMENT_NOTE_FIELD = "note";
 
 /** The photo types the server accepts and serves back: JPEG, which the client always sends after shrinking. */
 export const PHOTO_CONTENT_TYPES: readonly string[] = ["image/jpeg"];
@@ -185,6 +195,17 @@ export type LedgersResponse = LedgerSummary[];
 
 /** GET /api/ledgers/:recipientId: a ledger's page. Another account's recipient, or none, is a 200 refusal. */
 export type LedgerResponse = Json<LedgerResult>;
+
+/**
+ * POST /api/ledgers/:recipientId/payments: multipart form data with the
+ * amount in PAYMENT_AMOUNT_FIELD, an optional PAYMENT_NOTE_FIELD, and the
+ * screenshot as one `photo` file. A screenshot over MAX_PHOTO_BYTES is a 400
+ * "photo-too-large"; an amount that isn't a number, a field of the wrong
+ * kind, more than one `photo`, or a type outside PHOTO_CONTENT_TYPES is a
+ * 400 "invalid-request". The core's refusals, "no-screenshot" and
+ * "invalid-amount" (say, a fraction of a cent) included, are 200s.
+ */
+export type RecordPaymentResponse = RecordPaymentResult;
 
 /** GET /api/me: the signed-in account's profile. */
 export type MeResponse = Profile;

@@ -461,7 +461,8 @@ p {
   border-radius: 14px;
   touch-action: manipulation;
 }
-.cards > .rowbtn::after {
+.cards > .rowbtn::after,
+.ledger-card > .rowbtn::after {
   content: "\203A";
   color: var(--muted);
   font-size: 22px;
@@ -469,11 +470,42 @@ p {
   margin-left: 2px;
 }
 
-/* Ledgers: the big owed amount, then lifetime paid. */
+/* Ledgers: the big owed amount, a status line when payments await approval, then lifetime paid. */
 .ledger-sum {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.record-pay {
+  margin-top: 6px;
+}
+/* A ledger card on Ledgers: the row that opens the ledger, then Record payment
+   beside it in the DOM but drawn under lifetime paid, in one card. */
+.ledger-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.ledger-card:has(> .rowbtn:hover) {
+  border-color: var(--muted);
+}
+.ledger-card > .rowbtn {
+  padding-bottom: 0;
+  touch-action: manipulation;
+}
+.ledger-card > .record-pay {
+  margin: 6px 14px 12px;
+}
+/* What approved payments have paid, in a ledger's history. */
+.paid {
+  color: var(--kept);
+  font-weight: 700;
+}
+/* A rejected payment's amount: it never counted. */
+.struck {
+  text-decoration: line-through;
 }
 .bigmoney {
   font-family: var(--f-mono);
@@ -808,7 +840,7 @@ textarea.inp {
   line-height: 1;
 }
 
-/* A review item kind's icon in a coloured square: Evidence is a green camera. */
+/* A review item kind's icon in a coloured square: Evidence is a green camera, Payment a red $. */
 .kico {
   width: 36px;
   height: 36px;
@@ -824,6 +856,10 @@ textarea.inp {
 .k-evidence {
   background: var(--kept-bg);
   color: var(--kept);
+}
+.k-payment {
+  background: var(--missed-bg);
+  color: var(--missed);
 }
 
 /* A review item kind as a coloured badge with its icon, on Review. */
@@ -858,6 +894,10 @@ textarea.inp {
   border-radius: 14px;
   border: 1px solid var(--line);
   background: var(--sunk);
+}
+/* A payment's screenshot is often tall: show all of it rather than crop. */
+.big-photo.whole {
+  object-fit: contain;
 }
 .decide {
   position: sticky;

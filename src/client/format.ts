@@ -13,6 +13,18 @@ export function money(cents: number): string {
   }).format(cents / 100);
 }
 
+/** Dollars as typed ("5", "$2.50") in whole cents, or null when it isn't an amount. */
+export function parseCents(text: string): number | null {
+  const match = /^\$?\s*(\d+)(?:\.(\d{1,2}))?$/.exec(text.trim());
+  if (!match) return null;
+  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+}
+
+/** Cents as an amount field starts out: "5" for whole dollars, "2.50" otherwise, with no "$". */
+export function centsInputText(cents: number): string {
+  return (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
+}
+
 const WEEKDAY_LABELS: Record<Weekday, string> = {
   mon: "Mon",
   tue: "Tue",
@@ -35,14 +47,7 @@ export function scheduleText(schedule: Schedule): string {
  */
 export function formatDate(isoDate: string): string {
   const [year, month, day] = isoDate.split("-").map(Number) as [number, number, number];
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).formatToParts(new Date(Date.UTC(year, month - 1, day)));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${part("weekday")} ${part("month")} ${part("day")}`;
+  return formatDay(new Date(Date.UTC(year, month - 1, day)).toISOString(), "UTC");
 }
 
 /** A calendar date, "YYYY-MM-DD", as its weekday, "Wednesday". Never shifted into another timezone. */
@@ -51,6 +56,27 @@ export function weekdayName(isoDate: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(
     new Date(Date.UTC(year, month - 1, day)),
   );
+}
+
+/** An instant, as an ISO string, as its day in `timeZone` (the profile's): "Thu Oct 22", like `formatDate`. */
+export function formatDay(instant: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("weekday")} ${part("month")} ${part("day")}`;
+}
+
+/** An instant, as an ISO string, as its day and time in `timeZone` (the profile's): "Thu Oct 22, 9:05pm". */
+export function formatDayTime(instant: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).formatToParts(
+    new Date(instant),
+  );
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${formatDay(instant, timeZone)}, ${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
 }
 
 /** Time left as "16h 19m", or "3d 4h" from 48 hours up. Never negative. */

@@ -12,7 +12,7 @@ import { PactPage } from "./PactPage.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
-import { Centered } from "./ui.tsx";
+import { Centered, Sheet } from "./ui.tsx";
 
 type Session =
   | { kind: "loading" }
@@ -278,14 +278,20 @@ function Shell({
           />
         )}
         {!page && tab === "today" && (
-          <Today onOpenPact={openPact} onCreate={create} onInvite={() => setProfileOpen(true)} />
+          <Today
+            onOpenPact={openPact}
+            onOpenLedger={openLedger}
+            onCreate={create}
+            onInvite={() => setProfileOpen(true)}
+          />
         )}
         {!page && tab === "pacts" && <Pacts onOpenPact={openPact} onCreate={create} />}
-        {!page && tab === "review" && <Review onQueue={reviewCount.set} />}
+        {!page && tab === "review" && <Review timezone={profile.timezone} onQueue={reviewCount.set} />}
         {page?.kind === "ledger" && (
           <LedgerPage
             key={page.recipientId}
             recipientId={page.recipientId}
+            timezone={profile.timezone}
             onLoaded={ledgerLoaded}
             onOpenPact={openPact}
           />
@@ -372,75 +378,54 @@ function ProfileSheet({
     setChanging(false);
   });
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="overlay" onClick={onClose}>
-      <div
-        className="sheet gut"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Profile"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="grab" />
-        <div className="spread">
-          <h2>Profile</h2>
-          <button className="link" onClick={onClose}>
-            Done
-          </button>
-        </div>
-        <div className="row2">
-          <span className="avatar">{initial(profile.name)}</span>
-          <span className="stack-sm">
-            <b>{profile.name}</b>
-            <span className="muted small">{profile.email}</span>
-          </span>
-        </div>
+    <Sheet title="Profile" closeLabel="Done" onClose={onClose}>
+      <div className="row2">
+        <span className="avatar">{initial(profile.name)}</span>
+        <span className="stack-sm">
+          <b>{profile.name}</b>
+          <span className="muted small">{profile.email}</span>
+        </span>
+      </div>
 
-        <FriendsSection />
+      <FriendsSection />
 
-        <section className="stack">
-          <div className="label">Timezone</div>
-          {changing ? (
-            <div className="card">
-              <TimezoneSelect value={zone} onChange={setZone} />
-              {error && <p className="error">{error}</p>}
-              <div className="row2">
-                <button className="btn primary" disabled={saving} onClick={() => void save(zone)}>
-                  Save
-                </button>
-                <button className="btn" onClick={() => setChanging(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="spread">
-              <span>{prettyZone(profile.timezone)}</span>
-              <button className="link" onClick={() => setChanging(true)}>
-                Change
+      <section className="stack">
+        <div className="label">Timezone</div>
+        {changing ? (
+          <div className="card">
+            <TimezoneSelect value={zone} onChange={setZone} />
+            {error && <p className="error">{error}</p>}
+            <div className="row2">
+              <button className="btn primary" disabled={saving} onClick={() => void save(zone)}>
+                Save
+              </button>
+              <button className="btn" onClick={() => setChanging(false)}>
+                Cancel
               </button>
             </div>
-          )}
-        </section>
+          </div>
+        ) : (
+          <div className="spread">
+            <span>{prettyZone(profile.timezone)}</span>
+            <button className="link" onClick={() => setChanging(true)}>
+              Change
+            </button>
+          </div>
+        )}
+      </section>
 
-        <button
-          className="btn block danger"
-          disabled={signingOut}
-          onClick={() => {
-            setSigningOut(true);
-            signOut().then(onSignedOut, () => setSigningOut(false));
-          }}
-        >
-          Sign out
-        </button>
-      </div>
-    </div>
+      <button
+        className="btn block danger"
+        disabled={signingOut}
+        onClick={() => {
+          setSigningOut(true);
+          signOut().then(onSignedOut, () => setSigningOut(false));
+        }}
+      >
+        Sign out
+      </button>
+    </Sheet>
   );
 }
 

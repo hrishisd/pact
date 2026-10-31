@@ -1,9 +1,10 @@
 // An owner's ledgers: one per recipient across every pact naming it, each
-// with the history of the penalties Missed occurrences added to it.
+// with a history of the penalties Missed occurrences added to it and the
+// payments recorded against it, and which penalties those payments have paid.
 
 import { describe, expect, test } from "vitest";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
-import { scenario } from "./testing/scenario.ts";
+import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
+import { scenario, type AccountHandle } from "./testing/scenario.ts";
 
 describe("a ledger's history", () => {
   test("lists each penalty from every pact naming the recipient, newest first, under the ledger's summary", async () => {
@@ -18,31 +19,45 @@ describe("a ledger's history", () => {
     expect(owner.ledger(summary!.recipientId)).toEqual({
       ok: true,
       ledger: {
-        summary: { recipientId: summary!.recipientId, name: "Sam", owedCents: 1500, paidCents: 0 },
+        summary: {
+          recipientId: summary!.recipientId,
+          name: "Sam",
+          owedCents: 1500,
+          payableCents: 1500,
+          awaitingCents: 0,
+          awaitingCount: 0,
+          paidCents: 0,
+        },
         history: [
           {
+            kind: "penalty",
             penaltyId: expect.any(String),
             pactId: gym,
             pactName: "Gym",
             occurrenceDate: "2026-01-07",
             amountCents: 500,
             addedAt: s.at("Thu 00:00"),
+            paidCents: 0,
           },
           {
+            kind: "penalty",
             penaltyId: expect.any(String),
             pactId: gym,
             pactName: "Gym",
             occurrenceDate: "2026-01-05",
             amountCents: 500,
             addedAt: s.at("Tue 00:00"),
+            paidCents: 0,
           },
           {
+            kind: "penalty",
             penaltyId: expect.any(String),
             pactId: run,
             pactName: "Run",
             occurrenceDate: "2026-01-05",
             amountCents: 500,
             addedAt: s.at("Tue 00:00"),
+            paidCents: 0,
           },
         ],
       },
@@ -98,7 +113,18 @@ describe("a ledger's history", () => {
 
     expect(owner.ledger(summary!.recipientId)).toEqual({
       ok: true,
-      ledger: { summary: { recipientId: summary!.recipientId, name: "Sam", owedCents: 0, paidCents: 0 }, history: [] },
+      ledger: {
+        summary: {
+          recipientId: summary!.recipientId,
+          name: "Sam",
+          owedCents: 0,
+          payableCents: 0,
+          awaitingCents: 0,
+          awaitingCount: 0,
+          paidCents: 0,
+        },
+        history: [],
+      },
     });
   });
 });
@@ -114,5 +140,157 @@ describe("whose ledger", () => {
     const notFound = { ok: false, reason: "recipient-not-found" };
     expect(reviewer.ledger(summary!.recipientId)).toEqual(notFound);
     expect(owner.ledger("no-such-recipient")).toEqual(notFound);
+  });
+});
+
+/** How much of each penalty on the owner's ledger for Sam is paid, oldest penalty first. */
+function paidOldestFirst(owner: AccountHandle, recipientId: string) {
+  const ledger = owner.ledger(recipientId);
+  if (!ledger.ok) throw new Error(ledger.reason);
+  return ledger.ledger.history
+    .flatMap((entry) => (entry.kind === "penalty" ? [[entry.occurrenceDate, entry.paidCents]] : []))
+    .reverse();
+}
+
+describe("paying off a ledger's penalties", () => {
+  test("an approved $7 payment against three $5 penalties pays the oldest, part of the second, and none of the third", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await fifteenOwed(s);
+
+    await reviewer.decide(await recordPayment(owner, { recipientId: sam.id, amountCents: 700 }), { kind: "approve" });
+
+    expect(paidOldestFirst(owner, sam.id)).toEqual([
+      ["2026-01-05", 500],
+      ["2026-01-07", 200],
+      ["2026-01-09", 0],
+    ]);
+  });
+
+  test("a payment awaiting approval and a rejected one pay nothing", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await fifteenOwed(s);
+
+    const rejected = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
+    await reviewer.decide(rejected, { kind: "reject", reason: "Wrong account" });
+    await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
+
+    expect(paidOldestFirst(owner, sam.id)).toEqual([
+      ["2026-01-05", 0],
+      ["2026-01-07", 0],
+      ["2026-01-09", 0],
+    ]);
+  });
+
+  test("two approved payments of $3 and $4 pay the same as one of $7", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await fifteenOwed(s);
+
+    for (const amountCents of [300, 400]) {
+      await reviewer.decide(await recordPayment(owner, { recipientId: sam.id, amountCents }), { kind: "approve" });
+    }
+
+    expect(paidOldestFirst(owner, sam.id)).toEqual([
+      ["2026-01-05", 500],
+      ["2026-01-07", 200],
+      ["2026-01-09", 0],
+    ]);
+  });
+});
+
+describe("payments in a ledger's history", () => {
+  test("are listed newest first among the penalties, each awaiting approval, approved with who approved it, or rejected with who rejected it and why", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, sam, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Thu 00:00");
+    s.setClockTo("Thu 09:00");
+    const approved = await recordPayment(owner, { recipientId: sam.id, amountCents: 300, note: "Venmo" });
+    s.setClockTo("Thu 10:00");
+    const rejected = await recordPayment(owner, { recipientId: sam.id, amountCents: 200 });
+    s.setClockTo("Thu 11:00");
+    await reviewer.decide(approved, { kind: "approve" });
+    s.setClockTo("Thu 12:00");
+    await second.decide(rejected, { kind: "reject", reason: "That's not Sam's account" });
+    s.setClockTo("Fri 09:00");
+    const awaiting = await recordPayment(owner, { recipientId: sam.id, amountCents: 400 });
+    await s.advanceTo("Sat 00:00");
+
+    const penalty = (occurrenceDate: string, addedAt: string, paidCents: number) => ({
+      kind: "penalty",
+      penaltyId: expect.any(String),
+      pactId: gym,
+      pactName: "Gym",
+      occurrenceDate,
+      amountCents: 500,
+      addedAt: s.at(addedAt),
+      paidCents,
+    });
+    expect(owner.ledger(sam.id)).toEqual({
+      ok: true,
+      ledger: {
+        summary: {
+          recipientId: sam.id,
+          name: "Sam",
+          owedCents: 1200,
+          payableCents: 800,
+          awaitingCents: 400,
+          awaitingCount: 1,
+          paidCents: 300,
+        },
+        history: [
+          penalty("2026-01-09", "Sat 00:00", 0),
+          {
+            kind: "payment",
+            paymentId: awaiting,
+            amountCents: 400,
+            note: null,
+            recordedAt: s.at("Fri 09:00"),
+            state: { kind: "awaiting-approval" },
+          },
+          {
+            kind: "payment",
+            paymentId: rejected,
+            amountCents: 200,
+            note: null,
+            recordedAt: s.at("Thu 10:00"),
+            state: {
+              kind: "rejected",
+              reviewerName: "second",
+              decidedAt: s.at("Thu 12:00"),
+              reason: "That's not Sam's account",
+            },
+          },
+          {
+            kind: "payment",
+            paymentId: approved,
+            amountCents: 300,
+            note: "Venmo",
+            recordedAt: s.at("Thu 09:00"),
+            state: { kind: "approved", reviewerName: "reviewer", decidedAt: s.at("Thu 11:00") },
+          },
+          penalty("2026-01-07", "Thu 00:00", 0),
+          penalty("2026-01-05", "Tue 00:00", 300),
+        ],
+      },
+    });
+  });
+
+  test("never include another owner's payments", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
+    await createPact("Gym", ["mon"]);
+    // The reviewer owes their own Sam, and pays it, with the owner approving.
+    const theirSam = await reviewer.addRecipient({ name: "Sam" });
+    if (!theirSam.ok) throw new Error(theirSam.reason);
+    await reviewer.setTimezone("America/New_York");
+    await createPact("Run", ["mon"], { by: reviewer, reviewers: [owner], recipientId: theirSam.recipient.id });
+    await s.advanceTo("Tue 00:00");
+    const theirs = await recordPayment(reviewer, { recipientId: theirSam.recipient.id, amountCents: 500 });
+    await owner.decide(theirs, { kind: "approve" });
+
+    const ledger = owner.ledger(sam.id);
+    expect(ledger.ok && ledger.ledger.history).toEqual([
+      expect.objectContaining({ kind: "penalty", pactName: "Gym", paidCents: 0 }),
+    ]);
   });
 });

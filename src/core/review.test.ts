@@ -42,7 +42,11 @@ describe("the Review Queue", () => {
     s.setClockTo("Tue 07:00");
     await owner.submitEvidence(run, [photo()]);
 
-    expect(reviewer.reviewQueue().map((item) => [item.pactName, item.occurrenceDate, item.submittedAt])).toEqual([
+    expect(
+      reviewer
+        .reviewQueue()
+        .map((item) => item.kind === "evidence" && [item.pactName, item.occurrenceDate, item.submittedAt]),
+    ).toEqual([
       ["Run", "2026-01-05", s.at("Mon 20:00")],
       ["Gym", "2026-01-05", s.at("Mon 21:00")],
       ["Run", "2026-01-06", s.at("Tue 07:00")],

@@ -24,6 +24,10 @@ import {
   type Health,
   type Invite,
   type InviteLookup,
+  type LedgerEntry,
+  type LedgerPayment,
+  type LedgerPaymentState,
+  type LedgerPenalty,
   type LedgerResult,
   type LedgerSummary,
   type NewPact,
@@ -32,7 +36,10 @@ import {
   type PactResult,
   type PactTerms,
   type Recipient,
+  type NewPayment,
   type Profile,
+  type RecordPaymentRefusal,
+  type RecordPaymentResult,
   type ReviewDecision,
   type ReviewItem,
   type Schedule,
@@ -144,17 +151,33 @@ export interface AccountView {
    * store is, and it never writes.
    */
   photo(photoId: string): Promise<PhotoResult>;
-  /** Items waiting for this account's decision as a reviewer, oldest submitted first. */
+  /**
+   * Items waiting for this account's decision as a reviewer: evidence for
+   * pacts it reviews, and payments to a recipient of any pact it reviews.
+   * Oldest first, by when the evidence was submitted or the payment recorded.
+   */
   reviewQueue(): ReviewItem[];
   /**
-   * A reviewer of the item's pact decides it. The first decision is final:
-   * the item leaves every reviewer's queue and the owner is told. A refusal
-   * changes nothing. A rejection is final: it judges the occurrence Missed
+   * A reviewer decides an item in their queue: evidence by a reviewer of its
+   * pact, a payment by a reviewer of any of the owner's pacts with its
+   * recipient. The first decision is final: the item leaves every reviewer's
+   * queue and the owner is told. A refusal changes nothing. An approved
+   * payment lowers owed and raises lifetime paid; a rejected one changes
+   * neither. For evidence, a rejection is final: it judges the occurrence Missed
    * there and then, with its penalty, whether it's still open or past its
    * due time, and it takes no more evidence. An approval after the due time
    * judges it Kept there and then; before it, judging at the due time does.
    */
   decide(itemId: string, decision: ReviewDecision): Promise<DecideResult>;
+  /**
+   * The owner records a payment they made to one of their recipients outside
+   * the app, with one screenshot of it. It waits for a reviewer of any of the
+   * owner's pacts with that recipient, and each of them gets a review item.
+   * Refused if it's more than owed less payments already awaiting approval,
+   * so the ledger never goes below zero. A refusal writes nothing (a
+   * screenshot already stored stays unused).
+   */
+  recordPayment(payment: NewPayment, screenshot: Photo | null): Promise<RecordPaymentResult>;
   /** One ledger per recipient this owner's pacts name, sorted by name. */
   ledgers(): LedgerSummary[];
   /**
@@ -176,6 +199,17 @@ const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 /** A Missed occurrence stays on Today this long after it's judged. */
 const TODAY_MISSED_MS = 48 * 60 * 60 * 1000;
+/**
+ * SQL: who reviews payments from `owner` to `recipient` (SQL expressions):
+ * the reviewers of any of the owner's pacts with that recipient, with repeats.
+ */
+function paymentReviewersSql(owner: string, recipient: string): string {
+  return `SELECT pact_reviewer.reviewer_account_id FROM pact_reviewer
+    JOIN pact ON pact.id = pact_reviewer.pact_id
+    WHERE pact.owner_account_id = ${owner} AND pact.recipient_id = ${recipient}`;
+}
+/** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
+const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
 /**
  * SQL: the Missed `occurrence` row was judged through a rejection. Any
  * rejected evidence will do: a rejection judges the occurrence at once.
@@ -577,19 +611,48 @@ class Core implements PactCore {
             .run(this.#clock.now().toISOString(), pactId, occurrenceDate);
           return accepted.changes === 1 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
         }),
+      recordPayment: async (payment, screenshot) => {
+        account();
+        // Refuse cheaply before storing anything, then check again in the
+        // transaction that writes, as another payment may have come first.
+        const early = this.#paymentAcceptance(accountId, payment);
+        if (!early.ok) return early;
+        if (screenshot === null) return { ok: false, reason: "no-screenshot" };
+        const { photoId } = await this.#photoStore.store(screenshot);
+        return this.#command((): RecordPaymentResult => {
+          const acceptance = this.#paymentAcceptance(accountId, payment);
+          if (!acceptance.ok) return acceptance;
+          const note = payment.note?.trim() ?? "";
+          const paymentId = randomUUID();
+          this.#db
+            .prepare(
+              `INSERT INTO payment (id, owner_account_id, recipient_id, amount_cents, note, photo_id, recorded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              paymentId,
+              accountId,
+              payment.recipientId,
+              payment.amountCents,
+              note === "" ? null : note,
+              photoId,
+              this.#clock.now().toISOString(),
+            );
+          for (const reviewerId of this.#paymentReviewers(accountId, payment.recipientId)) {
+            this.#enqueue({
+              recipient: reviewerId,
+              kind: "review-item",
+              channel: "push",
+              payload: { itemKind: "payment", itemId: paymentId, recipientId: payment.recipientId },
+            });
+          }
+          return { ok: true, paymentId };
+        });
+      },
       photo: async (photoId) => {
         account();
-        const viewable = this.#db
-          .prepare(
-            `SELECT 1 FROM evidence_photo
-             JOIN evidence ON evidence.id = evidence_photo.evidence_id
-             JOIN pact ON pact.id = evidence.pact_id
-             WHERE evidence_photo.photo_id = ?
-               AND (pact.owner_account_id = ?
-                    OR EXISTS (SELECT 1 FROM pact_reviewer
-                               WHERE pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?))`,
-          )
-          .get(photoId, accountId, accountId);
+        const viewable =
+          this.#mayViewEvidencePhoto(photoId, accountId) || this.#mayViewPaymentPhoto(photoId, accountId);
         const photo = viewable ? await this.#photoStore.fetch(photoId) : null;
         return photo ? { ok: true, photo } : { ok: false, reason: "photo-not-found" };
       },
@@ -619,7 +682,7 @@ class Core implements PactCore {
           penalty_cents: number;
           recipient_name: string;
         }[];
-        return rows.map((row) => ({
+        const evidence = rows.map((row): ReviewItem => ({
           kind: "evidence",
           id: row.id,
           pactId: row.pact_id,
@@ -632,6 +695,12 @@ class Core implements PactCore {
           penaltyCents: row.penalty_cents,
           recipientName: row.recipient_name,
         }));
+        return mergeByTime(
+          (item) => (item.kind === "evidence" ? item.submittedAt : item.recordedAt),
+          "oldest-first",
+          evidence,
+          this.#paymentsToReview(accountId),
+        );
       },
       decide: (itemId, decision) =>
         this.#command((): DecideResult => {
@@ -646,15 +715,15 @@ class Core implements PactCore {
                WHERE evidence.id = ?`,
             )
             .get(accountId, itemId) as EvidenceToDecide | undefined;
-          if (!evidence) return { ok: false, reason: "item-not-found" };
-          if (evidence.decision !== null) return { ok: false, reason: "already-decided" };
-          if (decision.kind === "reject") {
-            const reason = decision.reason.trim();
-            if (reason === "") return { ok: false, reason: "blank-reason" };
-            this.#decideEvidence(evidence, { kind: "reject", reason }, accountId);
-          } else {
-            this.#decideEvidence(evidence, decision, accountId);
-          }
+          const payment = evidence ? undefined : this.#paymentToDecide(accountId, itemId);
+          const item = evidence ?? payment;
+          if (!item) return { ok: false, reason: "item-not-found" };
+          if (item.decision !== null) return { ok: false, reason: "already-decided" };
+          const reason = decision.kind === "reject" ? decision.reason.trim() : null;
+          if (reason === "") return { ok: false, reason: "blank-reason" };
+          const decided: Decided = { outcome: reason === null ? "approved" : "rejected", reason };
+          if (evidence) this.#decideEvidence(evidence, decided, accountId);
+          if (payment) this.#decidePayment(payment, decided, accountId);
           return { ok: true };
         }),
       ledgers: () => {
@@ -665,7 +734,7 @@ class Core implements PactCore {
         account();
         const [summary] = this.#ledgerSummaries(accountId, recipientId);
         if (!summary) return { ok: false, reason: "recipient-not-found" };
-        const history = this.#db
+        const penaltyRows = this.#db
           .prepare(
             `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
                     penalty.amount_cents, penalty.added_at
@@ -681,25 +750,37 @@ class Core implements PactCore {
           amount_cents: number;
           added_at: string;
         }[];
-        return {
-          ok: true,
-          ledger: {
-            summary,
-            history: history.map((row) => {
-              // Missed with evidence means all of it was rejected.
-              const rejection = this.#rejection(row.pact_id, row.occurrence_date);
-              return {
-                penaltyId: row.id,
-                pactId: row.pact_id,
-                pactName: row.pact_name,
-                occurrenceDate: row.occurrence_date,
-                amountCents: row.amount_cents,
-                addedAt: new Date(row.added_at),
-                ...(rejection && { rejection }),
-              };
-            }),
-          },
-        };
+        // Approved payments pay off penalties oldest first: walk the history
+        // backwards, giving each penalty what's left of the approved total.
+        let unallocatedCents = summary.paidCents;
+        const penalties = penaltyRows
+          .toReversed()
+          .map((row): LedgerPenalty => {
+            const paidCents = Math.min(row.amount_cents, unallocatedCents);
+            unallocatedCents -= paidCents;
+            // Missed with evidence means all of it was rejected.
+            const rejection = this.#rejection(row.pact_id, row.occurrence_date);
+            return {
+              kind: "penalty",
+              penaltyId: row.id,
+              pactId: row.pact_id,
+              pactName: row.pact_name,
+              occurrenceDate: row.occurrence_date,
+              amountCents: row.amount_cents,
+              addedAt: new Date(row.added_at),
+              paidCents,
+              ...(rejection && { rejection }),
+            };
+          })
+          .toReversed();
+        // A payment recorded the instant a penalty was added came after it, so it's listed first.
+        const history = mergeByTime<LedgerEntry>(
+          (entry) => (entry.kind === "penalty" ? entry.addedAt : entry.recordedAt),
+          "newest-first",
+          this.#ledgerPayments(accountId, recipientId),
+          penalties,
+        );
+        return { ok: true, ledger: { summary, history } };
       },
     };
   }
@@ -714,16 +795,102 @@ class Core implements PactCore {
         `SELECT recipient.id, recipient.name,
                 (SELECT COALESCE(SUM(amount_cents), 0) FROM penalty
                  WHERE penalty.owner_account_id = recipient.owner_account_id
-                   AND penalty.recipient_id = recipient.id) AS owed_cents
+                   AND penalty.recipient_id = recipient.id) AS penalty_cents,
+                COALESCE(SUM(payment.amount_cents) FILTER (WHERE payment.decision = 'approved'), 0) AS paid_cents,
+                COALESCE(SUM(payment.amount_cents) FILTER (WHERE payment.decision IS NULL), 0) AS awaiting_cents,
+                COUNT(payment.id) FILTER (WHERE payment.decision IS NULL) AS awaiting_count
          FROM recipient
+         LEFT JOIN payment
+           ON payment.owner_account_id = recipient.owner_account_id AND payment.recipient_id = recipient.id
          WHERE recipient.owner_account_id = ?
            AND (? IS NULL OR recipient.id = ?)
            AND (EXISTS (SELECT 1 FROM pact WHERE pact.recipient_id = recipient.id)
                 OR EXISTS (SELECT 1 FROM penalty WHERE penalty.recipient_id = recipient.id))
+         GROUP BY recipient.id
          ORDER BY recipient.name, recipient.id`,
       )
-      .all(ownerId, recipientId ?? null, recipientId ?? null) as { id: string; name: string; owed_cents: number }[];
-    return rows.map((row) => ({ recipientId: row.id, name: row.name, owedCents: row.owed_cents, paidCents: 0 }));
+      .all(ownerId, recipientId ?? null, recipientId ?? null) as {
+      id: string;
+      name: string;
+      penalty_cents: number;
+      paid_cents: number;
+      awaiting_cents: number;
+      awaiting_count: number;
+    }[];
+    return rows.map((row) => {
+      const owedCents = row.penalty_cents - row.paid_cents;
+      return {
+        recipientId: row.id,
+        name: row.name,
+        owedCents,
+        payableCents: Math.max(0, owedCents - row.awaiting_cents),
+        awaitingCents: row.awaiting_cents,
+        awaitingCount: row.awaiting_count,
+        paidCents: row.paid_cents,
+      };
+    });
+  }
+
+  /** The owner's payments to `recipientId` and where each one's review stands, newest recorded first. */
+  #ledgerPayments(ownerId: AccountId, recipientId: string): LedgerPayment[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT payment.id, payment.amount_cents, payment.note, payment.recorded_at, payment.decision,
+                payment.decided_at, payment.reject_reason, reviewer.name AS reviewer_name
+         FROM payment LEFT JOIN account AS reviewer ON reviewer.id = payment.decided_by_account_id
+         WHERE payment.owner_account_id = ? AND payment.recipient_id = ?
+         ORDER BY payment.recorded_at DESC, payment.id`,
+      )
+      .all(ownerId, recipientId) as {
+      id: string;
+      amount_cents: number;
+      note: string | null;
+      recorded_at: string;
+      decision: ReviewOutcome | null;
+      decided_at: string | null;
+      reject_reason: string | null;
+      reviewer_name: string | null;
+    }[];
+    return rows.map((row) => {
+      let state: LedgerPaymentState = { kind: "awaiting-approval" };
+      if (row.decision !== null) {
+        const decided = { reviewerName: row.reviewer_name!, decidedAt: new Date(row.decided_at!) };
+        state =
+          row.decision === "approved"
+            ? { kind: "approved", ...decided }
+            : { kind: "rejected", ...decided, reason: row.reject_reason! };
+      }
+      return {
+        kind: "payment",
+        paymentId: row.id,
+        amountCents: row.amount_cents,
+        note: row.note,
+        recordedAt: new Date(row.recorded_at),
+        state,
+      };
+    });
+  }
+
+  /**
+   * Whether `ownerId` may record `payment`, screenshot aside: to one of their
+   * recipients, a positive whole number of cents, and no more than the
+   * ledger's `payableCents`: owed less payments already awaiting approval.
+   */
+  #paymentAcceptance(
+    ownerId: AccountId,
+    payment: NewPayment,
+  ): { ok: true } | { ok: false; reason: RecordPaymentRefusal } {
+    const isOwnRecipient = this.#db
+      .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
+      .get(payment.recipientId, ownerId);
+    if (!isOwnRecipient) return { ok: false, reason: "recipient-not-found" };
+    if (!Number.isSafeInteger(payment.amountCents) || payment.amountCents <= 0) {
+      return { ok: false, reason: "invalid-amount" };
+    }
+    // A recipient no pact names and with no penalties has no ledger: nothing is owed.
+    const [ledger] = this.#ledgerSummaries(ownerId, payment.recipientId);
+    if (payment.amountCents > (ledger?.payableCents ?? 0)) return { ok: false, reason: "payment-exceeds-owed" };
+    return { ok: true };
   }
 
   /**
@@ -733,10 +900,8 @@ class Core implements PactCore {
    * since it was waiting on this decision; before that, judging at the due
    * time will.
    */
-  #decideEvidence(evidence: EvidenceToDecide, decision: ReviewDecision, reviewerId: AccountId): void {
+  #decideEvidence(evidence: EvidenceToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
     const now = this.#clock.now();
-    const outcome: EvidenceDecision = decision.kind === "approve" ? "approved" : "rejected";
-    const reason = decision.kind === "reject" ? decision.reason : null;
     this.#db
       .prepare(
         `UPDATE evidence SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
@@ -763,6 +928,100 @@ class Core implements PactCore {
     });
   }
 
+  /** Payments awaiting approval that `reviewerId` may decide, oldest recorded first. */
+  #paymentsToReview(reviewerId: AccountId): ReviewItem[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT payment.id, owner.name AS owner_name, recipient.name AS recipient_name, payment.amount_cents,
+                payment.note, payment.photo_id, payment.recorded_at,
+                (SELECT COALESCE(SUM(penalty.amount_cents), 0) FROM penalty
+                 WHERE penalty.owner_account_id = payment.owner_account_id
+                   AND penalty.recipient_id = payment.recipient_id)
+                - (SELECT COALESCE(SUM(approved.amount_cents), 0) FROM payment AS approved
+                   WHERE approved.owner_account_id = payment.owner_account_id
+                     AND approved.recipient_id = payment.recipient_id AND approved.decision = 'approved')
+                  AS owed_cents
+         FROM payment
+         JOIN account AS owner ON owner.id = payment.owner_account_id
+         JOIN recipient ON recipient.id = payment.recipient_id
+         WHERE payment.decision IS NULL AND ${MAY_DECIDE_PAYMENT}
+         ORDER BY payment.recorded_at, payment.id`,
+      )
+      .all(reviewerId) as {
+      id: string;
+      owner_name: string;
+      recipient_name: string;
+      amount_cents: number;
+      note: string | null;
+      photo_id: string;
+      recorded_at: string;
+      owed_cents: number;
+    }[];
+    return rows.map((row) => ({
+      kind: "payment",
+      id: row.id,
+      ownerName: row.owner_name,
+      recipientName: row.recipient_name,
+      amountCents: row.amount_cents,
+      note: row.note,
+      photoId: row.photo_id,
+      recordedAt: new Date(row.recorded_at),
+      owedCents: row.owed_cents,
+      owedAfterApprovalCents: Math.max(0, row.owed_cents - row.amount_cents),
+    }));
+  }
+
+  /** Who reviews payments from `ownerId` to `recipientId`, each once. */
+  #paymentReviewers(ownerId: AccountId, recipientId: string): AccountId[] {
+    return (
+      this.#db
+        .prepare(
+          `SELECT DISTINCT reviewer_account_id FROM (${paymentReviewersSql("?", "?")})
+           ORDER BY reviewer_account_id`,
+        )
+        .all(ownerId, recipientId) as { reviewer_account_id: AccountId }[]
+    ).map((row) => row.reviewer_account_id);
+  }
+
+  /**
+   * The payment `itemId`, if `reviewerId` may decide it: they review any of
+   * the owner's pacts with its recipient.
+   */
+  #paymentToDecide(reviewerId: AccountId, itemId: string): PaymentToDecide | undefined {
+    return this.#db
+      .prepare(
+        `SELECT payment.id, payment.owner_account_id, payment.recipient_id, payment.decision
+         FROM payment
+         WHERE payment.id = ? AND ${MAY_DECIDE_PAYMENT}`,
+      )
+      .get(itemId, reviewerId) as PaymentToDecide | undefined;
+  }
+
+  /**
+   * Records a reviewer's decision on a payment awaiting approval and tells
+   * the owner. Approved, it counts against the ledger; rejected, it never did.
+   */
+  #decidePayment(payment: PaymentToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
+    this.#db
+      .prepare(
+        `UPDATE payment SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
+         WHERE id = ?`,
+      )
+      .run(outcome, reviewerId, this.#clock.now().toISOString(), reason, payment.id);
+    this.#enqueue({
+      recipient: payment.owner_account_id,
+      kind: "payment-decided",
+      channel: "push",
+      payload: {
+        itemKind: "payment",
+        itemId: payment.id,
+        recipientId: payment.recipient_id,
+        decision: outcome,
+        ...(reason !== null && { reason }),
+      },
+    });
+  }
+
   /**
    * Whether judging at `t` reaches the pact's occurrence on `date`: it's on
    * or before the pact's `judged_through`, or due by `t` in the owner's
@@ -778,6 +1037,40 @@ class Core implements PactCore {
     return occurrences(occurrenceTermsOf(pact), pact.timezone)
       .dueAfter(pact.judged_through, t)
       .some((occurrence) => occurrence.date === date);
+  }
+
+  /** Whether `photoId` is a photo of some evidence and `accountId` owns or reviews its pact. */
+  #mayViewEvidencePhoto(photoId: string, accountId: AccountId): boolean {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM evidence_photo
+           JOIN evidence ON evidence.id = evidence_photo.evidence_id
+           JOIN pact ON pact.id = evidence.pact_id
+           WHERE evidence_photo.photo_id = ?
+             AND (pact.owner_account_id = ?
+                  OR EXISTS (SELECT 1 FROM pact_reviewer
+                             WHERE pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?))`,
+        )
+        .get(photoId, accountId, accountId) !== undefined
+    );
+  }
+
+  /**
+   * Whether `photoId` is a payment's screenshot and `accountId` made the
+   * payment or reviews any of the owner's pacts with its recipient: those who
+   * may decide it.
+   */
+  #mayViewPaymentPhoto(photoId: string, accountId: AccountId): boolean {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM payment
+           WHERE payment.photo_id = ?
+             AND (payment.owner_account_id = ? OR ${MAY_DECIDE_PAYMENT})`,
+        )
+        .get(photoId, accountId, accountId) !== undefined
+    );
   }
 
   /** The photos of some evidence, in the order taken. */
@@ -818,10 +1111,10 @@ class Core implements PactCore {
   }
 
   /** Where the evidence for an occurrence stands: waiting or approved if any is, else rejected or none. */
-  #evidenceDecision(pactId: string, date: LocalDate): EvidenceDecision | "waiting" | "none" {
+  #evidenceDecision(pactId: string, date: LocalDate): ReviewOutcome | "waiting" | "none" {
     const decisions = (
       this.#db.prepare(`SELECT decision FROM evidence WHERE pact_id = ? AND occurrence_date = ?`).all(pactId, date) as {
-        decision: EvidenceDecision | null;
+        decision: ReviewOutcome | null;
       }[]
     ).map((row) => row.decision ?? "waiting");
     if (decisions.includes("waiting")) return "waiting";
@@ -829,8 +1122,42 @@ class Core implements PactCore {
     return decisions.length > 0 ? "rejected" : "none";
   }
 
-  /** The owner's evidence still waiting for a decision, newest first. */
+  /** The owner's evidence and payments still waiting for a decision, newest first. */
   #waiting(ownerId: AccountId): TodayWaitingItem[] {
+    const payments = (
+      this.#db
+        .prepare(
+          `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
+                  payment.recorded_at
+           FROM payment JOIN recipient ON recipient.id = payment.recipient_id
+           WHERE payment.owner_account_id = ? AND payment.decision IS NULL
+           ORDER BY payment.recorded_at DESC, payment.id`,
+        )
+        .all(ownerId) as {
+        id: string;
+        recipient_id: string;
+        recipient_name: string;
+        amount_cents: number;
+        recorded_at: string;
+      }[]
+    ).map((row): TodayWaitingItem => ({
+      kind: "payment",
+      id: row.id,
+      recipientId: row.recipient_id,
+      recipientName: row.recipient_name,
+      amountCents: row.amount_cents,
+      recordedAt: new Date(row.recorded_at),
+    }));
+    return mergeByTime(
+      (item) => (item.kind === "evidence" ? item.submittedAt : item.recordedAt),
+      "newest-first",
+      this.#waitingEvidence(ownerId),
+      payments,
+    );
+  }
+
+  /** The owner's evidence still waiting for a decision, newest first. */
+  #waitingEvidence(ownerId: AccountId): TodayWaitingItem[] {
     const rows = this.#db
       .prepare(
         `SELECT evidence.id, evidence.pact_id, pact.name, evidence.occurrence_date, evidence.submitted_at
@@ -1182,12 +1509,35 @@ interface EvidenceToDecide {
   id: string;
   pact_id: string;
   occurrence_date: LocalDate;
-  decision: EvidenceDecision | null;
+  decision: ReviewOutcome | null;
   owner_account_id: AccountId;
 }
 
-/** A reviewer's decision on some evidence, as stored. */
-type EvidenceDecision = "approved" | "rejected";
+/** A payment a reviewer is deciding on, as `decide` reads it. */
+interface PaymentToDecide {
+  id: string;
+  owner_account_id: AccountId;
+  recipient_id: string;
+  decision: ReviewOutcome | null;
+}
+
+/** A reviewer's decision on some evidence or a payment, as stored. */
+type ReviewOutcome = "approved" | "rejected";
+
+/** A checked review decision, as `decide` hands it on: a rejection's reason is trimmed and never blank. */
+interface Decided {
+  outcome: ReviewOutcome;
+  reason: string | null;
+}
+
+/**
+ * `lists` merged into one sorted by `at`, oldest or newest first. Ties keep
+ * the order they have in `lists`, as the sort is stable.
+ */
+function mergeByTime<T>(at: (item: T) => Date, direction: "oldest-first" | "newest-first", ...lists: T[][]): T[] {
+  const sign = direction === "oldest-first" ? 1 : -1;
+  return lists.flat().sort((a, b) => sign * (at(a).getTime() - at(b).getTime()));
+}
 
 interface OutboxRow {
   id: number;

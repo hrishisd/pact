@@ -8,7 +8,7 @@ import { Hono, type Context } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
-import type { AccountId, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
+import type { AccountId, NewPayment, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
 import { MAX_EVIDENCE_PHOTOS, WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
@@ -19,6 +19,8 @@ import {
   INVITE_REQUIRED_PATH,
   invitePath,
   MAX_PHOTO_BYTES,
+  PAYMENT_AMOUNT_FIELD,
+  PAYMENT_NOTE_FIELD,
   PHOTO_CONTENT_TYPES,
   type AcceptInviteResponse,
   type AcceptMissResponse,
@@ -43,6 +45,7 @@ import {
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type RecordPaymentResponse,
   type ReviewQueueResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
@@ -71,6 +74,9 @@ export interface AppOptions {
   log?: (line: string) => void;
 }
 
+/** A parsed multipart form: each field's value, or values when it repeats. */
+type UploadForm = Record<string, string | File | (string | File)[]>;
+
 /** Room for the multipart boundaries and headers around the photos. */
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 
@@ -98,15 +104,79 @@ export function createApp({
   const app = new Hono<Env>();
 
   /**
-   * One line per evidence upload, to see sizes and speeds in the server log.
-   * Nothing from the request's URL goes in, so a request can't forge a line.
+   * One line per photo upload (evidence, or a payment's screenshot), to see
+   * sizes and speeds in the server log. Nothing from the request's URL goes
+   * in, so a request can't forge a line.
    */
-  const logUpload = (fields: Record<string, string | number>) =>
+  const logUpload = (upload: "evidence" | "payment", fields: Record<string, string | number>) =>
     log(
-      `evidence-upload ${Object.entries(fields)
+      `${upload}-upload ${Object.entries(fields)
         .map(([name, value]) => `${name}=${value}`)
         .join(" ")}`,
     );
+
+  /**
+   * A multipart upload of photos in EVIDENCE_PHOTO_FIELD: evidence, or a
+   * payment's screenshot. Transport checks only: a form that won't parse, a
+   * field there that isn't a photo, or a form `valid` refuses is a 400
+   * invalid-request; a photo over the size cap is a 400 photo-too-large.
+   * Otherwise `send` calls the core with the photos and its result is the
+   * response. Each upload that parsed logs one line (`logUpload`) with its
+   * sizes and timings and what `outcome` says became of it, except a form
+   * refused for its shape.
+   */
+  const receivePhotos = async <Body extends { ok: boolean }, Fields>(
+    c: Context<Env>,
+    upload: "evidence" | "payment",
+    {
+      parse,
+      send,
+      outcome,
+    }: {
+      /**
+       * Shape checks beyond the photos, given the parsed form and how many
+       * photos it has: the other fields `send` needs, or null if malformed.
+       */
+      parse: (form: UploadForm, photoCount: number) => Fields | null;
+      send: (fields: Fields, photos: Photo[]) => Promise<Body>;
+      /** For the log line: what became of the upload, and the new item's id when it was accepted. */
+      outcome: (body: Body) => Record<string, string>;
+    },
+  ) => {
+    if (!c.req.header("Content-Type")?.startsWith("multipart/form-data")) return apiError(c, 400, "invalid-request");
+    // From the request's headers arriving to its last byte: most of the time
+    // the phone spends uploading, though not its connection setup.
+    const receiving = performance.now();
+    const form = await c.req.parseBody({ all: true }).catch(() => null);
+    const receiveMs = Math.round(performance.now() - receiving);
+    if (!form) {
+      logUpload(upload, { outcome: "unreadable", receiveMs });
+      return apiError(c, 400, "invalid-request");
+    }
+    const fields = [form[EVIDENCE_PHOTO_FIELD] ?? []].flat();
+    const files = fields.filter(
+      (field): field is File => field instanceof File && PHOTO_CONTENT_TYPES.includes(field.type),
+    );
+    const parsed = files.length === fields.length ? parse(form, files.length) : null;
+    if (parsed === null) return apiError(c, 400, "invalid-request");
+    const sizes = {
+      photos: files.length,
+      bytes: files.reduce((total, file) => total + file.size, 0),
+      largestBytes: Math.max(0, ...files.map((file) => file.size)),
+    };
+    if (files.some((file) => file.size > MAX_PHOTO_BYTES)) {
+      logUpload(upload, { outcome: "photo-too-large", ...sizes, receiveMs });
+      return apiError(c, 400, "photo-too-large");
+    }
+    const photos: Photo[] = await Promise.all(
+      files.map(async (file) => ({ bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type })),
+    );
+    const storing = performance.now();
+    const body = await send(parsed, photos);
+    const storeMs = Math.round(performance.now() - storing);
+    logUpload(upload, { ...outcome(body), ...sizes, receiveMs, storeMs });
+    return c.json(body);
+  };
 
   // Liveness, for Fly's check: the process serves and the database answers.
   // It ignores the scheduler and the disk, so a stuck scheduler or a filling
@@ -281,46 +351,40 @@ export function createApp({
       maxSize: MAX_EVIDENCE_PHOTOS * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
       onError: (c) => apiError(c, 400, "photo-too-large"),
     }),
-    async (c) => {
-      if (!c.req.header("Content-Type")?.startsWith("multipart/form-data")) return apiError(c, 400, "invalid-request");
-      // From the request's headers arriving to its last byte: most of the time
-      // the phone spends uploading, though not its connection setup.
-      const receiving = performance.now();
-      const form = await c.req.parseBody({ all: true }).catch(() => null);
-      const receiveMs = Math.round(performance.now() - receiving);
-      if (!form) {
-        logUpload({ outcome: "unreadable", receiveMs });
-        return apiError(c, 400, "invalid-request");
-      }
-      const fields = [form[EVIDENCE_PHOTO_FIELD] ?? []].flat();
-      const files = fields.filter(
-        (field): field is File => field instanceof File && PHOTO_CONTENT_TYPES.includes(field.type),
-      );
-      if (files.length !== fields.length) return apiError(c, 400, "invalid-request");
-      const sizes = {
-        photos: files.length,
-        bytes: files.reduce((total, file) => total + file.size, 0),
-        largestBytes: Math.max(0, ...files.map((file) => file.size)),
-      };
-      if (files.some((file) => file.size > MAX_PHOTO_BYTES)) {
-        logUpload({ outcome: "photo-too-large", ...sizes, receiveMs });
-        return apiError(c, 400, "photo-too-large");
-      }
-      const photos: Photo[] = await Promise.all(
-        files.map(async (file) => ({ bytes: new Uint8Array(await file.arrayBuffer()), contentType: file.type })),
-      );
-      const storing = performance.now();
-      const body: SubmitEvidenceResponse = await core.as(c.get("accountId")).submitEvidence(c.req.param("id"), photos);
-      const storeMs = Math.round(performance.now() - storing);
-      logUpload({
-        outcome: body.ok ? "ok" : body.reason,
-        ...(body.ok && { evidence: body.evidenceId }),
-        ...sizes,
-        receiveMs,
-        storeMs,
-      });
-      return c.json(body);
-    },
+    (c) =>
+      receivePhotos(c, "evidence", {
+        parse: () => ({}),
+        send: (_fields, photos): Promise<SubmitEvidenceResponse> =>
+          core.as(c.get("accountId")).submitEvidence(c.req.param("id"), photos),
+        outcome: (body): Record<string, string> =>
+          body.ok ? { outcome: "ok", evidence: body.evidenceId } : { outcome: body.reason },
+      }),
+  );
+
+  // Transport and shape checks only, as for evidence: the amount must be a
+  // number, and there may be at most one screenshot, under the size cap. The
+  // core decides the rest, a missing screenshot included.
+  app.post(
+    API_PATHS.payments(":id"),
+    bodyLimit({
+      maxSize: MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
+      onError: (c) => apiError(c, 400, "photo-too-large"),
+    }),
+    (c) =>
+      receivePhotos(c, "payment", {
+        parse: (form, photoCount): Omit<NewPayment, "recipientId"> | null => {
+          const amount = form[PAYMENT_AMOUNT_FIELD];
+          const note = form[PAYMENT_NOTE_FIELD];
+          if (typeof amount !== "string" || !/^-?\d+(\.\d+)?$/.test(amount)) return null;
+          if (note !== undefined && typeof note !== "string") return null;
+          if (photoCount > 1) return null;
+          return { amountCents: Number(amount), ...(note !== undefined && { note }) };
+        },
+        send: (fields, [screenshot]): Promise<RecordPaymentResponse> =>
+          core.as(c.get("accountId")).recordPayment({ recipientId: c.req.param("id"), ...fields }, screenshot ?? null),
+        outcome: (body): Record<string, string> =>
+          body.ok ? { outcome: "ok", payment: body.paymentId } : { outcome: body.reason },
+      }),
   );
 
   app.post(API_PATHS.acceptMiss(":id", ":date"), async (c) => {

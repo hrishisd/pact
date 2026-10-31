@@ -61,6 +61,7 @@ test("migration 5: a pact made before judging existed gets no penalty for any oc
   if (!ledger.ok) throw new Error(ledger.reason);
   expect(ledger.ledger.history.length).toBeGreaterThan(0);
   const migratedOn = localDateOf(migratedAt, "UTC");
-  for (const penalty of ledger.ledger.history) expect(penalty.occurrenceDate > migratedOn).toBe(true);
+  for (const entry of ledger.ledger.history)
+    expect(entry.kind === "penalty" && entry.occurrenceDate > migratedOn).toBe(true);
   await core.close();
 });

@@ -231,7 +231,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Each rejection there raises a rejected-evidence alert for the owner. It stays until the owner taps Take the L, which only clears the alert: the penalty was already added at the rejection.
 - On Weekly count, rejected evidence doesn't count toward the week's target, and the owner can make up the session on another day that week. The week still adds one penalty per session short of the target. Example: a 3× week with three photos submitted and one rejected adds one penalty; a week with no photos adds three.
 - Evidence is accepted only on days it can count (scheduled days for Fixed days, any day of the week for Weekly count, the deadline's date for One-time, or start to deadline with Submit anytime) and only until the due-by time. With Submit anytime, the due-by time limits only the deadline's date. For Weekly count, at most one day of evidence counts per calendar day.
-- Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse can come from the library, since they're often screenshots.
+- Evidence photos are live photos taken with the camera. They can't be uploaded from the photo library. Photos attached to an excuse, and a payment's screenshot, can come from the library, since they're often screenshots.
 
 **Judging bedtime pacts**
 - The night of date D is decided by the first `long_sleep` period Oura reports whose `bedtime_start` is between 18:00 on D and 18:00 on D+1. Times come from Oura's timestamps, in the timezone those timestamps carry.
@@ -257,6 +257,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - Owed = penalties not held − approved payments. Awaiting approval = payments a reviewer hasn't decided yet.
 - A new payment can't exceed owed minus awaiting approval.
 - Payments are applied to penalties oldest first.
+- A rejected payment raises no alert. It stays in the recipient's ledger history with who rejected it and why, the way rejected evidence appears there.
 - Overdue = the unpaid part of bills whose due-at time has passed. The owner is warned only about the part that payments awaiting approval don't cover.
 - Lifetime paid = all payments ever approved, per recipient.
 
@@ -306,7 +307,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. On Fixed days and One-time evidence, the reject form warns under the reason box what rejecting costs, e.g. "Rejecting makes Wednesday Missed and adds $5 to Hrishi's Red Cross ledger." Items waiting on the owner's reply are listed below the current item.
 - **Profile:** a Connections section lists only the connections the owner has made, and is hidden when there are none. Disconnecting warns how many active pacts use it.
 - **Invite:** the page an invite link opens says that accepting makes you friends, so the inviter can pick you to review their pacts and you can pick them.
-- **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, "$4 bill due Wed Oct 28", or a payment awaiting approval), lifetime paid, and Record payment. Record payment starts at the open bills' amount. Held penalties appear only in the history, where each penalty also says which bill it's on, or that it goes on a Wednesday bill once it can't be excused. A penalty from rejected evidence says who rejected it and why. Tapping a card opens its history, pushed on the current tab.
+- **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, "$4 bill due Wed Oct 28", or a payment awaiting approval), lifetime paid, and Record payment. Record payment starts at the open bills' amount. Held penalties appear only in the history, where each penalty also says which bill it's on, or that it goes on a Wednesday bill once it can't be excused. A penalty from rejected evidence says who rejected it and why. Payments appear in the history too, each saying whether it's awaiting approval, approved and by whom, or rejected, by whom and why. Tapping a card opens its history, pushed on the current tab.
 - **Theme:** light only. v0 ignores the system's dark-mode setting; a dark theme can come later.
 - **Changes since the prototype** (`main` wins over the prototype on each):
   - Copy is short and plain throughout. New copy matches the existing empty states and timezone screen.
@@ -317,6 +318,10 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - The Penalty step has a single recipient slot: "Pick a recipient", then the chosen name with Change. A recipient is just a name.
   - The invite page explains that accepting lets you pick each other as reviewers, and what a reviewer does.
   - A rejected photo makes the day Missed at once and shows on Today only as an alert with Take the L. The prototype's "I'll pay it" on Missed cards is called Take the L too.
+  - A ledger card's big number is what's owed. A payment awaiting approval doesn't lower it; it shows only in the status line, "$10 payment awaiting approval", or "2 payments awaiting approval · $15" when there are several. The prototype showed owed minus awaiting.
+  - Record payment opens from a recipient's ledger card or history page, so the sheet names the recipient instead of offering a picker. The screenshot comes from the photo library.
+  - The ledger history marks each penalty payments have covered: "Paid", or "$2 of $5 paid" for part of it. The prototype worked this out but didn't show it.
+  - A rejected payment shows in the ledger history with who rejected it and why. The prototype had no copy for it.
 
 ## Testing Decisions
 

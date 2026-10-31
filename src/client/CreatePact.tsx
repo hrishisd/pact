@@ -13,7 +13,7 @@ import {
 } from "../shared/types.ts";
 import type { Json } from "../shared/api.ts";
 import { api, failureText } from "./api.ts";
-import { formatDate, initial } from "./format.ts";
+import { formatDate, initial, parseCents } from "./format.ts";
 import { CameraIcon, RingIcon } from "./icons.tsx";
 import { TermsList } from "./PactPage.tsx";
 
@@ -62,13 +62,6 @@ const PROBLEMS: Record<Problem, string> = {
   "not-a-friend": "Only friends can be reviewers.",
   "no-timezone": "Confirm your timezone first.",
 };
-
-/** Dollars as typed ("5", "$2.50") in whole cents, or null when it isn't an amount. */
-function parseCents(text: string): number | null {
-  const match = /^\$?\s*(\d+)(?:\.(\d{1,2}))?$/.exec(text.trim());
-  if (!match) return null;
-  return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
-}
 
 /** A field left empty (or an amount that isn't one) stops the owner leaving a step. The core judges the rest at Create. */
 function stepProblem(step: Step, form: Form): Problem | null {

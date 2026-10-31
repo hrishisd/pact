@@ -71,3 +71,9 @@ export const RingIcon = () => (
     <circle cx="12" cy="12" r="5" />
   </svg>
 );
+
+export const DollarIcon = () => (
+  <svg {...common} strokeWidth={1.9}>
+    <path d="M15.5 8.2c-.6-1.2-1.9-1.9-3.6-1.9-2 0-3.4 1-3.4 2.5 0 3.5 7.3 1.9 7.3 5.5 0 1.6-1.6 2.7-3.9 2.7-1.8 0-3.2-.8-3.8-2.1M12 4v16" />
+  </svg>
+);

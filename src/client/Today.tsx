@@ -12,18 +12,20 @@ import {
   type TodaySection,
   type TodayWaitingItem,
 } from "../shared/types.ts";
-import { api, ApiError, failureText } from "./api.ts";
+import { api, failureText, uploadFailureText } from "./api.ts";
 import { formatDate, money, timeLeft } from "./format.ts";
-import { CameraIcon } from "./icons.tsx";
-import { shrinkPhoto } from "./photos.ts";
+import { CameraIcon, DollarIcon } from "./icons.tsx";
+import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { Empty, useLoad } from "./ui.tsx";
 
 export function Today({
   onOpenPact,
+  onOpenLedger,
   onCreate,
   onInvite,
 }: {
   onOpenPact: (id: string, name: string) => void;
+  onOpenLedger: (recipientId: string, name: string) => void;
   onCreate: () => void;
   onInvite: () => void;
 }) {
@@ -65,7 +67,9 @@ export function Today({
       {today.sections.map((section) => (
         <Section key={section.kind} section={section} now={now} onOpenPact={onOpenPact} onChanged={reload} />
       ))}
-      {today.waiting.length > 0 && <Waiting items={today.waiting} onOpenPact={onOpenPact} />}
+      {today.waiting.length > 0 && (
+        <Waiting items={today.waiting} onOpenPact={onOpenPact} onOpenLedger={onOpenLedger} />
+      )}
     </>
   );
 }
@@ -188,38 +192,51 @@ const ACCEPT_MISS_REFUSAL_TEXT: Record<AcceptMissRefusal, string> = {
   "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
 };
 
-/** Waiting for approval, last on Today: each item with its kind's icon in a coloured square. */
+/**
+ * Waiting for approval, last on Today: each item with its kind's icon in a
+ * coloured square. Evidence opens its pact; a payment, its recipient's ledger.
+ */
 function Waiting({
   items,
   onOpenPact,
+  onOpenLedger,
 }: {
   items: Json<TodayWaitingItem>[];
   onOpenPact: (id: string, name: string) => void;
+  onOpenLedger: (recipientId: string, name: string) => void;
 }) {
   return (
     <section className="stack">
       <div className="label">Waiting for approval</div>
       <div className="cards">
-        {items.map((item) => (
-          <button key={item.id} className="rowbtn" onClick={() => onOpenPact(item.pactId, item.name)}>
-            <span className="kico k-evidence">
-              <CameraIcon />
-            </span>
-            <span className="rt">
-              <b>{item.name}</b>
-              <small>Evidence</small>
-            </span>
-          </button>
-        ))}
+        {items.map((item) =>
+          item.kind === "evidence" ? (
+            <button key={item.id} className="rowbtn" onClick={() => onOpenPact(item.pactId, item.name)}>
+              <span className="kico k-evidence">
+                <CameraIcon />
+              </span>
+              <span className="rt">
+                <b>{item.name}</b>
+                <small>Evidence</small>
+              </span>
+            </button>
+          ) : (
+            <button key={item.id} className="rowbtn" onClick={() => onOpenLedger(item.recipientId, item.recipientName)}>
+              <span className="kico k-payment">
+                <DollarIcon />
+              </span>
+              <span className="rt">
+                <b>
+                  {money(item.amountCents)} to {item.recipientName}
+                </b>
+                <small>Payment</small>
+              </span>
+            </button>
+          ),
+        )}
       </div>
     </section>
   );
-}
-
-/** A taken photo, shrunk for upload, and its thumbnail's object URL. */
-interface TakenPhoto {
-  blob: Blob;
-  url: string;
 }
 
 /**
@@ -229,7 +246,7 @@ interface TakenPhoto {
  */
 function EvidenceForm({ pactId, onSubmitted }: { pactId: string; onSubmitted: () => void }) {
   const input = useRef<HTMLInputElement>(null);
-  const [photos, setPhotos] = useState<TakenPhoto[]>([]);
+  const [photos, setPhotos] = useState<ShrunkPhoto[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const urls = useRef<string[]>([]);
@@ -240,13 +257,13 @@ function EvidenceForm({ pactId, onSubmitted }: { pactId: string; onSubmitted: ()
   const add = async (file: File) => {
     setError(null);
     try {
-      const blob = await shrinkPhoto(file);
-      setPhotos((taken) => [...taken, { blob, url: URL.createObjectURL(blob) }]);
+      const photo = await shrinkForPreview(file);
+      setPhotos((taken) => [...taken, photo]);
     } catch {
       setError("That photo couldn't be read. Take it again.");
     }
   };
-  const remove = (photo: TakenPhoto) => {
+  const remove = (photo: ShrunkPhoto) => {
     URL.revokeObjectURL(photo.url);
     setPhotos((taken) => taken.filter((p) => p !== photo));
   };
@@ -262,9 +279,11 @@ function EvidenceForm({ pactId, onSubmitted }: { pactId: string; onSubmitted: ()
       setError(REFUSAL_TEXT[result.reason]);
     } catch (failure) {
       setError(
-        failure instanceof ApiError && failure.code === "photo-too-large"
-          ? "A photo was too large to send. Remove it and take it again."
-          : failureText(failure, "Couldn't send. Check your connection and try again."),
+        uploadFailureText(
+          failure,
+          "A photo was too large to send. Remove it and take it again.",
+          "Couldn't send. Check your connection and try again.",
+        ),
       );
     } finally {
       setBusy(false);

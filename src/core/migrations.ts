@@ -203,4 +203,28 @@ export const migrations: readonly string[] = [
   -- Missed card); the ledger doesn't change.
   ALTER TABLE occurrence ADD COLUMN miss_accepted_at TEXT;
   `,
+  // 8: payments
+  `
+  -- The owner's record that they paid a recipient outside the app, with one
+  -- screenshot (photo_id is the PhotoStore's). It counts against the ledger
+  -- only once a reviewer of any of the owner's pacts with that recipient
+  -- approves it. decision is NULL while it waits; the first decision is final.
+  CREATE TABLE payment (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    note TEXT, -- trimmed; NULL when there's none
+    photo_id TEXT NOT NULL UNIQUE,
+    recorded_at TEXT NOT NULL,
+    decision TEXT CHECK (decision IN ('approved', 'rejected')),
+    decided_by_account_id TEXT REFERENCES account (id),
+    decided_at TEXT,
+    reject_reason TEXT,
+    CHECK ((decision IS NULL) = (decided_at IS NULL)),
+    CHECK ((decision IS NULL) = (decided_by_account_id IS NULL)),
+    CHECK ((decision IS 'rejected') = (reject_reason IS NOT NULL))
+  );
+  CREATE INDEX payment_ledger ON payment (owner_account_id, recipient_id);
+  `,
 ];

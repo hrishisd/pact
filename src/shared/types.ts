@@ -151,30 +151,52 @@ export type AcceptMissRefusal =
 export type AcceptMissResult = { ok: true } | { ok: false; reason: AcceptMissRefusal };
 
 /**
- * An item in a reviewer's Review Queue, oldest first. Items never expire.
- * Change requests, excuses and payments join as other kinds.
+ * An item in a reviewer's Review Queue, oldest first (by when evidence was
+ * submitted or a payment recorded). Items never expire. Change requests and
+ * excuses join as other kinds.
  */
 export type ReviewItem =
   /** Photo evidence: the reviewer checks the photos against what counts. */
-  {
-    kind: "evidence";
-    /** The evidence's id. */
-    id: string;
-    pactId: string;
-    pactName: string;
-    ownerName: string;
-    /** The pact's description of what counts. */
-    description: string;
-    /** In the order taken; each is served at the photo path. */
-    photoIds: string[];
-    /** When the server received its last photo. */
-    submittedAt: Date;
-    /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
-    occurrenceDate: string;
-    /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
-    penaltyCents: number;
-    recipientName: string;
-  };
+  | {
+      kind: "evidence";
+      /** The evidence's id. */
+      id: string;
+      pactId: string;
+      pactName: string;
+      ownerName: string;
+      /** The pact's description of what counts. */
+      description: string;
+      /** In the order taken; each is served at the photo path. */
+      photoIds: string[];
+      /** When the server received its last photo. */
+      submittedAt: Date;
+      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+      occurrenceDate: string;
+      /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
+      penaltyCents: number;
+      recipientName: string;
+    }
+  /**
+   * A payment the owner recorded: the reviewer checks the screenshot. Any
+   * reviewer of any of the owner's pacts with the recipient may decide it.
+   */
+  | {
+      kind: "payment";
+      /** The payment's id. */
+      id: string;
+      ownerName: string;
+      recipientName: string;
+      amountCents: number;
+      /** The owner's note, or null when there's none. */
+      note: string | null;
+      /** The screenshot, served at the photo path. */
+      photoId: string;
+      recordedAt: Date;
+      /** What the owner owes the recipient now. Approving lowers it by `amountCents`. */
+      owedCents: number;
+      /** What the owner would owe the recipient once this payment is approved, never below zero. */
+      owedAfterApprovalCents: number;
+    };
 
 /** A reviewer's decision on a Review Queue item. */
 export type ReviewDecision =
@@ -183,7 +205,7 @@ export type ReviewDecision =
   | { kind: "reject"; reason: string };
 
 export type DecideRefusal =
-  /** Not in this account's Review Queue: no such item, or not a reviewer of its pact. */
+  /** Not in this account's Review Queue: no such item, or not one this account may decide. */
   | "item-not-found"
   /** A reviewer of the pact has already decided it; the first decision is final. */
   | "already-decided"
@@ -284,31 +306,76 @@ export interface TodayComingUpCard extends TodayPactCard {
 /** Something of the owner's waiting for a reviewer's decision, newest first. */
 export type TodayWaitingItem =
   /** Evidence still waiting, even once its occurrence is past due. */
-  {
-    kind: "evidence";
-    /** The evidence's id. */
-    id: string;
-    pactId: string;
-    name: string;
-    /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
-    occurrenceDate: string;
-    /** When the server received its last photo. */
-    submittedAt: Date;
-  };
+  | {
+      kind: "evidence";
+      /** The evidence's id. */
+      id: string;
+      pactId: string;
+      name: string;
+      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+      occurrenceDate: string;
+      /** When the server received its last photo. */
+      submittedAt: Date;
+    }
+  /** A payment no reviewer has decided yet. */
+  | {
+      kind: "payment";
+      /** The payment's id. */
+      id: string;
+      recipientId: string;
+      recipientName: string;
+      amountCents: number;
+      recordedAt: Date;
+    };
 export type TodayYesterdayEntry = never;
 
 /** What the owner owes one recipient, across every pact naming it. */
 export interface LedgerSummary {
   recipientId: string;
   name: string;
-  /** The penalties added for Missed occurrences, less approved payments (none until payments arrive). */
+  /** The penalties added for Missed occurrences, less approved payments. */
   owedCents: number;
+  /**
+   * The most a new payment may be: `owedCents` less `awaitingCents`, never
+   * below zero. Nothing more can be recorded while it's zero.
+   */
+  payableCents: number;
+  /** Payments no reviewer has decided yet. They don't reduce `owedCents` until approved. */
+  awaitingCents: number;
+  /** How many payments make up `awaitingCents`. */
+  awaitingCount: number;
   /** Approved payments, lifetime. */
   paidCents: number;
 }
 
+/** A payment the owner made to a recipient outside the app, to record with its screenshot. */
+export interface NewPayment {
+  /** One of the owner's recipients. */
+  recipientId: string;
+  /** In US cents: a positive whole number. */
+  amountCents: number;
+  /** Optional; trimmed, and a blank note is none. */
+  note?: string;
+}
+
+export type RecordPaymentRefusal =
+  /** Not one of this owner's recipients, or none. */
+  | "recipient-not-found"
+  /** Not a positive whole number of cents. */
+  | "invalid-amount"
+  /** A payment needs one screenshot of it. */
+  | "no-screenshot"
+  /** More than what's owed less payments awaiting approval: the ledger would go below zero. */
+  | "payment-exceeds-owed";
+
+export type RecordPaymentResult = { ok: true; paymentId: string } | { ok: false; reason: RecordPaymentRefusal };
+
+/** An entry in a ledger's history: a penalty or a payment. */
+export type LedgerEntry = LedgerPenalty | LedgerPayment;
+
 /** A penalty on a ledger: what a Missed occurrence added. */
 export interface LedgerPenalty {
+  kind: "penalty";
   penaltyId: string;
   pactId: string;
   pactName: string;
@@ -317,14 +384,41 @@ export interface LedgerPenalty {
   amountCents: number;
   /** When it was added: when the occurrence was judged Missed. */
   addedAt: Date;
+  /**
+   * How much of it approved payments have paid: none, part or all of
+   * `amountCents`. Approved payments to the recipient pay off its penalties
+   * oldest first, in the reverse of the history's order.
+   */
+  paidCents: number;
   /** When the occurrence was Missed because its latest evidence was rejected: who rejected it and why. */
   rejection?: EvidenceRejection;
 }
 
-/** One recipient's ledger: its summary and its penalties, newest first. */
+/** A payment to the recipient the owner recorded, and where its review stands. */
+export interface LedgerPayment {
+  kind: "payment";
+  paymentId: string;
+  amountCents: number;
+  /** The owner's note, or null when there's none. */
+  note: string | null;
+  recordedAt: Date;
+  state: LedgerPaymentState;
+}
+
+/**
+ * Where a payment's review stands. Only an approved payment pays off
+ * penalties. A rejected one says who rejected it and why: that's how the
+ * owner learns of it.
+ */
+export type LedgerPaymentState =
+  | { kind: "awaiting-approval" }
+  | { kind: "approved"; reviewerName: string; decidedAt: Date }
+  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+
+/** One recipient's ledger: its summary and its history, newest first. */
 export interface Ledger {
   summary: LedgerSummary;
-  history: LedgerPenalty[];
+  history: LedgerEntry[];
 }
 
 export type LedgerResult = { ok: true; ledger: Ledger } | { ok: false; reason: "recipient-not-found" };

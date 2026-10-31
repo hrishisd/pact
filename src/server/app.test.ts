@@ -21,6 +21,8 @@ import {
   INVITE_TOKEN_SIGN_IN_KEY,
   invitePath,
   MAX_PHOTO_BYTES,
+  PAYMENT_AMOUNT_FIELD,
+  PAYMENT_NOTE_FIELD,
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientResponse,
@@ -39,6 +41,7 @@ import {
   type PactsResponse,
   type RecipientsResponse,
   type MeResponse,
+  type RecordPaymentResponse,
   type ReviewQueueResponse,
   type SetTimezoneResponse,
   type SubmitEvidenceResponse,
@@ -661,23 +664,22 @@ describe("pacts", () => {
   });
 });
 
+/** A JPEG-typed file of `bytes` bytes, as the client sends a shrunk photo. */
+const jpeg = (bytes = 3, fill = 1) => new File([new Uint8Array(bytes).fill(fill)], "photo.jpg", { type: "image/jpeg" });
+
+/** The owner of a Mon/Wed/Fri Camera pact, created on Monday, that the friend reviews. */
+async function ownerWithPact() {
+  const setup = await ownerWithFriend();
+  const created = await setup.s.api<CreatePactResponse>(API_PATHS.pacts, {
+    cookie: setup.owner.cookie,
+    method: "POST",
+    body: setup.pact,
+  });
+  if (!created.body.ok) throw new Error(created.body.reason);
+  return { ...setup, pactId: created.body.pactId };
+}
+
 describe("evidence", () => {
-  /** A JPEG-typed file of `bytes` bytes, as the client sends a shrunk photo. */
-  const jpeg = (bytes = 3, fill = 1) =>
-    new File([new Uint8Array(bytes).fill(fill)], "photo.jpg", { type: "image/jpeg" });
-
-  /** The owner of a Mon/Wed/Fri Camera pact, created on Monday, that the friend reviews. */
-  async function ownerWithPact() {
-    const setup = await ownerWithFriend();
-    const created = await setup.s.api<CreatePactResponse>(API_PATHS.pacts, {
-      cookie: setup.owner.cookie,
-      method: "POST",
-      body: setup.pact,
-    });
-    if (!created.body.ok) throw new Error(created.body.reason);
-    return { ...setup, pactId: created.body.pactId };
-  }
-
   /** Posts `files` as the evidence form's `photo` fields. */
   async function submit(
     s: Awaited<ReturnType<typeof server>>,
@@ -857,7 +859,7 @@ describe("evidence", () => {
           },
         ] satisfies ReviewQueueResponse,
       });
-      const photo = await s.request(API_PATHS.photo(queue.body[0]!.photoIds[1]!), { cookie: friend.cookie });
+      const photo = await s.request(API_PATHS.photo(s.photoStore.photoIds[1]!), { cookie: friend.cookie });
       expect(photo.status).toBe(200);
       expect(new Uint8Array(await photo.arrayBuffer())).toEqual(new Uint8Array(4).fill(2));
 
@@ -992,7 +994,15 @@ describe("ledgers", () => {
 
     const ledgers = await s.api<LedgersResponse>(API_PATHS.ledgers, { cookie: owner.cookie });
 
-    const summary = { recipientId: pact.recipientId, name: "Sam", owedCents: 500, paidCents: 0 };
+    const summary = {
+      recipientId: pact.recipientId,
+      name: "Sam",
+      owedCents: 500,
+      payableCents: 500,
+      awaitingCents: 0,
+      awaitingCount: 0,
+      paidCents: 0,
+    };
     expect(ledgers).toEqual({ status: 200, body: [summary] satisfies LedgersResponse });
     const ledger = await s.api(API_PATHS.ledger(pact.recipientId), { cookie: owner.cookie });
     expect(ledger).toEqual({
@@ -1003,12 +1013,14 @@ describe("ledgers", () => {
           summary,
           history: [
             {
+              kind: "penalty",
               penaltyId: expect.any(String),
               pactId: created.body.pactId,
               pactName: "Gym",
               occurrenceDate: "2026-01-05",
               amountCents: 500,
               addedAt: "2026-01-06T05:00:00.000Z",
+              paidCents: 0,
             },
           ],
         },
@@ -1023,6 +1035,193 @@ describe("ledgers", () => {
     expect(await s.api(API_PATHS.ledger(pact.recipientId), { cookie: friend.cookie })).toEqual(notFound);
     expect(await s.api(API_PATHS.ledger("no-such-recipient"), { cookie: friend.cookie })).toEqual(notFound);
     expect((await s.api(API_PATHS.ledgers, { cookie: friend.cookie })).body).toEqual([]);
+  });
+});
+
+describe("payments", () => {
+  /** The owner with $15 owed to Sam: the friend reviews their Mon/Wed/Fri pact, and every day of it was Missed. */
+  async function ownerWithFifteenOwed() {
+    const setup = await ownerWithPact();
+    setup.s.clock.set(setup.s.at("Sat 00:00"));
+    await setup.s.core.advanceTo(setup.s.clock.now());
+    return { ...setup, sam: setup.pact.recipientId };
+  }
+
+  /** Posts the payment form: the amount in cents, an optional note, and `photos` as `photo` fields. */
+  async function record(
+    s: Awaited<ReturnType<typeof server>>,
+    cookie: string,
+    recipientId: string,
+    { amountCents, note, photos }: { amountCents?: string; note?: string; photos: (File | string)[] },
+  ) {
+    const form = new FormData();
+    if (amountCents !== undefined) form.append(PAYMENT_AMOUNT_FIELD, amountCents);
+    if (note !== undefined) form.append(PAYMENT_NOTE_FIELD, note);
+    for (const photo of photos) form.append(EVIDENCE_PHOTO_FIELD, photo);
+    const response = await s.request(API_PATHS.payments(recipientId), { method: "POST", cookie, body: form });
+    return { status: response.status, body: (await response.json()) as unknown };
+  }
+
+  test("an owner records a payment with a screenshot; the ledger shows it awaiting, and the screenshot is served to the owner and the pact's reviewer only", async () => {
+    const { s, owner, friend, sam } = await ownerWithFifteenOwed();
+    // A friend of the owner's who reviews no pact with Sam.
+    const other = await s.signIn("other@example.test", {
+      inviteToken: (await s.api<CreateInviteResponse>(API_PATHS.invites, { cookie: owner.cookie, method: "POST" })).body
+        .token,
+    });
+
+    const recorded = await record(s, owner.cookie, sam, {
+      amountCents: "1000",
+      note: "Venmo",
+      photos: [jpeg(6, 3)],
+    });
+
+    expect(recorded).toEqual({
+      status: 200,
+      body: { ok: true, paymentId: expect.any(String) } satisfies RecordPaymentResponse,
+    });
+    const ledgers = await s.api<LedgersResponse>(API_PATHS.ledgers, { cookie: owner.cookie });
+    expect(ledgers.body).toEqual([
+      {
+        recipientId: sam,
+        name: "Sam",
+        owedCents: 1500,
+        payableCents: 500,
+        awaitingCents: 1000,
+        awaitingCount: 1,
+        paidCents: 0,
+      },
+    ] satisfies LedgersResponse);
+
+    const [screenshot] = s.photoStore.photoIds;
+    for (const cookie of [owner.cookie, friend.cookie]) {
+      const response = await s.request(API_PATHS.photo(screenshot!), { cookie });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("image/jpeg");
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(6).fill(3));
+    }
+    const response = await s.request(API_PATHS.photo(screenshot!), { cookie: other.cookie });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "not-found" });
+  });
+
+  test("the reviewer sees the payment in their queue and approves it; the owner can't decide it", async () => {
+    const { s, owner, friend, sam } = await ownerWithFifteenOwed();
+    const recorded = await record(s, owner.cookie, sam, { amountCents: "1000", photos: [jpeg()] });
+    const { paymentId } = recorded.body as { paymentId: string };
+
+    const queue = await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, { cookie: friend.cookie });
+    expect(queue.body).toEqual([
+      {
+        kind: "payment",
+        id: paymentId,
+        ownerName: "owner",
+        recipientName: "Sam",
+        amountCents: 1000,
+        note: null,
+        photoId: s.photoStore.photoIds[0]!,
+        recordedAt: s.at("Sat 00:00").toISOString(),
+        owedCents: 1500,
+        owedAfterApprovalCents: 500,
+      },
+    ] satisfies ReviewQueueResponse);
+
+    const approve = { kind: "approve" } satisfies DecideRequest;
+    const decide = (cookie: string) => s.api(API_PATHS.decide(paymentId), { cookie, method: "POST", body: approve });
+    expect(await decide(owner.cookie)).toEqual({
+      status: 200,
+      body: { ok: false, reason: "item-not-found" } satisfies DecideResponse,
+    });
+    expect(await decide(friend.cookie)).toEqual({ status: 200, body: { ok: true } satisfies DecideResponse });
+    const ledgers = await s.api<LedgersResponse>(API_PATHS.ledgers, { cookie: owner.cookie });
+    expect(ledgers.body).toEqual([
+      {
+        recipientId: sam,
+        name: "Sam",
+        owedCents: 500,
+        payableCents: 500,
+        awaitingCents: 0,
+        awaitingCount: 0,
+        paidCents: 1000,
+      },
+    ] satisfies LedgersResponse);
+  });
+
+  test("the core's refusals are data: more than owed, a fractional amount, no screenshot", async () => {
+    const { s, owner, sam } = await ownerWithFifteenOwed();
+
+    const refused = (reason: string) => ({ status: 200, body: { ok: false, reason } });
+    expect(await record(s, owner.cookie, sam, { amountCents: "1501", photos: [jpeg()] })).toEqual(
+      refused("payment-exceeds-owed"),
+    );
+    expect(await record(s, owner.cookie, sam, { amountCents: "250.5", photos: [jpeg()] })).toEqual(
+      refused("invalid-amount"),
+    );
+    expect(await record(s, owner.cookie, sam, { amountCents: "500", photos: [] })).toEqual(refused("no-screenshot"));
+  });
+
+  test("a screenshot over the size cap, one that isn't a JPEG, or more than one, is refused before the core sees it", async () => {
+    const { s, owner, sam } = await ownerWithFifteenOwed();
+
+    expect(await record(s, owner.cookie, sam, { amountCents: "500", photos: [jpeg(MAX_PHOTO_BYTES + 1)] })).toEqual({
+      status: 400,
+      body: { error: "photo-too-large" },
+    });
+    const malformed: (File | string)[][] = [
+      ["not a file"],
+      [new File([new Uint8Array([0x89, 0x50])], "photo.png", { type: "image/png" })],
+      [jpeg(), jpeg()],
+    ];
+    for (const photos of malformed) {
+      expect(await record(s, owner.cookie, sam, { amountCents: "500", photos })).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+    expect(s.photoStore.photoIds).toEqual([]);
+    const ledgers = await s.api<LedgersResponse>(API_PATHS.ledgers, { cookie: owner.cookie });
+    expect(ledgers.body).toEqual([expect.objectContaining({ awaitingCents: 0 })]);
+    // Exactly at the cap is fine.
+    expect(
+      (await record(s, owner.cookie, sam, { amountCents: "500", photos: [jpeg(MAX_PHOTO_BYTES)] })).body,
+    ).toMatchObject({ ok: true });
+  });
+
+  test("an amount that's missing or not a number is an invalid request", async () => {
+    const { s, owner, sam } = await ownerWithFifteenOwed();
+
+    for (const amountCents of [undefined, "", "ten", "1e3", "5 dollars"]) {
+      expect(
+        await record(s, owner.cookie, sam, { ...(amountCents !== undefined && { amountCents }), photos: [jpeg()] }),
+      ).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+    expect(s.photoStore.photoIds).toEqual([]);
+  });
+
+  test("each upload logs one line with its size and timings", async () => {
+    const { s, owner, sam } = await ownerWithFifteenOwed();
+    const uploadLines = () => s.logs.filter((line) => line.startsWith("payment-upload "));
+
+    const recorded = await record(s, owner.cookie, sam, { amountCents: "1000", photos: [jpeg(5)] });
+    const { paymentId } = recorded.body as { paymentId: string };
+    expect(uploadLines()).toEqual([
+      expect.stringMatching(
+        new RegExp(
+          `^payment-upload outcome=ok payment=${paymentId} photos=1 bytes=5 largestBytes=5 receiveMs=\\d+ storeMs=\\d+$`,
+        ),
+      ),
+    ]);
+
+    s.logs.length = 0;
+    await record(s, owner.cookie, sam, { amountCents: "1000", photos: [jpeg(4)] });
+    expect(uploadLines()).toEqual([
+      expect.stringMatching(
+        /^payment-upload outcome=payment-exceeds-owed photos=1 bytes=4 largestBytes=4 receiveMs=\d+ storeMs=\d+$/,
+      ),
+    ]);
   });
 });
 
@@ -1054,6 +1253,7 @@ describe("api", () => {
       API_PATHS.evidence("some-pact"),
       API_PATHS.decide("some-item"),
       API_PATHS.acceptMiss("some-pact", "2026-01-05"),
+      API_PATHS.payments("some-recipient"),
     ];
     for (const path of writes) {
       expect((await s.request(path, { method: "POST" })).status).toBe(401);

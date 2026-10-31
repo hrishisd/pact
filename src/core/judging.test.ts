@@ -124,7 +124,17 @@ describe("judging at the end of a scheduled day", () => {
 
     await s.advanceTo("Tue 00:00");
 
-    expect(owner.ledgers()).toEqual([{ recipientId: expect.any(String), name: "Sam", owedCents: 1000, paidCents: 0 }]);
+    expect(owner.ledgers()).toEqual([
+      {
+        recipientId: expect.any(String),
+        name: "Sam",
+        owedCents: 1000,
+        payableCents: 1000,
+        awaitingCents: 0,
+        awaitingCount: 0,
+        paidCents: 0,
+      },
+    ]);
     expect(missedOn(owner.today()).map((card) => card.pactId)).toEqual([gym, run]);
   });
 
@@ -256,7 +266,7 @@ async function submit(owner: AccountHandle, pactId: string): Promise<string> {
 function addedAt(owner: AccountHandle): Date[] {
   const ledger = owner.ledger(owner.ledgers()[0]!.recipientId);
   if (!ledger.ok) throw new Error(ledger.reason);
-  return ledger.ledger.history.map((penalty) => penalty.addedAt);
+  return ledger.ledger.history.flatMap((entry) => (entry.kind === "penalty" ? [entry.addedAt] : []));
 }
 
 /** The cards in Today's Missed section. */

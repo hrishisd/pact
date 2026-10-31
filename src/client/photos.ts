@@ -6,8 +6,20 @@
 /** The one place photo size and quality are set: about 100–180 KB a photo. */
 const PHOTO_SHRINK = { maxEdge: 1280, quality: 0.6 } as const;
 
+/** A photo shrunk for upload, and an object URL for its thumbnail, which its holder revokes. */
+export interface ShrunkPhoto {
+  blob: Blob;
+  url: string;
+}
+
+/** `photo` shrunk (`shrinkPhoto`), with an object URL to preview it by. */
+export async function shrinkForPreview(photo: Blob): Promise<ShrunkPhoto> {
+  const blob = await shrinkPhoto(photo);
+  return { blob, url: URL.createObjectURL(blob) };
+}
+
 /** `photo` redrawn upright, no larger than PHOTO_SHRINK.maxEdge, as a JPEG. */
-export async function shrinkPhoto(photo: Blob): Promise<Blob> {
+async function shrinkPhoto(photo: Blob): Promise<Blob> {
   const bitmap = await createImageBitmap(photo, { imageOrientation: "from-image" });
   try {
     const scale = Math.min(1, PHOTO_SHRINK.maxEdge / Math.max(bitmap.width, bitmap.height));

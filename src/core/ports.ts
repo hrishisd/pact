@@ -44,7 +44,9 @@ export type NotificationKind =
   /** To each reviewer of a pact: a new item in their Review Queue. */
   | "review-item"
   /** To the owner: a reviewer approved or rejected their evidence. */
-  | "evidence-decided";
+  | "evidence-decided"
+  /** To the owner: a reviewer approved or rejected their payment. */
+  | "payment-decided";
 export type NotificationChannel = "push";
 
 export interface Notification {
