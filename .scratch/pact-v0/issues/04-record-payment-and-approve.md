@@ -1,6 +1,6 @@
 # 04 Record a payment and have a reviewer approve it
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec stories: 71–75, 79, 80 (payment parts), 89 (payments).
@@ -49,3 +49,9 @@ Left for the human:
   - that the reviewer's screenshot loads quickly over cellular
 
 Status stays ready-for-agent until the phone check passes.
+
+### 2026-10-31: done
+
+The human reported that the work is finished and deployed to production, with 5e41638 on main. Migration 8 runs on boot, so the deploy applied it. I couldn't check `/health` from this session (the host is blocked), and no details of the phone check were reported.
+
+Closed.
