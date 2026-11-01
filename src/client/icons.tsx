@@ -37,6 +37,22 @@ export const LedgersIcon = () => (
   </svg>
 );
 
+/** Safari's Share button, as the setup guide describes it. */
+export const ShareIcon = () => (
+  <svg {...common} className="inline-ico">
+    <path d="M12 15V3.5M8 7l4-3.5L16 7" />
+    <path d="M8.5 10.5H6v10h12v-10h-2.5" />
+  </svg>
+);
+
+/** Safari's Add to Home Screen row. */
+export const AddIcon = () => (
+  <svg {...common} className="inline-ico">
+    <rect x="4" y="4" width="16" height="16" rx="3.5" />
+    <path d="M12 8v8M8 12h8" />
+  </svg>
+);
+
 export const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
     <path

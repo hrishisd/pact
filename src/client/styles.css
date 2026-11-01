@@ -566,6 +566,95 @@ p {
   -webkit-user-select: all;
 }
 
+/* Notifications: the steps of the setup guide, and one switch per kind in the profile. */
+.gsteps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: gstep;
+}
+.gsteps li {
+  counter-increment: gstep;
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.gsteps li::before {
+  content: counter(gstep);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+}
+.inline-ico {
+  width: 18px;
+  height: 18px;
+  vertical-align: -4px;
+  color: var(--accent);
+}
+.alert.ok {
+  background: var(--kept-bg);
+  border-color: var(--kept);
+}
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  cursor: pointer;
+}
+.switch-row .rt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.switch-row small {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: 13px;
+  background: var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px var(--scrim);
+  transition: transform 0.15s;
+}
+.switch:checked {
+  background: var(--kept);
+}
+.switch:checked::after {
+  transform: translateX(18px);
+}
+
 /* ---------- sheets ---------- */
 .overlay {
   position: fixed;

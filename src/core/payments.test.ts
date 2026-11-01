@@ -166,12 +166,19 @@ describe("a recorded payment", () => {
     const reviewItem = {
       kind: "review-item",
       channel: "push",
-      payload: { itemKind: "payment", itemId: paymentId, recipientId: sam.id },
+      payload: {
+        itemKind: "payment",
+        itemId: paymentId,
+        recipientId: sam.id,
+        title: "owner recorded a payment",
+        body: "$10 to Sam",
+        url: "/review",
+      },
     };
     expect(s.notifier.sentTo(reviewer)).toEqual([{ ...reviewItem, recipient: reviewer.id }]);
     expect(s.notifier.sentTo(second)).toEqual([{ ...reviewItem, recipient: second.id }]);
     expect(s.notifier.sentTo(friend)).toEqual([]);
-    expect(s.notifier.sentTo(owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "review-item")).toEqual([]);
   });
 
   test("survives a restart, still awaiting approval", async () => {
@@ -344,8 +351,19 @@ describe("deciding a payment", () => {
     await reviewer.decide(second, { kind: "reject", reason: "That's not Sam's account" });
 
     const decided = { recipient: owner.id, kind: "payment-decided", channel: "push" };
-    expect(s.notifier.sentTo(owner)).toEqual([
-      { ...decided, payload: { itemKind: "payment", itemId: paymentId, recipientId: sam.id, decision: "approved" } },
+    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "payment-decided")).toEqual([
+      {
+        ...decided,
+        payload: {
+          itemKind: "payment",
+          itemId: paymentId,
+          recipientId: sam.id,
+          decision: "approved",
+          title: "reviewer approved your payment",
+          body: "$10 to Sam",
+          url: `/ledgers/${sam.id}`,
+        },
+      },
       {
         ...decided,
         payload: {
@@ -354,6 +372,9 @@ describe("deciding a payment", () => {
           recipientId: sam.id,
           decision: "rejected",
           reason: "That's not Sam's account",
+          title: "reviewer rejected your payment",
+          body: "$5 to Sam · “That's not Sam's account”",
+          url: `/ledgers/${sam.id}`,
         },
       },
     ]);

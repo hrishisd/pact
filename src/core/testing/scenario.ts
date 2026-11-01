@@ -107,7 +107,12 @@ export function scenario(): Scenario {
         // Resolve against the current core on every use, so handles survive restart().
         const view = core.as(id);
         const value = Reflect.get(view, prop);
-        return typeof value === "function" ? value.bind(view) : value;
+        if (typeof value !== "function") return value;
+        // Commands don't wait for delivery; a scenario's next line may assert on it.
+        return (...args: unknown[]) => {
+          const result = value.apply(view, args);
+          return result instanceof Promise ? result.finally(() => core.deliveriesSettled()) : result;
+        };
       },
     });
 

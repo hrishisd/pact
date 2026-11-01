@@ -145,6 +145,9 @@ describe("deciding on evidence", () => {
           pactId: gym,
           decision: "rejected",
           reason: "That's last week's photo",
+          title: "reviewer rejected your evidence",
+          body: "Gym · “That's last week's photo”",
+          url: "/",
         },
       },
     ]);

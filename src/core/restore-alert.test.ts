@@ -18,7 +18,13 @@ describe("operator alert after a restore", () => {
         recipient: owner.id,
         kind: "operator-alert",
         channel: "push",
-        payload: { alert: "database-restored", lastTick: "2026-01-05T23:00:00.000Z" },
+        payload: {
+          alert: "database-restored",
+          lastTick: "2026-01-05T23:00:00.000Z",
+          title: "Operator alert",
+          body: "Database restored from backup. Last tick: 2026-01-05T23:00:00.000Z",
+          url: "/",
+        },
       },
     ]);
     expect(s.logs).toContainEqual(expect.stringMatching(OPERATOR_ALERT_WITH_TICK));
@@ -40,7 +46,15 @@ describe("operator alert after a restore", () => {
 
     await s.core.raiseRestoreAlert();
 
-    expect(s.notifier.sentTo(owner).map((n) => n.payload)).toEqual([{ alert: "database-restored", lastTick: null }]);
+    expect(s.notifier.sentTo(owner).map((n) => n.payload)).toEqual([
+      {
+        alert: "database-restored",
+        lastTick: null,
+        title: "Operator alert",
+        body: "Database restored from backup. Last tick: none",
+        url: "/",
+      },
+    ]);
     expect(s.logs).toContainEqual(expect.stringMatching(/OPERATOR_ALERT.*none/));
   });
 
@@ -59,7 +73,13 @@ describe("operator alert after a restore", () => {
     await s.advanceTo("Mon 18:01");
 
     expect(s.notifier.sentTo(owner).map((n) => n.payload)).toEqual([
-      { alert: "database-restored", lastTick: "2026-01-05T23:00:00.000Z" },
+      {
+        alert: "database-restored",
+        lastTick: "2026-01-05T23:00:00.000Z",
+        title: "Operator alert",
+        body: "Database restored from backup. Last tick: 2026-01-05T23:00:00.000Z",
+        url: "/",
+      },
     ]);
     // The tick that delivered it is recorded as usual.
     expect(s.core.lastTick()).toEqual(new Date("2026-01-05T23:01:00Z"));
@@ -79,7 +99,13 @@ describe("operator alert after a restore", () => {
     await s.core.raiseRestoreAlert();
 
     expect(s.notifier.sentTo(owner).map((n) => n.payload)).toEqual([
-      { alert: "database-restored", lastTick: "2026-01-05T23:01:00.000Z" },
+      {
+        alert: "database-restored",
+        lastTick: "2026-01-05T23:01:00.000Z",
+        title: "Operator alert",
+        body: "Database restored from backup. Last tick: 2026-01-05T23:01:00.000Z",
+        url: "/",
+      },
     ]);
   });
 });

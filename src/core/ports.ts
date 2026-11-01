@@ -1,7 +1,9 @@
 // The four ports outside the Pact core. Each has a production adapter
-// (adapters.ts, photo-stores.ts) and a fake for tests (testing/fakes.ts).
+// (adapters.ts, photo-stores.ts, web-push.ts) and a fake for tests (testing/fakes.ts).
 
-import type { AccountId } from "../shared/types.ts";
+import type { AccountId, PushDevice } from "../shared/types.ts";
+
+export type { PushDevice };
 
 /** The current time. The core never reads system time any other way. */
 export interface Clock {
@@ -46,19 +48,39 @@ export type NotificationKind =
   /** To the owner: a reviewer approved or rejected their evidence. */
   | "evidence-decided"
   /** To the owner: a reviewer approved or rejected their payment. */
-  | "payment-decided";
+  | "payment-decided"
+  /** To the owner: an occurrence reached its due time and was judged Missed. */
+  | "missed-occurrence";
 export type NotificationChannel = "push";
+
+export interface NotificationPayload {
+  /** What the notification says, and the app path it opens. */
+  title: string;
+  body: string;
+  url: string;
+  [detail: string]: unknown;
+}
 
 export interface Notification {
   recipient: AccountId;
   kind: NotificationKind;
   channel: NotificationChannel;
-  payload: Record<string, unknown>;
+  payload: NotificationPayload;
 }
 
-/** Delivers one notification. Throwing means "not delivered"; the core retries later. */
+export interface DeliveryReport {
+  /** Endpoints of devices the push service says are gone; the core removes them. */
+  expired: string[];
+  /** Devices it may reach later; the core retries just these. */
+  failed: { endpoint: string; error: string }[];
+}
+
+/**
+ * Delivers one notification to the given devices of its recipient (there may
+ * be none). Throwing means no device was reached; the core retries them all.
+ */
 export interface Notifier {
-  deliver(notification: Notification): Promise<void>;
+  deliver(notification: Notification, devices: readonly PushDevice[]): Promise<DeliveryReport>;
 }
 
 export interface StoredPhoto {

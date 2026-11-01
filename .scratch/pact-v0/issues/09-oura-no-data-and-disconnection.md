@@ -20,7 +20,7 @@ Make the gap between waking up and Oura syncing visible and cheap to fix, and ha
 - The core ignores a check less than 15 seconds after the last one for that account.
 
 ### 3pm push
-- At 15:00 on D+1, a night still not judged sends the owner one push (data-source problem kind).
+- At 15:00 on D+1, a night still not judged sends the owner one push (Connection problem kind).
 
 ### Disconnection
 - A "disconnected" result (token revoked or expired, membership lapsed / 403) marks the connection **Needs reconnecting** once, with one alert in the app and on the pact, plus one notification. The connection isn't polled again until the owner reconnects.

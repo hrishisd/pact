@@ -15,13 +15,17 @@ import type {
   LedgerSummary,
   NewPact,
   NewRecipient,
+  NotificationSetting,
+  NotificationSettingState,
   PactResult,
   PactSummary,
   Profile,
+  PushDevice,
   Recipient,
   RecordPaymentResult,
   ReviewDecision,
   ReviewItem,
+  SavePushSubscriptionResult,
   Schedule,
   SetTimezoneResult,
   SubmitEvidenceResult,
@@ -75,6 +79,16 @@ export function inviteTokenFromPath(pathname: string): string | null {
   return match?.[1] === undefined ? null : decodeURIComponent(match[1]);
 }
 
+/** The app's own pages, for its navigation and for where a notification opens. */
+export const APP_PATHS = {
+  today: "/",
+  pacts: "/pacts",
+  review: "/review",
+  ledgers: "/ledgers",
+  pact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}`,
+  ledger: (recipientId: string) => `/ledgers/${encodeURIComponent(recipientId)}`,
+} as const;
+
 /**
  * The JSON API's routes. Tokens and ids are URL-safe as made (base64url,
  * UUIDs), so they go into paths as they are; the server registers its routes
@@ -109,6 +123,8 @@ export const API_PATHS = {
   ledgers: "/api/ledgers",
   ledger: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}` as const,
   payments: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}/payments` as const,
+  notifications: "/api/notifications",
+  pushSubscriptions: "/api/push-subscriptions",
 } as const;
 
 /**
@@ -206,6 +222,32 @@ export type LedgerResponse = Json<LedgerResult>;
  * "invalid-amount" (say, a fraction of a cent) included, are 200s.
  */
 export type RecordPaymentResponse = RecordPaymentResult;
+
+/** GET /api/notifications: the account's settings, and the key a browser subscribes with. */
+export interface NotificationsResponse {
+  settings: NotificationSettingState[];
+  vapidPublicKey: string;
+}
+
+/** POST /api/notifications: turns one setting on or off. Answers with all of them. */
+export interface SetNotificationSettingRequest {
+  setting: NotificationSetting;
+  enabled: boolean;
+}
+export type SetNotificationSettingResponse = NotificationSettingState[];
+
+/**
+ * POST /api/push-subscriptions: this device gets this account's notifications.
+ * A body of another shape is a 400 "invalid-request"; the core refuses an
+ * endpoint or keys it doesn't accept with a 200.
+ */
+export type SavePushSubscriptionRequest = PushDevice;
+export type SavePushSubscriptionResponse = SavePushSubscriptionResult;
+
+/** DELETE /api/push-subscriptions: this device stops getting them. Answers 200 whether or not it was saved. */
+export interface RemovePushSubscriptionRequest {
+  endpoint: string;
+}
 
 /** GET /api/me: the signed-in account's profile. */
 export type MeResponse = Profile;

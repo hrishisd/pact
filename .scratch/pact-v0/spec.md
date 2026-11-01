@@ -138,7 +138,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 85. As an owner, I want each pact's reminders to fire only while the occurrence still needs evidence (on scheduled days for Fixed days; once, on its own date, for each One-time reminder), so that I'm not nagged about things I've already done.
 86. As an owner on a Weekly count pact, I want reminders to fire only on days without evidence and only until I've met the week's target, so that they stop once I'm done.
 87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to go off every scheduled night, even if I'm already in bed, so that I get a cue to start getting ready for bed. The app can't tell I'm in bed until my ring syncs, usually the next morning.
-88. As a user, I want to turn each kind of event notification (picked as a reviewer on a new pact, new review item, decision, comment, Missed occurrence, data-source problem, new bill, overdue bill) on or off, so that I control how much I'm contacted.
+88. As a user, I want to turn each kind of event notification (picked as a reviewer on a new pact, new review item, decision, comment, Missed occurrence, Connection problem, new bill, overdue bill) on or off, so that I control how much I'm contacted.
 
 ### Today and navigation
 
@@ -190,7 +190,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - **Penalty**: occurrence, recipient, amount, added-at time, state (held, while a pending excuse covers it; or owed), and the bill it's on, once it's on one.
 - **Bill**: owner, recipient, created-at time (a Wednesday at 18:00), due-at time (created + 7 days), and its penalties. It never changes after it's created.
 - **Payment**: owner, recipient, amount, screenshot, note, decision.
-- **Alert**: account, optional pact, kind (data-source problem, rejected evidence (resolved by Take the L), reviewer question awaiting reply, overdue bill not covered by pending payments), resolved state.
+- **Alert**: account, optional pact, kind (Connection problem, rejected evidence (resolved by Take the L), reviewer question awaiting reply, overdue bill not covered by pending payments), resolved state.
 
 ### Rules the core enforces
 
@@ -238,7 +238,7 @@ Each scheduled **occurrence** is judged as **Kept**, **Missed** or **Excused**. 
 - The night is judged as soon as that period arrives: Kept if `bedtime_start` is before the deadline, otherwise Missed. A later period in the same window never changes it. This accepts a loophole: a sleep of 3 hours or more that starts before the deadline counts, even if the owner gets up again afterwards.
 - No qualifying period by 18:00 on D+1 means Missed, judged then.
 - A "disconnected" result raises a data-source alert and notification but doesn't judge the night. It stays not judged until 18:00 on D+1, so reconnecting in time still lets the data count.
-- At 15:00 on D+1, a night still not judged sends the owner one push (the data-source problem notification kind).
+- At 15:00 on D+1, a night still not judged sends the owner one push (the Connection problem notification kind).
 
 **Excuses**
 - Can be filed for any future date range and for any occurrence that isn't judged yet, such as last night before Oura reports it. For occurrences already judged, only within 48 hours of being judged Missed or having evidence rejected.
@@ -306,6 +306,8 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **Item kinds:** each review item kind has its own colour and icon: Change amber pencil, Evidence green camera, Excuse slate calendar with an X, Payment red $. Waiting items show the icon in a coloured square on the left, with the kind name in the small line under the title. Review and item pages show it as a coloured badge with the icon. Chosen over plain colour badges.
 - **Review:** **one item at a time**, with Reject (a reason is required), Ask and Approve, plus Prev/Skip. On Fixed days and One-time evidence, the reject form warns under the reason box what rejecting costs, e.g. "Rejecting makes Wednesday Missed and adds $5 to Hrishi's Red Cross ledger." Items waiting on the owner's reply are listed below the current item.
 - **Profile:** a Connections section lists only the connections the owner has made, and is hidden when there are none. Disconnecting warns how many active pacts use it.
+- **Turning on notifications:** an alert sits above Today until push is on for the device or the user taps Not now, which clears it for good on that device. It opens a pushed Notifications page: on an iPhone in Safari, the steps to add Pact to the Home Screen and sign in again; in the installed app, or on any other device, Turn on notifications; if blocked, how to allow it in Settings. Chosen over a first-run screen (one more screen before the app, and it gets in the way of an invite) and leaving it in the profile (nothing tells a new reviewer push exists). The profile's Notifications section shows this device's state, with a way back to that page, above one switch per kind that exists so far. Switches apply to the account, on every device; push is per device.
+- **A rejection sends one push:** the decision, which names the reason. It doesn't also send a Missed occurrence push.
 - **Invite:** the page an invite link opens says that accepting makes you friends, so the inviter can pick you to review their pacts and you can pick them.
 - **Ledgers:** one card per recipient showing a big owed amount, one status line only when needed (overdue in red, "$4 bill due Wed Oct 28", or a payment awaiting approval), lifetime paid, and Record payment. Record payment starts at the open bills' amount. Held penalties appear only in the history, where each penalty also says which bill it's on, or that it goes on a Wednesday bill once it can't be excused. A penalty from rejected evidence says who rejected it and why. Payments appear in the history too, each saying whether it's awaiting approval, approved and by whom, or rejected, by whom and why. Tapping a card opens its history, pushed on the current tab.
 - **Theme:** light only. v0 ignores the system's dark-mode setting; a dark theme can come later.

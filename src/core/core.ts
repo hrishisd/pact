@@ -5,13 +5,16 @@
 // transaction and delivered only after it commits. Queries are synchronous
 // reads. The core reads time only from the Clock port.
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { createECDH, randomBytes, randomUUID } from "node:crypto";
 import type { LocalDate } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { newOccurrenceTerms, occurrences, type Occurrence, type OccurrenceTerms } from "./occurrences.ts";
-import type { Clock, Notification, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
+import type { Clock, Notification, NotificationKind, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
+import { APP_PATHS } from "../shared/api.ts";
+import { formatDate, money } from "../shared/format.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
+  NOTIFICATION_SETTINGS,
   type AcceptInviteResult,
   type AcceptMissResult,
   type AccountId,
@@ -32,16 +35,20 @@ import {
   type LedgerSummary,
   type NewPact,
   type NewRecipient,
+  type NotificationSetting,
+  type NotificationSettingState,
   type PactSummary,
   type PactResult,
   type PactTerms,
   type Recipient,
   type NewPayment,
   type Profile,
+  type PushDevice,
   type RecordPaymentRefusal,
   type RecordPaymentResult,
   type ReviewDecision,
   type ReviewItem,
+  type SavePushSubscriptionResult,
   type Schedule,
   type SetTimezoneResult,
   type SignInResult,
@@ -100,6 +107,8 @@ export interface PactCore {
   schemaVersion(): number;
   /** After a restore from backup: tells the operator how old the restored data is. */
   raiseRestoreAlert(): Promise<void>;
+  /** Waits for the outbox deliveries started so far. Commands don't; the scheduler's tick and tests do. */
+  deliveriesSettled(): Promise<void>;
   /** Waits for any delivery in progress, then closes the database. */
   close(): Promise<void>;
 }
@@ -185,6 +194,18 @@ export interface AccountView {
    * owner's recipient, or none, is not found.
    */
   ledger(recipientId: string): LedgerResult;
+  /** This account's notification settings, in display order. */
+  notificationSettings(): NotificationSettingState[];
+  /** Off, that kind records nothing for this account until it's turned back on. */
+  setNotificationSetting(setting: NotificationSetting, enabled: boolean): Promise<NotificationSettingState[]>;
+  /**
+   * Notifications for this account go to this device too, from now on. Only
+   * the known push services are accepted, since the server sends to whatever
+   * is saved here. A device another account saved moves to this one.
+   */
+  savePushSubscription(device: PushDevice): Promise<SavePushSubscriptionResult>;
+  /** Stops sending to this device, if it's this account's. */
+  removePushSubscription(endpoint: string): Promise<void>;
 }
 
 export type PhotoResult = { ok: true; photo: Photo } | { ok: false; reason: "photo-not-found" };
@@ -194,6 +215,23 @@ export function createPactCore(options: PactCoreOptions): PactCore {
   return new Core(db, options);
 }
 
+/** Which setting turns a kind of notification off. Operator alerts can't be. */
+const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
+  "operator-alert": null,
+  "review-item": "review-item",
+  "evidence-decided": "decision",
+  "payment-decided": "decision",
+  "missed-occurrence": "missed-occurrence",
+};
+/** The push services browsers use, as domains; a saved endpoint must be on one of them. */
+const PUSH_SERVICE_DOMAINS = [
+  "push.apple.com",
+  "fcm.googleapis.com",
+  "push.services.mozilla.com",
+  "notify.windows.com",
+];
+const P256DH_BYTES = 65;
+const AUTH_BYTES = 16;
 /** /health fails when the last scheduler tick is older than this. */
 const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
@@ -239,19 +277,22 @@ class Core implements PactCore {
 
   /**
    * Runs `change` as one transaction: all of it commits or none of it does.
-   * Then runs `afterCommit` and delivers the outbox. A delivery failure
+   * Then runs `afterCommit` and starts delivering the outbox, without waiting:
+   * a slow push service never holds up the person who tapped. A delivery failure
    * doesn't fail the command; the notification waits for the next attempt.
    */
   async #command<T>(change: () => T, afterCommit?: (result: T) => void): Promise<T> {
     const result = this.#db.transaction(change).immediate();
     afterCommit?.(result);
-    await this.#deliverOutbox();
+    void this.#deliverOutbox();
     return result;
   }
 
   /** Queues a notification in the current command's transaction. */
   #enqueue(notification: Notification): void {
     if (!this.#db.inTransaction) throw new Error("notifications are enqueued only inside a command");
+    const setting = SETTING_OF_KIND[notification.kind];
+    if (setting !== null && this.#settingIsOff(notification.recipient, setting)) return;
     this.#db
       .prepare(
         `INSERT INTO outbox (recipient_account_id, kind, channel, payload, created_at)
@@ -266,6 +307,18 @@ class Core implements PactCore {
       );
   }
 
+  #settingIsOff(accountId: AccountId, setting: NotificationSetting): boolean {
+    return (
+      this.#db
+        .prepare(`SELECT 1 FROM notification_setting_off WHERE account_id = ? AND setting = ?`)
+        .get(accountId, setting) !== undefined
+    );
+  }
+
+  #notificationSettings(accountId: AccountId): NotificationSettingState[] {
+    return NOTIFICATION_SETTINGS.map((setting) => ({ setting, enabled: !this.#settingIsOff(accountId, setting) }));
+  }
+
   #deliverOutbox(): Promise<void> {
     this.#delivery = this.#delivery
       .then(() => this.#deliverPending())
@@ -276,7 +329,7 @@ class Core implements PactCore {
   async #deliverPending(): Promise<void> {
     const rows = this.#db
       .prepare(
-        `SELECT id, recipient_account_id, kind, channel, payload
+        `SELECT id, recipient_account_id, kind, channel, payload, sent_to
          FROM outbox WHERE delivered_at IS NULL ORDER BY id`,
       )
       .all() as OutboxRow[];
@@ -288,7 +341,23 @@ class Core implements PactCore {
         payload: JSON.parse(row.payload) as Notification["payload"],
       };
       try {
-        await this.#notifier.deliver(notification);
+        const devices = this.#db
+          .prepare(`SELECT endpoint, p256dh, auth FROM push_subscription WHERE account_id = ? ORDER BY endpoint`)
+          .all(row.recipient_account_id) as PushDevice[];
+        const sentTo = JSON.parse(row.sent_to) as string[];
+        const toSend = devices.filter((device) => !sentTo.includes(device.endpoint));
+        const { expired, failed } = await this.#notifier.deliver(notification, toSend);
+        for (const endpoint of expired) {
+          this.#db.prepare(`DELETE FROM push_subscription WHERE endpoint = ?`).run(endpoint);
+        }
+        if (failed.length > 0) {
+          const unreached = new Set([...expired, ...failed.map((f) => f.endpoint)]);
+          const reached = toSend.map((device) => device.endpoint).filter((endpoint) => !unreached.has(endpoint));
+          this.#db
+            .prepare(`UPDATE outbox SET sent_to = ? WHERE id = ?`)
+            .run(JSON.stringify([...sentTo, ...reached]), row.id);
+          throw new Error(failed.map((f) => f.error).join("; "));
+        }
         this.#db
           .prepare(`UPDATE outbox SET delivered_at = ?, attempts = attempts + 1 WHERE id = ?`)
           .run(this.#clock.now().toISOString(), row.id);
@@ -559,8 +628,48 @@ class Core implements PactCore {
         const hasPacts = this.#db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
         return { hasPacts, alerts, sections, waiting: this.#waiting(accountId), yesterday: [] };
       },
+      notificationSettings: () => {
+        account();
+        return this.#notificationSettings(accountId);
+      },
+      setNotificationSetting: (setting, enabled) =>
+        this.#command(() => {
+          account();
+          if (enabled) {
+            this.#db
+              .prepare(`DELETE FROM notification_setting_off WHERE account_id = ? AND setting = ?`)
+              .run(accountId, setting);
+          } else {
+            this.#db
+              .prepare(
+                `INSERT INTO notification_setting_off (account_id, setting) VALUES (?, ?) ON CONFLICT DO NOTHING`,
+              )
+              .run(accountId, setting);
+          }
+          return this.#notificationSettings(accountId);
+        }),
+      savePushSubscription: (device) =>
+        this.#command((): SavePushSubscriptionResult => {
+          account();
+          if (!isPushDevice(device)) return { ok: false, reason: "invalid-subscription" };
+          this.#db
+            .prepare(
+              `INSERT INTO push_subscription (endpoint, account_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (endpoint) DO UPDATE
+               SET account_id = excluded.account_id, p256dh = excluded.p256dh, auth = excluded.auth`,
+            )
+            .run(device.endpoint, accountId, device.p256dh, device.auth, this.#clock.now().toISOString());
+          return { ok: true };
+        }),
+      removePushSubscription: (endpoint) =>
+        this.#command(() => {
+          account();
+          this.#db
+            .prepare(`DELETE FROM push_subscription WHERE endpoint = ? AND account_id = ?`)
+            .run(endpoint, accountId);
+        }),
       submitEvidence: async (pactId, photos) => {
-        const { timezone } = account();
+        const { timezone, name: ownerName } = account();
         // Refuse cheaply before storing anything, then check again at the time
         // the server received the photos, in the transaction that writes.
         const early = this.#evidenceAcceptance(accountId, timezone, pactId, photos.length, this.#clock.now());
@@ -583,6 +692,7 @@ class Core implements PactCore {
               .prepare(`INSERT INTO evidence_photo (evidence_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
               .run(evidenceId, position, photoId, receivedAt.toISOString());
           });
+          const pactName = this.#pactName(pactId);
           for (const { reviewer_account_id } of this.#db
             .prepare(`SELECT reviewer_account_id FROM pact_reviewer WHERE pact_id = ? ORDER BY reviewer_account_id`)
             .all(pactId) as { reviewer_account_id: AccountId }[]) {
@@ -590,7 +700,14 @@ class Core implements PactCore {
               recipient: reviewer_account_id,
               kind: "review-item",
               channel: "push",
-              payload: { itemKind: "evidence", itemId: evidenceId, pactId },
+              payload: {
+                itemKind: "evidence",
+                itemId: evidenceId,
+                pactId,
+                title: `${ownerName} submitted evidence`,
+                body: `${pactName} · ${formatDate(date)}`,
+                url: APP_PATHS.review,
+              },
             });
           }
           return { ok: true, evidenceId };
@@ -612,7 +729,7 @@ class Core implements PactCore {
           return accepted.changes === 1 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
         }),
       recordPayment: async (payment, screenshot) => {
-        account();
+        const { name: ownerName } = account();
         // Refuse cheaply before storing anything, then check again in the
         // transaction that writes, as another payment may have come first.
         const early = this.#paymentAcceptance(accountId, payment);
@@ -643,7 +760,14 @@ class Core implements PactCore {
               recipient: reviewerId,
               kind: "review-item",
               channel: "push",
-              payload: { itemKind: "payment", itemId: paymentId, recipientId: payment.recipientId },
+              payload: {
+                itemKind: "payment",
+                itemId: paymentId,
+                recipientId: payment.recipientId,
+                title: `${ownerName} recorded a payment`,
+                body: `${money(payment.amountCents)} to ${this.#recipientName(payment.recipientId)}`,
+                url: APP_PATHS.review,
+              },
             });
           }
           return { ok: true, paymentId };
@@ -924,8 +1048,26 @@ class Core implements PactCore {
         pactId: evidence.pact_id,
         decision: outcome,
         ...(reason !== null && { reason }),
+        title: `${this.#accountName(reviewerId)} ${outcome} your evidence`,
+        body: `${this.#pactName(evidence.pact_id)} · ${
+          reason === null ? formatDate(evidence.occurrence_date) : `“${reason}”`
+        }`,
+        // A rejection shows as an alert on Today, where the owner can respond to it.
+        url: outcome === "approved" ? APP_PATHS.pact(evidence.pact_id) : APP_PATHS.today,
       },
     });
+  }
+
+  #accountName(accountId: AccountId): string {
+    return (this.#db.prepare(`SELECT name FROM account WHERE id = ?`).get(accountId) as { name: string }).name;
+  }
+
+  #pactName(pactId: string): string {
+    return (this.#db.prepare(`SELECT name FROM pact WHERE id = ?`).get(pactId) as { name: string }).name;
+  }
+
+  #recipientName(recipientId: string): string {
+    return (this.#db.prepare(`SELECT name FROM recipient WHERE id = ?`).get(recipientId) as { name: string }).name;
   }
 
   /** Payments awaiting approval that `reviewerId` may decide, oldest recorded first. */
@@ -1008,6 +1150,10 @@ class Core implements PactCore {
          WHERE id = ?`,
       )
       .run(outcome, reviewerId, this.#clock.now().toISOString(), reason, payment.id);
+    const { amount_cents } = this.#db.prepare(`SELECT amount_cents FROM payment WHERE id = ?`).get(payment.id) as {
+      amount_cents: number;
+    };
+    const paid = `${money(amount_cents)} to ${this.#recipientName(payment.recipient_id)}`;
     this.#enqueue({
       recipient: payment.owner_account_id,
       kind: "payment-decided",
@@ -1018,6 +1164,9 @@ class Core implements PactCore {
         recipientId: payment.recipient_id,
         decision: outcome,
         ...(reason !== null && { reason }),
+        title: `${this.#accountName(reviewerId)} ${outcome} your payment`,
+        body: reason === null ? paid : `${paid} · “${reason}”`,
+        url: APP_PATHS.ledger(payment.recipient_id),
       },
     });
   }
@@ -1322,8 +1471,8 @@ class Core implements PactCore {
       .all(...params) as Recipient[];
   }
 
-  advanceTo(t: Date): Promise<void> {
-    return this.#command(() => {
+  async advanceTo(t: Date): Promise<void> {
+    await this.#command(() => {
       this.#judgeDueBy(t);
       this.#db
         .prepare(
@@ -1332,6 +1481,7 @@ class Core implements PactCore {
         )
         .run(t.toISOString());
     });
+    await this.#delivery;
   }
 
   /**
@@ -1368,7 +1518,28 @@ class Core implements PactCore {
     if (this.#isJudged(pactId, occurrence.date)) return;
     const decision = this.#evidenceDecision(pactId, occurrence.date);
     if (decision === "waiting") return;
-    this.#judge(pactId, occurrence.date, decision === "approved" ? "kept" : "missed", occurrence.dueAt);
+    const outcome = decision === "approved" ? "kept" : "missed";
+    this.#judge(pactId, occurrence.date, outcome, occurrence.dueAt);
+    if (outcome === "missed") this.#enqueueMissed(pactId, occurrence.date);
+  }
+
+  /** Only for judging at the due time: a rejection already told the owner, with the reason. */
+  #enqueueMissed(pactId: string, date: LocalDate): void {
+    const pact = this.#db
+      .prepare(`SELECT owner_account_id, name, recipient_id, penalty_cents FROM pact WHERE id = ?`)
+      .get(pactId) as { owner_account_id: AccountId; name: string; recipient_id: string; penalty_cents: number };
+    this.#enqueue({
+      recipient: pact.owner_account_id,
+      kind: "missed-occurrence",
+      channel: "push",
+      payload: {
+        pactId,
+        occurrenceDate: date,
+        title: `${pact.name} is Missed`,
+        body: `${formatDate(date)} · ${money(pact.penalty_cents)} to ${this.#recipientName(pact.recipient_id)}`,
+        url: APP_PATHS.pact(pactId),
+      },
+    });
   }
 
   /** Whether the occurrence already has an outcome, Kept or Missed. */
@@ -1439,7 +1610,13 @@ class Core implements PactCore {
             recipient: operator.id,
             kind: "operator-alert",
             channel: "push",
-            payload: { alert: "database-restored", lastTick },
+            payload: {
+              alert: "database-restored",
+              lastTick,
+              title: "Operator alert",
+              body: `Database restored from backup. Last tick: ${lastTick ?? "none"}`,
+              url: APP_PATHS.today,
+            },
           });
         }
         return lastTick;
@@ -1450,12 +1627,45 @@ class Core implements PactCore {
           `OPERATOR_ALERT database restored from backup; last scheduler tick before the restore: ${lastTick ?? "none"}`,
         ),
     );
+    await this.#delivery;
+  }
+
+  deliveriesSettled(): Promise<void> {
+    return this.#delivery;
   }
 
   async close(): Promise<void> {
     await this.#delivery;
     this.#db.close();
   }
+}
+
+function isPushDevice({ endpoint, p256dh, auth }: PushDevice): boolean {
+  if (!URL.canParse(endpoint)) return false;
+  const { protocol, hostname } = new URL(endpoint);
+  return (
+    protocol === "https:" &&
+    PUSH_SERVICE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`)) &&
+    isBase64UrlOfLength(p256dh, P256DH_BYTES) &&
+    isBase64UrlOfLength(auth, AUTH_BYTES) &&
+    isPointOnCurve(p256dh)
+  );
+}
+
+/** Encrypting for a key that isn't a real P-256 point throws, for every notification to it. */
+function isPointOnCurve(publicKey: string): boolean {
+  const ecdh = createECDH("prime256v1");
+  ecdh.generateKeys();
+  try {
+    ecdh.computeSecret(Buffer.from(publicKey, "base64url"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isBase64UrlOfLength(text: string, bytes: number): boolean {
+  return /^[A-Za-z0-9_-]+={0,2}$/.test(text) && Buffer.from(text, "base64url").length === bytes;
 }
 
 interface InviteRow {
@@ -1545,6 +1755,7 @@ interface OutboxRow {
   kind: string;
   channel: string;
   payload: string;
+  sent_to: string;
 }
 
 export class UnknownAccountError extends Error {

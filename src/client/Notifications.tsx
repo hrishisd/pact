@@ -1,0 +1,275 @@
+// Turning notifications on (story 3) and choosing which ones you get (story 88):
+// an alert above Today, the page it opens, and the profile's Notifications section.
+
+import { useState } from "react";
+import type { NotificationSetting, NotificationSettingState } from "../shared/types.ts";
+import { api, failureText } from "./api.ts";
+import { AddIcon, ShareIcon } from "./icons.tsx";
+import { deviceName, isIos, type Push } from "./push.ts";
+import { useLoad } from "./ui.tsx";
+
+const ALERT_CLEARED_KEY = "pact.notifications-alert-cleared";
+
+const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }> = {
+  "review-item": { label: "New review item", hint: "Evidence or a payment is waiting for you" },
+  decision: { label: "Decision", hint: "A reviewer approved or rejected something of yours" },
+  "missed-occurrence": { label: "Missed occurrence", hint: "One of your pacts was judged Missed" },
+};
+
+function alertWasCleared(): boolean {
+  try {
+    return localStorage.getItem(ALERT_CLEARED_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function clearAlert(): void {
+  try {
+    localStorage.setItem(ALERT_CLEARED_KEY, "1");
+  } catch {
+    // No storage here: it stays cleared until the app reloads.
+  }
+}
+
+/** Above Today until push is on for this device, or the user taps Not now. */
+export function NotificationsAlert({ push: { state }, onSetUp }: { push: Push; onSetUp: () => void }) {
+  const [cleared, setCleared] = useState(alertWasCleared);
+  if (cleared || (state !== "needs-install" && state !== "can-turn-on" && state !== "blocked")) return null;
+  const text =
+    state === "blocked"
+      ? `Notifications are blocked on this ${deviceName()}.`
+      : "Turn on notifications to hear when a friend's evidence is waiting for you.";
+  return (
+    <div className="alert info">
+      <p>{text}</p>
+      <div className="row2">
+        <button className="btn sm" onClick={onSetUp}>
+          {state === "blocked" ? "Fix this" : "Set up"}
+        </button>
+        <button
+          className="link small"
+          onClick={() => {
+            clearAlert();
+            setCleared(true);
+          }}
+        >
+          Not now
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The guide. What it shows follows this device's state, so it moves on by itself. */
+export function NotificationsPage({ push, onDone }: { push: Push; onDone: () => void }) {
+  return (
+    <div className="stack-lg">
+      <Guide push={push} onDone={onDone} />
+    </div>
+  );
+}
+
+function Guide({ push: { state, turnOn }, onDone }: { push: Push; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onTurnOn = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await turnOn();
+    } catch (cause) {
+      // The browser's own failures aren't the server's: say so, not "on our side".
+      setError(
+        cause instanceof DOMException
+          ? `Your ${deviceName()} couldn't turn them on. Try again.`
+          : `Couldn't turn them on. ${failureText(cause, "Check your connection and try again.")}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  switch (state) {
+    case "checking":
+      return null;
+    case "needs-install":
+      return (
+        <>
+          <div className="stack">
+            <h2>Add Pact to your Home Screen</h2>
+            <p className="muted">
+              {deviceName()} only sends notifications to apps on your Home Screen. This takes about a minute.
+            </p>
+          </div>
+          <ol className="gsteps">
+            <li>
+              <span>
+                In Safari, tap <ShareIcon /> <b>Share</b>. If you don't see it, it's under the <b>•••</b> button.
+              </span>
+            </li>
+            <li>
+              <span>
+                Scroll down and tap <AddIcon /> <b>Add to Home Screen</b>, then <b>Add</b>.
+              </span>
+            </li>
+            <li>
+              <span>
+                Close Safari and open <b>Pact</b> from your Home Screen.
+              </span>
+            </li>
+            <li>
+              <span>Sign in again. {deviceName()} keeps the installed app separate from Safari.</span>
+            </li>
+          </ol>
+        </>
+      );
+    case "can-turn-on":
+      return (
+        <>
+          <div className="stack">
+            <h2>Turn on notifications</h2>
+            <p className="muted">
+              Hear when a friend's evidence is waiting for you, when a reviewer decides on yours, and when a pact is
+              Missed. You choose which ones in your profile.
+            </p>
+          </div>
+          {error && <p className="error">{error}</p>}
+          <button className="btn primary block" disabled={busy} onClick={() => void onTurnOn()}>
+            Turn on notifications
+          </button>
+        </>
+      );
+    case "on":
+      return (
+        <>
+          <div className="alert ok">
+            <p>
+              <b>Notifications are on for this {deviceName()}.</b>
+            </p>
+            <p className="small">Add Pact on your other devices to get them there too.</p>
+          </div>
+          <button className="btn block" onClick={onDone}>
+            Done
+          </button>
+        </>
+      );
+    case "blocked":
+      return isIos() ? (
+        <>
+          <div className="stack">
+            <h2>Notifications are blocked</h2>
+            <p className="muted">{deviceName()} won't ask twice, so this has to change in Settings.</p>
+          </div>
+          <ol className="gsteps">
+            <li>
+              <span>
+                Open your {deviceName()}'s <b>Settings</b>.
+              </span>
+            </li>
+            <li>
+              <span>
+                Tap <b>Notifications</b>, then <b>Pact</b>.
+              </span>
+            </li>
+            <li>
+              <span>
+                Turn on <b>Allow Notifications</b>, then come back here.
+              </span>
+            </li>
+          </ol>
+        </>
+      ) : (
+        <div className="stack">
+          <h2>Notifications are blocked</h2>
+          <p className="muted">Allow notifications for this site in your browser's settings, then come back here.</p>
+        </div>
+      );
+    case "unsupported":
+      return (
+        <div className="stack">
+          <h2>Notifications aren't available here</h2>
+          <p className="muted">This browser can't get notifications. Open Pact in a current version of your browser.</p>
+        </div>
+      );
+  }
+}
+
+/** The profile's section: this device's state, then one switch per kind, grouped in one block. */
+export function NotificationsSection({ push: { state }, onSetUp }: { push: Push; onSetUp: () => void }) {
+  const { data, failed } = useLoad(api.notifications);
+  const [changed, setChanged] = useState<NotificationSettingState[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const settings = changed ?? data?.settings ?? null;
+
+  const toggle = async (setting: NotificationSetting, enabled: boolean) => {
+    if (!settings) return;
+    setError(null);
+    setChanged(settings.map((s) => (s.setting === setting ? { setting, enabled } : s)));
+    try {
+      setChanged(await api.setNotificationSetting({ setting, enabled }));
+    } catch (cause) {
+      setChanged(settings);
+      setError(`Couldn't save. ${failureText(cause, "Check your connection and try again.")}`);
+    }
+  };
+
+  return (
+    <section className="stack">
+      <div className="label">Notifications</div>
+      <DeviceLine state={state} onSetUp={onSetUp} />
+      {failed && <p className="muted small">Notification settings couldn't load.</p>}
+      {settings && (
+        <>
+          <div className="list">
+            {settings.map(({ setting, enabled }) => (
+              <label key={setting} className="switch-row">
+                <span className="rt">
+                  <b>{SETTING_COPY[setting].label}</b>
+                  <small>{SETTING_COPY[setting].hint}</small>
+                </span>
+                <input
+                  className="switch"
+                  type="checkbox"
+                  role="switch"
+                  checked={enabled}
+                  onChange={(e) => void toggle(setting, e.target.checked)}
+                />
+              </label>
+            ))}
+          </div>
+          {error && <p className="error">{error}</p>}
+          <p className="muted small">These apply to all your devices.</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function DeviceLine({ state, onSetUp }: { state: Push["state"]; onSetUp: () => void }) {
+  const device = deviceName();
+  switch (state) {
+    case "checking":
+      return null;
+    case "on":
+      return (
+        <div>
+          <span className="chip c-kept">On for this {device}</span>
+        </div>
+      );
+    case "unsupported":
+      return <span className="muted small">This browser can't get notifications.</span>;
+    case "blocked":
+    case "needs-install":
+    case "can-turn-on":
+      return (
+        <div className="spread">
+          <span>{state === "blocked" ? `Blocked on this ${device}` : `Off on this ${device}`}</span>
+          <button className="link" onClick={onSetUp}>
+            {{ blocked: "Fix this", "needs-install": "Set up", "can-turn-on": "Turn on" }[state]}
+          </button>
+        </div>
+      );
+  }
+}

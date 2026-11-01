@@ -13,6 +13,8 @@ const PRODUCTION = {
   GOOGLE_CLIENT_SECRET: "client-secret",
   BETTER_AUTH_SECRET: "a-production-secret-at-least-32-characters-long",
   BETTER_AUTH_URL: "https://pact.example.test",
+  VAPID_PUBLIC_KEY: "vapid-public",
+  VAPID_PRIVATE_KEY: "vapid-private",
 };
 
 const PHOTOS_BUCKET = {
@@ -38,6 +40,13 @@ describe("photo store", () => {
   test("production refuses to start without the photo bucket", () => {
     expect(() => loadConfig(PRODUCTION)).toThrow(
       "missing required environment variables: PHOTOS_BUCKET, PHOTOS_ENDPOINT, PHOTOS_ACCESS_KEY_ID, PHOTOS_SECRET_ACCESS_KEY",
+    );
+  });
+
+  test("production refuses to start without its own VAPID keys", () => {
+    const { VAPID_PUBLIC_KEY: _public, VAPID_PRIVATE_KEY: _private, ...withoutKeys } = PRODUCTION;
+    expect(() => loadConfig({ ...withoutKeys, ...PHOTOS_BUCKET })).toThrow(
+      "missing required environment variables: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY",
     );
   });
 

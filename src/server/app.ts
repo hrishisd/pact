@@ -9,7 +9,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import type { AccountId, NewPayment, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
-import { MAX_EVIDENCE_PHOTOS, WEEKDAYS } from "../shared/types.ts";
+import { MAX_EVIDENCE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
@@ -42,11 +42,17 @@ import {
   type LedgersResponse,
   type LivenessResponse,
   type MeResponse,
+  type NotificationsResponse,
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
   type RecordPaymentResponse,
+  type RemovePushSubscriptionRequest,
   type ReviewQueueResponse,
+  type SavePushSubscriptionRequest,
+  type SavePushSubscriptionResponse,
+  type SetNotificationSettingRequest,
+  type SetNotificationSettingResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
   type SubmitEvidenceResponse,
@@ -70,6 +76,8 @@ export interface AppOptions {
   production: boolean;
   /** The dev sign-in's `?as=operator`. */
   operatorEmail: string;
+  /** The key browsers subscribe to push with. See Config. */
+  vapidPublicKey: string;
   /** Where the app writes log lines. Default: console.log. */
   log?: (line: string) => void;
 }
@@ -99,6 +107,7 @@ export function createApp({
   diskUsedFraction,
   production,
   operatorEmail,
+  vapidPublicKey,
   log = (line) => console.log(line),
 }: AppOptions) {
   const app = new Hono<Env>();
@@ -428,6 +437,37 @@ export function createApp({
     return c.json(body);
   });
 
+  app.get(API_PATHS.notifications, (c) => {
+    const body: NotificationsResponse = {
+      settings: core.as(c.get("accountId")).notificationSettings(),
+      vapidPublicKey,
+    };
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.notifications, async (c) => {
+    const request = parseSetNotificationSetting(await c.req.json().catch(() => null));
+    if (!request) return apiError(c, 400, "invalid-request");
+    const body: SetNotificationSettingResponse = await core
+      .as(c.get("accountId"))
+      .setNotificationSetting(request.setting, request.enabled);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.pushSubscriptions, async (c) => {
+    const device = parsePushDevice(await c.req.json().catch(() => null));
+    if (!device) return apiError(c, 400, "invalid-request");
+    const body: SavePushSubscriptionResponse = await core.as(c.get("accountId")).savePushSubscription(device);
+    return c.json(body);
+  });
+
+  app.delete(API_PATHS.pushSubscriptions, async (c) => {
+    const request = (await c.req.json().catch(() => null)) as Partial<RemovePushSubscriptionRequest> | null;
+    if (typeof request?.endpoint !== "string") return apiError(c, 400, "invalid-request");
+    await core.as(c.get("accountId")).removePushSubscription(request.endpoint);
+    return c.json({ ok: true });
+  });
+
   app.all("/api/*", (c) => apiError(c, 404, "not-found"));
 
   // Better Auth redirects here, with ?error=<code>, when a sign-in fails.
@@ -538,6 +578,19 @@ function parseDecision(value: unknown): DecideRequest | null {
   if (value.kind === "approve") return { kind: "approve" };
   if (value.kind === "reject" && typeof value.reason === "string") return { kind: "reject", reason: value.reason };
   return null;
+}
+
+function parseSetNotificationSetting(value: unknown): SetNotificationSettingRequest | null {
+  if (!isRecord(value) || typeof value.enabled !== "boolean") return null;
+  const setting = NOTIFICATION_SETTINGS.find((known) => known === value.setting);
+  return setting ? { setting, enabled: value.enabled } : null;
+}
+
+function parsePushDevice(value: unknown): SavePushSubscriptionRequest | null {
+  if (!isRecord(value)) return null;
+  const { endpoint, p256dh, auth } = value;
+  if (typeof endpoint !== "string" || typeof p256dh !== "string" || typeof auth !== "string") return null;
+  return { endpoint, p256dh, auth };
 }
 
 function readIndexHtml(staticDir: string): string | null {

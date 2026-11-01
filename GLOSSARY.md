@@ -81,6 +81,14 @@ _Avoid_: Inbox, to-do list
 An owner's proposed edit to a pact that makes it less strict, such as deleting it, lowering the penalty or changing the recipient. The pact stays as it is until a reviewer approves the change.
 _Avoid_: Edit, amendment
 
+### Notifications
+
+**Push subscription**:
+One device's permission to get an account's notifications, as its browser reports it. An account can have several. Turning notifications on is per device.
+
+**Notification setting**:
+An account's on/off for one kind of notification, on all its devices. Every kind starts on.
+
 ### Money
 
 **Penalty**:

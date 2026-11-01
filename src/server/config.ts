@@ -35,6 +35,11 @@ export interface Config {
    * Development: `photos/` next to the database, so it needs no bucket.
    */
   photos: ({ kind: "r2" } & R2Bucket) | { kind: "local-disk"; dir: string };
+  /**
+   * The VAPID key pair that signs Web Push, base64url. Browsers subscribe with
+   * the public one, so changing it needs every device to subscribe again.
+   */
+  vapid: { publicKey: string; privateKey: string };
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
   restored: boolean;
   /** The commit CI built the image from, reported by /health. Null when built without one; never required. */
@@ -42,6 +47,9 @@ export interface Config {
 }
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
+// Development only, like the session secret's default: production must set its own.
+const DEV_VAPID_PUBLIC_KEY = "BB1FrNQz4WK8C55DsNs9-4Uzw6_MBaV8x4WiAgnLnCW89DQFUhkLHm2Jsk1q-5G_OLqx2aVVZUTKKRh9AePO53A";
+const DEV_VAPID_PRIVATE_KEY = "UQoUbfmAj8ZaiwNCrCw_cblSFYDxAk9uLNBh148hPZM";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const production = env.NODE_ENV === "production";
@@ -82,6 +90,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           secretAccessKey: read("PHOTOS_SECRET_ACCESS_KEY", ""),
         }
       : { kind: "local-disk", dir: join(dirname(dbPath), "photos") },
+    vapid: {
+      publicKey: read("VAPID_PUBLIC_KEY", DEV_VAPID_PUBLIC_KEY),
+      privateKey: read("VAPID_PRIVATE_KEY", DEV_VAPID_PRIVATE_KEY),
+    },
     restored: env.PACT_RESTORED === "1",
     commit: env.PACT_COMMIT?.trim() || null,
   };

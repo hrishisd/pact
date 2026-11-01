@@ -343,6 +343,16 @@ else
   write_env BETTER_AUTH_SECRET "$(openssl rand -base64 32)"
   say "Generated a new session secret."
 fi
+if [[ -n "$(_existing VAPID_PRIVATE_KEY || true)" ]]; then
+  VAPID_PUBLIC_KEY=$(_existing VAPID_PUBLIC_KEY)
+  VAPID_PRIVATE_KEY=$(_existing VAPID_PRIVATE_KEY)
+  say "Keeping the existing Web Push keys (changing them would stop every device's notifications)."
+else
+  vapid_keys=$(node -e 'const e=require("crypto").createECDH("prime256v1");e.generateKeys();console.log(e.getPublicKey("base64url")+" "+e.getPrivateKey("base64url"))')
+  write_env VAPID_PUBLIC_KEY "${vapid_keys% *}"
+  write_env VAPID_PRIVATE_KEY "${vapid_keys#* }"
+  say "Generated new Web Push keys."
+fi
 
 # ── 10 ────────────────────────────────────────────────────────────────────
 stage "Local development .env"
@@ -366,11 +376,12 @@ stage "Fly secrets"
 say "These names are exactly what the server and litestream.yml read:"
 for name in OPERATOR_EMAIL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BETTER_AUTH_SECRET \
             LITESTREAM_BUCKET LITESTREAM_ENDPOINT LITESTREAM_ACCESS_KEY_ID LITESTREAM_SECRET_ACCESS_KEY \
-            PHOTOS_BUCKET PHOTOS_ENDPOINT PHOTOS_ACCESS_KEY_ID PHOTOS_SECRET_ACCESS_KEY; do
+            PHOTOS_BUCKET PHOTOS_ENDPOINT PHOTOS_ACCESS_KEY_ID PHOTOS_SECRET_ACCESS_KEY \
+            VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY; do
   note "  $name"
 done
 note "NODE_ENV, PORT, PACT_DB_PATH and BETTER_AUTH_URL=https://$DOMAIN are in fly.toml [env], not secrets."
-if confirm "Set these 12 secrets on '$FLY_APP' (staged: they apply on the next deploy)?"; then
+if confirm "Set these 14 secrets on '$FLY_APP' (staged: they apply on the next deploy)?"; then
   # Through stdin, so no secret shows up in the process list.
   printf '%s\n' \
     "OPERATOR_EMAIL=$OPERATOR_EMAIL" \
@@ -385,8 +396,10 @@ if confirm "Set these 12 secrets on '$FLY_APP' (staged: they apply on the next d
     "PHOTOS_ENDPOINT=$PHOTOS_ENDPOINT" \
     "PHOTOS_ACCESS_KEY_ID=$PHOTOS_ACCESS_KEY_ID" \
     "PHOTOS_SECRET_ACCESS_KEY=$PHOTOS_SECRET_ACCESS_KEY" \
+    "VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY" \
+    "VAPID_PRIVATE_KEY=$VAPID_PRIVATE_KEY" \
     | if fly secrets import --stage -a "$FLY_APP"; then
-        printf '  %s✓ set%s 12 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP"
+        printf '  %s✓ set%s 14 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP"
       else
         warn "fly secrets import failed: fix the error above and re-run this wizard"
       fi

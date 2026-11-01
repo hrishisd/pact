@@ -43,7 +43,14 @@ describe("submitting evidence", () => {
     const reviewItem = {
       kind: "review-item",
       channel: "push",
-      payload: { itemKind: "evidence", itemId: submitted.evidenceId, pactId: gym },
+      payload: {
+        itemKind: "evidence",
+        itemId: submitted.evidenceId,
+        pactId: gym,
+        title: "owner submitted evidence",
+        body: "Gym · Mon Jan 5",
+        url: "/review",
+      },
     };
     expect(s.notifier.sentTo(reviewer)).toEqual([{ ...reviewItem, recipient: reviewer.id }]);
     expect(s.notifier.sentTo(second)).toEqual([{ ...reviewItem, recipient: second.id }]);

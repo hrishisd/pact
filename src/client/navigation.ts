@@ -5,14 +5,15 @@
 // (a typed or shared URL, no state) derives it from the path instead.
 
 import { useCallback, useEffect, useState } from "react";
+import { APP_PATHS } from "../shared/api.ts";
 
 export type TabId = "today" | "pacts" | "review" | "ledgers";
 
-export const TAB_PATHS: Record<TabId, string> = {
-  today: "/",
-  pacts: "/pacts",
-  review: "/review",
-  ledgers: "/ledgers",
+const TAB_PATHS: Record<TabId, string> = {
+  today: APP_PATHS.today,
+  pacts: APP_PATHS.pacts,
+  review: APP_PATHS.review,
+  ledgers: APP_PATHS.ledgers,
 };
 
 /**
@@ -22,7 +23,8 @@ export const TAB_PATHS: Record<TabId, string> = {
 export type Page =
   | { kind: "pact"; id: string; name?: string }
   | { kind: "create" }
-  | { kind: "ledger"; recipientId: string; name?: string };
+  | { kind: "ledger"; recipientId: string; name?: string }
+  | { kind: "notifications" };
 
 interface Route {
   tab: TabId;
@@ -36,15 +38,18 @@ interface Entry {
 }
 
 const NEW_PACT_PATH = "/pacts/new";
+const NOTIFICATIONS_PATH = "/notifications";
 
 function pagePath(page: Page): string {
   switch (page.kind) {
     case "create":
       return NEW_PACT_PATH;
     case "pact":
-      return `/pacts/${encodeURIComponent(page.id)}`;
+      return APP_PATHS.pact(page.id);
     case "ledger":
-      return `${TAB_PATHS.ledgers}/${encodeURIComponent(page.recipientId)}`;
+      return APP_PATHS.ledger(page.recipientId);
+    case "notifications":
+      return NOTIFICATIONS_PATH;
   }
 }
 
@@ -55,6 +60,7 @@ function routePath(route: Route): string {
 
 function routeFromPath(pathname: string): Route {
   if (pathname === NEW_PACT_PATH) return { tab: "pacts", stack: [{ kind: "create" }] };
+  if (pathname === NOTIFICATIONS_PATH) return { tab: "today", stack: [{ kind: "notifications" }] };
   const pact = /^\/pacts\/([^/]+)$/.exec(pathname);
   if (pact) return { tab: "pacts", stack: [{ kind: "pact", id: decodeURIComponent(pact[1]!) }] };
   const ledger = /^\/ledgers\/([^/]+)$/.exec(pathname);

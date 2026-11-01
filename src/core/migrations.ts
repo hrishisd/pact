@@ -227,4 +227,31 @@ export const migrations: readonly string[] = [
   );
   CREATE INDEX payment_ledger ON payment (owner_account_id, recipient_id);
   `,
+  // 9: push subscriptions and notification settings
+  `
+  -- One row per device. The browser names a device by its endpoint, so a device
+  -- someone else signs in on moves to their account.
+  CREATE TABLE push_subscription (
+    endpoint TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES account (id),
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX push_subscription_account ON push_subscription (account_id);
+
+  -- The notification settings an account turned off. Every setting starts on,
+  -- so a kind added later is on for everyone.
+  CREATE TABLE notification_setting_off (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    setting TEXT NOT NULL,
+    PRIMARY KEY (account_id, setting)
+  );
+  `,
+  // 10: retrying one device
+  `
+  -- The endpoints a notification has reached, JSON. A retry goes only to the
+  -- others, so one failing device doesn't repeat it on the rest.
+  ALTER TABLE outbox ADD COLUMN sent_to TEXT NOT NULL DEFAULT '[]';
+  `,
 ];

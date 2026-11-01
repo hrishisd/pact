@@ -27,11 +27,17 @@ import {
   type LedgerResponse,
   type LedgersResponse,
   type MeResponse,
+  type NotificationsResponse,
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
   type RecordPaymentResponse,
+  type RemovePushSubscriptionRequest,
   type ReviewQueueResponse,
+  type SavePushSubscriptionRequest,
+  type SavePushSubscriptionResponse,
+  type SetNotificationSettingRequest,
+  type SetNotificationSettingResponse,
   type SetTimezoneRequest,
   type SetTimezoneResponse,
   type SubmitEvidenceResponse,
@@ -149,4 +155,15 @@ export const api = {
     form.append(EVIDENCE_PHOTO_FIELD, screenshot, "screenshot.jpg");
     return postForm<RecordPaymentResponse>(API_PATHS.payments(encodeURIComponent(recipientId)), form);
   },
+  notifications: () => call<NotificationsResponse>(API_PATHS.notifications),
+  setNotificationSetting: (request: SetNotificationSettingRequest) =>
+    post<SetNotificationSettingResponse>(API_PATHS.notifications, request),
+  savePushSubscription: (device: SavePushSubscriptionRequest) =>
+    post<SavePushSubscriptionResponse>(API_PATHS.pushSubscriptions, device),
+  removePushSubscription: (endpoint: string) =>
+    call<unknown>(API_PATHS.pushSubscriptions, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint } satisfies RemovePushSubscriptionRequest),
+    }),
 };

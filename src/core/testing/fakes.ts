@@ -3,6 +3,7 @@
 import type { AccountId } from "../../shared/types.ts";
 import type {
   Clock,
+  DeliveryReport,
   Notification,
   Notifier,
   OuraDateRange,
@@ -11,6 +12,7 @@ import type {
   OuraSource,
   Photo,
   PhotoStore,
+  PushDevice,
   StoredPhoto,
 } from "../ports.ts";
 
@@ -36,16 +38,55 @@ export class FakeClock implements Clock {
   }
 }
 
-/** Records every notification it delivers, in delivery order. */
+/** Records every notification it delivers, and the devices it went to, in delivery order. */
 export class RecordingNotifier implements Notifier {
   readonly sent: Notification[] = [];
+  readonly #devices: { recipient: AccountId; device: PushDevice }[] = [];
+  readonly #expired = new Set<string>();
+  readonly #failing = new Set<string>();
+  #held: Promise<void> = Promise.resolve();
 
-  async deliver(notification: Notification): Promise<void> {
+  async deliver(notification: Notification, devices: readonly PushDevice[]): Promise<DeliveryReport> {
+    await this.#held;
     this.sent.push(structuredClone(notification));
+    const reached = devices.filter((d) => !this.#failing.has(d.endpoint));
+    for (const device of reached) this.#devices.push({ recipient: notification.recipient, device: { ...device } });
+    return {
+      expired: devices.map((d) => d.endpoint).filter((endpoint) => this.#expired.has(endpoint)),
+      failed: devices
+        .filter((d) => this.#failing.has(d.endpoint))
+        .map((d) => ({ endpoint: d.endpoint, error: "injected failure" })),
+    };
   }
 
   sentTo(account: { id: AccountId }): Notification[] {
     return this.sent.filter((n) => n.recipient === account.id);
+  }
+
+  /** Every device a delivery to `account` has gone to, repeats included. */
+  devicesOf(account: { id: AccountId }): PushDevice[] {
+    return this.#devices.filter((d) => d.recipient === account.id).map((d) => d.device);
+  }
+
+  /** From now on the push service reports this device as expired. */
+  expire(endpoint: string): void {
+    this.#expired.add(endpoint);
+  }
+
+  /** From now on (or until `recover`) sending to this device fails. */
+  fail(endpoint: string): void {
+    this.#failing.add(endpoint);
+  }
+
+  recover(endpoint: string): void {
+    this.#failing.delete(endpoint);
+  }
+
+  /** Stalls delivery, as a slow push service would, until the returned function is called. */
+  hold(): () => void {
+    let release = () => {};
+    this.#held = new Promise((resolve) => (release = resolve));
+    return release;
   }
 }
 

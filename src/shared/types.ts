@@ -217,6 +217,27 @@ export type SetTimezoneResult =
   /** `timezone` is the zone's canonical IANA name, as stored. */
   { ok: true; timezone: string } | { ok: false; reason: "invalid-timezone" };
 
+/**
+ * The kinds of notification an account can turn off, on all its devices. Every
+ * kind starts on. Later tickets add theirs (story 88).
+ */
+export const NOTIFICATION_SETTINGS = ["review-item", "decision", "missed-occurrence"] as const;
+export type NotificationSetting = (typeof NOTIFICATION_SETTINGS)[number];
+
+export interface NotificationSettingState {
+  setting: NotificationSetting;
+  enabled: boolean;
+}
+
+/** One device's push subscription, as the browser reports it. Keys are base64url. */
+export interface PushDevice {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+export type SavePushSubscriptionResult = { ok: true } | { ok: false; reason: "invalid-subscription" };
+
 export interface Profile {
   email: string;
   name: string;

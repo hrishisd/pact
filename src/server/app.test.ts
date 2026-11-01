@@ -41,8 +41,11 @@ import {
   type PactsResponse,
   type RecipientsResponse,
   type MeResponse,
+  type NotificationsResponse,
   type RecordPaymentResponse,
   type ReviewQueueResponse,
+  type SavePushSubscriptionResponse,
+  type SetNotificationSettingResponse,
   type SetTimezoneResponse,
   type SubmitEvidenceResponse,
   type TodayResponse,
@@ -55,6 +58,7 @@ const ORIGIN = "http://localhost:5173";
 /** The scenario harness's operator. */
 const OPERATOR = "owner@example.test";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const VAPID_PUBLIC_KEY = "test-vapid-public-key";
 
 /**
  * `canonicalOrigin` is the config's: null unless the server is in production.
@@ -93,6 +97,7 @@ async function server({
     diskUsedFraction,
     production,
     operatorEmail: OPERATOR,
+    vapidPublicKey: VAPID_PUBLIC_KEY,
     log: (line) => s.logs.push(line),
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
@@ -1403,6 +1408,8 @@ describe("canonical host", () => {
         PHOTOS_ENDPOINT: "https://test-account.r2.cloudflarestorage.com",
         PHOTOS_ACCESS_KEY_ID: "test-access-key-id",
         PHOTOS_SECRET_ACCESS_KEY: "test-secret-access-key",
+        VAPID_PUBLIC_KEY: "vapid-public",
+        VAPID_PRIVATE_KEY: "vapid-private",
       }).canonicalOrigin,
     });
 
@@ -1455,5 +1462,97 @@ describe("canonical host", () => {
     const page = await s.request("/some/client/route", { origin: "http://localhost:3000" });
 
     expect(page.status).toBe(200);
+  });
+});
+
+describe("notifications", () => {
+  const DEVICE = {
+    endpoint: "https://web.push.apple.com/abc",
+    p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+    auth: Buffer.alloc(16, 9).toString("base64url"),
+  };
+
+  test("needs a session", async () => {
+    const s = await server();
+    expect((await s.api(API_PATHS.notifications)).status).toBe(401);
+    expect((await s.api(API_PATHS.pushSubscriptions, { method: "POST", body: DEVICE })).status).toBe(401);
+  });
+
+  test("the settings come with the key a browser subscribes with, and a change sticks", async () => {
+    const s = await server();
+    const { cookie } = await s.signIn(OPERATOR);
+
+    const changed = await s.api<SetNotificationSettingResponse>(API_PATHS.notifications, {
+      cookie,
+      method: "POST",
+      body: { setting: "decision", enabled: false },
+    });
+
+    expect(changed.body).toContainEqual({ setting: "decision", enabled: false });
+    expect((await s.api<NotificationsResponse>(API_PATHS.notifications, { cookie })).body).toEqual({
+      vapidPublicKey: VAPID_PUBLIC_KEY,
+      settings: [
+        { setting: "review-item", enabled: true },
+        { setting: "decision", enabled: false },
+        { setting: "missed-occurrence", enabled: true },
+      ],
+    });
+  });
+
+  test.each([
+    ["a setting that doesn't exist", { setting: "nonsense", enabled: true }],
+    ["operator alerts", { setting: "operator-alert", enabled: false }],
+    ["enabled that isn't a boolean", { setting: "decision", enabled: "no" }],
+  ])("a setting change with %s is a 400", async (_name, body) => {
+    const s = await server();
+    const { cookie } = await s.signIn(OPERATOR);
+
+    const response = await s.api(API_PATHS.notifications, { cookie, method: "POST", body });
+
+    expect(response).toMatchObject({ status: 400, body: { error: "invalid-request" } });
+  });
+
+  test("a device is saved, then removed", async () => {
+    const s = await server();
+    const { cookie } = await s.signIn(OPERATOR);
+
+    const saved = await s.api<SavePushSubscriptionResponse>(API_PATHS.pushSubscriptions, {
+      cookie,
+      method: "POST",
+      body: DEVICE,
+    });
+    expect(saved).toMatchObject({ status: 200, body: { ok: true } });
+
+    const removed = await s.api(API_PATHS.pushSubscriptions, {
+      cookie,
+      method: "DELETE",
+      body: { endpoint: DEVICE.endpoint },
+    });
+    expect(removed.status).toBe(200);
+  });
+
+  test("an endpoint that isn't a push service is the core's refusal, a 200", async () => {
+    const s = await server();
+    const { cookie } = await s.signIn(OPERATOR);
+
+    const saved = await s.api<SavePushSubscriptionResponse>(API_PATHS.pushSubscriptions, {
+      cookie,
+      method: "POST",
+      body: { ...DEVICE, endpoint: "https://internal.example/hook" },
+    });
+
+    expect(saved).toMatchObject({ status: 200, body: { ok: false, reason: "invalid-subscription" } });
+  });
+
+  test.each([
+    ["no keys", { endpoint: DEVICE.endpoint }],
+    ["an endpoint that isn't a string", { ...DEVICE, endpoint: 1 }],
+  ])("a device with %s is a 400", async (_name, body) => {
+    const s = await server();
+    const { cookie } = await s.signIn(OPERATOR);
+
+    const response = await s.api(API_PATHS.pushSubscriptions, { cookie, method: "POST", body });
+
+    expect(response).toMatchObject({ status: 400, body: { error: "invalid-request" } });
   });
 });

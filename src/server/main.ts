@@ -7,10 +7,10 @@ import { serve } from "@hono/node-server";
 import {
   createPactCore,
   localDiskPhotoStore,
-  logNotifier,
   r2PhotoStore,
   stubOuraSource,
   systemClock,
+  webPushNotifier,
 } from "../core/index.ts";
 import { createApp } from "./app.ts";
 import { createAuth } from "./auth.ts";
@@ -45,7 +45,7 @@ if (!config.production) {
 const core = createPactCore({
   dbPath: config.dbPath,
   clock: systemClock,
-  notifier: logNotifier(),
+  notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, systemClock),
   ouraSource: stubOuraSource,
   photoStore:
     config.photos.kind === "r2"
@@ -81,6 +81,7 @@ const app = createApp({
   diskUsedFraction: () => usedFraction(statfsSync(dataDir)),
   production: config.production,
   operatorEmail: config.operatorEmail,
+  vapidPublicKey: config.vapid.publicKey,
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(

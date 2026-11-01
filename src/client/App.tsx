@@ -6,6 +6,8 @@ import { initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
 import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
+import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
+import { forgetThisDevice, usePush, type Push } from "./push.ts";
 import { LedgerPage, Ledgers } from "./Ledgers.tsx";
 import { useNavigation, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
@@ -227,6 +229,7 @@ function Shell({
   const { tab, page } = nav;
   const [profileOpen, setProfileOpen] = useState(false);
   const reviewCount = useReviewCount(tab);
+  const push = usePush();
   // Pact and recipient names learnt by loading their pages, for a page opened from a link.
   const [pactNames, pactLoaded] = useLearntNames();
   const [ledgerNames, ledgerLoaded] = useLearntNames();
@@ -234,12 +237,17 @@ function Shell({
   const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
   const openLedger = (recipientId: string, name: string) => nav.push({ kind: "ledger", recipientId, name });
   const create = () => nav.push({ kind: "create" });
+  const openNotifications = () => {
+    setProfileOpen(false);
+    nav.push({ kind: "notifications" });
+  };
 
   let title: string;
   let subtitle = "";
   if (page?.kind === "pact") title = pactNames[page.id] ?? page.name ?? "";
   else if (page?.kind === "create") title = "New pact";
   else if (page?.kind === "ledger") title = ledgerNames[page.recipientId] ?? page.name ?? "";
+  else if (page?.kind === "notifications") title = "Notifications";
   else {
     title = TABS.find((t) => t.id === tab)!.label;
     if (tab === "today") {
@@ -277,6 +285,8 @@ function Shell({
             onInvite={() => setProfileOpen(true)}
           />
         )}
+        {page?.kind === "notifications" && <NotificationsPage push={push} onDone={nav.back} />}
+        {!page && tab === "today" && <NotificationsAlert push={push} onSetUp={openNotifications} />}
         {!page && tab === "today" && (
           <Today
             onOpenPact={openPact}
@@ -322,6 +332,8 @@ function Shell({
       {profileOpen && (
         <ProfileSheet
           profile={profile}
+          push={push}
+          onSetUpNotifications={openNotifications}
           onClose={() => setProfileOpen(false)}
           onProfile={onProfile}
           onSignedOut={onSignedOut}
@@ -361,11 +373,15 @@ function useReviewCount(tab: TabId): { value: number; set: (length: number) => v
 
 function ProfileSheet({
   profile,
+  push,
+  onSetUpNotifications,
   onClose,
   onProfile,
   onSignedOut,
 }: {
   profile: ConfirmedProfile;
+  push: Push;
+  onSetUpNotifications: () => void;
   onClose: () => void;
   onProfile: (p: MeResponse) => void;
   onSignedOut: () => void;
@@ -389,6 +405,8 @@ function ProfileSheet({
       </div>
 
       <FriendsSection />
+
+      <NotificationsSection push={push} onSetUp={onSetUpNotifications} />
 
       <section className="stack">
         <div className="label">Timezone</div>
@@ -420,7 +438,10 @@ function ProfileSheet({
         disabled={signingOut}
         onClick={() => {
           setSigningOut(true);
-          signOut().then(onSignedOut, () => setSigningOut(false));
+          // First, while there's still a session: a signed-out phone shouldn't get this account's pushes.
+          forgetThisDevice()
+            .then(signOut)
+            .then(onSignedOut, () => setSigningOut(false));
         }}
       >
         Sign out
