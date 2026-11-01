@@ -14,6 +14,8 @@ Before writing any real code for a user-facing change, ask the human one questio
 2. **Build the prototype.** Use `/prototype`. A throwaway, self-contained HTML file on its own branch `prototype/<topic>`, cut from main in a git worktree, so the main checkout and the human's dev server stay untouched. Commit it there; never push.
    - Copy main's real styles and markup (`src/client/`), so it looks like the app, not a mock-up. Glossary words in all copy.
    - Realistic data, phone width, options side by side, and each moment that matters clickable (e.g. before / after a tap, day open / day closed).
+   - Start the file with `<meta charset="utf-8">` and a viewport meta, so it reads the same served locally as published.
+   - To see it in the browser pane, copy it into `tmp/` and use the launch config `prototype` (the pane can't open local files or the published page).
    - Done when every option and moment renders and every button does what the option claims.
 3. **Show it.** Publish it as a private Artifact so the link opens on the human's phone, and send screenshots of each moment in the chat. Give a recommendation.
 4. **Settle and write down.** Once the human picks, update the spec and the affected tickets before implementing, so the build has one source of truth.

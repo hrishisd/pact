@@ -12,7 +12,7 @@ Read at review time. `npm run lint` enforces the mechanical rules: formatting (P
 ## Results and errors
 
 - A domain refusal is a result, `{ ok: false, reason }`, returned as HTTP 200. HTTP error codes are for malformed requests (400), no session (401) and unknown routes (404).
-- Paths and request/response types live once in `src/shared/` and both sides import them.
+- Paths, the API's and the app's own pages alike (`API_PATHS`, `APP_PATHS`), and request/response types live once in `src/shared/` and both sides import them.
 - Error copy says what failed: a network failure asks the user to check their connection; a server error says it's on our side (`failureText` in `src/client/api.ts`). Never blame the connection for a 500.
 
 ## Names
@@ -23,6 +23,7 @@ Read at review time. `npm run lint` enforces the mechanical rules: formatting (P
 
 - Core behaviour is tested through `scenario()` with named times ("Mon 18:00", America/New_York) and fake ports, not by calling internals. The one exception is occurrence timing (`src/core/occurrences.ts`), which is also tested at its own interface (`occurrences.test.ts`) for calendar cases a scenario can't express, such as daylight saving changes. HTTP behaviour is tested at the `app.test.ts` seam, with Google faked at its token endpoint.
 - Write the test first and watch it fail for the right reason. A test that passes before the code exists (for example, through the SPA fallback's 200) proves nothing.
+- Account ids are random, so anything sorted by them comes in a different order each run. A test that fails the `n`th call to a port names one account only when that account is the only one being called.
 - Asserting on `s.logs` is fine when the log line is a required output (`OPERATOR_ALERT`). `app.test.ts` may read the auth tables directly to prove a refused sign-in created no rows.
 
 ## Auth
@@ -36,4 +37,5 @@ Read at review time. `npm run lint` enforces the mechanical rules: formatting (P
 - Commands don't wait for outbox delivery, so a slow push service never delays a tap; the scheduler's tick does wait. Scenarios wait through their account handles (`deliveriesSettled`).
 - `src/server/pages.ts` has its own hex colours: those pages are plain HTML with no shared stylesheet.
 - Light theme only.
+- `Notification.recipient` is the account being notified, and predates the glossary's Recipient (a penalty's payee, never notified). The type makes clear which one it is.
 - The photo bytes route (`GET /api/photos/:id`) answers 404 for a photo the account may not see, not a 200 refusal: an `<img>` can't read a refusal body. The core still returns `photo-not-found`.

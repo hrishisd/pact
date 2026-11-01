@@ -2,4 +2,10 @@
 # Formats the staged files with Prettier before each commit (lint-staged
 # config in package.json). `npm install` points git here (the prepare script).
 set -euo pipefail
+# A git worktree has no node_modules of its own: use the main checkout's.
+if [ ! -d node_modules ]; then
+  main_checkout="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+  PATH="$main_checkout/node_modules/.bin:$PATH"
+  exec lint-staged
+fi
 exec npx --no -- lint-staged

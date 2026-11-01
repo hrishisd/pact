@@ -5,7 +5,15 @@
       "name": "pact-dev",
       "runtimeExecutable": "fnm",
       "runtimeArgs": ["exec", "--using=.nvmrc", "--", "env", "PORT=3000", "npm", "run", "dev"],
-      "port": 5173
+      "port": 5173,
+      "autoPort": false
+    },
+    {
+      "name": "prototype",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "tmp"],
+      "port": 8765,
+      "autoPort": false
     }
   ]
 }
