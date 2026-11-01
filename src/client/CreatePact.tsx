@@ -1,24 +1,31 @@
-// The step-by-step create-pact form: evidence kind, goal, schedule, penalty,
-// reviewers, then a check before Create pact. The core decides every rule;
-// the steps only stop the owner moving on with a field left empty.
+// The step-by-step pact form: evidence kind, goal, schedule, penalty, reviewers,
+// then a check before Create pact. Editing a pact in its edit window reuses it
+// without the evidence kind step. The core decides every rule; the steps only
+// stop the owner moving on with a field left empty.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   WEEKDAYS,
-  type CreatePactRefusal,
+  type EditPactRefusal,
   type FirstOccurrence,
   type Friend,
+  type PactTerms,
   type Recipient,
   type Weekday,
 } from "../shared/types.ts";
 import type { Json } from "../shared/api.ts";
 import { api, failureText } from "./api.ts";
-import { formatDate, initial, parseCents } from "./format.ts";
+import { centsInputText, clockTime, formatDate, initial, minutesLeft, parseCents } from "./format.ts";
 import { CameraIcon, RingIcon } from "./icons.tsx";
 import { TermsList } from "./PactPage.tsx";
+import { Empty, useLoad, useNow } from "./ui.tsx";
 
 const STEPS = ["kind", "goal", "schedule", "penalty", "reviewers", "check"] as const;
 type Step = (typeof STEPS)[number];
+/** A pact's evidence kind never changes, so editing skips that step. */
+const EDIT_STEPS = STEPS.slice(1);
+
+type Pact = Json<PactTerms>;
 
 /** The schedule step's day buttons: what each shows and its accessible name. */
 const DAY_BUTTONS: Record<Weekday, { short: string; full: string }> = {
@@ -43,11 +50,22 @@ interface Form {
 
 const EMPTY_FORM: Form = { name: "", description: "", days: [], penalty: "", recipientId: null, reviewerIds: [] };
 
+function formOf(pact: Pact): Form {
+  return {
+    name: pact.name,
+    description: pact.description,
+    days: pact.schedule.days,
+    penalty: centsInputText(pact.penaltyCents),
+    recipientId: pact.recipient.id,
+    reviewerIds: pact.reviewers.map((reviewer) => reviewer.id),
+  };
+}
+
 /**
- * What's wrong, in the owner's words: the core's refusals at Create, and the
- * steps' own checks that a field is filled in.
+ * What's wrong, in the owner's words: the core's refusals at Create or Save,
+ * and the steps' own checks that a field is filled in.
  */
-type Problem = CreatePactRefusal | "no-amount" | "no-recipient";
+type Problem = EditPactRefusal | "no-amount" | "no-recipient";
 
 const PROBLEMS: Record<Problem, string> = {
   "evidence-kind-unavailable": "Oura Ring pacts aren't available yet.",
@@ -61,6 +79,9 @@ const PROBLEMS: Record<Problem, string> = {
   "no-reviewers": "Pick at least one reviewer.",
   "not-a-friend": "Only friends can be reviewers.",
   "no-timezone": "Confirm your timezone first.",
+  "pact-not-found": "This pact wasn't found.",
+  "edit-window-closed": "The 10 minutes are up.",
+  "evidence-kind-fixed": "A pact's evidence kind can't change.",
 };
 
 /** A field left empty (or an amount that isn't one) stops the owner leaving a step. The core judges the rest at Create. */
@@ -82,17 +103,49 @@ function stepProblem(step: Step, form: Form): Problem | null {
   }
 }
 
+/** The form for a pact in its edit window, or word that the window has closed. */
+export function EditPact({
+  pactId,
+  onDone,
+  onInvite,
+}: {
+  pactId: string;
+  /** After saving, cancelling, or finding the window closed: back to the pact. */
+  onDone: () => void;
+  onInvite: () => void;
+}) {
+  const { data, failed } = useLoad(() => api.pact(pactId));
+  if (failed) {
+    return (
+      <Empty
+        title="This pact couldn't load"
+        body={failureText(failed.error, "Check your connection and reopen Pact.")}
+      />
+    );
+  }
+  if (data === null) return null;
+  if (!data.ok) return <Empty title="Pact not found" body="It isn't one of your pacts." />;
+  return <CreatePact editing={data.pact} onCancel={onDone} onCreated={onDone} onInvite={onInvite} />;
+}
+
+/** The form, for a new pact or for `editing`. */
 export function CreatePact({
+  editing,
   onCancel,
   onCreated,
   onInvite,
 }: {
+  editing?: Pact;
   onCancel: () => void;
+  /** After creating the pact, or saving the edit. */
   onCreated: (pactId: string, name: string) => void;
   onInvite: () => void;
 }) {
+  const steps = editing ? EDIT_STEPS : STEPS;
+  const now = useNow();
+  const [windowClosed, setWindowClosed] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
-  const [form, setForm] = useState<Form>(EMPTY_FORM);
+  const [form, setForm] = useState<Form>(editing ? formOf(editing) : EMPTY_FORM);
   const [tried, setTried] = useState(false);
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
@@ -101,7 +154,7 @@ export function CreatePact({
   const [createError, setCreateError] = useState<string | null>(null);
   const top = useRef<HTMLDivElement>(null);
 
-  const step = STEPS[stepIndex]!;
+  const step = steps[stepIndex]!;
   const problem = stepProblem(step, form);
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
 
@@ -139,19 +192,28 @@ export function CreatePact({
     setCreating(true);
     setCreateError(null);
     try {
-      const result = await api.createPact({
-        evidenceKind: "camera",
+      const pact = {
+        evidenceKind: editing?.evidenceKind ?? "camera",
         name: form.name.trim(),
         description: form.description.trim(),
         schedule: { kind: "fixed-days", days: form.days },
         penaltyCents,
         recipientId,
         reviewerIds: form.reviewerIds,
-      });
-      if (result.ok) return onCreated(result.pactId, form.name.trim());
-      setCreateError(PROBLEMS[result.reason]);
+      } as const;
+      if (editing) {
+        const result = await api.editPact(editing.id, pact);
+        if (result.ok) return onCreated(editing.id, pact.name);
+        if (result.reason === "edit-window-closed") setWindowClosed(true);
+        setCreateError(PROBLEMS[result.reason]);
+      } else {
+        const result = await api.createPact(pact);
+        if (result.ok) return onCreated(result.pactId, pact.name);
+        setCreateError(PROBLEMS[result.reason]);
+      }
     } catch (error) {
-      setCreateError(`Couldn't create it. ${failureText(error, "Check your connection and try again.")}`);
+      const action = editing ? "save" : "create";
+      setCreateError(`Couldn't ${action} it. ${failureText(error, "Check your connection and try again.")}`);
     }
     setCreating(false);
   };
@@ -192,21 +254,37 @@ export function CreatePact({
       );
       break;
     case "check":
-      body = <CheckStep form={form} friends={friends ?? []} recipients={recipients ?? []} />;
+      body = <CheckStep form={form} friends={friends ?? []} recipients={recipients ?? []} editing={editing} />;
       break;
+  }
+
+  const minutes = editing ? minutesLeft(editing.editWindowClosesAt, now) : null;
+  if (editing && (windowClosed || minutes === null)) {
+    return (
+      <div className="alert bad" role="status">
+        <b>The 10 minutes are up.</b>
+        <span>Your changes weren't saved, and {editing.name} stays as it was.</span>
+        <button className="btn sm self-start" onClick={onCancel}>
+          Back to pact
+        </button>
+      </div>
+    );
   }
 
   return (
     <>
       <div className="stack" ref={top}>
         <div className="steps" aria-hidden="true">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <i key={s} className={i <= stepIndex ? "on" : undefined} />
           ))}
         </div>
-        <small className="muted">
-          Step {stepIndex + 1} of {STEPS.length}
-        </small>
+        <div className="spread">
+          <small className="muted">
+            Step {stepIndex + 1} of {steps.length}
+          </small>
+          {minutes !== null && <span className="chip c-new">{minutes} min left to edit</span>}
+        </div>
       </div>
       {loadFailed && (
         <p className="error">
@@ -228,7 +306,7 @@ export function CreatePact({
         )}
         {step === "check" ? (
           <button className="btn primary grow" disabled={creating} onClick={() => void create()}>
-            Create pact
+            {editing ? "Save changes" : "Create pact"}
           </button>
         ) : (
           step !== "kind" && (
@@ -549,7 +627,17 @@ type FirstState =
 /** How often the Check step asks again, so the day it names stays the one Create would store. */
 const FIRST_OCCURRENCE_REFRESH_MS = 60_000;
 
-function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[]; recipients: Recipient[] }) {
+function CheckStep({
+  form,
+  friends,
+  recipients,
+  editing,
+}: {
+  form: Form;
+  friends: Friend[];
+  recipients: Recipient[];
+  editing?: Pact;
+}) {
   const [first, setFirst] = useState<FirstState>({ kind: "loading" });
   const days = form.days;
 
@@ -559,7 +647,7 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
       if (current) setFirst(state);
     };
     const load = () =>
-      api.firstOccurrence({ schedule: { kind: "fixed-days", days } }).then(
+      api.firstOccurrence({ schedule: { kind: "fixed-days", days }, editing: editing?.id }).then(
         (result) =>
           show(
             result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
@@ -572,7 +660,7 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
       current = false;
       window.clearInterval(timer);
     };
-  }, [days]);
+  }, [days, editing?.id]);
 
   const recipient = recipients.find((r) => r.id === form.recipientId);
   return (
@@ -584,7 +672,7 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
         {recipient && (
           <TermsList
             terms={{
-              evidenceKind: "camera",
+              evidenceKind: editing?.evidenceKind ?? "camera",
               schedule: { kind: "fixed-days", days },
               penaltyCents: parseCents(form.penalty) ?? 0,
               recipient,
@@ -595,12 +683,15 @@ function CheckStep({ form, friends, recipients }: { form: Form; friends: Friend[
       </div>
       <div className="alert info">
         <p>
-          It's Active as soon as you create it.
+          {!editing && "It's Active as soon as you create it."}
           {first.kind === "loaded" && (
             <>
               {" "}
               The first one is <b>{formatDate(first.first.date)}</b>, due midnight.
             </>
+          )}
+          {editing?.editWindowClosesAt && (
+            <> Your 10 minutes end at {clockTime(editing.editWindowClosesAt)}. Saving doesn't add more.</>
           )}
         </p>
         {first.kind === "failed" && (

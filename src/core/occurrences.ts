@@ -51,6 +51,8 @@ export interface Occurrences {
   readonly first: Occurrence;
   /** The occurrence open at `t`: none on a day the schedule skips, or before the first occurrence. */
   openAt(t: Date): Occurrence | null;
+  /** Whether the pact has an occurrence dated `date`. */
+  includes(date: LocalDate): boolean;
   /**
    * The occurrences dated after `date` (from the first occurrence, if null)
    * whose due time has come by `t`, oldest first: what judging at `t` still
@@ -67,6 +69,9 @@ export function occurrences(terms: OccurrenceTerms, timezone: string): Occurrenc
       const date = localDateOf(t, timezone);
       if (date < terms.firstOccurrence || !terms.schedule.days.includes(weekdayOf(date))) return null;
       return fixedDaysOccurrence(date, timezone);
+    },
+    includes(date) {
+      return date >= terms.firstOccurrence && terms.schedule.days.includes(weekdayOf(date));
     },
     dueAfter(after, t) {
       const due: Occurrence[] = [];

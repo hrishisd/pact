@@ -13,10 +13,10 @@ import {
   type TodayWaitingItem,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
-import { formatDate, money, timeLeft } from "./format.ts";
+import { formatDate, minutesLeft, money, timeLeft } from "./format.ts";
 import { CameraIcon, DollarIcon } from "./icons.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
-import { Empty, useLoad } from "./ui.tsx";
+import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
 
 export function Today({
   onOpenPact,
@@ -93,6 +93,8 @@ function Section({
           key={card.pactId}
           name={card.name}
           penaltyCents={card.penaltyCents}
+          editWindowClosesAt={card.editWindowClosesAt}
+          now={now}
           chip={<span className="chip c-todo">To do</span>}
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
@@ -121,6 +123,8 @@ function Section({
               key={card.pactId}
               name={card.name}
               penaltyCents={card.penaltyCents}
+              editWindowClosesAt={card.editWindowClosesAt}
+              now={now}
               chip={<span className="chip c-soon">Opens {formatDate(card.opensOn)}</span>}
               onOpen={() => onOpenPact(card.pactId, card.name)}
             />
@@ -350,19 +354,24 @@ const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
 function PactCard({
   name,
   penaltyCents,
+  editWindowClosesAt = null,
+  now = 0,
   chip,
   onOpen,
   children,
 }: {
   name: string;
   penaltyCents: number;
+  /** For a pact that can still be in its edit window; `now` keeps its chip right. */
+  editWindowClosesAt?: string | null;
+  now?: number;
   chip: ReactNode;
   onOpen: () => void;
   children?: ReactNode;
 }) {
   return (
     <article
-      className="card tcard"
+      className={minutesLeft(editWindowClosesAt, now) === null ? "card tcard" : "card tcard fresh"}
       role="link"
       tabIndex={0}
       onClick={onOpen}
@@ -371,21 +380,14 @@ function PactCard({
       }}
     >
       <div className="spread">
-        <h3>{name}</h3>
+        <span className="namerow">
+          <h3>{name}</h3>
+          <EditWindowChip closesAt={editWindowClosesAt} now={now} />
+        </span>
         {chip}
       </div>
       <div className="meta pen">{money(penaltyCents)}</div>
       {children}
     </article>
   );
-}
-
-/** The current time, updated each minute so countdowns stay right. */
-function useNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return now;
 }

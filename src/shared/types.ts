@@ -85,6 +85,19 @@ export type CreatePactRefusal =
 
 export type CreatePactResult = { ok: true; pactId: string } | { ok: false; reason: CreatePactRefusal };
 
+export type EditPactRefusal =
+  | CreatePactRefusal
+  /** Not this owner's pact, or no pact. */
+  | "pact-not-found"
+  /** Past the first 10 minutes. */
+  | "edit-window-closed"
+  /** A pact's evidence kind never changes, not even in its edit window. */
+  | "evidence-kind-fixed";
+
+export type EditPactResult = { ok: true } | { ok: false; reason: EditPactRefusal };
+
+export type DeletePactResult = { ok: true } | { ok: false; reason: "pact-not-found" | "edit-window-closed" };
+
 /** A pact's first occurrence, as the create form's Check step names it. */
 export interface FirstOccurrence {
   /** The occurrence's day in the owner's timezone, "YYYY-MM-DD". */
@@ -94,7 +107,7 @@ export interface FirstOccurrence {
 }
 
 export type FirstOccurrenceResult =
-  { ok: true; firstOccurrence: FirstOccurrence } | { ok: false; reason: "no-days" | "no-timezone" };
+  { ok: true; firstOccurrence: FirstOccurrence } | { ok: false; reason: "no-days" | "no-timezone" | "pact-not-found" };
 
 /** A card in the Pacts tab. */
 export interface PactSummary {
@@ -102,6 +115,8 @@ export interface PactSummary {
   name: string;
   schedule: Schedule;
   penaltyCents: number;
+  /** When its edit window closes; null once it has. */
+  editWindowClosesAt: Date | null;
 }
 
 /** The pact page: the pact's terms. */
@@ -118,6 +133,8 @@ export interface PactTerms {
   /** Ended comes with end dates and change requests. */
   stage: "active";
   firstOccurrence: FirstOccurrence;
+  /** When its edit window closes; null once it has. */
+  editWindowClosesAt: Date | null;
 }
 
 export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "pact-not-found" };
@@ -221,7 +238,7 @@ export type SetTimezoneResult =
  * The kinds of notification an account can turn off, on all its devices. Every
  * kind starts on. Later tickets add theirs (story 88).
  */
-export const NOTIFICATION_SETTINGS = ["review-item", "decision", "missed-occurrence"] as const;
+export const NOTIFICATION_SETTINGS = ["picked-as-reviewer", "review-item", "decision", "missed-occurrence"] as const;
 export type NotificationSetting = (typeof NOTIFICATION_SETTINGS)[number];
 
 export interface NotificationSettingState {
@@ -301,6 +318,8 @@ interface TodayPactCard {
 
 /** A Fixed-days pact whose occurrence is open today. */
 export interface TodayToDoCard extends TodayPactCard {
+  /** When its edit window closes; null once it has. */
+  editWindowClosesAt: Date | null;
   /** Midnight ending today, in the owner's timezone. */
   dueAt: Date;
 }
@@ -320,6 +339,8 @@ export interface TodayMissedCard extends TodayPactCard {
 }
 
 export interface TodayComingUpCard extends TodayPactCard {
+  /** When its edit window closes; null once it has. */
+  editWindowClosesAt: Date | null;
   /** The first occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
   opensOn: string;
 }

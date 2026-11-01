@@ -11,6 +11,7 @@ import { useLoad } from "./ui.tsx";
 const ALERT_CLEARED_KEY = "pact.notifications-alert-cleared";
 
 const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }> = {
+  "picked-as-reviewer": { label: "Picked as a reviewer", hint: "A friend picked you as a reviewer on a new pact" },
   "review-item": { label: "New review item", hint: "Evidence or a payment is waiting for you" },
   decision: { label: "Decision", hint: "A reviewer approved or rejected something of yours" },
   "missed-occurrence": { label: "Missed occurrence", hint: "One of your pacts was judged Missed" },

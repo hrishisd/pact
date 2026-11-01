@@ -1,4 +1,6 @@
-// How money and days are written, by the client and in notifications.
+// How money, days and schedules are written, by the client and in notifications.
+
+import { WEEKDAYS, type Schedule, type Weekday } from "./types.ts";
 
 /** US cents as dollars: "$5" for whole dollars, "$5.50" otherwise. */
 export function money(cents: number): string {
@@ -30,4 +32,20 @@ export function formatDay(instant: string, timeZone: string): string {
   }).formatToParts(new Date(instant));
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
   return `${part("weekday")} ${part("month")} ${part("day")}`;
+}
+
+const WEEKDAY_LABELS: Record<Weekday, string> = {
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+  sun: "Sun",
+};
+
+/** "Every day", or the days in order: "Mon, Wed, Fri". */
+export function scheduleText(schedule: Schedule): string {
+  if (schedule.days.length === WEEKDAYS.length) return "Every day";
+  return schedule.days.map((day) => WEEKDAY_LABELS[day]).join(", ");
 }

@@ -1,8 +1,8 @@
-// The Pacts tab: the owner's Active pacts, each opening its page.
+// The Pacts tab: the owner's Active pacts, those in their edit window first, each opening its page.
 
 import { api, failureText } from "./api.ts";
-import { money, scheduleText } from "./format.ts";
-import { Empty, useLoad } from "./ui.tsx";
+import { minutesLeft, money, scheduleText } from "./format.ts";
+import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
 
 export function Pacts({
   onOpenPact,
@@ -12,6 +12,7 @@ export function Pacts({
   onCreate: () => void;
 }) {
   const { data: pacts, failed } = useLoad(api.pacts);
+  const now = useNow();
 
   return (
     <div className="stack">
@@ -24,9 +25,16 @@ export function Pacts({
           <div className="label">Active</div>
           <div className="cards">
             {pacts.map((pact) => (
-              <button key={pact.id} className="rowbtn" onClick={() => onOpenPact(pact.id, pact.name)}>
+              <button
+                key={pact.id}
+                className={minutesLeft(pact.editWindowClosesAt, now) === null ? "rowbtn" : "rowbtn fresh"}
+                onClick={() => onOpenPact(pact.id, pact.name)}
+              >
                 <span className="rt">
-                  <b>{pact.name}</b>
+                  <span className="namerow">
+                    <b>{pact.name}</b>
+                    <EditWindowChip closesAt={pact.editWindowClosesAt} now={now} />
+                  </span>
                   <small>
                     {scheduleText(pact.schedule)} · <span className="pen">{money(pact.penaltyCents)}</span>
                   </small>

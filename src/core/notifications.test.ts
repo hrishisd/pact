@@ -72,7 +72,7 @@ describe("each kind records one notification for each person it's for", () => {
         },
       },
     ]);
-    expect(s.notifier.sentTo(reviewer)).toEqual([]);
+    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer"]);
 
     await s.advanceTo("Tue 00:00");
     expect(s.notifier.sentTo(owner)).toHaveLength(1);
@@ -95,6 +95,7 @@ describe("notification settings", () => {
     const owner = await s.signIn("owner");
 
     expect(owner.notificationSettings()).toEqual([
+      { setting: "picked-as-reviewer", enabled: true },
       { setting: "review-item", enabled: true },
       { setting: "decision", enabled: true },
       { setting: "missed-occurrence", enabled: true },
@@ -356,6 +357,6 @@ describe("delivery happens after the command", () => {
     await s.restart();
     await s.advanceTo("Mon 18:01");
 
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["review-item"]);
+    expect(s.notifier.sentTo(reviewer).filter((n) => n.kind === "review-item")).toHaveLength(1);
   });
 });

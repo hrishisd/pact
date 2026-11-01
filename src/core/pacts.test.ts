@@ -46,6 +46,7 @@ describe("creating a pact", () => {
         reviewers: [{ id: reviewer.id, name: "reviewer" }],
         stage: "active",
         firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
+        editWindowClosesAt: s.at("Mon 09:10"),
       },
     });
   });
@@ -172,12 +173,19 @@ describe("the Pacts tab", () => {
     await s.restart();
 
     expect(owner.pacts()).toEqual([
-      { id: gym.pactId, name: "Gym", schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] }, penaltyCents: 500 },
+      {
+        id: gym.pactId,
+        name: "Gym",
+        schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
+        penaltyCents: 500,
+        editWindowClosesAt: s.at("Mon 09:10"),
+      },
       {
         id: reading.pactId,
         name: "Reading",
         schedule: { kind: "fixed-days", days: ["sat", "sun"] },
         penaltyCents: 250,
+        editWindowClosesAt: s.at("Mon 09:10"),
       },
     ]);
     expect(owner.pact(gym.pactId)).toMatchObject({ ok: true, pact: { name: "Gym" } });

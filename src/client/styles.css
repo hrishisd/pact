@@ -16,6 +16,8 @@
   --missed: #ad3227;
   --missed-bg: #f6dfda;
   --due: #b0520a;
+  --fresh: #1d64c2;
+  --fresh-bg: #ddeafb;
   --scrim: rgba(14, 22, 18, 0.45);
   --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -416,6 +418,27 @@ p {
 .c-soon {
   background: var(--sunk);
   color: var(--muted);
+}
+
+/* A pact in its edit window: a blue chip next to its name, a blue left edge, a blue bar on its page. */
+.c-new {
+  background: var(--fresh-bg);
+  color: var(--fresh);
+}
+.card.fresh,
+.cards > .rowbtn.fresh {
+  border-left: 4px solid var(--fresh);
+}
+.alert.fresh {
+  background: var(--fresh-bg);
+  border-color: var(--fresh);
+}
+.namerow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
 }
 
 /* Lists. Rows you can tap are separate cards with a chevron; rows you can't tap

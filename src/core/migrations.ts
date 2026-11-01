@@ -254,4 +254,13 @@ export const migrations: readonly string[] = [
   -- others, so one failing device doesn't repeat it on the rest.
   ALTER TABLE outbox ADD COLUMN sent_to TEXT NOT NULL DEFAULT '[]';
   `,
+  // 11: the edit window
+  `
+  -- When the scheduler told the pact's reviewers about it, in the transaction
+  -- that queued the notifications, so each hears once even across a restart.
+  -- NULL until its edit window closes. Pacts from before this have long closed,
+  -- and their reviewers already know.
+  ALTER TABLE pact ADD COLUMN reviewers_notified_at TEXT;
+  UPDATE pact SET reviewers_notified_at = created_at;
+  `,
 ];

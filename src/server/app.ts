@@ -30,6 +30,8 @@ import {
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
+  type DeletePactResponse,
+  type EditPactResponse,
   type DecideRequest,
   type DecideResponse,
   type FirstOccurrenceRequest,
@@ -324,7 +326,7 @@ export function createApp({
   });
 
   app.get(API_PATHS.pacts, (c) => {
-    const body: PactsResponse = core.as(c.get("accountId")).pacts();
+    const body: PactsResponse = json(core.as(c.get("accountId")).pacts());
     return c.json(body);
   });
 
@@ -341,12 +343,26 @@ export function createApp({
     > | null;
     const schedule = parseSchedule(request?.schedule);
     if (!schedule) return apiError(c, 400, "invalid-request");
-    const body: FirstOccurrenceResponse = json(core.as(c.get("accountId")).firstOccurrence(schedule));
+    const editing = request?.editing;
+    if (editing !== undefined && typeof editing !== "string") return apiError(c, 400, "invalid-request");
+    const body: FirstOccurrenceResponse = json(core.as(c.get("accountId")).firstOccurrence(schedule, editing));
     return c.json(body);
   });
 
   app.get(API_PATHS.pact(":id"), (c) => {
     const body: PactResponse = json(core.as(c.get("accountId")).pact(c.req.param("id")));
+    return c.json(body);
+  });
+
+  app.put(API_PATHS.pact(":id"), async (c) => {
+    const pact = parseNewPact(await c.req.json().catch(() => null));
+    if (!pact) return apiError(c, 400, "invalid-request");
+    const body: EditPactResponse = await core.as(c.get("accountId")).editPact(c.req.param("id"), pact);
+    return c.json(body);
+  });
+
+  app.delete(API_PATHS.pact(":id"), async (c) => {
+    const body: DeletePactResponse = await core.as(c.get("accountId")).deletePact(c.req.param("id"));
     return c.json(body);
   });
 

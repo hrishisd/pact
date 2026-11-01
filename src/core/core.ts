@@ -11,7 +11,7 @@ import { openDatabase, type Db } from "./db.ts";
 import { newOccurrenceTerms, occurrences, type Occurrence, type OccurrenceTerms } from "./occurrences.ts";
 import type { Clock, Notification, NotificationKind, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { APP_PATHS } from "../shared/api.ts";
-import { formatDate, money } from "../shared/format.ts";
+import { formatDate, money, scheduleText } from "../shared/format.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
   NOTIFICATION_SETTINGS,
@@ -19,8 +19,11 @@ import {
   type AcceptMissResult,
   type AccountId,
   type AddRecipientResult,
+  type CreatePactRefusal,
   type CreatePactResult,
   type DecideResult,
+  type DeletePactResult,
+  type EditPactResult,
   type EvidenceRejection,
   type FirstOccurrenceResult,
   type Friend,
@@ -130,11 +133,21 @@ export interface AccountView {
   /** Makes a pact, Active at once. A refusal writes nothing. */
   createPact(pact: NewPact): Promise<CreatePactResult>;
   /**
-   * The first occurrence a pact with `schedule` would have if created now:
-   * what the create form's Check step names. Same rule as `createPact`.
+   * Changes a pact in its edit window. Same rules as `createPact`, as of when
+   * the pact was created, and the evidence kind can't change. It doesn't
+   * restart the window. Evidence waiting for a day the new schedule doesn't
+   * have goes with that day. A refusal changes nothing.
    */
-  firstOccurrence(schedule: Schedule): FirstOccurrenceResult;
-  /** This owner's Active pacts, for the Pacts tab, sorted by name. */
+  editPact(pactId: string, pact: NewPact): Promise<EditPactResult>;
+  /** Removes a pact in its edit window, with its evidence, and tells nobody. A refusal changes nothing. */
+  deletePact(pactId: string): Promise<DeletePactResult>;
+  /**
+   * The first occurrence a pact with `schedule` would have if created now, or
+   * if it's the pact `editing`, when that was created: what the form's Check
+   * step names. Same rule as `createPact`.
+   */
+  firstOccurrence(schedule: Schedule, editing?: string): FirstOccurrenceResult;
+  /** This owner's Active pacts, for the Pacts tab: those in their edit window first, then by name. */
   pacts(): PactSummary[];
   /** The pact page's terms. Someone else's pact, or none, is not found. */
   pact(pactId: string): PactResult;
@@ -218,6 +231,7 @@ export function createPactCore(options: PactCoreOptions): PactCore {
 /** Which setting turns a kind of notification off. Operator alerts can't be. */
 const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "operator-alert": null,
+  "picked-as-reviewer": "picked-as-reviewer",
   "review-item": "review-item",
   "evidence-decided": "decision",
   "payment-decided": "decision",
@@ -237,6 +251,8 @@ const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 /** A Missed occurrence stays on Today this long after it's judged. */
 const TODAY_MISSED_MS = 48 * 60 * 60 * 1000;
+/** How long after creation the owner can edit or delete a pact freely. */
+const EDIT_WINDOW_MS = 10 * 60 * 1000;
 /**
  * SQL: who reviews payments from `owner` to `recipient` (SQL expressions):
  * the reviewers of any of the owner's pacts with that recipient, with repeats.
@@ -521,26 +537,9 @@ class Core implements PactCore {
       createPact: (pact) =>
         this.#command((): CreatePactResult => {
           const { timezone } = account();
-          // Oura Ring pacts come with the Oura connection (ticket 08).
-          if (pact.evidenceKind !== "camera") return { ok: false, reason: "evidence-kind-unavailable" };
-          const name = pact.name.trim();
-          const description = pact.description.trim();
-          if (name === "") return { ok: false, reason: "blank-name" };
-          if (description === "") return { ok: false, reason: "blank-description" };
-          if (timezone === null) return { ok: false, reason: "no-timezone" };
           const now = this.#clock.now();
-          const timing = newOccurrenceTerms(pact.schedule, now, timezone);
-          if (!timing.ok) return timing;
-          if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
-            return { ok: false, reason: "invalid-penalty" };
-          }
-          const isOwnRecipient = this.#db
-            .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
-            .get(pact.recipientId, accountId);
-          if (!isOwnRecipient) return { ok: false, reason: "unknown-recipient" };
-          const reviewerIds = [...new Set(pact.reviewerIds)];
-          if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
-          if (!reviewerIds.every((id) => this.#areFriends(accountId, id))) return { ok: false, reason: "not-a-friend" };
+          const checked = this.#checkedPact(accountId, timezone, pact, now);
+          if (!checked.ok) return checked;
 
           const id = randomUUID();
           this.#db
@@ -552,43 +551,88 @@ class Core implements PactCore {
             .run(
               id,
               accountId,
-              name,
-              description,
+              checked.name,
+              checked.description,
               pact.evidenceKind,
-              JSON.stringify(timing.terms.schedule),
+              JSON.stringify(checked.terms.schedule),
               pact.penaltyCents,
               pact.recipientId,
-              timing.terms.firstOccurrence,
+              checked.terms.firstOccurrence,
               now.toISOString(),
             );
-          for (const reviewerId of reviewerIds) {
-            this.#db
-              .prepare(`INSERT INTO pact_reviewer (pact_id, reviewer_account_id) VALUES (?, ?)`)
-              .run(id, reviewerId);
-          }
+          this.#setReviewers(id, checked.reviewerIds);
           return { ok: true, pactId: id };
         }),
-      firstOccurrence: (schedule) => {
+      editPact: (pactId, pact) =>
+        this.#command((): EditPactResult => {
+          const { timezone } = account();
+          const row = this.#ownPact(accountId, pactId);
+          if (!row) return { ok: false, reason: "pact-not-found" };
+          if (editWindowClosesAt(row, this.#clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
+          if (pact.evidenceKind !== row.evidence_kind) return { ok: false, reason: "evidence-kind-fixed" };
+          const checked = this.#checkedPact(accountId, timezone, pact, new Date(row.created_at));
+          if (!checked.ok) return checked;
+
+          this.#db
+            .prepare(
+              `UPDATE pact SET name = ?, description = ?, schedule = ?, penalty_cents = ?, recipient_id = ?,
+                               first_occurrence = ?
+               WHERE id = ?`,
+            )
+            .run(
+              checked.name,
+              checked.description,
+              JSON.stringify(checked.terms.schedule),
+              pact.penaltyCents,
+              pact.recipientId,
+              checked.terms.firstOccurrence,
+              pactId,
+            );
+          this.#db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
+          this.#setReviewers(pactId, checked.reviewerIds);
+          // #checkedPact refuses an owner with no timezone.
+          const { includes } = occurrences(checked.terms, timezone!);
+          this.#removeEvidence(pactId, (date) => !includes(date));
+          return { ok: true };
+        }),
+      deletePact: (pactId) =>
+        this.#command((): DeletePactResult => {
+          account();
+          const row = this.#ownPact(accountId, pactId);
+          if (!row) return { ok: false, reason: "pact-not-found" };
+          if (editWindowClosesAt(row, this.#clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
+          // In its window a pact has nothing judged, so no penalties: evidence is all it can have.
+          this.#removeEvidence(pactId, () => true);
+          this.#db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
+          this.#db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);
+          return { ok: true };
+        }),
+      firstOccurrence: (schedule, editing) => {
         const { timezone } = account();
+        const pact = editing === undefined ? undefined : this.#ownPact(accountId, editing);
+        if (editing !== undefined && !pact) return { ok: false, reason: "pact-not-found" };
         if (timezone === null) return { ok: false, reason: "no-timezone" };
-        const timing = newOccurrenceTerms(schedule, this.#clock.now(), timezone);
+        const timing = newOccurrenceTerms(schedule, pact ? new Date(pact.created_at) : this.#clock.now(), timezone);
         if (!timing.ok) return timing;
         return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
       },
       pacts: () => {
         account();
-        return this.#activePacts(accountId).map(({ id, name, terms, penaltyCents }) => ({
+        const pacts = this.#activePacts(accountId).map(({ id, name, terms, penaltyCents, editWindowClosesAt }) => ({
           id,
           name,
           schedule: terms.schedule,
           penaltyCents,
+          editWindowClosesAt,
         }));
+        return [
+          ...pacts.filter((pact) => pact.editWindowClosesAt),
+          ...pacts.filter((pact) => !pact.editWindowClosesAt),
+        ];
       },
       pact: (pactId) => {
         const { timezone } = account();
-        const row = this.#db
-          .prepare(`SELECT * FROM pact WHERE id = ? AND owner_account_id = ?`)
-          .get(pactId, accountId) as PactRow | undefined;
+        const row = this.#ownPact(accountId, pactId);
         if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
         const reviewers = this.#db
           .prepare(
@@ -613,6 +657,7 @@ class Core implements PactCore {
           reviewers,
           stage: row.stage,
           firstOccurrence: { date: first.date, dueAt: first.dueAt },
+          editWindowClosesAt: editWindowClosesAt(row, this.#clock.now()),
         };
         return { ok: true, pact };
       },
@@ -692,23 +737,11 @@ class Core implements PactCore {
               .prepare(`INSERT INTO evidence_photo (evidence_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
               .run(evidenceId, position, photoId, receivedAt.toISOString());
           });
-          const pactName = this.#pactName(pactId);
-          for (const { reviewer_account_id } of this.#db
-            .prepare(`SELECT reviewer_account_id FROM pact_reviewer WHERE pact_id = ? ORDER BY reviewer_account_id`)
-            .all(pactId) as { reviewer_account_id: AccountId }[]) {
-            this.#enqueue({
-              recipient: reviewer_account_id,
-              kind: "review-item",
-              channel: "push",
-              payload: {
-                itemKind: "evidence",
-                itemId: evidenceId,
-                pactId,
-                title: `${ownerName} submitted evidence`,
-                body: `${pactName} · ${formatDate(date)}`,
-                url: APP_PATHS.review,
-              },
-            });
+          // Evidence in the edit window waits for it to close: see #closeEditWindows.
+          const pact = this.#ownPact(accountId, pactId);
+          // Its reviewers already told, it may be from inside the window but it missed that.
+          if (pact && (pact.reviewers_notified_at !== null || editWindowClosesAt(pact, submittedAt) === null)) {
+            this.#enqueueEvidenceReviewItems(pactId, evidenceId, date, ownerName);
           }
           return { ok: true, evidenceId };
         });
@@ -792,10 +825,10 @@ class Core implements PactCore {
              JOIN account AS owner ON owner.id = pact.owner_account_id
              JOIN recipient ON recipient.id = pact.recipient_id
              JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-             WHERE evidence.decision IS NULL
+             WHERE evidence.decision IS NULL AND pact.created_at <= ?
              ORDER BY evidence.submitted_at, evidence.id`,
           )
-          .all(accountId) as {
+          .all(accountId, this.#editWindowCutoff()) as {
           id: string;
           pact_id: string;
           pact_name: string;
@@ -836,9 +869,9 @@ class Core implements PactCore {
                FROM evidence
                JOIN pact ON pact.id = evidence.pact_id
                JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-               WHERE evidence.id = ?`,
+               WHERE evidence.id = ? AND pact.created_at <= ?`,
             )
-            .get(accountId, itemId) as EvidenceToDecide | undefined;
+            .get(accountId, itemId, this.#editWindowCutoff()) as EvidenceToDecide | undefined;
           const payment = evidence ? undefined : this.#paymentToDecide(accountId, itemId);
           const item = evidence ?? payment;
           if (!item) return { ok: false, reason: "item-not-found" };
@@ -1056,6 +1089,136 @@ class Core implements PactCore {
         url: outcome === "approved" ? APP_PATHS.pact(evidence.pact_id) : APP_PATHS.today,
       },
     });
+  }
+
+  /** `ownerId`'s pact `pactId`, if it is one. */
+  #ownPact(ownerId: AccountId, pactId: string): PactRow | undefined {
+    return this.#db.prepare(`SELECT * FROM pact WHERE id = ? AND owner_account_id = ?`).get(pactId, ownerId) as
+      PactRow | undefined;
+  }
+
+  /** What creating and editing share: `pact` checked as a pact made at `createdAt`, or why it's refused. */
+  #checkedPact(
+    ownerId: AccountId,
+    timezone: string | null,
+    pact: NewPact,
+    createdAt: Date,
+  ):
+    | { ok: true; name: string; description: string; terms: OccurrenceTerms; reviewerIds: AccountId[] }
+    | { ok: false; reason: CreatePactRefusal } {
+    // Oura Ring pacts come with the Oura connection (ticket 08).
+    if (pact.evidenceKind !== "camera") return { ok: false, reason: "evidence-kind-unavailable" };
+    const name = pact.name.trim();
+    const description = pact.description.trim();
+    if (name === "") return { ok: false, reason: "blank-name" };
+    if (description === "") return { ok: false, reason: "blank-description" };
+    if (timezone === null) return { ok: false, reason: "no-timezone" };
+    const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone);
+    if (!timing.ok) return timing;
+    if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
+      return { ok: false, reason: "invalid-penalty" };
+    }
+    const isOwnRecipient = this.#db
+      .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
+      .get(pact.recipientId, ownerId);
+    if (!isOwnRecipient) return { ok: false, reason: "unknown-recipient" };
+    const reviewerIds = [...new Set(pact.reviewerIds)];
+    if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
+    if (!reviewerIds.every((id) => this.#areFriends(ownerId, id))) return { ok: false, reason: "not-a-friend" };
+    return { ok: true, name, description, terms: timing.terms, reviewerIds };
+  }
+
+  #setReviewers(pactId: string, reviewerIds: AccountId[]): void {
+    for (const reviewerId of reviewerIds) {
+      this.#db
+        .prepare(`INSERT INTO pact_reviewer (pact_id, reviewer_account_id) VALUES (?, ?)`)
+        .run(pactId, reviewerId);
+    }
+  }
+
+  /** Pacts created by this time, as an ISO string, are past their edit window: for comparing in SQL. */
+  #editWindowCutoff(at = this.#clock.now()): string {
+    return new Date(at.getTime() - EDIT_WINDOW_MS).toISOString();
+  }
+
+  /** Removes the pact's evidence on the dates `removed` picks, and those occurrences, none of them judged. */
+  #removeEvidence(pactId: string, removed: (date: LocalDate) => boolean): void {
+    const rows = this.#db.prepare(`SELECT id, occurrence_date FROM evidence WHERE pact_id = ?`).all(pactId) as {
+      id: string;
+      occurrence_date: LocalDate;
+    }[];
+    for (const { id, occurrence_date } of rows.filter((row) => removed(row.occurrence_date))) {
+      this.#db.prepare(`DELETE FROM evidence_photo WHERE evidence_id = ?`).run(id);
+      this.#db.prepare(`DELETE FROM evidence WHERE id = ?`).run(id);
+      this.#db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, occurrence_date);
+    }
+  }
+
+  #reviewersOf(pactId: string): AccountId[] {
+    return (
+      this.#db
+        .prepare(`SELECT reviewer_account_id FROM pact_reviewer WHERE pact_id = ? ORDER BY reviewer_account_id`)
+        .all(pactId) as { reviewer_account_id: AccountId }[]
+    ).map((row) => row.reviewer_account_id);
+  }
+
+  #enqueueEvidenceReviewItems(pactId: string, evidenceId: string, date: LocalDate, ownerName: string): void {
+    const pactName = this.#pactName(pactId);
+    for (const reviewerId of this.#reviewersOf(pactId)) {
+      this.#enqueue({
+        recipient: reviewerId,
+        kind: "review-item",
+        channel: "push",
+        payload: {
+          itemKind: "evidence",
+          itemId: evidenceId,
+          pactId,
+          title: `${ownerName} submitted evidence`,
+          body: `${pactName} · ${formatDate(date)}`,
+          url: APP_PATHS.review,
+        },
+      });
+    }
+  }
+
+  /**
+   * For each pact whose edit window has closed by `t` and whose reviewers
+   * haven't been told: tells them they've been picked, then about any
+   * evidence submitted in the window.
+   */
+  #closeEditWindows(t: Date): void {
+    const pacts = this.#db
+      .prepare(`SELECT * FROM pact WHERE reviewers_notified_at IS NULL AND created_at <= ? ORDER BY created_at, id`)
+      .all(this.#editWindowCutoff(t)) as (PactRow & { owner_account_id: AccountId })[];
+    for (const pact of pacts) {
+      const ownerName = this.#accountName(pact.owner_account_id);
+      const { schedule } = occurrenceTermsOf(pact);
+      for (const reviewerId of this.#reviewersOf(pact.id)) {
+        this.#enqueue({
+          recipient: reviewerId,
+          kind: "picked-as-reviewer",
+          channel: "push",
+          payload: {
+            pactId: pact.id,
+            title: `${ownerName} picked you as a reviewer`,
+            body: `${pact.name} · ${scheduleText(schedule)} · ${money(pact.penalty_cents)} per miss`,
+            url: APP_PATHS.review,
+          },
+        });
+      }
+      const closedAt = editWindowEnd(pact).toISOString();
+      const held = this.#db
+        .prepare(
+          `SELECT id, occurrence_date FROM evidence
+           WHERE pact_id = ? AND decision IS NULL AND submitted_at < ?
+           ORDER BY submitted_at, id`,
+        )
+        .all(pact.id, closedAt) as { id: string; occurrence_date: LocalDate }[];
+      for (const { id, occurrence_date } of held) {
+        this.#enqueueEvidenceReviewItems(pact.id, id, occurrence_date, ownerName);
+      }
+      this.#db.prepare(`UPDATE pact SET reviewers_notified_at = ? WHERE id = ?`).run(t.toISOString(), pact.id);
+    }
   }
 
   #accountName(accountId: AccountId): string {
@@ -1339,6 +1502,7 @@ class Core implements PactCore {
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
       const card = { pactId: pact.id, name: pact.name, penaltyCents: pact.penaltyCents };
+      const { editWindowClosesAt } = pact;
       const { first, openAt } = occurrences(pact.terms, timezone);
       const open = openAt(now);
       // Judged while still open: its evidence was rejected, so it's an alert.
@@ -1347,9 +1511,9 @@ class Core implements PactCore {
         // Evidence waiting or approved: Waiting for approval, or done.
         const decision = this.#evidenceDecision(pact.id, open.date);
         if (decision === "waiting" || decision === "approved") continue;
-        toDo.push({ ...card, dueAt: open.dueAt });
+        toDo.push({ ...card, editWindowClosesAt, dueAt: open.dueAt });
       } else if (now.getTime() < first.opensAt.getTime()) {
-        comingUp.push({ ...card, opensOn: first.date });
+        comingUp.push({ ...card, editWindowClosesAt, opensOn: first.date });
       }
     }
     // Rows come sorted by name, and the sorts are stable.
@@ -1444,15 +1608,19 @@ class Core implements PactCore {
 
   /** `ownerId`'s Active pacts, sorted by name. */
   #activePacts(ownerId: AccountId): ActivePact[] {
+    const now = this.#clock.now();
     const rows = this.#db
       .prepare(
-        `SELECT pact.id, pact.name, pact.schedule, pact.penalty_cents, pact.first_occurrence,
+        `SELECT pact.id, pact.name, pact.schedule, pact.penalty_cents, pact.first_occurrence, pact.created_at,
                 recipient.name AS recipient_name
          FROM pact JOIN recipient ON recipient.id = pact.recipient_id
          WHERE pact.owner_account_id = ? AND pact.stage = 'active'
          ORDER BY pact.name, pact.created_at, pact.id`,
       )
-      .all(ownerId) as (Pick<PactRow, "id" | "name" | "schedule" | "penalty_cents" | "first_occurrence"> & {
+      .all(ownerId) as (Pick<
+      PactRow,
+      "id" | "name" | "schedule" | "penalty_cents" | "first_occurrence" | "created_at"
+    > & {
       recipient_name: string;
     })[];
     return rows.map((row) => ({
@@ -1461,6 +1629,7 @@ class Core implements PactCore {
       penaltyCents: row.penalty_cents,
       recipientName: row.recipient_name,
       terms: occurrenceTermsOf(row),
+      editWindowClosesAt: editWindowClosesAt(row, now),
     }));
   }
 
@@ -1473,6 +1642,7 @@ class Core implements PactCore {
 
   async advanceTo(t: Date): Promise<void> {
     await this.#command(() => {
+      this.#closeEditWindows(t);
       this.#judgeDueBy(t);
       this.#db
         .prepare(
@@ -1689,6 +1859,17 @@ interface ActivePact {
   penaltyCents: number;
   recipientName: string;
   terms: OccurrenceTerms;
+  editWindowClosesAt: Date | null;
+}
+
+function editWindowEnd({ created_at }: Pick<PactRow, "created_at">): Date {
+  return new Date(new Date(created_at).getTime() + EDIT_WINDOW_MS);
+}
+
+/** When a pact's edit window closes; null once it has, as of `now`. */
+function editWindowClosesAt(pact: Pick<PactRow, "created_at">, now: Date): Date | null {
+  const closesAt = editWindowEnd(pact);
+  return now.getTime() < closesAt.getTime() ? closesAt : null;
 }
 
 /** A pact row's occurrence terms: the one place a stored schedule is read. */
@@ -1706,6 +1887,8 @@ interface PactRow {
   recipient_id: string;
   stage: PactTerms["stage"];
   first_occurrence: string;
+  created_at: string;
+  reviewers_notified_at: string | null;
 }
 
 /** A pact as judging reads it. */

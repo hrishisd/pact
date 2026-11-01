@@ -23,6 +23,7 @@ const TAB_PATHS: Record<TabId, string> = {
 export type Page =
   | { kind: "pact"; id: string; name?: string }
   | { kind: "create" }
+  | { kind: "edit-pact"; id: string }
   | { kind: "ledger"; recipientId: string; name?: string }
   | { kind: "notifications" };
 
@@ -46,6 +47,8 @@ function pagePath(page: Page): string {
       return NEW_PACT_PATH;
     case "pact":
       return APP_PATHS.pact(page.id);
+    case "edit-pact":
+      return APP_PATHS.editPact(page.id);
     case "ledger":
       return APP_PATHS.ledger(page.recipientId);
     case "notifications":
@@ -61,6 +64,17 @@ function routePath(route: Route): string {
 function routeFromPath(pathname: string): Route {
   if (pathname === NEW_PACT_PATH) return { tab: "pacts", stack: [{ kind: "create" }] };
   if (pathname === NOTIFICATIONS_PATH) return { tab: "today", stack: [{ kind: "notifications" }] };
+  const edit = /^\/pacts\/([^/]+)\/edit$/.exec(pathname);
+  if (edit) {
+    const id = decodeURIComponent(edit[1]!);
+    return {
+      tab: "pacts",
+      stack: [
+        { kind: "pact", id },
+        { kind: "edit-pact", id },
+      ],
+    };
+  }
   const pact = /^\/pacts\/([^/]+)$/.exec(pathname);
   if (pact) return { tab: "pacts", stack: [{ kind: "pact", id: decodeURIComponent(pact[1]!) }] };
   const ledger = /^\/ledgers\/([^/]+)$/.exec(pathname);

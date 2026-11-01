@@ -60,8 +60,22 @@ describe("Today", () => {
       hasPacts: true,
       alerts: [],
       sections: [
-        { kind: "to-do", cards: [{ pactId: gym, name: "Gym", penaltyCents: 500, dueAt: s.at("Tue 00:00") }] },
-        { kind: "coming-up", cards: [{ pactId: stretch, name: "Stretch", penaltyCents: 300, opensOn: "2026-01-06" }] },
+        {
+          kind: "to-do",
+          cards: [{ pactId: gym, name: "Gym", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Tue 00:00") }],
+        },
+        {
+          kind: "coming-up",
+          cards: [
+            {
+              pactId: stretch,
+              name: "Stretch",
+              penaltyCents: 300,
+              editWindowClosesAt: s.at("Mon 23:40"),
+              opensOn: "2026-01-06",
+            },
+          ],
+        },
       ],
       waiting: [],
       yesterday: [],
@@ -77,7 +91,12 @@ describe("Today", () => {
 
     s.setClockTo("Tue 10:00");
     expect(owner.today().sections).toEqual([
-      { kind: "to-do", cards: [{ pactId: stretch, name: "Stretch", penaltyCents: 500, dueAt: s.at("Wed 00:00") }] },
+      {
+        kind: "to-do",
+        cards: [
+          { pactId: stretch, name: "Stretch", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Wed 00:00") },
+        ],
+      },
     ]);
 
     s.setClockTo("Wed 10:00");
@@ -85,8 +104,8 @@ describe("Today", () => {
       {
         kind: "to-do",
         cards: [
-          { pactId: gym, name: "Gym", penaltyCents: 500, dueAt: s.at("Thu 00:00") },
-          { pactId: stretch, name: "Stretch", penaltyCents: 500, dueAt: s.at("Thu 00:00") },
+          { pactId: gym, name: "Gym", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Thu 00:00") },
+          { pactId: stretch, name: "Stretch", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Thu 00:00") },
         ],
       },
     ]);
@@ -104,9 +123,28 @@ describe("Today", () => {
       {
         kind: "to-do",
         // Midnight ending Tuesday in Auckland.
-        cards: [{ pactId: tuesday, name: "Tuesday pact", penaltyCents: 500, dueAt: new Date("2026-01-06T11:00:00Z") }],
+        cards: [
+          {
+            pactId: tuesday,
+            name: "Tuesday pact",
+            penaltyCents: 500,
+            editWindowClosesAt: s.at("Mon 09:10"),
+            dueAt: new Date("2026-01-06T11:00:00Z"),
+          },
+        ],
       },
-      { kind: "coming-up", cards: [{ pactId: monday, name: "Monday pact", penaltyCents: 500, opensOn: "2026-01-12" }] },
+      {
+        kind: "coming-up",
+        cards: [
+          {
+            pactId: monday,
+            name: "Monday pact",
+            penaltyCents: 500,
+            editWindowClosesAt: s.at("Mon 09:10"),
+            opensOn: "2026-01-12",
+          },
+        ],
+      },
     ]);
   });
 });

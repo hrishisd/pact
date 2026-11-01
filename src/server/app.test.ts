@@ -570,6 +570,39 @@ describe("dev sign-in", () => {
 });
 
 describe("pacts", () => {
+  test("an owner edits and deletes a new pact, and only in its edit window", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const { cookie } = owner;
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: pact });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const path = API_PATHS.pact(created.body.pactId);
+
+    expect((await s.api(path, { cookie, method: "PUT", body: { nonsense: true } })).status).toBe(400);
+    const edited = await s.api(path, { cookie, method: "PUT", body: { ...pact, name: "Morning gym" } });
+    expect(edited).toMatchObject({ status: 200, body: { ok: true } });
+    expect((await s.api(path, { cookie })).body).toMatchObject({ pact: { name: "Morning gym" } });
+    expect(
+      (
+        await s.api(API_PATHS.firstOccurrence, {
+          cookie,
+          method: "POST",
+          body: { schedule: pact.schedule, editing: created.body.pactId },
+        })
+      ).body,
+    ).toMatchObject({ ok: true });
+
+    expect((await s.api(path, { cookie, method: "DELETE" })).body).toEqual({ ok: true });
+    expect((await s.api(path, { cookie })).body).toEqual({ ok: false, reason: "pact-not-found" });
+
+    const again = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: pact });
+    if (!again.body.ok) throw new Error(again.body.reason);
+    s.clock.set(new Date(s.clock.now().getTime() + 10 * 60 * 1000));
+    const late = API_PATHS.pact(again.body.pactId);
+    const refused = { ok: false, reason: "edit-window-closed" };
+    expect((await s.api(late, { cookie, method: "PUT", body: pact })).body).toEqual(refused);
+    expect((await s.api(late, { cookie, method: "DELETE" })).body).toEqual(refused);
+  });
+
   test("an owner creates a Camera pact and sees it on Today, in Pacts and on its page", async () => {
     const { s, owner, pact, friendId } = await ownerWithFriend();
     const cookie = owner.cookie;
@@ -585,16 +618,22 @@ describe("pacts", () => {
     const created = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: pact });
     if (!created.body.ok) throw new Error(created.body.reason);
     const { pactId } = created.body;
+    const editWindowClosesAt = new Date(s.clock.now().getTime() + 10 * 60 * 1000).toISOString();
 
     expect((await s.api(API_PATHS.today, { cookie })).body).toEqual({
       hasPacts: true,
       alerts: [],
-      sections: [{ kind: "to-do", cards: [{ pactId, name: "Gym", penaltyCents: 500, dueAt: firstOccurrence.dueAt }] }],
+      sections: [
+        {
+          kind: "to-do",
+          cards: [{ pactId, name: "Gym", penaltyCents: 500, editWindowClosesAt, dueAt: firstOccurrence.dueAt }],
+        },
+      ],
       waiting: [],
       yesterday: [],
     } satisfies TodayResponse);
     expect((await s.api(API_PATHS.pacts, { cookie })).body).toEqual([
-      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500 },
+      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500, editWindowClosesAt },
     ] satisfies PactsResponse);
     expect((await s.api(API_PATHS.pact(pactId), { cookie })).body).toEqual({
       ok: true,
@@ -609,6 +648,7 @@ describe("pacts", () => {
         reviewers: [{ id: friendId, name: "friend" }],
         stage: "active",
         firstOccurrence,
+        editWindowClosesAt,
       },
     } satisfies PactResponse);
   });
@@ -681,6 +721,8 @@ async function ownerWithPact() {
     body: setup.pact,
   });
   if (!created.body.ok) throw new Error(created.body.reason);
+  // Past its edit window, when reviewers can see its evidence.
+  setup.s.clock.set(new Date(setup.s.clock.now().getTime() + 11 * 60 * 1000));
   return { ...setup, pactId: created.body.pactId };
 }
 
@@ -720,7 +762,7 @@ describe("evidence", () => {
         pactId,
         name: "Gym",
         occurrenceDate: "2026-01-05",
-        submittedAt: "2026-01-05T14:00:00.000Z",
+        submittedAt: "2026-01-05T14:11:00.000Z",
       },
     ] satisfies TodayResponse["waiting"]);
 
@@ -857,7 +899,7 @@ describe("evidence", () => {
             ownerName: "owner",
             description: "Me at the gym",
             photoIds: s.photoStore.photoIds,
-            submittedAt: "2026-01-05T14:00:00.000Z",
+            submittedAt: "2026-01-05T14:11:00.000Z",
             occurrenceDate: "2026-01-05",
             penaltyCents: 500,
             recipientName: "Sam",
@@ -1492,6 +1534,7 @@ describe("notifications", () => {
     expect((await s.api<NotificationsResponse>(API_PATHS.notifications, { cookie })).body).toEqual({
       vapidPublicKey: VAPID_PUBLIC_KEY,
       settings: [
+        { setting: "picked-as-reviewer", enabled: true },
         { setting: "review-item", enabled: true },
         { setting: "decision", enabled: false },
         { setting: "missed-occurrence", enabled: true },

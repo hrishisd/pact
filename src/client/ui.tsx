@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { minutesLeft } from "./format.ts";
 
 /** A full screen with its content centred: sign-in, timezone, invite. */
 export function Centered({ children }: { children: ReactNode }) {
@@ -37,6 +38,22 @@ export function useLoad<T>(load: () => Promise<T>): {
   return { data, failed, reload: () => setLoads((n) => n + 1) };
 }
 
+/** The current time, updated every second, so countdowns stay right and end on time. */
+export function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+/** "New · edit for 7 min", next to the name of a pact in its edit window. Nothing once it's closed. */
+export function EditWindowChip({ closesAt, now }: { closesAt: string | null; now: number }) {
+  const minutes = minutesLeft(closesAt, now);
+  return minutes === null ? null : <span className="chip c-new">New · edit for {minutes} min</span>;
+}
+
 export function Empty({ title, body, children }: { title: string; body: string; children?: ReactNode }) {
   return (
     <div className="card">
@@ -48,8 +65,8 @@ export function Empty({ title, body, children }: { title: string; body: string; 
 }
 
 /**
- * A sheet that slides up over the screen: its title, a link that closes it
- * (Done, Cancel), then `children`. Tapping outside it or pressing Escape closes it too.
+ * A sheet that slides up over the screen: its title, maybe a link that closes
+ * it (Done, Cancel), then `children`. Tapping outside it or pressing Escape closes it too.
  * It renders on the document's body, wherever it's used.
  */
 export function Sheet({
@@ -59,7 +76,8 @@ export function Sheet({
   children,
 }: {
   title: string;
-  closeLabel: string;
+  /** Left out when `children` has its own way to close it. */
+  closeLabel?: string;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -82,9 +100,11 @@ export function Sheet({
         <div className="grab" />
         <div className="spread">
           <h2>{title}</h2>
-          <button className="link" onClick={onClose}>
-            {closeLabel}
-          </button>
+          {closeLabel && (
+            <button className="link" onClick={onClose}>
+              {closeLabel}
+            </button>
+          )}
         </div>
         {children}
       </div>

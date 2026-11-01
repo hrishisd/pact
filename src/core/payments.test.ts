@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "vitest";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
-import { scenario, type Scenario } from "./testing/scenario.ts";
+import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
 /** A friend of the owner's who reviews only a pact of theirs with another recipient, "Food bank". */
 async function reviewerForAnotherRecipient(
@@ -175,8 +175,9 @@ describe("a recorded payment", () => {
         url: "/review",
       },
     };
-    expect(s.notifier.sentTo(reviewer)).toEqual([{ ...reviewItem, recipient: reviewer.id }]);
-    expect(s.notifier.sentTo(second)).toEqual([{ ...reviewItem, recipient: second.id }]);
+    const reviewItems = (account: AccountHandle) => s.notifier.sentTo(account).filter((n) => n.kind === "review-item");
+    expect(reviewItems(reviewer)).toEqual([{ ...reviewItem, recipient: reviewer.id }]);
+    expect(reviewItems(second)).toEqual([{ ...reviewItem, recipient: second.id }]);
     expect(s.notifier.sentTo(friend)).toEqual([]);
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "review-item")).toEqual([]);
   });

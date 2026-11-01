@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
-import { CreatePact } from "./CreatePact.tsx";
+import { CreatePact, EditPact } from "./CreatePact.tsx";
 import { initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
 import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
@@ -246,6 +246,7 @@ function Shell({
   let subtitle = "";
   if (page?.kind === "pact") title = pactNames[page.id] ?? page.name ?? "";
   else if (page?.kind === "create") title = "New pact";
+  else if (page?.kind === "edit-pact") title = "Edit pact";
   else if (page?.kind === "ledger") title = ledgerNames[page.recipientId] ?? page.name ?? "";
   else if (page?.kind === "notifications") title = "Notifications";
   else {
@@ -277,7 +278,18 @@ function Shell({
         </button>
       </header>
       <main className="scroll gut">
-        {page?.kind === "pact" && <PactPage key={page.id} pactId={page.id} onLoaded={pactLoaded} />}
+        {page?.kind === "pact" && (
+          <PactPage
+            key={page.id}
+            pactId={page.id}
+            onLoaded={pactLoaded}
+            onEdit={() => nav.push({ kind: "edit-pact", id: page.id })}
+            onDeleted={nav.back}
+          />
+        )}
+        {page?.kind === "edit-pact" && (
+          <EditPact key={page.id} pactId={page.id} onDone={nav.back} onInvite={() => setProfileOpen(true)} />
+        )}
         {page?.kind === "create" && (
           <CreatePact
             onCancel={nav.back}

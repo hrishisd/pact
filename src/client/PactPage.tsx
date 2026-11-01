@@ -1,11 +1,12 @@
-// A pact's page, pushed on the current tab: its terms. History and actions come later.
+// A pact's page, pushed on the current tab: its terms, and Edit and Delete in
+// its edit window. History and other actions come later.
 
 import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type { PactTerms } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { money, scheduleText } from "./format.ts";
-import { Empty } from "./ui.tsx";
+import { minutesLeft, money, scheduleText } from "./format.ts";
+import { Empty, Sheet, useNow } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
 
@@ -16,7 +17,17 @@ const STAGE_CHIPS: Record<Pact["stage"], { label: string; className: string }> =
   active: { label: "Active", className: "c-kept" },
 };
 
-export function PactPage({ pactId, onLoaded }: { pactId: string; onLoaded: (pactId: string, name: string) => void }) {
+export function PactPage({
+  pactId,
+  onLoaded,
+  onEdit,
+  onDeleted,
+}: {
+  pactId: string;
+  onLoaded: (pactId: string, name: string) => void;
+  onEdit: () => void;
+  onDeleted: () => void;
+}) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
@@ -43,8 +54,67 @@ export function PactPage({ pactId, onLoaded }: { pactId: string; onLoaded: (pact
         />
       );
     case "loaded":
-      return <Terms pact={state.pact} />;
+      return (
+        <>
+          <EditWindowBar pact={state.pact} onEdit={onEdit} onDeleted={onDeleted} />
+          <Terms pact={state.pact} />
+        </>
+      );
   }
+}
+
+/** The blue bar on a pact in its edit window. It and any open sheet go away when the window closes. */
+function EditWindowBar({ pact, onEdit, onDeleted }: { pact: Pact; onEdit: () => void; onDeleted: () => void }) {
+  const now = useNow();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const minutes = minutesLeft(pact.editWindowClosesAt, now);
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.deletePact(pact.id);
+      if (result.ok) return onDeleted();
+      setError(result.reason === "edit-window-closed" ? "The 10 minutes are up." : "This pact wasn't found.");
+    } catch (failure) {
+      setError(`Couldn't delete it. ${failureText(failure, "Check your connection and try again.")}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (minutes === null) return error ? <p className="error">{error}</p> : null;
+  return (
+    <div className="alert fresh" role="status">
+      <b>
+        Feel free to edit or delete for {minutes} more {minutes === 1 ? "minute" : "minutes"}.
+      </b>
+      <div className="row2">
+        <button className="btn sm" onClick={onEdit}>
+          Edit
+        </button>
+        <button className="btn sm danger" onClick={() => setAsking(true)}>
+          Delete
+        </button>
+      </div>
+      {asking && (
+        <Sheet title={`Delete ${pact.name}?`} onClose={() => setAsking(false)}>
+          <p>This action can't be undone.</p>
+          {error && <p className="error">{error}</p>}
+          <div className="stack">
+            <button className="btn danger block" disabled={busy} onClick={() => void remove()}>
+              {busy ? "Deleting…" : "Delete pact"}
+            </button>
+            <button className="btn block" onClick={() => setAsking(false)}>
+              Keep it
+            </button>
+          </div>
+        </Sheet>
+      )}
+    </div>
+  );
 }
 
 function Terms({ pact }: { pact: Pact }) {

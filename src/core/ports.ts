@@ -43,6 +43,8 @@ export interface OuraSource {
 
 export type NotificationKind =
   | "operator-alert"
+  /** To each reviewer of a new pact, when its edit window closes. */
+  | "picked-as-reviewer"
   /** To each reviewer of a pact: a new item in their Review Queue. */
   | "review-item"
   /** To the owner: a reviewer approved or rejected their evidence. */

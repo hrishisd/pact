@@ -18,6 +18,9 @@ import {
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
+  type DeletePactResponse,
+  type EditPactRequest,
+  type EditPactResponse,
   type DecideRequest,
   type DecideResponse,
   type FirstOccurrenceRequest,
@@ -105,9 +108,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function post<T>(path: string, body?: unknown): Promise<T> {
+function post<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
   return call<T>(path, {
-    method: "POST",
+    method,
     ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   });
 }
@@ -131,6 +134,10 @@ export const api = {
   addRecipient: (recipient: AddRecipientRequest) => post<AddRecipientResponse>(API_PATHS.recipients, recipient),
   pacts: () => call<PactsResponse>(API_PATHS.pacts),
   createPact: (pact: CreatePactRequest) => post<CreatePactResponse>(API_PATHS.pacts, pact),
+  editPact: (pactId: string, pact: EditPactRequest) =>
+    post<EditPactResponse>(API_PATHS.pact(encodeURIComponent(pactId)), pact, "PUT"),
+  deletePact: (pactId: string) =>
+    call<DeletePactResponse>(API_PATHS.pact(encodeURIComponent(pactId)), { method: "DELETE" }),
   firstOccurrence: (request: FirstOccurrenceRequest) =>
     post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
   pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),

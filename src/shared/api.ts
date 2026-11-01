@@ -6,6 +6,8 @@ import type {
   AcceptMissResult,
   AddRecipientResult,
   CreatePactResult,
+  DeletePactResult,
+  EditPactResult,
   DecideResult,
   FirstOccurrenceResult,
   Friend,
@@ -86,6 +88,7 @@ export const APP_PATHS = {
   review: "/review",
   ledgers: "/ledgers",
   pact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}`,
+  editPact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}/edit`,
   ledger: (recipientId: string) => `/ledgers/${encodeURIComponent(recipientId)}`,
 } as const;
 
@@ -168,14 +171,23 @@ export type AddRecipientResponse = AddRecipientResult;
 export type CreatePactRequest = NewPact;
 export type CreatePactResponse = CreatePactResult;
 
-/** POST /api/pacts/first-occurrence: the create form's Check step, before the pact exists. */
+/** PUT /api/pacts/:id: an edit in the pact's edit window. */
+export type EditPactRequest = NewPact;
+export type EditPactResponse = EditPactResult;
+
+/** DELETE /api/pacts/:id (no body): a delete in the pact's edit window. */
+export type DeletePactResponse = DeletePactResult;
+
+/** POST /api/pacts/first-occurrence: the form's Check step, before the pact exists or its edit is saved. */
 export interface FirstOccurrenceRequest {
   schedule: Schedule;
+  /** The pact being edited: the rule then counts from when it was created. */
+  editing?: string;
 }
 export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
 
 /** GET /api/pacts: the Pacts tab. */
-export type PactsResponse = PactSummary[];
+export type PactsResponse = Json<PactSummary>[];
 
 /** GET /api/pacts/:id: the pact page. Someone else's pact, or none, is a 200 refusal. */
 export type PactResponse = Json<PactResult>;

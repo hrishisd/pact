@@ -1,9 +1,8 @@
 // How the client writes money, schedules, dates and time left.
 
 import { formatDay } from "../shared/format.ts";
-import { WEEKDAYS, type Schedule, type Weekday } from "../shared/types.ts";
 
-export { formatDate, formatDay, money } from "../shared/format.ts";
+export { formatDate, formatDay, money, scheduleText } from "../shared/format.ts";
 
 /** Dollars as typed ("5", "$2.50") in whole cents, or null when it isn't an amount. */
 export function parseCents(text: string): number | null {
@@ -15,22 +14,6 @@ export function parseCents(text: string): number | null {
 /** Cents as an amount field starts out: "5" for whole dollars, "2.50" otherwise, with no "$". */
 export function centsInputText(cents: number): string {
   return (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
-}
-
-const WEEKDAY_LABELS: Record<Weekday, string> = {
-  mon: "Mon",
-  tue: "Tue",
-  wed: "Wed",
-  thu: "Thu",
-  fri: "Fri",
-  sat: "Sat",
-  sun: "Sun",
-};
-
-/** "Every day", or the days in order: "Mon, Wed, Fri". */
-export function scheduleText(schedule: Schedule): string {
-  if (schedule.days.length === WEEKDAYS.length) return "Every day";
-  return schedule.days.map((day) => WEEKDAY_LABELS[day]).join(", ");
 }
 
 /** A calendar date, "YYYY-MM-DD", as its weekday, "Wednesday". Never shifted into another timezone. */
@@ -56,6 +39,22 @@ export function timeLeft(ms: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours >= 48) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
   return `${hours}h ${minutes % 60}m`;
+}
+
+/** The whole minutes left until `closesAt`, rounded up: "7 min" holds until 6 have passed. Null once it's reached or if none. */
+export function minutesLeft(closesAt: string | null, now: number): number | null {
+  if (closesAt === null) return null;
+  const ms = Date.parse(closesAt) - now;
+  return ms > 0 ? Math.ceil(ms / 60_000) : null;
+}
+
+/** An instant, as an ISO string, as a time on this device: "2:24pm". */
+export function clockTime(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).formatToParts(
+    new Date(instant),
+  );
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
 }
 
 /** "Sam Lee" → "S". */
