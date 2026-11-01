@@ -1,6 +1,10 @@
 {
   "permissions": {
-    "allow": ["Bash(scripts/prod-log.sh *)"],
+    "allow": [
+      "Bash(scripts/prod-log.sh *)",
+      "Bash(scripts/prod-db.sh *)",
+      "Bash(curl -sS https://pact.hrishisd.com/health)"
+    ],
     "deny": ["Read(./.env)", "Read(./.env.operator)"]
   },
   "hooks": {
