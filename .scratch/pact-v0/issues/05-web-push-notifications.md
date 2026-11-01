@@ -1,6 +1,6 @@
 # 05 Web Push notifications, iPhone setup and notification settings
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec stories: 3, 34, 61, 88. ADR 0002 (Notifications, Operator alerts).
@@ -23,4 +23,4 @@ Real delivery for the notifications the core already records, so a reviewer lear
 - [x] Core: submitting evidence records one new-review-item notification per reviewer; approving records one decision notification to the owner; a Missed judgment records one to the owner.
 - [x] Core: a kind turned off in settings records nothing for that account.
 - [x] Core: a command that fails mid-way records no notifications (failing-port scenario).
-- [ ] Manual: on a real iPhone, install to the home screen, enable push, and receive a push when a friend's evidence lands in your queue.
+- [x] Manual: on a real iPhone, install to the home screen, enable push, and receive a push when a friend's evidence lands in your queue.
