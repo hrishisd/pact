@@ -84,7 +84,7 @@ const PROBLEMS: Record<Problem, string> = {
   "evidence-kind-fixed": "A pact's evidence kind can't change.",
 };
 
-/** A field left empty (or an amount that isn't one) stops the owner leaving a step. The core judges the rest at Create. */
+/** A field left empty, an amount that isn't one, or a $0 penalty stops the owner leaving a step. The core judges the rest at Create. */
 function stepProblem(step: Step, form: Form): Problem | null {
   switch (step) {
     case "goal":
@@ -93,9 +93,12 @@ function stepProblem(step: Step, form: Form): Problem | null {
       return null;
     case "schedule":
       return form.days.length === 0 ? "no-days" : null;
-    case "penalty":
-      if (parseCents(form.penalty) === null) return "no-amount";
+    case "penalty": {
+      const penaltyCents = parseCents(form.penalty);
+      if (penaltyCents === null) return "no-amount";
+      if (penaltyCents === 0) return "invalid-penalty";
       return form.recipientId === null ? "no-recipient" : null;
+    }
     case "reviewers":
       return form.reviewerIds.length === 0 ? "no-reviewers" : null;
     default:

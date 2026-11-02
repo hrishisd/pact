@@ -4,10 +4,10 @@ import { formatDay } from "../shared/format.ts";
 
 export { formatDate, formatDay, money, scheduleText } from "../shared/format.ts";
 
-/** Dollars as typed ("5", "$2.50") in whole cents, or null when it isn't an amount. */
+/** Dollars as typed ("5", "$2.50", "0.5", ".50") in whole cents, or null when it isn't an amount. */
 export function parseCents(text: string): number | null {
-  const match = /^\$?\s*(\d+)(?:\.(\d{1,2}))?$/.exec(text.trim());
-  if (!match) return null;
+  const match = /^\$?\s*(\d*)(?:\.(\d{1,2}))?$/.exec(text.trim());
+  if (!match || (match[1] === "" && match[2] === undefined)) return null;
   return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
 }
 
