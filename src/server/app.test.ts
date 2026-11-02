@@ -64,6 +64,7 @@ const ORIGIN = "http://localhost:5173";
 const OPERATOR = "owner@example.test";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const VAPID_PUBLIC_KEY = "test-vapid-public-key";
+const OURA_AUTHORIZE = "https://cloud.oura.test/oauth/authorize";
 
 /**
  * `canonicalOrigin` is the config's: null unless the server is in production.
@@ -82,6 +83,7 @@ async function server({
   production?: boolean;
 } = {}) {
   const s = scenario();
+  const ouraConnects: { account: string; code: string }[] = [];
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Pact</title><div id=root></div>");
@@ -103,6 +105,13 @@ async function server({
     production,
     operatorEmail: OPERATOR,
     vapidPublicKey: VAPID_PUBLIC_KEY,
+    oura: {
+      authorizeUrl: (state) => `${OURA_AUTHORIZE}?state=${state}`,
+      async connect(account, code) {
+        ouraConnects.push({ account, code });
+        return code === "good-code" ? { ok: true } : { ok: false, reason: "exchange-failed" };
+      },
+    },
     log: (line) => s.logs.push(line),
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
@@ -122,6 +131,7 @@ async function server({
   return {
     at: s.at,
     clock: s.clock,
+    ouraConnects,
     core: s.core,
     logs: s.logs,
     photoStore: s.photoStore,
@@ -1594,6 +1604,9 @@ describe("canonical host", () => {
         PHOTOS_SECRET_ACCESS_KEY: "test-secret-access-key",
         VAPID_PUBLIC_KEY: "vapid-public",
         VAPID_PRIVATE_KEY: "vapid-private",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        OURA_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
       }).canonicalOrigin,
     });
 
@@ -1739,5 +1752,69 @@ describe("notifications", () => {
     const response = await s.api(API_PATHS.pushSubscriptions, { cookie, method: "POST", body });
 
     expect(response).toMatchObject({ status: 400, body: { error: "invalid-request" } });
+  });
+});
+
+describe("connecting Oura", () => {
+  /** Starts connecting as the browser would; returns the state Oura was sent and the cookies to bring back. */
+  async function startConnecting(s: Awaited<ReturnType<typeof server>>, cookie: string) {
+    const response = await s.request(API_PATHS.ouraConnect, { cookie });
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("Location")!);
+    expect(location.origin + location.pathname).toBe(OURA_AUTHORIZE);
+    return { state: location.searchParams.get("state")!, cookie: `${cookie}; ${cookieFrom(response)}` };
+  }
+
+  test("Oura's callback with this browser's state stores the tokens, makes the connection and returns to the form", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const started = await startConnecting(s, cookie);
+
+    const back = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=${started.state}`, {
+      cookie: started.cookie,
+    });
+
+    expect(back.status).toBe(302);
+    expect(back.headers.get("Location")).toBe("/pacts/new?oura=connected");
+    expect(s.ouraConnects).toEqual([{ account: s.core.accountIdForEmail(OPERATOR), code: "good-code" }]);
+    const me = await s.api<MeResponse>(API_PATHS.me, { cookie });
+    expect(me.body.connections).toEqual([{ service: "oura", status: "connected", connectedAt: expect.any(String) }]);
+  });
+
+  test("a state that isn't this browser's connects nothing", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const started = await startConnecting(s, cookie);
+
+    const forged = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=someone-else`, {
+      cookie: started.cookie,
+    });
+    const noCookie = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=${started.state}`, { cookie });
+
+    for (const response of [forged, noCookie]) expect(response.headers.get("Location")).toBe("/pacts/new?oura=failed");
+    expect(s.ouraConnects).toEqual([]);
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+  });
+
+  test("saying no on Oura's page returns to the form as cancelled; a code Oura refuses, as failed", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    let started = await startConnecting(s, cookie);
+    const cancelled = await s.request(`${API_PATHS.ouraCallback}?error=access_denied&state=${started.state}`, {
+      cookie: started.cookie,
+    });
+    started = await startConnecting(s, cookie);
+    const refused = await s.request(`${API_PATHS.ouraCallback}?code=bad-code&state=${started.state}`, {
+      cookie: started.cookie,
+    });
+
+    expect(cancelled.headers.get("Location")).toBe("/pacts/new?oura=cancelled");
+    expect(refused.headers.get("Location")).toBe("/pacts/new?oura=failed");
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+  });
+
+  test("connecting needs a session", async () => {
+    const s = await server();
+    expect((await s.request(API_PATHS.ouraConnect)).status).toBe(401);
   });
 });

@@ -15,6 +15,9 @@ const PRODUCTION = {
   BETTER_AUTH_URL: "https://pact.example.test",
   VAPID_PUBLIC_KEY: "vapid-public",
   VAPID_PRIVATE_KEY: "vapid-private",
+  OURA_CLIENT_ID: "oura-client-id",
+  OURA_CLIENT_SECRET: "oura-client-secret",
+  OURA_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
 };
 
 const PHOTOS_BUCKET = {
@@ -66,5 +69,27 @@ describe("deployed commit", () => {
     expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET }).commit).toBeNull();
     // A build without the arg sets the variable to an empty string.
     expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, PACT_COMMIT: "" }).commit).toBeNull();
+  });
+});
+
+describe("Oura", () => {
+  test("production needs the Oura client and a 32-byte token key", () => {
+    const { OURA_CLIENT_ID: _id, OURA_CLIENT_SECRET: _secret, OURA_TOKEN_KEY: _key, ...withoutOura } = PRODUCTION;
+    expect(() => loadConfig({ ...withoutOura, ...PHOTOS_BUCKET })).toThrow(
+      "missing required environment variables: OURA_CLIENT_ID, OURA_CLIENT_SECRET, OURA_TOKEN_KEY",
+    );
+    expect(() => loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, OURA_TOKEN_KEY: "c2hvcnQ=" })).toThrow(
+      "OURA_TOKEN_KEY must be 32 bytes, base64",
+    );
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET }).oura).toEqual({
+      clientId: "oura-client-id",
+      clientSecret: "oura-client-secret",
+      tokenKey: PRODUCTION.OURA_TOKEN_KEY,
+    });
+  });
+
+  test("development without an Oura client uses the stand-in", () => {
+    expect(loadConfig({}).oura).toBeNull();
+    expect(loadConfig({ OURA_CLIENT_ID: "id", OURA_CLIENT_SECRET: "secret" }).oura).toMatchObject({ clientId: "id" });
   });
 });

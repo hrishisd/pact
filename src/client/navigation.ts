@@ -39,13 +39,12 @@ interface Entry {
   inApp: boolean;
 }
 
-const NEW_PACT_PATH = "/pacts/new";
 const NOTIFICATIONS_PATH = "/notifications";
 
 function pagePath(page: Page): string {
   switch (page.kind) {
     case "create":
-      return NEW_PACT_PATH;
+      return APP_PATHS.newPact;
     case "pact":
       return APP_PATHS.pact(page.id);
     case "edit-pact":
@@ -65,7 +64,7 @@ function routePath(route: Route): string {
 }
 
 function routeFromPath(pathname: string): Route {
-  if (pathname === NEW_PACT_PATH) return { tab: "pacts", stack: [{ kind: "create" }] };
+  if (pathname === APP_PATHS.newPact) return { tab: "pacts", stack: [{ kind: "create" }] };
   if (pathname === NOTIFICATIONS_PATH) return { tab: "today", stack: [{ kind: "notifications" }] };
   const edit = /^\/pacts\/([^/]+)\/edit$/.exec(pathname);
   if (edit) {

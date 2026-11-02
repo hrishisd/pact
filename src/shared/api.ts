@@ -75,6 +75,14 @@ export const INVITE_REQUIRED_PATH = "/invite-required";
  */
 export const INVITE_TOKEN_SIGN_IN_KEY = "inviteToken";
 
+/**
+ * How connecting Oura went, on the new pact form's URL after Oura's callback:
+ * `/pacts/new?oura=connected`, `cancelled` (the owner said no on Oura's page)
+ * or `failed`.
+ */
+export const OURA_RESULT_PARAM = "oura";
+export type OuraResult = "connected" | "cancelled" | "failed";
+
 /** The client route of an invite link; the SPA renders it. */
 export function invitePath(token: string): string {
   return `/invite/${token}`;
@@ -90,6 +98,7 @@ export function inviteTokenFromPath(pathname: string): string | null {
 export const APP_PATHS = {
   today: "/",
   pacts: "/pacts",
+  newPact: "/pacts/new",
   review: "/review",
   ledgers: "/ledgers",
   pact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}`,
@@ -105,6 +114,10 @@ export const APP_PATHS = {
  */
 export const API_PATHS = {
   me: "/api/me",
+  /** A browser visit, not JSON: redirects to Oura's authorize page. */
+  ouraConnect: "/api/oura/connect",
+  /** Where Oura sends the browser back; it redirects to the new pact form with OURA_RESULT_PARAM. */
+  ouraCallback: "/api/oura/callback",
   timezone: "/api/me/timezone",
   today: "/api/today",
   invites: "/api/invites",

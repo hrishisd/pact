@@ -2,13 +2,15 @@
 // Better Auth under /api/auth, the JSON API under /api, two plain sign-in error
 // pages, and the built SPA with a fallback to index.html for client-side routes.
 
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
-import type { AccountId, NewPayment, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import type { AccountId, NewPayment, OuraConnector, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
 import { MAX_EVIDENCE_PHOTOS, MAX_EXCUSE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
@@ -21,7 +23,10 @@ import {
   EXCUSE_TO_FIELD,
   INVITE_REQUIRED_PATH,
   invitePath,
+  APP_PATHS,
   MAX_PHOTO_BYTES,
+  OURA_RESULT_PARAM,
+  type OuraResult,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   PHOTO_CONTENT_TYPES,
@@ -88,6 +93,8 @@ export interface AppOptions {
   operatorEmail: string;
   /** The key browsers subscribe to push with. See Config. */
   vapidPublicKey: string;
+  /** Oura's OAuth steps: the real adapter, or in development without Oura credentials a stand-in. */
+  oura: OuraConnector;
   /** Where the app writes log lines. Default: console.log. */
   log?: (line: string) => void;
 }
@@ -97,6 +104,9 @@ type UploadForm = Record<string, string | File | (string | File)[]>;
 
 /** What a photo upload is for, as its log line names it. */
 type Upload = "evidence" | "excuse" | "payment";
+
+/** The OAuth state for connecting Oura, between the connect route and Oura's callback. */
+const OURA_STATE_COOKIE = "pact_oura_state";
 
 /** Room for the multipart boundaries and headers around the photos. */
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
@@ -121,6 +131,7 @@ export function createApp({
   production,
   operatorEmail,
   vapidPublicKey,
+  oura,
   log = (line) => console.log(line),
 }: AppOptions) {
   const app = new Hono<Env>();
@@ -289,6 +300,38 @@ export function createApp({
     if (!accountId) return apiError(c, 401, "unauthenticated");
     c.set("accountId", accountId);
     await next();
+  });
+
+  // Connecting Oura: to Oura's authorize page with a random state, kept in a
+  // short-lived cookie this browser brings back to the callback, where it
+  // must match. Lax, so Oura's redirect back (a top-level GET) carries it.
+  app.get(API_PATHS.ouraConnect, (c) => {
+    const state = randomBytes(16).toString("base64url");
+    setCookie(c, OURA_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: production,
+      sameSite: "Lax",
+      path: API_PATHS.ouraCallback,
+      maxAge: 10 * 60,
+    });
+    return c.redirect(oura.authorizeUrl(state));
+  });
+  app.get(API_PATHS.ouraCallback, async (c) => {
+    const back = (result: OuraResult) => c.redirect(`${APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${result}`);
+    const expected = getCookie(c, OURA_STATE_COOKIE);
+    deleteCookie(c, OURA_STATE_COOKIE, { path: API_PATHS.ouraCallback });
+    const { state, code, error } = c.req.query();
+    if (expected === undefined || state !== expected) return back("failed");
+    // Oura's page sends the browser back with an error when the owner says no.
+    if (error !== undefined || code === undefined) return back(error === "access_denied" ? "cancelled" : "failed");
+    const accountId = c.get("accountId");
+    const connected = await oura.connect(accountId, code).catch((failure: unknown) => {
+      log(`oura connect failed: ${failure instanceof Error ? failure.message : String(failure)}`);
+      return { ok: false as const };
+    });
+    if (!connected.ok) return back("failed");
+    await core.as(accountId).connectOura();
+    return back("connected");
   });
 
   app.get(API_PATHS.me, (c) => {

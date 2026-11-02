@@ -6,11 +6,14 @@ import { dirname, join } from "node:path";
 import { serve } from "@hono/node-server";
 import {
   createPactCore,
+  devOura,
   localDiskPhotoStore,
+  ouraAdapter,
   r2PhotoStore,
-  stubOuraSource,
   systemClock,
   webPushNotifier,
+  type OuraConnector,
+  type OuraSource,
 } from "../core/index.ts";
 import { createApp } from "./app.ts";
 import { createAuth } from "./auth.ts";
@@ -18,6 +21,7 @@ import { loadConfig } from "./config.ts";
 import { startLogFile } from "./log-file.ts";
 import { exitUnlessNativeBinaryLoads } from "./native-binary.ts";
 import { startScheduler } from "./scheduler.ts";
+import { API_PATHS } from "../shared/api.ts";
 
 const config = loadConfig();
 const dataDir = dirname(config.dbPath);
@@ -42,11 +46,19 @@ if (!config.production) {
   exitUnlessNativeBinaryLoads();
 }
 
+const oura: OuraSource & OuraConnector & { close?: () => void } = config.oura
+  ? ouraAdapter(
+      config.dbPath,
+      { ...config.oura, redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString() },
+      systemClock,
+    )
+  : devOura(dataDir, API_PATHS.ouraCallback);
+
 const core = createPactCore({
   dbPath: config.dbPath,
   clock: systemClock,
   notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, systemClock),
-  ouraSource: stubOuraSource,
+  ouraSource: oura,
   photoStore:
     config.photos.kind === "r2"
       ? r2PhotoStore(config.photos, systemClock)
@@ -82,6 +94,7 @@ const app = createApp({
   production: config.production,
   operatorEmail: config.operatorEmail,
   vapidPublicKey: config.vapid.publicKey,
+  oura,
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(
@@ -101,6 +114,7 @@ async function shutdown(signal: string): Promise<void> {
   ]);
   await scheduler.stop();
   await core.close();
+  oura.close?.();
   closeAuth();
   process.exit(0);
 }
