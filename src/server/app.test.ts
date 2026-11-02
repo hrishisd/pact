@@ -29,7 +29,12 @@ import {
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
+  type AcceptExcuseRejectionResponse,
   type DecideRequest,
+  type ExcuseOptionsResponse,
+  type ExcusePreviewResponse,
+  type ExcuseResponse,
+  type FileExcuseResponse,
   type DecideResponse,
   type FirstOccurrenceResponse,
   type FriendsResponse,
@@ -626,7 +631,16 @@ describe("pacts", () => {
       sections: [
         {
           kind: "to-do",
-          cards: [{ pactId, name: "Gym", penaltyCents: 500, editWindowClosesAt, dueAt: firstOccurrence.dueAt }],
+          cards: [
+            {
+              pactId,
+              name: "Gym",
+              penaltyCents: 500,
+              editWindowClosesAt,
+              occurrenceDate: firstOccurrence.date,
+              dueAt: firstOccurrence.dueAt,
+            },
+          ],
         },
       ],
       waiting: [],
@@ -649,6 +663,7 @@ describe("pacts", () => {
         stage: "active",
         firstOccurrence,
         editWindowClosesAt,
+        waiting: [],
       },
     } satisfies PactResponse);
   });
@@ -953,6 +968,7 @@ describe("evidence", () => {
           occurrenceDate: "2026-01-05",
           penaltyCents: 500,
           recipientName: "Sam",
+          excusableUntil: expect.any(String),
         },
       ] satisfies TodayResponse["alerts"]);
       expect(today.body.sections).toEqual([]);
@@ -1027,6 +1043,125 @@ describe("evidence", () => {
   });
 });
 
+describe("excuses", () => {
+  /** Posts an excuse form for `pactId`: its dates and reason, and `files` as its `photo` fields. */
+  async function fileExcuse(
+    s: Awaited<ReturnType<typeof server>>,
+    cookie: string,
+    pactId: string,
+    fields: Partial<Record<"from" | "to" | "reason", string>>,
+    files: File[] = [],
+  ) {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(fields)) form.append(name, value);
+    for (const file of files) form.append(EVIDENCE_PHOTO_FIELD, file);
+    const response = await s.request(API_PATHS.excuses(pactId), { method: "POST", cookie, body: form });
+    return { status: response.status, body: (await response.json()) as unknown };
+  }
+
+  test("the owner previews, files with a photo, sees it waiting and on its page; the reviewer approves it", async () => {
+    const { s, owner, friend, pactId } = await ownerWithPact();
+    await s.core.advanceTo(s.at("Tue 00:00"));
+    s.clock.set(s.at("Tue 08:00"));
+    const monday = { from: "2026-01-05", to: "2026-01-05" };
+
+    const preview = await s.api<ExcusePreviewResponse>(
+      `${API_PATHS.excusePreview(pactId)}?${new URLSearchParams(monday).toString()}`,
+      { cookie: owner.cookie },
+    );
+    expect(preview.body).toMatchObject({
+      ok: true,
+      preview: { covered: [{ date: "2026-01-05", status: { kind: "missed", held: false } }], heldCents: 500 },
+    });
+    const options = await s.api<ExcuseOptionsResponse>(API_PATHS.excuseOptions(pactId), { cookie: owner.cookie });
+    expect(options.body).toMatchObject({
+      ok: true,
+      options: { today: "2026-01-06", recentDays: [{ date: "2026-01-05" }] },
+    });
+
+    const filed = await fileExcuse(s, owner.cookie, pactId, { ...monday, reason: "Sick" }, [jpeg(3, 7)]);
+    expect(filed).toEqual({ status: 200, body: { ok: true, excuseId: expect.any(String) } });
+    const { excuseId } = filed.body as { excuseId: string };
+    expect(s.logs).toContainEqual(expect.stringMatching(/^excuse-upload outcome=ok excuse=\S+ photos=1 bytes=3 /));
+
+    const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+    expect(today.body.waiting).toEqual([
+      {
+        kind: "excuse",
+        id: excuseId,
+        pactId,
+        name: "Gym",
+        firstDate: "2026-01-05",
+        lastDate: "2026-01-05",
+        filedAt: s.at("Tue 08:00").toISOString(),
+      },
+    ] satisfies TodayResponse["waiting"]);
+    const page = await s.api<ExcuseResponse>(API_PATHS.excuse(excuseId), { cookie: owner.cookie });
+    expect(page.body).toMatchObject({ ok: true, excuse: { reason: "Sick", reviewerNames: ["friend"] } });
+    expect((await s.api(API_PATHS.excuse(excuseId), { cookie: friend.cookie })).body).toEqual({
+      ok: false,
+      reason: "excuse-not-found",
+    });
+    const [photoId] = s.photoStore.photoIds;
+    expect((await s.request(API_PATHS.photo(photoId!), { cookie: friend.cookie })).status).toBe(200);
+
+    const queue = await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, { cookie: friend.cookie });
+    expect(queue.body).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId, heldCents: 500 })]);
+    const decided = await s.api(API_PATHS.decide(excuseId), {
+      cookie: friend.cookie,
+      method: "POST",
+      body: { kind: "approve" } satisfies DecideRequest,
+    });
+    expect(decided).toEqual({ status: 200, body: { ok: true } });
+    expect((await s.api<LedgersResponse>(API_PATHS.ledgers, { cookie: owner.cookie })).body).toEqual([
+      expect.objectContaining({ owedCents: 0 }),
+    ]);
+  });
+
+  test("a rejected excuse is an alert; Take the L on it is a 200, and so is its refusal", async () => {
+    const { s, owner, friend, pactId } = await ownerWithPact();
+    await s.core.advanceTo(s.at("Tue 00:00"));
+    const filed = await fileExcuse(s, owner.cookie, pactId, { from: "2026-01-05", to: "2026-01-05", reason: "Sick" });
+    const { excuseId } = filed.body as { excuseId: string };
+    await s.api(API_PATHS.decide(excuseId), {
+      cookie: friend.cookie,
+      method: "POST",
+      body: { kind: "reject", reason: "No" } satisfies DecideRequest,
+    });
+
+    const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+    expect(today.body.alerts).toEqual([expect.objectContaining({ kind: "excuse-rejected", excuseId })]);
+    const accept = () =>
+      s.api<AcceptExcuseRejectionResponse>(API_PATHS.acceptExcuseRejection(excuseId), {
+        cookie: owner.cookie,
+        method: "POST",
+      });
+    expect(await accept()).toEqual({ status: 200, body: { ok: true } });
+    expect(await accept()).toEqual({ status: 200, body: { ok: false, reason: "nothing-to-accept" } });
+  });
+
+  test("the core's refusals are 200s; a form missing a field, or a preview without dates, is a 400", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+
+    expect(await fileExcuse(s, owner.cookie, pactId, { from: "2026-01-05", to: "2026-01-05", reason: " " })).toEqual({
+      status: 200,
+      body: { ok: false, reason: "blank-reason" } satisfies FileExcuseResponse,
+    });
+    const four = [jpeg(3, 1), jpeg(3, 2), jpeg(3, 3), jpeg(3, 4)];
+    expect(
+      await fileExcuse(s, owner.cookie, pactId, { from: "2026-01-05", to: "2026-01-05", reason: "Sick" }, four),
+    ).toEqual({ status: 200, body: { ok: false, reason: "too-many-photos" } });
+    expect(await fileExcuse(s, owner.cookie, pactId, { from: "2026-01-05", reason: "Sick" })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
+    });
+    expect(await s.api(`${API_PATHS.excusePreview(pactId)}?from=2026-01-05`, { cookie: owner.cookie })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
+    });
+  });
+});
+
 describe("ledgers", () => {
   test("a Missed occurrence's penalty shows on the recipient's ledger, and its history", async () => {
     const { s, owner, pact } = await ownerWithFriend();
@@ -1068,6 +1203,7 @@ describe("ledgers", () => {
               amountCents: 500,
               addedAt: "2026-01-06T05:00:00.000Z",
               paidCents: 0,
+              held: false,
             },
           ],
         },

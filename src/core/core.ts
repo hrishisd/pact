@@ -6,7 +6,7 @@
 // reads. The core reads time only from the Clock port.
 
 import { createECDH, randomBytes, randomUUID } from "node:crypto";
-import type { LocalDate } from "./calendar.ts";
+import { addDays, localDateOf, type LocalDate } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { newOccurrenceTerms, occurrences, type Occurrence, type OccurrenceTerms } from "./occurrences.ts";
 import type { Clock, Notification, NotificationKind, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
@@ -14,7 +14,10 @@ import { APP_PATHS } from "../shared/api.ts";
 import { formatDate, money, scheduleText } from "../shared/format.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
+  MAX_EXCUSE_PHOTOS,
+  MAX_EXCUSE_SPAN_DAYS,
   NOTIFICATION_SETTINGS,
+  type AcceptExcuseRejectionResult,
   type AcceptInviteResult,
   type AcceptMissResult,
   type AccountId,
@@ -25,6 +28,18 @@ import {
   type DeletePactResult,
   type EditPactResult,
   type EvidenceRejection,
+  type ExcuseDates,
+  type ExcuseDatesRefusal,
+  type ExcuseDay,
+  type ExcuseDetail,
+  type ExcuseOptionsResult,
+  type ExcusePreview,
+  type ExcusePreviewResult,
+  type ExcuseResult,
+  type ExcuseSkipReason,
+  type ExcuseState,
+  type FileExcuseRefusal,
+  type FileExcuseResult,
   type FirstOccurrenceResult,
   type Friend,
   type Health,
@@ -36,10 +51,13 @@ import {
   type LedgerPenalty,
   type LedgerResult,
   type LedgerSummary,
+  type NewExcuse,
   type NewPact,
   type NewRecipient,
   type NotificationSetting,
   type NotificationSettingState,
+  type OccurrenceStatus,
+  type PactWaitingItem,
   type PactSummary,
   type PactResult,
   type PactTerms,
@@ -168,15 +186,45 @@ export interface AccountView {
    */
   acceptMiss(pactId: string, occurrenceDate: string): Promise<AcceptMissResult>;
   /**
-   * A photo of some evidence, for the pact's owner or one of its reviewers;
+   * The days an excuse for `pactId` with `dates` would cover if filed now,
+   * and those it would skip and why: what the File excuse sheet lists. The
+   * same rules as `fileExcuse`, which it never calls.
+   */
+  excusePreview(pactId: string, dates: ExcuseDates): ExcusePreviewResult;
+  /** What File excuse from the pact page offers: the owner's today, and the recent days an excuse would cover. */
+  excuseOptions(pactId: string): ExcuseOptionsResult;
+  /**
+   * The owner asks the pact's reviewers to treat the pact's scheduled days in
+   * `excuse`'s dates as Excused. It covers the days that can be excused now,
+   * fixed at filing: any day not judged yet, and a Missed day within 48 hours
+   * of being judged Missed (a rejection judges it then). It skips the rest:
+   * Kept, already Excused or approved ahead, on another excuse waiting for
+   * approval, or Missed more than 48 hours ago. While it waits, the
+   * penalties of its Missed days are held. Refused when no day is left, the
+   * reason is blank, the dates are reversed or span more than 62 days, in the
+   * pact's edit window, or with more than 3 photos. The reviewers get a review
+   * item. A refusal writes nothing (photos already stored stay unused).
+   */
+  fileExcuse(pactId: string, excuse: NewExcuse, photos: Photo[]): Promise<FileExcuseResult>;
+  /** The excuse page, for the owner. Someone else's excuse, or none, is not found. */
+  excuse(excuseId: string): ExcuseResult;
+  /**
+   * The owner takes the L on a rejected excuse: its alert leaves Today, and
+   * so do its Missed days. The ledger doesn't change, and a new excuse for
+   * its days is still accepted inside their 48 hours.
+   */
+  acceptExcuseRejection(excuseId: string): Promise<AcceptExcuseRejectionResult>;
+  /**
+   * A photo of some evidence or an excuse, for the pact's owner or one of its reviewers;
    * anyone else is told it isn't found. A query: async only because the photo
    * store is, and it never writes.
    */
   photo(photoId: string): Promise<PhotoResult>;
   /**
-   * Items waiting for this account's decision as a reviewer: evidence for
-   * pacts it reviews, and payments to a recipient of any pact it reviews.
-   * Oldest first, by when the evidence was submitted or the payment recorded.
+   * Items waiting for this account's decision as a reviewer: evidence and
+   * excuses for pacts it reviews, and payments to a recipient of any pact it
+   * reviews. Oldest first, by when the evidence was submitted, the excuse
+   * filed or the payment recorded.
    */
   reviewQueue(): ReviewItem[];
   /**
@@ -189,6 +237,11 @@ export interface AccountView {
    * there and then, with its penalty, whether it's still open or past its
    * due time, and it takes no more evidence. An approval after the due time
    * judges it Kept there and then; before it, judging at the due time does.
+   * For an excuse, the decision covers all its days. Approved, its Missed days
+   * become Excused there and then and their penalties are removed; its days
+   * not judged yet are judged Excused at their due time (or at once, if that
+   * has passed). Rejected, its held penalties are owed again, its days not
+   * judged yet are judged as usual, and the owner gets a rejected-excuse alert.
    */
   decide(itemId: string, decision: ReviewDecision): Promise<DecideResult>;
   /**
@@ -236,6 +289,7 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "evidence-decided": "decision",
   "payment-decided": "decision",
   "missed-occurrence": "missed-occurrence",
+  "excuse-decided": "decision",
 };
 /** The push services browsers use, as domains; a saved endpoint must be on one of them. */
 const PUSH_SERVICE_DOMAINS = [
@@ -249,8 +303,11 @@ const AUTH_BYTES = 16;
 /** /health fails when the last scheduler tick is older than this. */
 const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
-/** A Missed occurrence stays on Today this long after it's judged. */
-const TODAY_MISSED_MS = 48 * 60 * 60 * 1000;
+/**
+ * How long after it's judged Missed (a rejection judges it then) an
+ * occurrence can be excused. A Missed card stays on Today that long.
+ */
+const EXCUSE_WINDOW_MS = 48 * 60 * 60 * 1000;
 /** How long after creation the owner can edit or delete a pact freely. */
 const EDIT_WINDOW_MS = 10 * 60 * 1000;
 /**
@@ -271,6 +328,16 @@ const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_i
 const MISSED_THROUGH_REJECTION = `EXISTS (SELECT 1 FROM evidence
   WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
     AND evidence.decision = 'rejected')`;
+/**
+ * SQL: an excuse matching `condition` (on `excuse`) covers the occurrence of
+ * pact `pact` on `date` (SQL expressions).
+ */
+function excuseCoversSql(pact: string, date: string, condition: string): string {
+  return `EXISTS (SELECT 1 FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+    WHERE excuse_day.pact_id = ${pact} AND excuse_day.date = ${date} AND ${condition})`;
+}
+/** SQL: the `penalty` row is held: an excuse waiting for approval covers its occurrence. */
+const PENALTY_HELD = excuseCoversSql("penalty.pact_id", "penalty.occurrence_date", "excuse.decision IS NULL");
 
 class Core implements PactCore {
   readonly #db: Db;
@@ -658,6 +725,12 @@ class Core implements PactCore {
           stage: row.stage,
           firstOccurrence: { date: first.date, dueAt: first.dueAt },
           editWindowClosesAt: editWindowClosesAt(row, this.#clock.now()),
+          waiting: mergeByTime(
+            waitingSince,
+            "newest-first",
+            this.#waitingEvidence(accountId, pactId),
+            this.#waitingExcuses(accountId, pactId),
+          ) as PactWaitingItem[],
         };
         return { ok: true, pact };
       },
@@ -761,6 +834,160 @@ class Core implements PactCore {
             .run(this.#clock.now().toISOString(), pactId, occurrenceDate);
           return accepted.changes === 1 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
         }),
+      excusePreview: (pactId, dates) => {
+        const { timezone } = account();
+        return this.#excusePreview(accountId, timezone, pactId, dates, this.#clock.now());
+      },
+      excuseOptions: (pactId) => {
+        const { timezone } = account();
+        const now = this.#clock.now();
+        const pact = this.#ownPact(accountId, pactId);
+        if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
+        if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
+        const today = localDateOf(now, timezone);
+        // Days before today an excuse could cover: Missed in the last 48 hours, or still waiting on evidence.
+        const since = new Date(now.getTime() - EXCUSE_WINDOW_MS).toISOString();
+        const earliest = (
+          this.#db
+            .prepare(
+              `SELECT MIN(date) AS date FROM occurrence
+               WHERE pact_id = ? AND date < ? AND (outcome IS NULL OR (outcome = 'missed' AND judged_at > ?))`,
+            )
+            .get(pactId, today, since) as { date: LocalDate | null }
+        ).date;
+        const { between } = occurrences(occurrenceTermsOf(pact), timezone);
+        const recentDays = between(earliest ?? today, today)
+          .map((occurrence) => ({ date: occurrence.date, status: this.#occurrenceStatus(pactId, occurrence) }))
+          .filter(({ status }) => this.#skipReason(status, now) === null)
+          .toReversed();
+        return { ok: true, options: { today, recentDays } };
+      },
+      fileExcuse: async (pactId, excuse, photos) => {
+        const { timezone, name: ownerName } = account();
+        const reason = excuse.reason.trim();
+        // Refuse cheaply before storing anything, then check again at the time
+        // the server received the photos, in the transaction that writes.
+        const acceptance = (
+          at: Date,
+        ): { ok: true; preview: ExcusePreview } | { ok: false; reason: FileExcuseRefusal } => {
+          const checked = this.#excusePreview(accountId, timezone, pactId, excuse, at);
+          if (!checked.ok) return checked;
+          if (reason === "") return { ok: false, reason: "blank-reason" };
+          if (photos.length > MAX_EXCUSE_PHOTOS) return { ok: false, reason: "too-many-photos" };
+          if (checked.preview.covered.length === 0) return { ok: false, reason: "nothing-to-excuse" };
+          return checked;
+        };
+        const early = acceptance(this.#clock.now());
+        if (!early.ok) return early;
+        const stored = await Promise.all(photos.map((photo) => this.#photoStore.store(photo)));
+        return this.#command((): FileExcuseResult => {
+          const filedAt = this.#clock.now();
+          const checked = acceptance(filedAt);
+          if (!checked.ok) return checked;
+          const excuseId = randomUUID();
+          this.#db
+            .prepare(`INSERT INTO excuse (id, pact_id, reason, filed_at) VALUES (?, ?, ?, ?)`)
+            .run(excuseId, pactId, reason, filedAt.toISOString());
+          for (const { date } of checked.preview.covered) {
+            this.#db
+              .prepare(`INSERT INTO excuse_day (excuse_id, pact_id, date) VALUES (?, ?, ?)`)
+              .run(excuseId, pactId, date);
+          }
+          stored.forEach(({ photoId, receivedAt }, position) => {
+            this.#db
+              .prepare(`INSERT INTO excuse_photo (excuse_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
+              .run(excuseId, position, photoId, receivedAt.toISOString());
+          });
+          const pactName = this.#pactName(pactId);
+          const dates = this.#excuseDatesText(excuseId);
+          for (const reviewerId of this.#reviewersOf(pactId)) {
+            this.#enqueue({
+              recipient: reviewerId,
+              kind: "review-item",
+              channel: "push",
+              payload: {
+                itemKind: "excuse",
+                itemId: excuseId,
+                pactId,
+                title: `${ownerName} filed an excuse`,
+                body: `${pactName} · ${dates}`,
+                url: APP_PATHS.review,
+              },
+            });
+          }
+          return { ok: true, excuseId };
+        });
+      },
+      excuse: (excuseId) => {
+        account();
+        const pact = this.#excusePact(excuseId);
+        if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
+        const row = this.#db
+          .prepare(
+            `SELECT excuse.reason, excuse.filed_at, excuse.decision, excuse.decided_at, excuse.reject_reason,
+                    reviewer.name AS reviewer_name
+             FROM excuse LEFT JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
+             WHERE excuse.id = ?`,
+          )
+          .get(excuseId) as {
+          reason: string;
+          filed_at: string;
+          decision: ReviewOutcome | null;
+          decided_at: string | null;
+          reject_reason: string | null;
+          reviewer_name: string | null;
+        };
+        let state: ExcuseState = { kind: "waiting" };
+        if (row.decision !== null) {
+          const decided = { reviewerName: row.reviewer_name!, decidedAt: new Date(row.decided_at!) };
+          state =
+            row.decision === "approved"
+              ? { kind: "approved", ...decided }
+              : { kind: "rejected", ...decided, reason: row.reject_reason! };
+        }
+        const reviewerNames = (
+          this.#db
+            .prepare(
+              `SELECT account.name FROM pact_reviewer JOIN account ON account.id = pact_reviewer.reviewer_account_id
+               WHERE pact_reviewer.pact_id = ? ORDER BY account.name, account.id`,
+            )
+            .all(pact.id) as { name: string }[]
+        ).map((r) => r.name);
+        const excuse: ExcuseDetail = {
+          id: excuseId,
+          pactId: pact.id,
+          pactName: pact.name,
+          reason: row.reason,
+          photoIds: this.#excusePhotoIds(excuseId),
+          filedAt: new Date(row.filed_at),
+          days: this.#excuseDays(excuseId, pact, pact.timezone),
+          state,
+          reviewerNames,
+        };
+        return { ok: true, excuse };
+      },
+      acceptExcuseRejection: (excuseId) =>
+        this.#command((): AcceptExcuseRejectionResult => {
+          account();
+          const pact = this.#excusePact(excuseId);
+          if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
+          const now = this.#clock.now().toISOString();
+          const accepted = this.#db
+            .prepare(
+              `UPDATE excuse SET rejection_accepted_at = ?
+               WHERE id = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL`,
+            )
+            .run(now, excuseId);
+          if (accepted.changes !== 1) return { ok: false, reason: "nothing-to-accept" };
+          this.#db
+            .prepare(
+              `UPDATE occurrence SET miss_accepted_at = ?
+               WHERE outcome = 'missed' AND miss_accepted_at IS NULL
+                 AND (pact_id, date) IN (SELECT pact_id, date FROM excuse_day WHERE excuse_id = ?)`,
+            )
+            .run(now, excuseId);
+          return { ok: true };
+        }),
       recordPayment: async (payment, screenshot) => {
         const { name: ownerName } = account();
         // Refuse cheaply before storing anything, then check again in the
@@ -809,7 +1036,9 @@ class Core implements PactCore {
       photo: async (photoId) => {
         account();
         const viewable =
-          this.#mayViewEvidencePhoto(photoId, accountId) || this.#mayViewPaymentPhoto(photoId, accountId);
+          this.#mayViewEvidencePhoto(photoId, accountId) ||
+          this.#mayViewExcusePhoto(photoId, accountId) ||
+          this.#mayViewPaymentPhoto(photoId, accountId);
         const photo = viewable ? await this.#photoStore.fetch(photoId) : null;
         return photo ? { ok: true, photo } : { ok: false, reason: "photo-not-found" };
       },
@@ -853,9 +1082,11 @@ class Core implements PactCore {
           recipientName: row.recipient_name,
         }));
         return mergeByTime(
-          (item) => (item.kind === "evidence" ? item.submittedAt : item.recordedAt),
+          (item) =>
+            item.kind === "evidence" ? item.submittedAt : item.kind === "excuse" ? item.filedAt : item.recordedAt,
           "oldest-first",
           evidence,
+          this.#excusesToReview(accountId),
           this.#paymentsToReview(accountId),
         );
       },
@@ -872,14 +1103,26 @@ class Core implements PactCore {
                WHERE evidence.id = ? AND pact.created_at <= ?`,
             )
             .get(accountId, itemId, this.#editWindowCutoff()) as EvidenceToDecide | undefined;
-          const payment = evidence ? undefined : this.#paymentToDecide(accountId, itemId);
-          const item = evidence ?? payment;
+          const excuse = evidence
+            ? undefined
+            : (this.#db
+                .prepare(
+                  `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
+                   FROM excuse
+                   JOIN pact ON pact.id = excuse.pact_id
+                   JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
+                   WHERE excuse.id = ?`,
+                )
+                .get(accountId, itemId) as ExcuseToDecide | undefined);
+          const payment = evidence || excuse ? undefined : this.#paymentToDecide(accountId, itemId);
+          const item = evidence ?? excuse ?? payment;
           if (!item) return { ok: false, reason: "item-not-found" };
           if (item.decision !== null) return { ok: false, reason: "already-decided" };
           const reason = decision.kind === "reject" ? decision.reason.trim() : null;
           if (reason === "") return { ok: false, reason: "blank-reason" };
           const decided: Decided = { outcome: reason === null ? "approved" : "rejected", reason };
           if (evidence) this.#decideEvidence(evidence, decided, accountId);
+          if (excuse) this.#decideExcuse(excuse, decided, accountId);
           if (payment) this.#decidePayment(payment, decided, accountId);
           return { ok: true };
         }),
@@ -894,7 +1137,7 @@ class Core implements PactCore {
         const penaltyRows = this.#db
           .prepare(
             `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
-                    penalty.amount_cents, penalty.added_at
+                    penalty.amount_cents, penalty.added_at, ${PENALTY_HELD} AS held
              FROM penalty JOIN pact ON pact.id = penalty.pact_id
              WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
              ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
@@ -906,14 +1149,17 @@ class Core implements PactCore {
           occurrence_date: string;
           amount_cents: number;
           added_at: string;
+          held: 0 | 1;
         }[];
         // Approved payments pay off penalties oldest first: walk the history
         // backwards, giving each penalty what's left of the approved total.
+        // A held penalty isn't owed, so payments skip it.
         let unallocatedCents = summary.paidCents;
         const penalties = penaltyRows
           .toReversed()
           .map((row): LedgerPenalty => {
-            const paidCents = Math.min(row.amount_cents, unallocatedCents);
+            const held = row.held === 1;
+            const paidCents = held ? 0 : Math.min(row.amount_cents, unallocatedCents);
             unallocatedCents -= paidCents;
             // Missed with evidence means all of it was rejected.
             const rejection = this.#rejection(row.pact_id, row.occurrence_date);
@@ -927,6 +1173,7 @@ class Core implements PactCore {
               addedAt: new Date(row.added_at),
               paidCents,
               ...(rejection && { rejection }),
+              held,
             };
           })
           .toReversed();
@@ -952,7 +1199,7 @@ class Core implements PactCore {
         `SELECT recipient.id, recipient.name,
                 (SELECT COALESCE(SUM(amount_cents), 0) FROM penalty
                  WHERE penalty.owner_account_id = recipient.owner_account_id
-                   AND penalty.recipient_id = recipient.id) AS penalty_cents,
+                   AND penalty.recipient_id = recipient.id AND NOT ${PENALTY_HELD}) AS penalty_cents,
                 COALESCE(SUM(payment.amount_cents) FILTER (WHERE payment.decision = 'approved'), 0) AS paid_cents,
                 COALESCE(SUM(payment.amount_cents) FILTER (WHERE payment.decision IS NULL), 0) AS awaiting_cents,
                 COUNT(payment.id) FILTER (WHERE payment.decision IS NULL) AS awaiting_count
@@ -1065,11 +1312,15 @@ class Core implements PactCore {
          WHERE id = ?`,
       )
       .run(outcome, reviewerId, now.toISOString(), reason, evidence.id);
+    // A day ahead with an approved excuse stays for judging at its due time, which makes it Excused.
+    const excusedAhead = this.#excuseOn(evidence.pact_id, evidence.occurrence_date) === "approved";
     if (
       !this.#isJudged(evidence.pact_id, evidence.occurrence_date) &&
-      (outcome === "rejected" || this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now))
+      ((outcome === "rejected" && !excusedAhead) ||
+        this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now))
     ) {
-      this.#judge(evidence.pact_id, evidence.occurrence_date, outcome === "approved" ? "kept" : "missed", now);
+      const judged = outcome === "approved" ? "kept" : excusedAhead ? "excused" : "missed";
+      this.#judge(evidence.pact_id, evidence.occurrence_date, judged, now);
     }
     this.#enqueue({
       recipient: evidence.owner_account_id,
@@ -1088,6 +1339,341 @@ class Core implements PactCore {
         // A rejection shows as an alert on Today, where the owner can respond to it.
         url: outcome === "approved" ? APP_PATHS.pact(evidence.pact_id) : APP_PATHS.today,
       },
+    });
+  }
+
+  /**
+   * Where the pact's occurrence `occurrence` stands as of `now`, excuses
+   * included.
+   */
+  #occurrenceStatus(pactId: string, occurrence: Occurrence): OccurrenceStatus {
+    const { date } = occurrence;
+    const row = this.#db
+      .prepare(
+        `SELECT occurrence.outcome, occurrence.judged_at, penalty.amount_cents
+         FROM occurrence
+         LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
+         WHERE occurrence.pact_id = ? AND occurrence.date = ?`,
+      )
+      .get(pactId, date) as
+      | { outcome: "kept" | "missed" | "excused" | null; judged_at: string | null; amount_cents: number | null }
+      | undefined;
+    const excuse = this.#excuseOn(pactId, date);
+    if (row?.outcome === "kept") return { kind: "kept" };
+    if (row?.outcome === "excused") return { kind: "excused" };
+    if (row?.outcome === "missed") {
+      return {
+        kind: "missed",
+        penaltyCents: row.amount_cents!,
+        held: excuse === "waiting",
+        excusableUntil: new Date(new Date(row.judged_at!).getTime() + EXCUSE_WINDOW_MS),
+      };
+    }
+    return {
+      kind: "not-judged",
+      opensAt: occurrence.opensAt,
+      dueAt: occurrence.dueAt,
+      evidenceWaiting: this.#evidenceDecision(pactId, date) === "waiting",
+      excuse,
+    };
+  }
+
+  /** Whether an excuse waiting for approval, or else an approved one, covers the occurrence. */
+  #excuseOn(pactId: string, date: LocalDate): "waiting" | "approved" | null {
+    const decisions = (
+      this.#db
+        .prepare(
+          `SELECT excuse.decision FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+           WHERE excuse_day.pact_id = ? AND excuse_day.date = ?`,
+        )
+        .all(pactId, date) as { decision: ReviewOutcome | null }[]
+    ).map((row) => row.decision);
+    if (decisions.includes(null)) return "waiting";
+    return decisions.includes("approved") ? "approved" : null;
+  }
+
+  /** Why a day with `status` can't be excused at `now`, or null if it can. */
+  #skipReason(status: OccurrenceStatus, now: Date): ExcuseSkipReason | null {
+    switch (status.kind) {
+      case "kept":
+        return "kept";
+      case "excused":
+        return "excused";
+      case "missed":
+        if (status.held) return "on-waiting-excuse";
+        return status.excusableUntil.getTime() > now.getTime() ? null : "window-closed";
+      case "not-judged":
+        if (status.excuse === "waiting") return "on-waiting-excuse";
+        return status.excuse === "approved" ? "excused" : null;
+    }
+  }
+
+  /**
+   * The owner's pact `pactId` and the days an excuse for it with `dates`
+   * would cover at `now`, or why the dates are refused.
+   */
+  #excusePreview(
+    ownerId: AccountId,
+    timezone: string | null,
+    pactId: string,
+    dates: ExcuseDates,
+    now: Date,
+  ): { ok: true; preview: ExcusePreview } | { ok: false; reason: ExcuseDatesRefusal } {
+    const pact = this.#ownPact(ownerId, pactId);
+    if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
+    if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
+    const { from, to } = dates;
+    if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };
+    if (to > addDays(from, MAX_EXCUSE_SPAN_DAYS - 1)) return { ok: false, reason: "too-many-days" };
+    const preview: ExcusePreview = { covered: [], skipped: [], heldCents: 0 };
+    for (const occurrence of occurrences(occurrenceTermsOf(pact), timezone).between(from, to)) {
+      const status = this.#occurrenceStatus(pactId, occurrence);
+      const skipped = this.#skipReason(status, now);
+      if (skipped !== null) {
+        preview.skipped.push({ date: occurrence.date, reason: skipped });
+        continue;
+      }
+      preview.covered.push({ date: occurrence.date, status });
+      if (status.kind === "missed") preview.heldCents += status.penaltyCents;
+    }
+    return { ok: true, preview };
+  }
+
+  /** The days an excuse covers, oldest first, as they stand now. */
+  #excuseDays(excuseId: string, pact: Pick<PactRow, "schedule" | "first_occurrence">, timezone: string): ExcuseDay[] {
+    const { between } = occurrences(occurrenceTermsOf(pact), timezone);
+    const dates = (
+      this.#db.prepare(`SELECT date FROM excuse_day WHERE excuse_id = ? ORDER BY date`).all(excuseId) as {
+        date: LocalDate;
+      }[]
+    ).map((row) => row.date);
+    const pactId = (this.#db.prepare(`SELECT pact_id FROM excuse WHERE id = ?`).get(excuseId) as { pact_id: string })
+      .pact_id;
+    // The schedule was fixed when the edit window closed, before any excuse.
+    return dates.map((date) => {
+      const [occurrence] = between(date, date);
+      if (!occurrence) throw new Error(`excuse ${excuseId} covers ${date}, which pact ${pactId} doesn't have`);
+      return { date, status: this.#occurrenceStatus(pactId, occurrence) };
+    });
+  }
+
+  /** The photos of an excuse, in the order added. */
+  #excusePhotoIds(excuseId: string): string[] {
+    return (
+      this.#db.prepare(`SELECT photo_id FROM excuse_photo WHERE excuse_id = ? ORDER BY position`).all(excuseId) as {
+        photo_id: string;
+      }[]
+    ).map((row) => row.photo_id);
+  }
+
+  /** The owner's timezone and the pact's terms, for an excuse's pact. */
+  #excusePact(excuseId: string): (PactRow & { owner_account_id: AccountId; timezone: string }) | undefined {
+    return this.#db
+      .prepare(
+        `SELECT pact.*, account.timezone FROM excuse
+         JOIN pact ON pact.id = excuse.pact_id
+         JOIN account ON account.id = pact.owner_account_id
+         WHERE excuse.id = ?`,
+      )
+      .get(excuseId) as (PactRow & { owner_account_id: AccountId; timezone: string }) | undefined;
+  }
+
+  /** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days. */
+  #excuseDatesText(excuseId: string): string {
+    const { first, last } = this.#db
+      .prepare(`SELECT MIN(date) AS first, MAX(date) AS last FROM excuse_day WHERE excuse_id = ?`)
+      .get(excuseId) as { first: LocalDate; last: LocalDate };
+    return first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
+  }
+
+  /**
+   * Records a reviewer's decision on an excuse waiting for approval and tells
+   * the owner. Approved: its Missed days become Excused as of now, without
+   * their penalties, and its days not judged yet that judging has reached
+   * (their evidence was waiting) are judged Excused now; the rest are judged
+   * Excused at their due time. Rejected: nothing to change, as its holds are
+   * released by no longer waiting and its days are judged as usual.
+   */
+  #decideExcuse(excuse: ExcuseToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
+    const now = this.#clock.now();
+    this.#db
+      .prepare(
+        `UPDATE excuse SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
+         WHERE id = ?`,
+      )
+      .run(outcome, reviewerId, now.toISOString(), reason, excuse.id);
+    if (outcome === "approved") {
+      const dates = this.#db.prepare(`SELECT date FROM excuse_day WHERE excuse_id = ?`).all(excuse.id) as {
+        date: LocalDate;
+      }[];
+      for (const { date } of dates) {
+        const row = this.#db
+          .prepare(`SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`)
+          .get(excuse.pact_id, date) as { outcome: string | null } | undefined;
+        if (row?.outcome === "missed") {
+          this.#db.prepare(`DELETE FROM penalty WHERE pact_id = ? AND occurrence_date = ?`).run(excuse.pact_id, date);
+          this.#db
+            .prepare(`UPDATE occurrence SET outcome = 'excused', judged_at = ? WHERE pact_id = ? AND date = ?`)
+            .run(now.toISOString(), excuse.pact_id, date);
+        } else if ((row?.outcome ?? null) === null && this.#judgingReached(excuse.pact_id, date, now)) {
+          this.#judge(excuse.pact_id, date, "excused", now);
+        }
+      }
+    }
+    const dates = this.#excuseDatesText(excuse.id);
+    this.#enqueue({
+      recipient: excuse.owner_account_id,
+      kind: "excuse-decided",
+      channel: "push",
+      payload: {
+        itemKind: "excuse",
+        itemId: excuse.id,
+        pactId: excuse.pact_id,
+        decision: outcome,
+        ...(reason !== null && { reason }),
+        title: `${this.#accountName(reviewerId)} ${outcome} your excuse`,
+        body: `${this.#pactName(excuse.pact_id)} · ${reason === null ? dates : `“${reason}”`}`,
+        // A rejection shows as an alert on Today, where the owner can respond to it.
+        url: outcome === "approved" ? APP_PATHS.excuse(excuse.id) : APP_PATHS.today,
+      },
+    });
+  }
+
+  /** Excuses waiting for approval that `reviewerId` may decide: those for pacts they review. */
+  #excusesToReview(reviewerId: AccountId): ReviewItem[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT excuse.id, excuse.reason, excuse.filed_at, pact.id AS pact_id, pact.name AS pact_name,
+                owner.name AS owner_name, owner.timezone, recipient.name AS recipient_name,
+                pact.schedule, pact.first_occurrence
+         FROM excuse
+         JOIN pact ON pact.id = excuse.pact_id
+         JOIN account AS owner ON owner.id = pact.owner_account_id
+         JOIN recipient ON recipient.id = pact.recipient_id
+         JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
+         WHERE excuse.decision IS NULL
+         ORDER BY excuse.filed_at, excuse.id`,
+      )
+      .all(reviewerId) as {
+      id: string;
+      reason: string;
+      filed_at: string;
+      pact_id: string;
+      pact_name: string;
+      owner_name: string;
+      timezone: string;
+      recipient_name: string;
+      schedule: string;
+      first_occurrence: string;
+    }[];
+    return rows.map((row): ReviewItem => {
+      const days = this.#excuseDays(row.id, row, row.timezone);
+      return {
+        kind: "excuse",
+        id: row.id,
+        pactId: row.pact_id,
+        pactName: row.pact_name,
+        ownerName: row.owner_name,
+        reason: row.reason,
+        photoIds: this.#excusePhotoIds(row.id),
+        filedAt: new Date(row.filed_at),
+        days,
+        heldCents: days.reduce((sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0), 0),
+        recipientName: row.recipient_name,
+      };
+    });
+  }
+
+  /** The owner's excuses waiting for a decision (or just those for `pactId`), newest first. */
+  #waitingExcuses(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT excuse.id, excuse.pact_id, pact.name, excuse.filed_at,
+                (SELECT MIN(date) FROM excuse_day WHERE excuse_id = excuse.id) AS first_date,
+                (SELECT MAX(date) FROM excuse_day WHERE excuse_id = excuse.id) AS last_date
+         FROM excuse JOIN pact ON pact.id = excuse.pact_id
+         WHERE pact.owner_account_id = ? AND excuse.decision IS NULL AND (? IS NULL OR pact.id = ?)
+         ORDER BY excuse.filed_at DESC, excuse.id`,
+      )
+      .all(ownerId, pactId ?? null, pactId ?? null) as {
+      id: string;
+      pact_id: string;
+      name: string;
+      filed_at: string;
+      first_date: string;
+      last_date: string;
+    }[];
+    return rows.map((row) => ({
+      kind: "excuse",
+      id: row.id,
+      pactId: row.pact_id,
+      name: row.name,
+      firstDate: row.first_date,
+      lastDate: row.last_date,
+      filedAt: new Date(row.filed_at),
+    }));
+  }
+
+  /**
+   * One alert per rejected excuse of the owner's, newest rejection first,
+   * until the owner takes the L on it or files a new excuse for any of its
+   * days. With when it was rejected, for ordering among the alerts.
+   */
+  #rejectedExcuseAlerts(ownerId: AccountId, now: Date): { at: Date; alert: TodayAlert }[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT excuse.id, excuse.pact_id, excuse.reject_reason, excuse.decided_at, pact.name,
+                pact.schedule, pact.first_occurrence, owner.timezone, reviewer.name AS reviewer_name
+         FROM excuse
+         JOIN pact ON pact.id = excuse.pact_id
+         JOIN account AS owner ON owner.id = pact.owner_account_id
+         JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
+         WHERE pact.owner_account_id = ? AND excuse.decision = 'rejected' AND excuse.rejection_accepted_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM excuse_day AS mine
+                           JOIN excuse_day AS other ON other.pact_id = mine.pact_id AND other.date = mine.date
+                           JOIN excuse AS later ON later.id = other.excuse_id
+                           WHERE mine.excuse_id = excuse.id AND later.filed_at > excuse.filed_at)
+         ORDER BY excuse.decided_at DESC, excuse.id`,
+      )
+      .all(ownerId) as {
+      id: string;
+      pact_id: string;
+      reject_reason: string;
+      decided_at: string;
+      name: string;
+      schedule: string;
+      first_occurrence: string;
+      timezone: string;
+      reviewer_name: string;
+    }[];
+    return rows.map((row) => {
+      const days = this.#excuseDays(row.id, row, row.timezone);
+      const { owed } = this.#db
+        .prepare(
+          `SELECT COALESCE(SUM(penalty.amount_cents), 0) AS owed FROM excuse_day
+           JOIN penalty ON penalty.pact_id = excuse_day.pact_id AND penalty.occurrence_date = excuse_day.date
+           WHERE excuse_day.excuse_id = ? AND penalty.added_at <= ?`,
+        )
+        .get(row.id, row.decided_at) as { owed: number };
+      const excusable = days.filter(({ status }) => this.#skipReason(status, now) === null);
+      const closing = excusable.flatMap(({ status }) => (status.kind === "missed" ? [status.excusableUntil] : []));
+      const closesAt = closing.length === 0 ? null : new Date(Math.min(...closing.map((d) => d.getTime())));
+      return {
+        at: new Date(row.decided_at),
+        alert: {
+          kind: "excuse-rejected",
+          excuseId: row.id,
+          pactId: row.pact_id,
+          name: row.name,
+          reviewerName: row.reviewer_name,
+          reason: row.reject_reason,
+          firstDate: days[0]!.date,
+          lastDate: days.at(-1)!.date,
+          owedAgainCents: owed,
+          hasDaysNotJudged: days.some(({ status }) => status.kind === "not-judged"),
+          refile: excusable.length === 0 ? null : { closesAt },
+        },
+      };
     });
   }
 
@@ -1241,7 +1827,7 @@ class Core implements PactCore {
                 payment.note, payment.photo_id, payment.recorded_at,
                 (SELECT COALESCE(SUM(penalty.amount_cents), 0) FROM penalty
                  WHERE penalty.owner_account_id = payment.owner_account_id
-                   AND penalty.recipient_id = payment.recipient_id)
+                   AND penalty.recipient_id = payment.recipient_id AND NOT ${PENALTY_HELD})
                 - (SELECT COALESCE(SUM(approved.amount_cents), 0) FROM payment AS approved
                    WHERE approved.owner_account_id = payment.owner_account_id
                      AND approved.recipient_id = payment.recipient_id AND approved.decision = 'approved')
@@ -1368,6 +1954,23 @@ class Core implements PactCore {
     );
   }
 
+  /** Whether `photoId` is a photo of some excuse and `accountId` owns or reviews its pact. */
+  #mayViewExcusePhoto(photoId: string, accountId: AccountId): boolean {
+    return (
+      this.#db
+        .prepare(
+          `SELECT 1 FROM excuse_photo
+           JOIN excuse ON excuse.id = excuse_photo.excuse_id
+           JOIN pact ON pact.id = excuse.pact_id
+           WHERE excuse_photo.photo_id = ?
+             AND (pact.owner_account_id = ?
+                  OR EXISTS (SELECT 1 FROM pact_reviewer
+                             WHERE pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?))`,
+        )
+        .get(photoId, accountId, accountId) !== undefined
+    );
+  }
+
   /**
    * Whether `photoId` is a payment's screenshot and `accountId` made the
    * payment or reviews any of the owner's pacts with its recipient: those who
@@ -1434,7 +2037,7 @@ class Core implements PactCore {
     return decisions.length > 0 ? "rejected" : "none";
   }
 
-  /** The owner's evidence and payments still waiting for a decision, newest first. */
+  /** The owner's evidence, excuses and payments still waiting for a decision, newest first. */
   #waiting(ownerId: AccountId): TodayWaitingItem[] {
     const payments = (
       this.#db
@@ -1461,23 +2064,30 @@ class Core implements PactCore {
       recordedAt: new Date(row.recorded_at),
     }));
     return mergeByTime(
-      (item) => (item.kind === "evidence" ? item.submittedAt : item.recordedAt),
+      waitingSince,
       "newest-first",
       this.#waitingEvidence(ownerId),
+      this.#waitingExcuses(ownerId),
       payments,
     );
   }
 
-  /** The owner's evidence still waiting for a decision, newest first. */
-  #waitingEvidence(ownerId: AccountId): TodayWaitingItem[] {
+  /** The owner's evidence still waiting for a decision (or just that for `pactId`), newest first. */
+  #waitingEvidence(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
     const rows = this.#db
       .prepare(
         `SELECT evidence.id, evidence.pact_id, pact.name, evidence.occurrence_date, evidence.submitted_at
          FROM evidence JOIN pact ON pact.id = evidence.pact_id
-         WHERE pact.owner_account_id = ? AND evidence.decision IS NULL
+         WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND (? IS NULL OR pact.id = ?)
          ORDER BY evidence.submitted_at DESC, evidence.id`,
       )
-      .all(ownerId) as { id: string; pact_id: string; name: string; occurrence_date: string; submitted_at: string }[];
+      .all(ownerId, pactId ?? null, pactId ?? null) as {
+      id: string;
+      pact_id: string;
+      name: string;
+      occurrence_date: string;
+      submitted_at: string;
+    }[];
     return rows.map((row) => ({
       kind: "evidence",
       id: row.id,
@@ -1489,7 +2099,8 @@ class Core implements PactCore {
   }
 
   /**
-   * Alerts: occurrences Missed through a rejection, until accepted. To do:
+   * Alerts: occurrences Missed through a rejection, and rejected excuses,
+   * until accepted or excused again; newest first. To do:
    * pacts with an occurrence open now that still needs evidence. Missed:
    * other occurrences judged Missed in the last 48 hours and not accepted.
    * Coming up: pacts whose first
@@ -1511,7 +2122,9 @@ class Core implements PactCore {
         // Evidence waiting or approved: Waiting for approval, or done.
         const decision = this.#evidenceDecision(pact.id, open.date);
         if (decision === "waiting" || decision === "approved") continue;
-        toDo.push({ ...card, editWindowClosesAt, dueAt: open.dueAt });
+        // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
+        if (this.#excuseOn(pact.id, open.date) !== null) continue;
+        toDo.push({ ...card, editWindowClosesAt, occurrenceDate: open.date, dueAt: open.dueAt });
       } else if (now.getTime() < first.opensAt.getTime()) {
         comingUp.push({ ...card, editWindowClosesAt, opensOn: first.date });
       }
@@ -1524,37 +2137,59 @@ class Core implements PactCore {
     const missed = this.#recentlyMissed(ownerId, now);
     if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
-    return { alerts: this.#rejectedEvidenceAlerts(ownerId), sections };
+    const alerts = [...this.#rejectedEvidenceAlerts(ownerId), ...this.#rejectedExcuseAlerts(ownerId, now)];
+    return { alerts: mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert), sections };
   }
 
   /**
    * One alert per occurrence of the owner's judged Missed through a
-   * rejection and not accepted yet, newest rejection first. No time limit.
+   * rejection, newest rejection first, with when it was judged. No time
+   * limit. It goes once the owner accepts the miss, or files an excuse for
+   * the day (one waiting before the rejection counts too); a rejected
+   * excuse's own alert takes over then.
    */
-  #rejectedEvidenceAlerts(ownerId: AccountId): TodayAlert[] {
+  #rejectedEvidenceAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
     const rows = this.#db
       .prepare(
-        `SELECT pact.id, pact.name, occurrence.date, penalty.amount_cents, recipient.name AS recipient_name
+        `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at, penalty.amount_cents,
+                recipient.name AS recipient_name
          FROM occurrence
          JOIN pact ON pact.id = occurrence.pact_id
          JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
          JOIN recipient ON recipient.id = penalty.recipient_id
          WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.miss_accepted_at IS NULL
            AND ${MISSED_THROUGH_REJECTION}
+           AND NOT ${excuseCoversSql(
+             "occurrence.pact_id",
+             "occurrence.date",
+             "(excuse.decision IS NULL OR excuse.filed_at >= occurrence.judged_at)",
+           )}
          ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
       )
-      .all(ownerId) as { id: string; name: string; date: LocalDate; amount_cents: number; recipient_name: string }[];
+      .all(ownerId) as {
+      id: string;
+      name: string;
+      date: LocalDate;
+      judged_at: string;
+      amount_cents: number;
+      recipient_name: string;
+    }[];
     return rows.map((row) => {
       const rejection = this.#rejection(row.id, row.date);
       if (!rejection) throw new Error(`no rejected evidence for pact ${row.id} on ${row.date}`);
+      const judgedAt = new Date(row.judged_at);
       return {
-        kind: "evidence-rejected",
-        pactId: row.id,
-        name: row.name,
-        ...rejection,
-        occurrenceDate: row.date,
-        penaltyCents: row.amount_cents,
-        recipientName: row.recipient_name,
+        at: judgedAt,
+        alert: {
+          kind: "evidence-rejected",
+          pactId: row.id,
+          name: row.name,
+          ...rejection,
+          occurrenceDate: row.date,
+          penaltyCents: row.amount_cents,
+          recipientName: row.recipient_name,
+          excusableUntil: new Date(judgedAt.getTime() + EXCUSE_WINDOW_MS),
+        },
       };
     });
   }
@@ -1562,10 +2197,11 @@ class Core implements PactCore {
   /**
    * The owner's occurrences judged Missed in the 48 hours before `now`,
    * latest first, but not accepted misses, nor those Missed through a
-   * rejection: those are alerts.
+   * rejection or on a rejected excuse (those are alerts), nor those on an
+   * excuse waiting for approval.
    */
   #recentlyMissed(ownerId: AccountId, now: Date): TodayMissedCard[] {
-    const since = new Date(now.getTime() - TODAY_MISSED_MS);
+    const since = new Date(now.getTime() - EXCUSE_WINDOW_MS);
     const rows = this.#db
       .prepare(
         `SELECT pact.id, pact.name, penalty.amount_cents, occurrence.date, occurrence.judged_at
@@ -1574,6 +2210,11 @@ class Core implements PactCore {
          JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
          WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.judged_at > ?
            AND occurrence.miss_accepted_at IS NULL AND NOT ${MISSED_THROUGH_REJECTION}
+           AND NOT ${excuseCoversSql(
+             "occurrence.pact_id",
+             "occurrence.date",
+             "(excuse.decision IS NULL OR (excuse.decision = 'rejected' AND excuse.decided_at >= occurrence.judged_at))",
+           )}
          ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
       )
       .all(ownerId, since.toISOString()) as {
@@ -1589,6 +2230,7 @@ class Core implements PactCore {
       penaltyCents: row.amount_cents,
       occurrenceDate: row.date,
       missedAt: new Date(row.judged_at),
+      excusableUntil: new Date(new Date(row.judged_at).getTime() + EXCUSE_WINDOW_MS),
     }));
   }
 
@@ -1682,15 +2324,22 @@ class Core implements PactCore {
 
   /**
    * Judges an occurrence as of its due time, unless a decision after that
-   * already judged it or its evidence is still waiting for one.
+   * already judged it or its evidence is still waiting for one: Kept with
+   * approved evidence, else Excused with an approved excuse, else Missed. A
+   * Missed day on an excuse waiting for approval has its penalty held, and the
+   * owner, who asked for it to be excused, isn't told it's Missed.
    */
   #judgeAtDueTime(pactId: string, occurrence: Occurrence): void {
     if (this.#isJudged(pactId, occurrence.date)) return;
     const decision = this.#evidenceDecision(pactId, occurrence.date);
+    const excuse = this.#excuseOn(pactId, occurrence.date);
+    if (decision !== "approved" && excuse === "approved") {
+      return this.#judge(pactId, occurrence.date, "excused", occurrence.dueAt);
+    }
     if (decision === "waiting") return;
     const outcome = decision === "approved" ? "kept" : "missed";
     this.#judge(pactId, occurrence.date, outcome, occurrence.dueAt);
-    if (outcome === "missed") this.#enqueueMissed(pactId, occurrence.date);
+    if (outcome === "missed" && excuse === null) this.#enqueueMissed(pactId, occurrence.date);
   }
 
   /** Only for judging at the due time: a rejection already told the owner, with the reason. */
@@ -1712,7 +2361,7 @@ class Core implements PactCore {
     });
   }
 
-  /** Whether the occurrence already has an outcome, Kept or Missed. */
+  /** Whether the occurrence already has an outcome: Kept, Missed or Excused. */
   #isJudged(pactId: string, date: LocalDate): boolean {
     return (
       this.#db
@@ -1723,9 +2372,10 @@ class Core implements PactCore {
 
   /**
    * Records an occurrence's outcome as of `at`. Missed adds the pact's
-   * penalty to the owner's ledger for the pact's recipient.
+   * penalty to the owner's ledger for the pact's recipient (held, while an
+   * excuse for it waits for approval).
    */
-  #judge(pactId: string, date: LocalDate, outcome: "kept" | "missed", at: Date): void {
+  #judge(pactId: string, date: LocalDate, outcome: "kept" | "missed" | "excused", at: Date): void {
     const pact = this.#db
       .prepare(`SELECT owner_account_id, recipient_id, penalty_cents FROM pact WHERE id = ?`)
       .get(pactId) as Pick<PactRow, "recipient_id" | "penalty_cents"> & { owner_account_id: AccountId };
@@ -1904,6 +2554,31 @@ interface EvidenceToDecide {
   occurrence_date: LocalDate;
   decision: ReviewOutcome | null;
   owner_account_id: AccountId;
+}
+
+/** An excuse a reviewer is deciding on, as `decide` reads it. */
+interface ExcuseToDecide {
+  id: string;
+  pact_id: string;
+  decision: ReviewOutcome | null;
+  owner_account_id: AccountId;
+}
+
+/** When a waiting item was sent for a decision: for ordering them. */
+function waitingSince(item: TodayWaitingItem): Date {
+  switch (item.kind) {
+    case "evidence":
+      return item.submittedAt;
+    case "excuse":
+      return item.filedAt;
+    case "payment":
+      return item.recordedAt;
+  }
+}
+
+/** Whether `text` is a real calendar day written "YYYY-MM-DD". */
+function isLocalDate(text: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) && addDays(text, 0) === text;
 }
 
 /** A payment a reviewer is deciding on, as `decide` reads it. */

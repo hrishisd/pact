@@ -19,7 +19,14 @@ describe("judging at the end of a scheduled day", () => {
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 500, paidCents: 0 })]);
     expect(missedOn(owner.today())).toEqual([
-      { pactId: gym, name: "Gym", penaltyCents: 500, occurrenceDate: MONDAY, missedAt: s.at("Tue 00:00") },
+      {
+        pactId: gym,
+        name: "Gym",
+        penaltyCents: 500,
+        occurrenceDate: MONDAY,
+        missedAt: s.at("Tue 00:00"),
+        excusableUntil: s.at("Thu 00:00"),
+      },
     ]);
   });
 
@@ -172,7 +179,14 @@ describe("judging over a week", () => {
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
     // Monday was Missed at Tue 00:00, over 48 hours ago, so only Wednesday is on Today.
     expect(missedOn(owner.today())).toEqual([
-      { pactId: gym, name: "Gym", penaltyCents: 500, occurrenceDate: "2026-01-07", missedAt: s.at("Thu 00:00") },
+      {
+        pactId: gym,
+        name: "Gym",
+        penaltyCents: 500,
+        occurrenceDate: "2026-01-07",
+        missedAt: s.at("Thu 00:00"),
+        excusableUntil: s.at("Sat 00:00"),
+      },
     ]);
   });
 

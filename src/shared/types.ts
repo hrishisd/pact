@@ -135,7 +135,12 @@ export interface PactTerms {
   firstOccurrence: FirstOccurrence;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
+  /** The pact's evidence and excuses waiting for a reviewer's decision, newest first. */
+  waiting: PactWaitingItem[];
 }
+
+/** What the pact page's "Waiting on" list holds: never payments, which belong to a recipient. */
+export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" }>;
 
 export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "pact-not-found" };
 
@@ -191,6 +196,27 @@ export type ReviewItem =
       occurrenceDate: string;
       /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
       penaltyCents: number;
+      recipientName: string;
+    }
+  /**
+   * An excuse: the reviewer reads the reason and photos and decides all of
+   * its days at once.
+   */
+  | {
+      kind: "excuse";
+      /** The excuse's id. */
+      id: string;
+      pactId: string;
+      pactName: string;
+      ownerName: string;
+      reason: string;
+      /** In the order added; each is served at the photo path. */
+      photoIds: string[];
+      filedAt: Date;
+      /** The days it covers, oldest first, as they stand now. */
+      days: ExcuseDay[];
+      /** The penalties held while it waits: approving removes them, rejecting makes them owed. */
+      heldCents: number;
       recipientName: string;
     }
   /**
@@ -285,19 +311,48 @@ export type TodayAlert =
    * A reviewer rejected the evidence for an occurrence, which judged it
    * Missed and added `penaltyCents` to the ledger for `recipientName`. Newest
    * rejection first. It stays until the owner accepts the miss (Take the L,
-   * `acceptMiss`), which changes nothing else.
+   * `acceptMiss`), which changes nothing else, or files an excuse for the day.
    */
-  {
-    kind: "evidence-rejected";
-    pactId: string;
-    name: string;
-    reviewerName: string;
-    reason: string;
-    /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
-    occurrenceDate: string;
-    penaltyCents: number;
-    recipientName: string;
-  };
+  | {
+      kind: "evidence-rejected";
+      pactId: string;
+      name: string;
+      reviewerName: string;
+      reason: string;
+      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+      occurrenceDate: string;
+      penaltyCents: number;
+      recipientName: string;
+      /** Until when an excuse for the day is accepted: 48 hours after the rejection. */
+      excusableUntil: Date;
+    }
+  /**
+   * A reviewer rejected an excuse: its held penalties are owed again, and its
+   * days not judged yet are judged as usual. Newest rejection first. It stays
+   * until the owner takes the L (`acceptExcuseRejection`) or files a new
+   * excuse for any of its days.
+   */
+  | {
+      kind: "excuse-rejected";
+      excuseId: string;
+      pactId: string;
+      name: string;
+      reviewerName: string;
+      reason: string;
+      /** The first and last days it covered, "YYYY-MM-DD"; the same day for one. */
+      firstDate: string;
+      lastDate: string;
+      /** The penalties it held, owed again now. */
+      owedAgainCents: number;
+      /** Whether any of its days isn't judged yet. */
+      hasDaysNotJudged: boolean;
+      /**
+       * Whether a new excuse would cover any of its days, and when the first
+       * of those windows closes: null when the days left are not judged yet,
+       * whose window hasn't started.
+       */
+      refile: { closesAt: Date | null } | null;
+    };
 export type TodaySection =
   /** Pacts whose occurrence is open today, soonest due first. */
   | { kind: "to-do"; cards: TodayToDoCard[] }
@@ -320,6 +375,8 @@ interface TodayPactCard {
 export interface TodayToDoCard extends TodayPactCard {
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
+  /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
   /** Midnight ending today, in the owner's timezone. */
   dueAt: Date;
 }
@@ -336,6 +393,8 @@ export interface TodayMissedCard extends TodayPactCard {
   occurrenceDate: string;
   /** When it was judged Missed. */
   missedAt: Date;
+  /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+  excusableUntil: Date;
 }
 
 export interface TodayComingUpCard extends TodayPactCard {
@@ -359,6 +418,18 @@ export type TodayWaitingItem =
       /** When the server received its last photo. */
       submittedAt: Date;
     }
+  /** An excuse no reviewer has decided yet. */
+  | {
+      kind: "excuse";
+      /** The excuse's id. */
+      id: string;
+      pactId: string;
+      name: string;
+      /** The first and last days it covers, "YYYY-MM-DD"; the same day for one. */
+      firstDate: string;
+      lastDate: string;
+      filedAt: Date;
+    }
   /** A payment no reviewer has decided yet. */
   | {
       kind: "payment";
@@ -375,7 +446,7 @@ export type TodayYesterdayEntry = never;
 export interface LedgerSummary {
   recipientId: string;
   name: string;
-  /** The penalties added for Missed occurrences, less approved payments. */
+  /** The penalties added for Missed occurrences, less those held by an excuse waiting for approval, less approved payments. */
   owedCents: number;
   /**
    * The most a new payment may be: `owedCents` less `awaitingCents`, never
@@ -434,6 +505,8 @@ export interface LedgerPenalty {
   paidCents: number;
   /** When the occurrence was Missed because its latest evidence was rejected: who rejected it and why. */
   rejection?: EvidenceRejection;
+  /** Held while an excuse for the occurrence waits for approval: it doesn't count toward owed, and payments don't pay it. */
+  held: boolean;
 }
 
 /** A payment to the recipient the owner recorded, and where its review stands. */
@@ -464,6 +537,132 @@ export interface Ledger {
 }
 
 export type LedgerResult = { ok: true; ledger: Ledger } | { ok: false; reason: "recipient-not-found" };
+
+/** The most photos one excuse may have. */
+export const MAX_EXCUSE_PHOTOS = 3;
+
+/** The longest date range one excuse may span, in days. */
+export const MAX_EXCUSE_SPAN_DAYS = 62;
+
+/** The dates an owner picks for an excuse for one pact. */
+export interface ExcuseDates {
+  /** "YYYY-MM-DD" in the owner's timezone, both included. */
+  from: string;
+  to: string;
+}
+
+export interface NewExcuse extends ExcuseDates {
+  /** Why: trimmed, and it can't be blank. */
+  reason: string;
+}
+
+/**
+ * Where one of a pact's occurrences stands. `excuse` says whether an excuse
+ * waiting for approval, or an approved one, covers a day not judged yet.
+ */
+export type OccurrenceStatus =
+  | { kind: "kept" }
+  | { kind: "excused" }
+  | {
+      kind: "missed";
+      /** Its penalty. */
+      penaltyCents: number;
+      /** Held while an excuse for it waits for approval. */
+      held: boolean;
+      /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+      excusableUntil: Date;
+    }
+  | {
+      kind: "not-judged";
+      opensAt: Date;
+      dueAt: Date;
+      /** Its evidence is waiting for a reviewer. */
+      evidenceWaiting: boolean;
+      excuse: "waiting" | "approved" | null;
+    };
+
+/** One of a pact's days on an excuse, and where it stands. */
+export interface ExcuseDay {
+  /** "YYYY-MM-DD" in the owner's timezone. */
+  date: string;
+  status: OccurrenceStatus;
+}
+
+/**
+ * Why a day in an excuse's dates can't be excused now: Kept, already Excused
+ * (or approved ahead), already on an excuse waiting for approval, or Missed
+ * more than 48 hours ago.
+ */
+export type ExcuseSkipReason = "kept" | "excused" | "on-waiting-excuse" | "window-closed";
+
+/** The days an excuse with some dates would cover, and those it would skip. */
+export interface ExcusePreview {
+  /** Oldest first, as they stand before filing. */
+  covered: ExcuseDay[];
+  /** Oldest first. */
+  skipped: { date: string; reason: ExcuseSkipReason }[];
+  /** The penalties filing would hold: those of the covered Missed days. */
+  heldCents: number;
+}
+
+export type ExcuseDatesRefusal =
+  /** Not this owner's pact, or no pact. */
+  | "pact-not-found"
+  /** Excuses open once the edit window closes. */
+  | "edit-window-open"
+  /** Not "YYYY-MM-DD", or `to` before `from`. */
+  | "invalid-dates"
+  /** More than MAX_EXCUSE_SPAN_DAYS days. */
+  | "too-many-days";
+
+export type ExcusePreviewResult = { ok: true; preview: ExcusePreview } | { ok: false; reason: ExcuseDatesRefusal };
+
+/** What the File excuse sheet opened from a pact page offers. */
+export interface ExcuseOptions {
+  /** The owner's today, "YYYY-MM-DD": the Days ahead range starts here. */
+  today: string;
+  /** Days dated today or earlier that an excuse would cover now, newest first. */
+  recentDays: ExcuseDay[];
+}
+
+export type ExcuseOptionsResult =
+  { ok: true; options: ExcuseOptions } | { ok: false; reason: "pact-not-found" | "edit-window-open" };
+
+export type FileExcuseRefusal =
+  | ExcuseDatesRefusal
+  | "blank-reason"
+  /** More than MAX_EXCUSE_PHOTOS photos. */
+  | "too-many-photos"
+  /** None of the pact's days in the dates can be excused now. */
+  | "nothing-to-excuse";
+
+export type FileExcuseResult = { ok: true; excuseId: string } | { ok: false; reason: FileExcuseRefusal };
+
+/** Where an excuse's review stands. */
+export type ExcuseState =
+  | { kind: "waiting" }
+  | { kind: "approved"; reviewerName: string; decidedAt: Date }
+  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+
+/** The excuse page. */
+export interface ExcuseDetail {
+  id: string;
+  pactId: string;
+  pactName: string;
+  reason: string;
+  photoIds: string[];
+  filedAt: Date;
+  /** Oldest first, as they stand now. */
+  days: ExcuseDay[];
+  state: ExcuseState;
+  /** The pact's reviewers, sorted by name: who it was sent to. */
+  reviewerNames: string[];
+}
+
+export type ExcuseResult = { ok: true; excuse: ExcuseDetail } | { ok: false; reason: "excuse-not-found" };
+
+export type AcceptExcuseRejectionResult =
+  { ok: true } | { ok: false; reason: "excuse-not-found" | "nothing-to-accept" };
 
 export interface Health {
   /** False when there has been no scheduler tick in the last 5 minutes. */

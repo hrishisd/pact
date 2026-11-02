@@ -47,6 +47,7 @@ describe("creating a pact", () => {
         stage: "active",
         firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
         editWindowClosesAt: s.at("Mon 09:10"),
+        waiting: [],
       },
     });
   });

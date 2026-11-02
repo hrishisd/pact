@@ -59,10 +59,13 @@ export interface Occurrences {
    * has to look at when it has been through `date`.
    */
   dueAfter(date: LocalDate | null, t: Date): Occurrence[];
+  /** The pact's occurrences dated `from` to `to`, both included, oldest first. */
+  between(from: LocalDate, to: LocalDate): Occurrence[];
 }
 
 /** The occurrences of a pact with `terms`, in its owner's `timezone`. */
 export function occurrences(terms: OccurrenceTerms, timezone: string): Occurrences {
+  const includes = (date: LocalDate) => date >= terms.firstOccurrence && terms.schedule.days.includes(weekdayOf(date));
   return {
     first: fixedDaysOccurrence(terms.firstOccurrence, timezone),
     openAt(t) {
@@ -70,9 +73,7 @@ export function occurrences(terms: OccurrenceTerms, timezone: string): Occurrenc
       if (date < terms.firstOccurrence || !terms.schedule.days.includes(weekdayOf(date))) return null;
       return fixedDaysOccurrence(date, timezone);
     },
-    includes(date) {
-      return date >= terms.firstOccurrence && terms.schedule.days.includes(weekdayOf(date));
-    },
+    includes,
     dueAfter(after, t) {
       const due: Occurrence[] = [];
       const start = after === null || after < terms.firstOccurrence ? terms.firstOccurrence : addDays(after, 1);
@@ -82,6 +83,13 @@ export function occurrences(terms: OccurrenceTerms, timezone: string): Occurrenc
         if (occurrence.dueAt.getTime() > t.getTime()) return due;
         if (terms.schedule.days.includes(weekdayOf(date))) due.push(occurrence);
       }
+    },
+    between(from, to) {
+      const found: Occurrence[] = [];
+      for (let date = from; date <= to; date = addDays(date, 1)) {
+        if (includes(date)) found.push(fixedDaysOccurrence(date, timezone));
+      }
+      return found;
     },
   };
 }

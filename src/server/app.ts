@@ -9,19 +9,23 @@ import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import type { AccountId, NewPayment, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
-import { MAX_EVIDENCE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
+import { MAX_EVIDENCE_PHOTOS, MAX_EXCUSE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
   DEV_SIGN_IN_PATH,
   EVIDENCE_PHOTO_FIELD,
+  EXCUSE_FROM_FIELD,
+  EXCUSE_REASON_FIELD,
+  EXCUSE_TO_FIELD,
   INVITE_REQUIRED_PATH,
   invitePath,
   MAX_PHOTO_BYTES,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   PHOTO_CONTENT_TYPES,
+  type AcceptExcuseRejectionResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientRequest,
@@ -32,6 +36,10 @@ import {
   type CreatePactResponse,
   type DeletePactResponse,
   type EditPactResponse,
+  type ExcuseOptionsResponse,
+  type ExcusePreviewResponse,
+  type ExcuseResponse,
+  type FileExcuseResponse,
   type DecideRequest,
   type DecideResponse,
   type FirstOccurrenceRequest,
@@ -87,6 +95,9 @@ export interface AppOptions {
 /** A parsed multipart form: each field's value, or values when it repeats. */
 type UploadForm = Record<string, string | File | (string | File)[]>;
 
+/** What a photo upload is for, as its log line names it. */
+type Upload = "evidence" | "excuse" | "payment";
+
 /** Room for the multipart boundaries and headers around the photos. */
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 
@@ -119,7 +130,7 @@ export function createApp({
    * sizes and speeds in the server log. Nothing from the request's URL goes
    * in, so a request can't forge a line.
    */
-  const logUpload = (upload: "evidence" | "payment", fields: Record<string, string | number>) =>
+  const logUpload = (upload: Upload, fields: Record<string, string | number>) =>
     log(
       `${upload}-upload ${Object.entries(fields)
         .map(([name, value]) => `${name}=${value}`)
@@ -138,7 +149,7 @@ export function createApp({
    */
   const receivePhotos = async <Body extends { ok: boolean }, Fields>(
     c: Context<Env>,
-    upload: "evidence" | "payment",
+    upload: Upload,
     {
       parse,
       send,
@@ -411,6 +422,55 @@ export function createApp({
           body.ok ? { outcome: "ok", payment: body.paymentId } : { outcome: body.reason },
       }),
   );
+
+  // Transport and shape checks only, as for evidence: the dates and reason
+  // must be text. The core decides the rest, how many photos included; the
+  // body limit lets one more photo than allowed through, so that's its refusal.
+  app.post(
+    API_PATHS.excuses(":id"),
+    bodyLimit({
+      maxSize: (MAX_EXCUSE_PHOTOS + 1) * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
+      onError: (c) => apiError(c, 400, "photo-too-large"),
+    }),
+    (c) =>
+      receivePhotos(c, "excuse", {
+        parse: (form) => {
+          const [from, to, reason] = [form[EXCUSE_FROM_FIELD], form[EXCUSE_TO_FIELD], form[EXCUSE_REASON_FIELD]];
+          if (typeof from !== "string" || typeof to !== "string" || typeof reason !== "string") return null;
+          return { from, to, reason };
+        },
+        send: (excuse, photos): Promise<FileExcuseResponse> =>
+          core.as(c.get("accountId")).fileExcuse(c.req.param("id"), excuse, photos),
+        outcome: (body): Record<string, string> =>
+          body.ok ? { outcome: "ok", excuse: body.excuseId } : { outcome: body.reason },
+      }),
+  );
+
+  app.get(API_PATHS.excusePreview(":id"), (c) => {
+    const [from, to] = [c.req.query("from"), c.req.query("to")];
+    if (from === undefined || to === undefined) return apiError(c, 400, "invalid-request");
+    const body: ExcusePreviewResponse = json(
+      core.as(c.get("accountId")).excusePreview(c.req.param("id"), { from, to }),
+    );
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.excuseOptions(":id"), (c) => {
+    const body: ExcuseOptionsResponse = json(core.as(c.get("accountId")).excuseOptions(c.req.param("id")));
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.excuse(":id"), (c) => {
+    const body: ExcuseResponse = json(core.as(c.get("accountId")).excuse(c.req.param("id")));
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.acceptExcuseRejection(":id"), async (c) => {
+    const body: AcceptExcuseRejectionResponse = await core
+      .as(c.get("accountId"))
+      .acceptExcuseRejection(c.req.param("id"));
+    return c.json(body);
+  });
 
   app.post(API_PATHS.acceptMiss(":id", ":date"), async (c) => {
     const date = c.req.param("date");

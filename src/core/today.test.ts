@@ -62,7 +62,16 @@ describe("Today", () => {
       sections: [
         {
           kind: "to-do",
-          cards: [{ pactId: gym, name: "Gym", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Tue 00:00") }],
+          cards: [
+            {
+              pactId: gym,
+              name: "Gym",
+              penaltyCents: 500,
+              editWindowClosesAt: null,
+              occurrenceDate: "2026-01-05",
+              dueAt: s.at("Tue 00:00"),
+            },
+          ],
         },
         {
           kind: "coming-up",
@@ -94,7 +103,14 @@ describe("Today", () => {
       {
         kind: "to-do",
         cards: [
-          { pactId: stretch, name: "Stretch", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Wed 00:00") },
+          {
+            pactId: stretch,
+            name: "Stretch",
+            penaltyCents: 500,
+            editWindowClosesAt: null,
+            occurrenceDate: "2026-01-06",
+            dueAt: s.at("Wed 00:00"),
+          },
         ],
       },
     ]);
@@ -104,8 +120,22 @@ describe("Today", () => {
       {
         kind: "to-do",
         cards: [
-          { pactId: gym, name: "Gym", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Thu 00:00") },
-          { pactId: stretch, name: "Stretch", penaltyCents: 500, editWindowClosesAt: null, dueAt: s.at("Thu 00:00") },
+          {
+            pactId: gym,
+            name: "Gym",
+            penaltyCents: 500,
+            editWindowClosesAt: null,
+            occurrenceDate: "2026-01-07",
+            dueAt: s.at("Thu 00:00"),
+          },
+          {
+            pactId: stretch,
+            name: "Stretch",
+            penaltyCents: 500,
+            editWindowClosesAt: null,
+            occurrenceDate: "2026-01-07",
+            dueAt: s.at("Thu 00:00"),
+          },
         ],
       },
     ]);
@@ -129,6 +159,7 @@ describe("Today", () => {
             name: "Tuesday pact",
             penaltyCents: 500,
             editWindowClosesAt: s.at("Mon 09:10"),
+            occurrenceDate: "2026-01-06",
             dueAt: new Date("2026-01-06T11:00:00Z"),
           },
         ],

@@ -263,4 +263,48 @@ export const migrations: readonly string[] = [
   ALTER TABLE pact ADD COLUMN reviewers_notified_at TEXT;
   UPDATE pact SET reviewers_notified_at = created_at;
   `,
+  // 12: excuses
+  `
+  -- The owner's request to have some occurrences of one pact treated as
+  -- Excused. The days it covers are fixed when it's filed (excuse_day).
+  -- decision is NULL while it waits; the first decision is final. While it
+  -- waits, the penalties of its covered days are held: they don't count
+  -- toward owed. rejection_accepted_at is when the owner took the L on its
+  -- rejected-excuse alert.
+  CREATE TABLE excuse (
+    id TEXT PRIMARY KEY,
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    reason TEXT NOT NULL,
+    filed_at TEXT NOT NULL,
+    decision TEXT CHECK (decision IN ('approved', 'rejected')),
+    decided_by_account_id TEXT REFERENCES account (id),
+    decided_at TEXT,
+    reject_reason TEXT,
+    rejection_accepted_at TEXT,
+    CHECK ((decision IS NULL) = (decided_at IS NULL)),
+    CHECK ((decision IS NULL) = (decided_by_account_id IS NULL)),
+    CHECK ((decision IS 'rejected') = (reject_reason IS NOT NULL)),
+    CHECK (rejection_accepted_at IS NULL OR decision = 'rejected')
+  );
+  CREATE INDEX excuse_pact ON excuse (pact_id);
+
+  -- The occurrences an excuse covers, by date. Days ahead have no occurrence
+  -- row yet. A day is on at most one waiting excuse; the core checks that.
+  CREATE TABLE excuse_day (
+    excuse_id TEXT NOT NULL REFERENCES excuse (id),
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    date TEXT NOT NULL, -- "YYYY-MM-DD" in the owner's timezone
+    PRIMARY KEY (excuse_id, date)
+  );
+  CREATE INDEX excuse_day_occurrence ON excuse_day (pact_id, date);
+
+  -- An excuse's photos, in the order added. photo_id is the PhotoStore's.
+  CREATE TABLE excuse_photo (
+    excuse_id TEXT NOT NULL REFERENCES excuse (id),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    photo_id TEXT NOT NULL UNIQUE,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (excuse_id, position)
+  );
+  `,
 ];

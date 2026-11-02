@@ -49,6 +49,8 @@ export type NotificationKind =
   | "review-item"
   /** To the owner: a reviewer approved or rejected their evidence. */
   | "evidence-decided"
+  /** To the owner: a reviewer approved or rejected their excuse. */
+  | "excuse-decided"
   /** To the owner: a reviewer approved or rejected their payment. */
   | "payment-decided"
   /** To the owner: an occurrence reached its due time and was judged Missed. */

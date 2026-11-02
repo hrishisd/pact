@@ -2,12 +2,17 @@
 // request and response bodies. Domain shapes come from ./types.ts.
 
 import type {
+  AcceptExcuseRejectionResult,
   AcceptInviteResult,
   AcceptMissResult,
   AddRecipientResult,
   CreatePactResult,
   DeletePactResult,
   EditPactResult,
+  ExcuseOptionsResult,
+  ExcusePreviewResult,
+  ExcuseResult,
+  FileExcuseResult,
   DecideResult,
   FirstOccurrenceResult,
   Friend,
@@ -90,6 +95,7 @@ export const APP_PATHS = {
   pact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}`,
   editPact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}/edit`,
   ledger: (recipientId: string) => `/ledgers/${encodeURIComponent(recipientId)}`,
+  excuse: (excuseId: string) => `/excuses/${encodeURIComponent(excuseId)}`,
 } as const;
 
 /**
@@ -121,6 +127,16 @@ export const API_PATHS = {
    * 404 an unknown photo does.
    */
   photo: <T extends string>(photoId: T) => `/api/photos/${photoId}` as const,
+  /** POST: file an excuse for the pact. */
+  excuses: <T extends string>(pactId: T) => `/api/pacts/${pactId}/excuses` as const,
+  /** GET, with `?from=YYYY-MM-DD&to=YYYY-MM-DD`: the days an excuse with those dates would cover. */
+  excusePreview: <T extends string>(pactId: T) => `/api/pacts/${pactId}/excuses/preview` as const,
+  /** GET: what File excuse from the pact page offers. */
+  excuseOptions: <T extends string>(pactId: T) => `/api/pacts/${pactId}/excuses/options` as const,
+  /** GET: the excuse page. */
+  excuse: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}` as const,
+  /** POST (no body): Take the L on a rejected excuse. */
+  acceptExcuseRejection: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}/accept-rejection` as const,
   reviewQueue: "/api/review",
   decide: <T extends string>(itemId: T) => `/api/review/${itemId}/decision` as const,
   ledgers: "/api/ledgers",
@@ -144,6 +160,11 @@ export const PAYMENT_AMOUNT_FIELD = "amountCents";
 
 /** The payment form's optional note field. */
 export const PAYMENT_NOTE_FIELD = "note";
+
+/** The excuse form's fields: its dates, "YYYY-MM-DD", and its reason. Photos go in EVIDENCE_PHOTO_FIELD. */
+export const EXCUSE_FROM_FIELD = "from";
+export const EXCUSE_TO_FIELD = "to";
+export const EXCUSE_REASON_FIELD = "reason";
 
 /** The photo types the server accepts and serves back: JPEG, which the client always sends after shrinking. */
 export const PHOTO_CONTENT_TYPES: readonly string[] = ["image/jpeg"];
@@ -207,6 +228,27 @@ export type SubmitEvidenceResponse = SubmitEvidenceResult;
  * is a 400 "invalid-request"; the core's refusals are 200s.
  */
 export type AcceptMissResponse = AcceptMissResult;
+
+/**
+ * POST /api/pacts/:id/excuses: multipart form data with EXCUSE_FROM_FIELD,
+ * EXCUSE_TO_FIELD and EXCUSE_REASON_FIELD, and one `photo` file per photo
+ * (0–3). A missing or non-text field, a photo over MAX_PHOTO_BYTES or of a
+ * type outside PHOTO_CONTENT_TYPES is a 400, as for evidence; the core's
+ * refusals ("too-many-photos" and "invalid-dates" included) are 200s.
+ */
+export type FileExcuseResponse = FileExcuseResult;
+
+/** GET /api/pacts/:id/excuses/preview?from=&to= (both required, else a 400). The core's refusals are 200s. */
+export type ExcusePreviewResponse = Json<ExcusePreviewResult>;
+
+/** GET /api/pacts/:id/excuses/options */
+export type ExcuseOptionsResponse = Json<ExcuseOptionsResult>;
+
+/** GET /api/excuses/:id: the excuse page. Someone else's excuse, or none, is a 200 refusal. */
+export type ExcuseResponse = Json<ExcuseResult>;
+
+/** POST /api/excuses/:id/accept-rejection (no body). */
+export type AcceptExcuseRejectionResponse = AcceptExcuseRejectionResult;
 
 /** GET /api/review: the signed-in account's Review Queue, oldest first. */
 export type ReviewQueueResponse = Json<ReviewItem[]>;

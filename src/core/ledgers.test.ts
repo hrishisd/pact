@@ -38,6 +38,7 @@ describe("a ledger's history", () => {
             amountCents: 500,
             addedAt: s.at("Thu 00:00"),
             paidCents: 0,
+            held: false,
           },
           {
             kind: "penalty",
@@ -48,6 +49,7 @@ describe("a ledger's history", () => {
             amountCents: 500,
             addedAt: s.at("Tue 00:00"),
             paidCents: 0,
+            held: false,
           },
           {
             kind: "penalty",
@@ -58,6 +60,7 @@ describe("a ledger's history", () => {
             amountCents: 500,
             addedAt: s.at("Tue 00:00"),
             paidCents: 0,
+            held: false,
           },
         ],
       },
@@ -224,6 +227,7 @@ describe("payments in a ledger's history", () => {
       amountCents: 500,
       addedAt: s.at(addedAt),
       paidCents,
+      held: false,
     });
     expect(owner.ledger(sam.id)).toEqual({
       ok: true,

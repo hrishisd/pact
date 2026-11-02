@@ -6,10 +6,14 @@ import {
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
   EVIDENCE_PHOTO_FIELD,
+  EXCUSE_FROM_FIELD,
+  EXCUSE_REASON_FIELD,
+  EXCUSE_TO_FIELD,
   INVITE_TOKEN_SIGN_IN_KEY,
   invitePath,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
+  type AcceptExcuseRejectionResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientRequest,
@@ -21,6 +25,10 @@ import {
   type DeletePactResponse,
   type EditPactRequest,
   type EditPactResponse,
+  type ExcuseOptionsResponse,
+  type ExcusePreviewResponse,
+  type ExcuseResponse,
+  type FileExcuseResponse,
   type DecideRequest,
   type DecideResponse,
   type FirstOccurrenceRequest,
@@ -147,6 +155,23 @@ export const api = {
     photos.forEach((photo, i) => form.append(EVIDENCE_PHOTO_FIELD, photo, `photo-${i + 1}.jpg`));
     return postForm<SubmitEvidenceResponse>(API_PATHS.evidence(encodeURIComponent(pactId)), form);
   },
+  excusePreview: (pactId: string, dates: { from: string; to: string }) =>
+    call<ExcusePreviewResponse>(
+      `${API_PATHS.excusePreview(encodeURIComponent(pactId))}?${new URLSearchParams(dates).toString()}`,
+    ),
+  excuseOptions: (pactId: string) => call<ExcuseOptionsResponse>(API_PATHS.excuseOptions(encodeURIComponent(pactId))),
+  /** `photos` are already shrunk (photos.ts), in the order added. */
+  fileExcuse: (pactId: string, excuse: { from: string; to: string; reason: string }, photos: Blob[]) => {
+    const form = new FormData();
+    form.append(EXCUSE_FROM_FIELD, excuse.from);
+    form.append(EXCUSE_TO_FIELD, excuse.to);
+    form.append(EXCUSE_REASON_FIELD, excuse.reason);
+    photos.forEach((photo, i) => form.append(EVIDENCE_PHOTO_FIELD, photo, `photo-${i + 1}.jpg`));
+    return postForm<FileExcuseResponse>(API_PATHS.excuses(encodeURIComponent(pactId)), form);
+  },
+  excuse: (excuseId: string) => call<ExcuseResponse>(API_PATHS.excuse(encodeURIComponent(excuseId))),
+  acceptExcuseRejection: (excuseId: string) =>
+    post<AcceptExcuseRejectionResponse>(API_PATHS.acceptExcuseRejection(encodeURIComponent(excuseId))),
   acceptMiss: (pactId: string, occurrenceDate: string) =>
     post<AcceptMissResponse>(API_PATHS.acceptMiss(encodeURIComponent(pactId), encodeURIComponent(occurrenceDate))),
   reviewQueue: () => call<ReviewQueueResponse>(API_PATHS.reviewQueue),

@@ -62,7 +62,11 @@ export function Today({
         />
       )}
       {today.alerts.map((alert) => (
-        <Alert key={`${alert.kind}:${alert.pactId}:${alert.occurrenceDate}`} alert={alert} onChanged={reload} />
+        <Alert
+          key={alert.kind === "evidence-rejected" ? `${alert.pactId}:${alert.occurrenceDate}` : alert.excuseId}
+          alert={alert}
+          onChanged={reload}
+        />
       ))}
       {today.sections.map((section) => (
         <Section key={section.kind} section={section} now={now} onOpenPact={onOpenPact} onChanged={reload} />
@@ -139,6 +143,8 @@ function Alert({ alert, onChanged }: { alert: Json<TodayAlert>; onChanged: () =>
   switch (alert.kind) {
     case "evidence-rejected":
       return <RejectedEvidenceAlert alert={alert} onTaken={onChanged} />;
+    case "excuse-rejected":
+      return null;
   }
 }
 
@@ -214,7 +220,7 @@ function Waiting({
       <div className="label">Waiting for approval</div>
       <div className="cards">
         {items.map((item) =>
-          item.kind === "evidence" ? (
+          item.kind === "excuse" ? null : item.kind === "evidence" ? (
             <button key={item.id} className="rowbtn" onClick={() => onOpenPact(item.pactId, item.name)}>
               <span className="kico k-evidence">
                 <CameraIcon />

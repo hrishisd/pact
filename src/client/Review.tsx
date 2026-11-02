@@ -74,7 +74,7 @@ export function Review({
         )}
       </div>
       {notice && <p className="error small">{notice}</p>}
-      {item.kind === "evidence" ? (
+      {item.kind === "excuse" ? null : item.kind === "evidence" ? (
         <EvidenceItem key={item.id} item={item} onDecided={decided} />
       ) : (
         <PaymentItem key={item.id} item={item} timezone={timezone} onDecided={decided} />
