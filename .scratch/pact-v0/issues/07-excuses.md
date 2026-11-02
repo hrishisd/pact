@@ -34,3 +34,7 @@ The owner asks a reviewer to treat one or more occurrences as Excused, ahead of 
 ## Out of this ticket
 
 Weekly count whole-week excuses (14). Oura nights (08/09) reuse this as-is.
+
+## Comments
+
+**Prototype, round 1.** `.scratch/pact-v0/prototype/excuses.prototype.html` compares three filing forms (A one sheet, B pick days, C steps) and has switches for the behaviours this ticket leaves open: what Today shows when an excuse covers today, an alert for a rejected excuse, re-filing after a rejection, one review item vs one per reviewer set, withdrawing, and where File excuse on a pact page starts. Waiting on the human's picks before the spec and this ticket are updated.

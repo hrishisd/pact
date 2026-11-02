@@ -1,0 +1,735 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pact Excuses Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  PROTOTYPE, throwaway. Ticket 07 (excuses, penalty holds, Take the L on Missed cards).
+  Answers: what should filing an excuse look like (options A, B, C), and how should the
+  behaviours the ticket leaves open work (switches in the side panel)?
+  Everything is in memory; Reset or reload to start over.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: the app at phone width on a desk surface, with the prototype panel beside it (behind a button on phones).
+   Palette and components copy src/client/styles.css. v0 is light-only, so this page commits to the light look. */
+:root{
+  --paper:#f1f4f0; --surface:#ffffff; --sunk:#e5eae5; --desk:#d9e0da;
+  --ink:#17221d; --muted:#56645c; --line:#d2dad4;
+  --accent:#22457a; --accent-ink:#ffffff; --accent-soft:#e1e8f3;
+  --kept:#2b7347; --kept-bg:#dceee2;
+  --missed:#ad3227; --missed-bg:#f6dfda;
+  --excused:#8f5c0c; --excused-bg:#f4e8cf;
+  --slate:#4f5675; --slate-bg:#e4e6ef;
+  --due:#b0520a;
+  --scrim:rgba(14,22,18,.45);
+  --proto:#2a2140; --proto-soft:#efeafb; --proto-line:#8c7bc4;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
+  --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--desk);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--f-display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:-.01em}
+p{margin:0}
+.muted{color:var(--muted)} .small{font-size:13px} .error{color:var(--missed);font-weight:600}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+#stage{height:100%;display:flex;gap:24px;justify-content:center;align-items:stretch;padding-block:20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+#phone{position:relative;width:400px;max-width:100%;height:100%;max-height:880px;background:var(--paper);border:1px solid var(--line);border-radius:30px;overflow:hidden;box-shadow:0 18px 50px -24px rgba(10,20,15,.45);flex:none}
+#side{width:380px;min-width:0;height:100%;max-height:880px;overflow:auto;background:var(--surface);border:1.5px dashed var(--proto-line);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:18px}
+#protoBtn{display:none}
+@media (max-width:840px){
+  #stage{padding:0}
+  #phone{width:100%;max-height:none;border:0;border-radius:0;box-shadow:none}
+  #side{display:none;position:fixed;inset:0;z-index:60;width:auto;max-height:none;border-radius:0;border:0;padding-block:18px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  #side.open{display:flex}
+  #protoBtn{display:block;position:fixed;right:max(62px,calc(env(safe-area-inset-right,0px) + 62px));top:calc(17px + env(safe-area-inset-top,0px));z-index:50;background:var(--proto);color:#fff;border:0;border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;box-shadow:0 6px 20px -8px rgba(0,0,0,.5)}
+}
+.gut{padding-left:16px;padding-right:16px}
+
+/* app shell */
+#app{height:100%;display:flex;flex-direction:column}
+.hdr{display:flex;align-items:center;gap:10px;padding-block:14px 10px;border-bottom:1px solid var(--line);background:var(--paper)}
+.hdr h1{font-size:22px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iconbtn{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;flex:none}
+.avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;border:0;flex:none}
+.scroll{flex:1;overflow:auto;padding-block:14px 24px;display:flex;flex-direction:column;gap:14px}
+.tabbar{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface);padding:6px 6px 10px}
+.tab{background:none;border:0;padding:0;display:flex;justify-content:center;color:var(--muted)}
+.tab .tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:68px;padding:6px 10px 5px;border-radius:12px;font-size:11.5px}
+.tab svg{width:22px;height:22px}
+.tab[aria-current]{color:var(--accent)} .tab[aria-current] .tile{background:var(--accent-soft);font-weight:700}
+.badge{position:absolute;top:1px;left:calc(50% + 6px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--missed);color:var(--surface);font-size:11px;font-weight:700;display:grid;place-items:center}
+
+/* components */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card h3{font-size:17px}
+.row2{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.spread{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.stack{display:flex;flex-direction:column;gap:8px}
+.stack-sm{display:flex;flex-direction:column;gap:2px;min-width:0}
+.label{font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:11px 14px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--missed);border-color:var(--missed)}
+.btn.ok{background:var(--kept);border-color:var(--kept);color:var(--surface)}
+.btn.sm{padding:6px 10px;font-size:13px;border-radius:10px}
+.btn.block{width:100%} .btn.grow{flex:1}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg{width:18px;height:18px}
+.link{background:none;border:0;padding:0;color:var(--accent);font-weight:600;text-align:left}
+.self-start{align-self:flex-start}
+.field{display:flex;flex-direction:column;gap:6px}
+.field > span{font-size:13px;font-weight:600}
+.field small{color:var(--muted);font-size:13px}
+.inp{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:16px}
+textarea.inp{min-height:76px;resize:vertical}
+.tcard{cursor:pointer}
+.meta{font-size:12.5px;color:var(--muted)}
+.pen,.meta.pen{color:var(--missed);font-weight:700}
+.due,.meta.due{color:var(--due);font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.c-kept{background:var(--kept-bg);color:var(--kept)}
+.c-missed{background:var(--missed-bg);color:var(--missed)}
+.c-excused{background:var(--excused-bg);color:var(--excused)}
+.c-todo{background:var(--kept);color:var(--paper)}
+.c-soon{background:var(--sunk);color:var(--muted)}
+.c-wait{background:var(--slate-bg);color:var(--slate)}
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.list > * + *{border-top:1px solid var(--line)}
+.rowbtn{display:flex;gap:10px;align-items:center;padding:12px 14px;background:none;border:0;text-align:left;width:100%}
+.rowbtn .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.rowbtn .rt small{color:var(--muted);font-size:12.5px}
+.cards{display:flex;flex-direction:column;gap:8px}
+.cards > .rowbtn{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.cards > .rowbtn::after{content:"\203A";color:var(--muted);font-size:22px;line-height:1;margin-left:2px}
+.bigmoney{font-family:var(--f-mono);font-size:30px;font-weight:500;letter-spacing:-.02em;line-height:1.15}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;min-width:0}
+.alert{border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:8px;border:1px solid}
+.alert.bad{background:var(--missed-bg);border-color:var(--missed)}
+.kico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none}
+.kico svg{width:20px;height:20px}
+.k-excuse{background:var(--slate-bg);color:var(--slate)}
+.k-evidence{background:var(--kept-bg);color:var(--kept)}
+.kind{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;padding:3px 7px;white-space:nowrap}
+.kind svg{width:14px;height:14px}
+.counter{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
+.decide{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 1.3fr;gap:8px;padding-block:10px 4px;background:linear-gradient(to bottom,transparent,var(--paper) 25%)}
+.quote{font-size:16px}
+.big-photo{display:block;width:100%;max-height:340px;object-fit:contain;border-radius:14px;border:1px solid var(--line);background:var(--sunk)}
+
+/* sheets */
+.overlay{position:absolute;inset:0;background:var(--scrim);display:flex;align-items:flex-end;z-index:30}
+.sheet{background:var(--paper);width:100%;max-height:92%;overflow:auto;border-radius:22px 22px 0 0;padding-block:10px 24px;display:flex;flex-direction:column;gap:16px}
+.grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.sheet h2{font-size:20px}
+@media (prefers-reduced-motion:no-preference){.sheet.anim{animation:up .22s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+.steps{display:flex;gap:4px} .steps i{flex:1;height:4px;border-radius:2px;background:var(--line)} .steps i.on{background:var(--accent)}
+.footbar{position:sticky;bottom:-24px;display:flex;flex-direction:column;gap:6px;padding-block:12px 4px;background:linear-gradient(to bottom,transparent,var(--paper) 22%)}
+.opt{display:flex;gap:12px;align-items:center;text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:14px;padding:10px 12px;width:100%;cursor:pointer}
+.opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.opt .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.opt small{color:var(--muted);font-size:12.5px}
+.opt input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.opt.off{opacity:.6;cursor:default;background:var(--paper)}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600}
+.pill[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.thumb{position:relative}
+.thumb img,.ph-add{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--sunk)}
+.ph-add{display:grid;place-items:center;border-style:dashed;font-size:26px;color:var(--muted)}
+.thumb .remove{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;border:0;background:var(--scrim);color:var(--surface);display:grid;place-items:center;font-size:17px;line-height:1}
+.covrow{display:flex;gap:10px;align-items:flex-start;padding:10px 14px}
+.covrow .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.covrow .rt small{color:var(--muted);font-size:12.5px}
+.covrow.skip b{color:var(--muted);font-weight:600}
+.toast{position:absolute;left:16px;right:16px;top:70px;z-index:40;background:var(--ink);color:var(--paper);border-radius:12px;padding:10px 14px;font-weight:600;font-size:14px}
+.note{border-left:3px solid var(--proto-line);padding-left:10px;font-size:13px;color:var(--muted)}
+
+/* prototype panel */
+#side h2{font-size:19px}
+#side section{display:flex;flex-direction:column;gap:8px}
+.tag{display:inline-block;background:var(--proto);color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.08em;border-radius:5px;padding:2px 6px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--proto-line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:var(--surface);padding:7px 6px;font-size:12.5px;font-weight:600;color:var(--proto)}
+.seg button + button{border-left:1px solid var(--proto-line)}
+.seg button[aria-pressed=true]{background:var(--proto);color:#fff}
+.beh{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:12px;background:var(--proto-soft)}
+.beh b{font-size:13.5px}
+.beh p{font-size:12.5px;color:var(--muted)}
+.log{font-size:12.5px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto}
+.log div{border-left:2px solid var(--line);padding-left:8px}
+.log .t{font-family:var(--f-mono);color:var(--muted);font-size:11.5px}
+.qs{margin:0;padding-left:18px;font-size:13px;display:flex;flex-direction:column;gap:6px}
+</style>
+
+<div id="stage">
+  <div id="phone"><div id="app"></div></div>
+  <aside id="side" aria-label="Prototype controls"></aside>
+</div>
+<button id="protoBtn" data-act="side">Prototype</button>
+
+<script>
+"use strict";
+// ---------- dates and formatting ----------
+const HOUR = 36e5, WINDOW = 48 * HOUR;
+const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MO = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const at = (y, m, d, h = 0, mi = 0) => new Date(y, m - 1, d, h, mi).getTime();
+const pad = n => String(n).padStart(2, "0");
+const key = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const parts = k => k.split("-").map(Number);
+const startOf = k => { const [y, m, d] = parts(k); return new Date(y, m - 1, d).getTime(); };
+const addDays = (k, n) => { const [y, m, d] = parts(k); return key(new Date(y, m - 1, d + n).getTime()); };
+const wday = k => new Date(startOf(k)).getDay();
+const fmtDate = k => { const d = new Date(startOf(k)); return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; };
+const fmtRange = (a, b) => a === b ? fmtDate(a) : `${fmtDate(a)} – ${fmtDate(b)}`;
+const fmtTime = t => { const d = new Date(t); const h = d.getHours(); return `${h % 12 || 12}:${pad(d.getMinutes())}${h < 12 ? "am" : "pm"}`; };
+const fmtWhen = t => `${fmtDate(key(t))}, ${fmtTime(t)}`;
+const timeLeft = ms => { const m = Math.floor(Math.max(0, ms) / 6e4), h = Math.floor(m / 60); return h >= 1 ? `${h}h` : `${m % 60}m`; };
+const timeLeftLong = ms => { const m = Math.floor(Math.max(0, ms) / 6e4), h = Math.floor(m / 60); return `${h}h ${m % 60}m`; };
+const money = c => "$" + (c % 100 ? (c / 100).toFixed(2) : c / 100);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uniq = a => [...new Set(a)];
+const listNames = a => a.length <= 1 ? (a[0] || "") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
+
+// ---------- icons ----------
+const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${d}</svg>`;
+const IC = {
+  today: svg('<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><circle cx="12" cy="15" r="1.6" fill="currentColor"/>'),
+  pacts: svg('<path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M9 11h6M9 14.5h6M9 18h3.5"/>'),
+  review: svg('<rect x="3.5" y="6" width="17" height="13.5" rx="3"/><path d="M8 3.5h8M8.5 12.5l2.5 2.5 4.5-5"/>'),
+  ledgers: svg('<path d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H19M9 8.5h6"/>'),
+  back: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>',
+  camera: svg('<path d="M4 8.5A2 2 0 0 1 6 6.5h2l1.5-2h5l1.5 2h2a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/>'),
+  excuse: svg('<rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4M9.5 12.5l5 5M14.5 12.5l-5 5"/>'),
+};
+
+// ---------- the world ----------
+const PEOPLE = { jordan: "Jordan", sam: "Sam", alex: "Alex" };
+const PACTS = [
+  { id: "gym", name: "Gym", desc: "A photo of me at the gym", days: [1, 3, 5], pen: 500, rcp: "Red Cross", rev: ["sam"], start: "2026-10-26" },
+  { id: "read", name: "Read 20 pages", desc: "A photo of the page I finished on", days: [0, 1, 2, 3, 4, 5, 6], pen: 200, rcp: "Doctors Without Borders", rev: ["alex"], start: "2026-10-26" },
+  { id: "piano", name: "Piano practice", desc: "A photo of the practice log", days: [2, 4], pen: 300, rcp: "Red Cross", rev: ["sam", "alex"], start: "2026-10-26" },
+];
+const pact = id => PACTS.find(p => p.id === id);
+const scheduled = (p, k) => k >= p.start && p.days.includes(wday(k));
+const okey = (p, k) => `${p.id}|${k}`;
+const fromKey = id => { const [pid, k] = id.split("|"); return { p: pact(pid), k }; };
+
+// A fake screenshot for excuse photos, drawn as an SVG.
+function sample(lines, tint) {
+  const t = lines.map((l, i) => `<text x="24" y="${90 + i * 44}" font-family="system-ui" font-size="${i ? 26 : 34}" font-weight="${i ? 400 : 700}" fill="#17221d">${esc(l)}</text>`).join("");
+  const s = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="480"><rect width="360" height="480" fill="${tint}"/><rect x="0" y="0" width="360" height="40" fill="#00000014"/>${t}</svg>`;
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s);
+}
+const SAMPLES = [
+  ["MyChart", "Visit summary", "Nov 2, 2026", "Dx: influenza A", "Rest 3 days"],
+  ["Delta", "DEN → JFK", "Fri Nov 6 7:05am", "Return Sun Nov 8", "Confirmation G7KQ2P"],
+  ["Thermometer", "101.4 °F", "Mon 7:42am"],
+];
+
+let S;
+function reset() {
+  S = {
+    now: at(2026, 11, 3, 17, 0), me: "jordan", variant: "A",
+    beh: { today: "stay", rejectAlert: "alert", refile: "yes", split: "one", withdraw: "yes", fromPact: "miss" },
+    occ: {}, excuses: [], log: [], nid: 1,
+    tab: "today", stack: { today: [], pacts: [], review: [], ledgers: [] },
+    sheet: null, form: null, toast: null, reviewAt: 0, rejecting: null, sideOpen: false,
+  };
+  // Last week: mostly Kept, one old miss, one old approved excuse.
+  for (let k = "2026-10-26"; k <= "2026-11-02"; k = addDays(k, 1))
+    for (const p of PACTS) if (scheduled(p, k)) S.occ[okey(p, k)] = { outcome: "kept", judgedAt: startOf(addDays(k, 1)) };
+  S.occ["gym|2026-10-28"] = { outcome: "missed", judgedAt: startOf("2026-10-29"), cause: "none" };
+  S.occ["read|2026-10-30"] = { outcome: "excused", judgedAt: at(2026, 10, 30, 21) };
+  S.excuses.push({ id: "x0", keys: ["read|2026-10-30"], reason: "Flying home, left my book in the checked bag.", photos: [], filedAt: at(2026, 10, 30, 8), status: "approved", decidedBy: "alex", decidedAt: at(2026, 10, 30, 21) });
+  // Monday: Gym had no photo, so it was Missed at midnight. Alex rejected Monday's reading photo this morning.
+  S.occ["gym|2026-11-02"] = { outcome: "missed", judgedAt: startOf("2026-11-03"), cause: "none" };
+  S.occ["read|2026-11-02"] = { outcome: "missed", judgedAt: at(2026, 11, 3, 9, 12), cause: "rejected", by: "alex", reason: "That's the same page as Sunday's photo." };
+  S.log.push({ t: S.now, who: "jordan", text: "Alex rejected your evidence for Read 20 pages." });
+}
+
+// ---------- the rules ----------
+const today = () => key(S.now);
+const coverBy = (id, status) => S.excuses.find(x => x.status === status && x.keys.includes(id));
+const lastRejected = id => [...S.excuses].reverse().find(x => x.status === "rejected" && x.keys.includes(id));
+const reviewersOf = keys => uniq(keys.flatMap(id => fromKey(id).p.rev));
+function notify(who, text) { S.log.unshift({ t: S.now, who, text }); }
+
+/** Can this occurrence go on a new excuse now? With the reason shown on the cover list. */
+function elig(p, k) {
+  const id = okey(p, k), o = S.occ[id];
+  if (coverBy(id, "pending")) return { ok: false, note: "Already on an excuse waiting for approval" };
+  if (coverBy(id, "approved")) return { ok: false, note: "Already excused" };
+  if (!o || !o.outcome) {
+    if (k > today()) return { ok: true, note: "Not open yet · Excused when it ends, if approved" };
+    if (k === today()) return { ok: true, note: "Today · not judged yet" };
+    return { ok: true, note: "Not judged yet" };
+  }
+  if (o.outcome === "kept") return { ok: false, note: "Kept" };
+  if (o.outcome === "excused") return { ok: false, note: "Already Excused" };
+  const rej = lastRejected(id);
+  if (rej && S.beh.refile === "no") return { ok: false, note: `${PEOPLE[rej.decidedBy]} rejected an excuse for it` };
+  const left = o.judgedAt + WINDOW - S.now;
+  if (left <= 0) return { ok: false, note: "Missed more than 48 hours ago" };
+  return { ok: true, held: p.pen, left, note: `Missed · ${money(p.pen)} held until decided · ${timeLeft(left)} left` };
+}
+function rowsFor(pactIds, from, to) {
+  const rows = [];
+  if (!from || !to || to < from) return rows;
+  for (let k = from, n = 0; k <= to && n < 62; k = addDays(k, 1), n++)
+    for (const pid of pactIds) { const p = pact(pid); if (scheduled(p, k)) rows.push({ p, k, id: okey(p, k), ...elig(p, k) }); }
+  return rows;
+}
+/** Every occurrence up to today that could go on an excuse now (option B's list). */
+function excusableNow() {
+  const rows = [];
+  for (let k = addDays(today(), -3); k <= today(); k = addDays(k, 1))
+    for (const p of PACTS) if (scheduled(p, k)) { const e = elig(p, k); if (e.ok) rows.push({ p, k, id: okey(p, k), ...e }); }
+  return rows.sort((a, b) => (b.k > a.k) - (b.k < a.k));
+}
+
+function fileExcuse(keys, reason, photos) {
+  const groups = {};
+  for (const id of keys) {
+    const g = S.beh.split === "split" ? fromKey(id).p.rev.join("+") : "all";
+    (groups[g] ||= []).push(id);
+  }
+  const made = Object.values(groups).map(ks => {
+    const x = { id: "x" + S.nid++, keys: ks.sort(), reason, photos, filedAt: S.now, status: "pending" };
+    S.excuses.push(x);
+    for (const id of ks) { const o = S.occ[id]; if (o) o.alertDone = true; }
+    for (const r of reviewersOf(ks)) notify(r, `New review item: Jordan's excuse for ${listNames(uniq(ks.map(id => fromKey(id).p.name)))}.`);
+    return x;
+  });
+  // A new excuse resolves any rejected-excuse alert for these days.
+  for (const x of S.excuses) if (x.alertOpen && x.keys.some(id => keys.includes(id))) x.alertOpen = false;
+  return made;
+}
+function decide(x, approve, reason) {
+  x.status = approve ? "approved" : "rejected";
+  x.decidedBy = S.me; x.decidedAt = S.now; x.decisionReason = reason || null;
+  if (approve) for (const id of x.keys) { const o = S.occ[id]; if (o && o.outcome === "missed") o.outcome = "excused"; }
+  else if (S.beh.rejectAlert === "alert") x.alertOpen = true;
+  notify("jordan", approve ? `${PEOPLE[S.me]} approved your excuse.` : `${PEOPLE[S.me]} rejected your excuse: "${reason}"`);
+}
+/** Midnight judges each day that ended. A day an approved excuse covers is Excused; otherwise, with no photo, Missed. */
+function advance(to) {
+  let k = today();
+  while (startOf(addDays(k, 1)) <= to) {
+    const end = startOf(addDays(k, 1));
+    for (const p of PACTS) {
+      const id = okey(p, k);
+      if (!scheduled(p, k) || S.occ[id]?.outcome) continue;
+      if (coverBy(id, "approved")) S.occ[id] = { outcome: "excused", judgedAt: end };
+      else {
+        S.occ[id] = { outcome: "missed", judgedAt: end, cause: "none" };
+        S.now = end;
+        notify("jordan", `${p.name} · ${fmtDate(k)} is Missed${coverBy(id, "pending") ? " (penalty held: an excuse is waiting)" : ""}.`);
+      }
+    }
+    k = addDays(k, 1);
+  }
+  S.now = to;
+}
+function penalties() {
+  return Object.entries(S.occ).filter(([, o]) => o.outcome === "missed").map(([id, o]) => {
+    const { p, k } = fromKey(id);
+    return { id, p, k, o, amount: p.pen, held: !!coverBy(id, "pending") };
+  }).sort((a, b) => b.o.judgedAt - a.o.judgedAt);
+}
+
+// ---------- labels ----------
+function occChip(p, k, compact) {
+  const id = okey(p, k), o = S.occ[id];
+  if (compact && o?.outcome === "missed") return `<span class="chip c-missed">Missed</span>`;
+  if (compact && !o?.outcome) return "";
+  if (o?.outcome === "excused") return `<span class="chip c-excused">Excused</span>`;
+  if (o?.outcome === "kept") return `<span class="chip c-kept">Kept</span>`;
+  if (o?.outcome === "missed") return coverBy(id, "pending") ? `<span class="chip c-missed">Missed · excuse waiting for approval</span>` : `<span class="chip c-missed">Missed</span>`;
+  if (coverBy(id, "approved")) return `<span class="chip c-excused">Excused</span>`;
+  if (coverBy(id, "pending")) return `<span class="chip c-wait">Excuse waiting for approval</span>`;
+  if (k === today()) return `<span class="chip c-todo">Due today</span>`;
+  if (k > today()) return `<span class="chip c-soon">Coming up</span>`;
+  return `<span class="chip c-soon">Not judged yet</span>`;
+}
+
+// ---------- the filing sheet ----------
+function openExcuse(ctx = {}) {
+  let { pactId, date } = ctx;
+  if (pactId && !date) {
+    const miss = S.beh.fromPact === "miss" && excusableNow().find(r => r.p.id === pactId && r.k < today());
+    date = miss ? miss.k : today();
+  }
+  date ||= today();
+  const pids = pactId ? [pactId] : [PACTS[0].id];
+  S.form = { pids, from: date, to: date, reason: "", photos: [], step: 1, picked: pactId ? { [okey(pact(pactId), date)]: true } : {}, ahead: false, aPids: [], aFrom: addDays(today(), 1), aTo: addDays(today(), 1), aOff: {} };
+  S.sheet = "excuse"; S.sheetFresh = true;
+}
+/** What the form would file now: the covered rows and the skipped ones. */
+function draft() {
+  const f = S.form;
+  if (S.variant === "B") {
+    const now = excusableNow().filter(r => f.picked[r.id]);
+    const ahead = f.ahead ? rowsFor(f.aPids, f.aFrom, f.aTo).filter(r => r.k > today()) : [];
+    const rows = [...now, ...ahead.filter(r => r.ok && !f.aOff[r.id])];
+    return { rows, skipped: ahead.filter(r => !r.ok), keys: rows.map(r => r.id) };
+  }
+  const all = rowsFor(f.pids, f.from, f.to);
+  const rows = all.filter(r => r.ok);
+  return { rows, skipped: all.filter(r => !r.ok), keys: rows.map(r => r.id) };
+}
+const canSend = () => draft().keys.length > 0 && S.form.reason.trim() !== "";
+
+function pactPicker(field) {
+  const sel = S.form[field];
+  return `<div class="stack">${PACTS.map(p => `<label class="opt"><input type="checkbox" id="${field}-${p.id}" data-f="${field}" value="${p.id}" ${sel.includes(p.id) ? "checked" : ""}><span class="rt"><b>${esc(p.name)}</b><small>${p.days.length === 7 ? "Every day" : p.days.map(d => WD[d]).join(", ")} · ${money(p.pen)} · ${listNames(p.rev.map(r => PEOPLE[r]))}</small></span></label>`).join("")}</div>`;
+}
+function rangePicker(fromF, toF) {
+  const f = S.form, t = today();
+  const presets = [["Yesterday", addDays(t, -1), addDays(t, -1)], ["Today", t, t], ["Tomorrow", addDays(t, 1), addDays(t, 1)]];
+  return `<div class="pills">${presets.map(([l, a, b]) => `<button class="pill" data-act="preset" data-arg="${fromF},${toF},${a},${b}" aria-pressed="${f[fromF] === a && f[toF] === b}">${l}</button>`).join("")}</div>
+    <div class="dates"><label class="field"><span>From</span><input class="inp" type="date" id="${fromF}" data-f="${fromF}" value="${f[fromF]}"></label><label class="field"><span>To</span><input class="inp" type="date" id="${toF}" data-f="${toF}" value="${f[toF]}"></label></div>`;
+}
+function reasonField() {
+  return `<label class="field"><span>Reason</span><textarea class="inp" id="ex-reason" data-f="reason" placeholder="e.g. Sick with the flu, or: that photo was today's page, the book has two page 112s">${esc(S.form.reason)}</textarea><small>For a good reason not to keep it, or for a judgment that was wrong.</small></label>`;
+}
+function photosField() {
+  const ph = S.form.photos;
+  return `<div class="field"><span>Photos (optional)</span>
+    <div class="photos">${ph.map((src, i) => `<div class="thumb"><img src="${src}" alt="Photo ${i + 1}"><button class="remove" data-act="rmPhoto" data-arg="${i}" aria-label="Remove photo ${i + 1}">×</button></div>`).join("")}${ph.length < 3 ? `<label class="ph-add" for="ex-file" aria-label="Add a photo">+</label>` : ""}</div>
+    <input type="file" id="ex-file" accept="image/*" hidden>
+    <small>From your camera or photo library, since these are often screenshots. <button class="link" data-act="samplePhoto">Add a sample screenshot</button></small></div>`;
+}
+function coverList(d, opts = {}) {
+  const row = (r, ok) => `<div class="covrow ${ok ? "" : "skip"}"><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span>${ok ? `<span class="chip c-excused">Covered</span>` : `<span class="chip c-soon">Skipped</span>`}</div>`;
+  if (!d.rows.length && !d.skipped.length) return `<p class="muted small">${opts.empty || "Pick at least one pact and the days."}</p>`;
+  return `<div class="list">${d.rows.map(r => row(r, true)).join("")}${d.skipped.map(r => row(r, false)).join("")}</div>`;
+}
+function sendFooter(d) {
+  const held = d.rows.reduce((a, r) => a + (r.held || 0), 0);
+  const revs = reviewersOf(d.keys).map(r => PEOPLE[r]);
+  const items = S.beh.split === "split" ? uniq(d.keys.map(id => fromKey(id).p.rev.join("+"))).length : 1;
+  const line = d.keys.length === 0 ? "Nothing to cover yet." :
+    `Covers ${d.keys.length} ${d.keys.length === 1 ? "day" : "days"}.${held ? ` ${money(held)} is held off what you owe until it's decided.` : ""}${items > 1 ? ` Sent as ${items} separate excuses, one per set of reviewers.` : ""}`;
+  return `<div class="footbar"><span class="meta">${line}</span><button class="btn primary block" data-act="send" data-live="send" ${canSend() ? "" : "disabled"}>Send to ${listNames(revs) || "your reviewer"}</button></div>`;
+}
+function excuseSheet() {
+  const f = S.form, d = draft();
+  if (S.variant === "A") return `<h2>File excuse</h2>
+    <div class="field"><span>Which pacts?</span>${pactPicker("pids")}</div>
+    <div class="field"><span>Which days?</span>${rangePicker("from", "to")}</div>
+    ${reasonField()}${photosField()}
+    <div class="stack"><div class="label">This excuse covers</div>${coverList(d)}</div>
+    ${sendFooter(d)}`;
+  if (S.variant === "B") {
+    const now = excusableNow();
+    const ahead = f.ahead ? rowsFor(f.aPids, f.aFrom, f.aTo).filter(r => r.k > today()) : [];
+    return `<h2>File excuse</h2>
+      <div class="field"><span>Days you can still excuse</span>
+        <div class="stack">${now.map(r => `<label class="opt"><input type="checkbox" id="pk-${r.id}" data-pick="${r.id}" ${f.picked[r.id] ? "checked" : ""}><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span></label>`).join("") || `<p class="muted small">Nothing from the last few days can be excused.</p>`}</div></div>
+      <div class="field"><span>Days ahead</span>
+        ${f.ahead ? `${pactPicker("aPids")}${rangePicker("aFrom", "aTo")}
+          ${ahead.length ? `<div class="stack">${ahead.map(r => r.ok ? `<label class="opt"><input type="checkbox" id="ao-${r.id}" data-aoff="${r.id}" ${f.aOff[r.id] ? "" : "checked"}><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span></label>` : `<div class="opt off"><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span></div>`).join("")}</div>` : `<p class="muted small">Pick pacts and future dates.</p>`}`
+        : `<button class="btn sm self-start" data-act="ahead">+ Add days ahead, like a trip</button>`}</div>
+      ${reasonField()}${photosField()}
+      ${sendFooter(d)}`;
+  }
+  // C: three steps.
+  const steps = `<div class="steps">${[1, 2, 3].map(i => `<i class="${i <= f.step ? "on" : ""}"></i>`).join("")}</div>`;
+  if (f.step === 1) return `${steps}<h2>Which days?</h2>
+    <div class="field"><span>Pacts</span>${pactPicker("pids")}</div>
+    <div class="field"><span>Dates</span>${rangePicker("from", "to")}</div>
+    <div class="footbar"><span class="meta">${d.keys.length ? `${d.keys.length} ${d.keys.length === 1 ? "day" : "days"} can be covered${d.skipped.length ? `, ${d.skipped.length} skipped` : ""}.` : "None of these days can be excused."}</span><button class="btn primary block" data-act="step" data-arg="2" ${d.keys.length ? "" : "disabled"}>Next</button></div>`;
+  if (f.step === 2) return `${steps}<h2>Why?</h2>${reasonField()}${photosField()}
+    <div class="footbar"><div class="row2"><button class="btn" data-act="step" data-arg="1">Back</button><button class="btn primary grow" data-act="step" data-arg="3" data-live="reason" ${f.reason.trim() ? "" : "disabled"}>Next</button></div></div>`;
+  return `${steps}<h2>Check and send</h2>
+    <div class="card"><span class="label">Reason</span><span class="quote">“${esc(f.reason)}”</span>${f.photos.length ? `<span class="meta">${f.photos.length} ${f.photos.length === 1 ? "photo" : "photos"}</span>` : ""}</div>
+    <div class="stack"><div class="label">This excuse covers</div>${coverList(d)}</div>
+    <button class="btn self-start sm" data-act="step" data-arg="1">Change days</button>
+    ${sendFooter(d)}`;
+}
+
+// ---------- screens ----------
+function header(title, back) {
+  return `<header class="hdr gut">${back ? `<button class="iconbtn" data-act="back" aria-label="Back">${IC.back}</button>` : ""}<h1>${esc(title)}</h1><span class="avatar" title="Signed in as ${PEOPLE[S.me]}">${PEOPLE[S.me][0]}</span></header>`;
+}
+function pactCard(p, k, chip, body) {
+  return `<article class="card tcard" data-act="openPact" data-arg="${p.id}"><div class="spread"><h3>${esc(p.name)}</h3>${chip}</div><div class="meta pen">${money(p.pen)}</div>${body}</article>`;
+}
+function excuseTitle(x) { return listNames(uniq(x.keys.map(id => fromKey(id).p.name))); }
+function excuseDates(x) { const ks = x.keys.map(id => fromKey(id).k).sort(); return fmtRange(ks[0], ks[ks.length - 1]); }
+function waitingRow(x) {
+  return `<button class="rowbtn" data-act="openExcuse" data-arg="${x.id}"><span class="kico k-excuse">${IC.excuse}</span><span class="rt"><b>${esc(excuseTitle(x))}</b><small>Excuse · ${excuseDates(x)}</small></span></button>`;
+}
+
+function todayScreen() {
+  if (S.me !== "jordan") return `<div class="card"><h3>Nothing to do right now</h3><p class="muted">${PEOPLE[S.me]} has no pacts in this prototype. Jordan's excuses are on the Review tab.</p></div>`;
+  const out = [], t = today();
+  // Alerts: rejected evidence, then rejected excuses.
+  for (const [id, o] of Object.entries(S.occ)) {
+    if (o.cause !== "rejected" || o.alertDone || o.tookL) continue;
+    const { p, k } = fromKey(id), e = elig(p, k);
+    out.push(`<div class="alert bad"><b>${PEOPLE[o.by]} rejected your evidence for ${esc(p.name)}</b><span>“${esc(o.reason)}”</span>
+      <span class="small">${fmtDate(k)} is Missed · <b class="pen">${money(p.pen)} to ${esc(p.rcp)}</b></span>
+      <div class="row2">${e.ok ? `<button class="btn sm" data-act="file" data-arg="${p.id},${k}">File excuse · ${timeLeft(e.left)} left</button>` : ""}<button class="btn sm danger" data-act="takeL" data-arg="${id}">Take the L</button></div></div>`);
+  }
+  for (const x of S.excuses.filter(x => x.alertOpen)) {
+    const open = x.keys.filter(id => { const { p, k } = fromKey(id); return S.occ[id]?.outcome === "missed" && elig(p, k).ok; });
+    const owed = x.keys.filter(id => S.occ[id]?.outcome === "missed").reduce((a, id) => a + fromKey(id).p.pen, 0);
+    const left = Math.min(...open.map(id => S.occ[id].judgedAt + WINDOW - S.now));
+    out.push(`<div class="alert bad"><b>${PEOPLE[x.decidedBy]} rejected your excuse for ${esc(excuseTitle(x))}</b><span>“${esc(x.decisionReason)}”</span>
+      <span class="small">${excuseDates(x)}${owed ? ` · <b class="pen">${money(owed)} is owed again</b>` : " · days not judged yet are judged as usual"}</span>
+      <div class="row2">${open.length ? `<button class="btn sm" data-act="refile" data-arg="${x.id}">File another excuse · ${timeLeft(left)} left</button>` : ""}<button class="btn sm danger" data-act="ackX" data-arg="${x.id}">Take the L</button></div></div>`);
+  }
+  // To do: today's days.
+  for (const p of PACTS) {
+    if (!scheduled(p, t) || S.occ[okey(p, t)]?.outcome) continue;
+    const id = okey(p, t);
+    if (coverBy(id, "approved")) { out.push(pactCard(p, t, `<span class="chip c-excused">Excused</span>`, `<div class="meta">Nothing to do today. ${PEOPLE[coverBy(id, "approved").decidedBy]} approved your excuse.</div>`)); continue; }
+    if (coverBy(id, "pending")) {
+      if (S.beh.today === "move") continue;
+      out.push(pactCard(p, t, `<span class="chip c-todo">To do</span>`, `<div class="meta due">Due at midnight · ${timeLeftLong(startOf(addDays(t, 1)) - S.now)}</div><div class="meta">Excuse waiting for approval. A photo still counts if it's rejected.</div><button class="btn primary self-start" data-act="photo">${IC.camera}Take photo</button>`));
+      continue;
+    }
+    out.push(pactCard(p, t, `<span class="chip c-todo">To do</span>`, `<div class="meta due">Due at midnight · ${timeLeftLong(startOf(addDays(t, 1)) - S.now)}</div><div class="row2"><button class="btn primary" data-act="photo">${IC.camera}Take photo</button><button class="btn" data-act="file" data-arg="${p.id},${t}">File excuse</button></div>`));
+  }
+  // Missed: misses that can still be excused.
+  const inAlert = new Set(S.excuses.filter(x => x.alertOpen).flatMap(x => x.keys));
+  for (const pen of penalties()) {
+    const { p, k, o, id } = pen;
+    if (o.cause === "rejected" || o.tookL || inAlert.has(id)) continue;
+    const e = elig(p, k);
+    if (!e.ok) continue;
+    out.push(pactCard(p, k, `<span class="chip c-missed">Missed</span>`, `<div class="meta">${fmtDate(k)}</div><div class="row2"><button class="btn" data-act="file" data-arg="${p.id},${k}">File excuse · ${timeLeft(e.left)} left</button><button class="btn" data-act="takeL" data-arg="${id}">Take the L</button></div>`));
+  }
+  const waiting = S.excuses.filter(x => x.status === "pending");
+  if (waiting.length) out.push(`<section class="stack"><div class="label">Waiting for approval</div><div class="cards">${waiting.map(waitingRow).join("")}</div></section>`);
+  if (!out.length) out.push(`<div class="card"><h3>Nothing to do right now</h3><p class="muted">When one of your pacts needs something from you, it shows up here.</p></div>`);
+  return out.join("");
+}
+
+function pactsScreen() {
+  return `<div class="cards">${PACTS.map(p => `<button class="rowbtn" data-act="openPact" data-arg="${p.id}"><span class="rt"><b>${esc(p.name)}</b><small>${p.days.length === 7 ? "Every day" : p.days.map(d => WD[d]).join(", ")} · ${money(p.pen)} per miss</small></span></button>`).join("")}</div>`;
+}
+function pactPage(id) {
+  const p = pact(id), t = today();
+  const days = [];
+  for (let k = addDays(t, 7); k >= addDays(t, -9); k = addDays(k, -1)) if (scheduled(p, k)) days.push(k);
+  const waiting = S.excuses.filter(x => x.status === "pending" && x.keys.some(k => k.startsWith(p.id + "|")));
+  return `<div class="row2"><span class="chip c-kept">Active</span><span class="muted">${esc(p.desc)}</span></div>
+    <div class="row2">${S.me === "jordan" ? `<button class="btn" data-act="file" data-arg="${p.id},">File excuse</button><button class="btn" data-act="noop">Request change</button>` : ""}</div>
+    ${waiting.length ? `<section class="stack"><div class="label">Waiting on</div><div class="cards">${waiting.map(waitingRow).join("")}</div></section>` : ""}
+    <section class="stack"><div class="label">Days</div><div class="list">${days.map(k => `<div class="covrow"><span class="rt"><b>${fmtDate(k)}</b></span>${occChip(p, k)}</div>`).join("")}</div>
+    <small class="muted">The heat map comes from another ticket. This list shows the same labels.</small></section>
+    <section class="card"><h3>Terms</h3><dl class="kv"><dt>Evidence</dt><dd>Camera photo, checked by a reviewer</dd><dt>Schedule</dt><dd>${p.days.length === 7 ? "Every day" : p.days.map(d => WD[d]).join(", ")}</dd><dt>Penalty</dt><dd>${money(p.pen)} per miss</dd><dt>Recipient</dt><dd>${esc(p.rcp)}</dd><dt>${p.rev.length > 1 ? "Reviewers" : "Reviewer"}</dt><dd>${listNames(p.rev.map(r => PEOPLE[r]))}</dd></dl></section>`;
+}
+function coverRowsForReview(x) {
+  return x.keys.map(id => {
+    const { p, k } = fromKey(id), o = S.occ[id];
+    const held = o?.outcome === "missed" && x.status === "pending";
+    return `<div class="covrow"><span class="rt"><b>${esc(p.name)} · ${fmtDate(k)}</b><small>${held ? `${money(p.pen)} held` : !o?.outcome ? (k > today() ? "Not open yet" : "Not judged yet") : ""}${o?.cause === "rejected" ? ` · ${PEOPLE[o.by]} rejected the photo` : ""}</small></span>${occChip(p, k, x.status === "pending")}</div>`;
+  }).join("");
+}
+function excusePage(xid) {
+  const x = S.excuses.find(e => e.id === xid);
+  const status = { pending: `<span class="chip c-wait">Waiting for approval</span>`, approved: `<span class="chip c-excused">Approved by ${PEOPLE[x.decidedBy]}</span>`, rejected: `<span class="chip c-missed">Rejected by ${PEOPLE[x.decidedBy]}</span>`, withdrawn: `<span class="chip c-soon">Withdrawn</span>` }[x.status];
+  return `<div class="row2"><span class="kind k-excuse">${IC.excuse}Excuse</span>${status}</div>
+    <article class="card"><h3>${excuseDates(x)}</h3><span class="quote">“${esc(x.reason)}”</span>
+      ${x.photos.map((src, i) => `<img class="big-photo" src="${src}" alt="Excuse photo ${i + 1}">`).join("")}
+      ${x.status === "rejected" ? `<p class="small"><b>${PEOPLE[x.decidedBy]}:</b> “${esc(x.decisionReason)}”</p>` : ""}
+      <span class="label">Covers</span><div class="list">${coverRowsForReview(x)}</div>
+      <span class="meta">Sent to ${listNames(reviewersOf(x.keys).map(r => PEOPLE[r]))} · ${fmtWhen(x.filedAt)}</span></article>
+    ${x.status === "pending" && S.beh.withdraw === "yes" ? `<button class="btn danger self-start sm" data-act="withdrawAsk" data-arg="${x.id}">Withdraw excuse</button>` : ""}`;
+}
+
+function reviewScreen() {
+  const q = S.excuses.filter(x => x.status === "pending" && reviewersOf(x.keys).includes(S.me));
+  if (!q.length) return `<div class="card"><h3>Nothing to review</h3><p class="muted">${S.me === "jordan" ? "Nobody has picked Jordan as a reviewer here. Switch to Sam or Alex in the prototype panel to review Jordan's excuses." : "When a friend sends evidence, an excuse or a payment, it shows up here."}</p></div>`;
+  const i = Math.min(S.reviewAt, q.length - 1), x = q[i];
+  const held = x.keys.filter(id => S.occ[id]?.outcome === "missed").reduce((a, id) => a + fromKey(id).p.pen, 0);
+  const notMine = uniq(x.keys.map(id => fromKey(id).p).filter(p => !p.rev.includes(S.me)).map(p => p.name));
+  const future = x.keys.some(id => !S.occ[id]?.outcome);
+  const rej = S.rejecting === x.id;
+  return `<div class="spread"><span class="counter">${i + 1} of ${q.length} to review</span>${q.length > 1 ? `<div class="row2"><button class="btn sm" data-act="rprev">‹ Prev</button><button class="btn sm" data-act="rnext">Skip ›</button></div>` : ""}</div>
+    <div class="row2"><span class="kind k-excuse">${IC.excuse}Excuse</span><span class="muted">from Jordan</span></div>
+    <article class="card"><h3>${excuseDates(x)}</h3>
+      <div class="stack-sm"><span class="label">Reason</span><span class="quote">“${esc(x.reason)}”</span></div>
+      ${x.photos.map((src, n) => `<img class="big-photo" src="${src}" alt="Excuse photo ${n + 1}">`).join("")}
+      <span class="label">Covers</span><div class="list">${coverRowsForReview(x)}</div>
+      ${notMine.length ? `<p class="note">You don't review ${listNames(notMine.map(esc))}. Your decision covers ${notMine.length > 1 ? "them" : "it"} too.</p>` : ""}
+      <p class="muted small">Approving makes ${x.keys.length === 1 ? "this day" : `all ${x.keys.length} days`} Excused${held ? ` and removes ${money(held)} in held penalties` : ""}.${future ? " Days not judged yet are Excused when they end." : ""}</p></article>
+    ${rej ? `<div class="stack"><label class="field"><span>Why are you rejecting it? (required)</span><textarea class="inp" id="rej-reason" data-rej placeholder="e.g. You were at the party, not sick">${esc(S.rejReason || "")}</textarea></label>
+      <p class="small">Rejecting ${held ? `makes ${money(held)} owed again` : "changes nothing yet"}${future ? " and leaves the days not judged yet to be judged as usual" : ""}.</p>
+      <div class="row2"><button class="btn" data-act="rejCancel">Cancel</button><button class="btn danger grow" data-act="rejSend" data-arg="${x.id}" data-live="rej" ${(S.rejReason || "").trim() ? "" : "disabled"}>Reject</button></div></div>`
+    : `<div class="decide"><button class="btn danger" data-act="rejOpen" data-arg="${x.id}">Reject</button><button class="btn ok" data-act="approve" data-arg="${x.id}">Approve</button></div>`}`;
+}
+
+function ledgersScreen() {
+  if (S.me !== "jordan") return `<div class="card"><h3>No ledgers</h3><p class="muted">${PEOPLE[S.me]} has no pacts in this prototype.</p></div>`;
+  const rcps = uniq(PACTS.map(p => p.rcp));
+  return `<div class="cards">${rcps.map(r => { const owed = penalties().filter(x => x.p.rcp === r && !x.held).reduce((a, x) => a + x.amount, 0); return `<button class="rowbtn" data-act="openLedger" data-arg="${esc(r)}"><span class="rt"><b>${esc(r)}</b><span class="bigmoney">${money(owed)}</span><small>owed</small></span></button>`; }).join("")}</div>`;
+}
+function ledgerPage(r) {
+  const pens = penalties().filter(x => x.p.rcp === r);
+  const owed = pens.filter(x => !x.held).reduce((a, x) => a + x.amount, 0);
+  return `<section class="card"><span class="bigmoney">${money(owed)}</span><span class="meta">owed</span></section>
+    <section class="stack"><div class="label">History</div><div class="list">${pens.map(x => {
+      const open = x.o.judgedAt + WINDOW > S.now;
+      const where = x.held ? "Held while an excuse waits for approval" : open ? "Goes on a Wednesday bill once it can't be excused" : "On the Wed Nov 4 bill";
+      return `<div class="rowbtn"><span class="rt"><button class="link" data-act="openPact" data-arg="${x.p.id}">${esc(x.p.name)}</button><small>Missed ${fmtDate(x.k)} · ${where}</small>${x.o.cause === "rejected" ? `<small>Rejected by ${PEOPLE[x.o.by]}: “${esc(x.o.reason)}”</small>` : ""}</span><span class="num ${x.held ? "muted" : "pen"}">${x.held ? "" : "+"}${money(x.amount)}</span></div>`;
+    }).join("") || `<div class="rowbtn muted">Nothing yet</div>`}</div>
+    <small class="muted">Excused penalties leave the history. Held ones don't count toward owed.</small></section>`;
+}
+
+// ---------- render ----------
+const TABS = [["today", "Today", IC.today], ["pacts", "Pacts", IC.pacts], ["review", "Review", IC.review], ["ledgers", "Ledgers", IC.ledgers]];
+function render() {
+  const app = document.getElementById("app");
+  const sc = app.querySelector(".scroll")?.scrollTop || 0, ss = app.querySelector(".sheet")?.scrollTop || 0;
+  const stack = S.stack[S.tab], page = stack[stack.length - 1];
+  let title = TABS.find(t => t[0] === S.tab)[1], body;
+  if (page?.kind === "pact") { title = pact(page.id).name; body = pactPage(page.id); }
+  else if (page?.kind === "excuse") { title = "Excuse"; body = excusePage(page.id); }
+  else if (page?.kind === "ledger") { title = page.id; body = ledgerPage(page.id); }
+  else body = { today: todayScreen, pacts: pactsScreen, review: reviewScreen, ledgers: ledgersScreen }[S.tab]();
+  const qn = S.excuses.filter(x => x.status === "pending" && reviewersOf(x.keys).includes(S.me)).length;
+  let sheet = "";
+  if (S.sheet === "excuse") sheet = excuseSheet();
+  if (S.sheet?.withdraw) sheet = `<h2>Withdraw this excuse?</h2><p>Any held penalties become owed again, and days not judged yet are judged as usual. You can file a new one while the days are still in their 48 hours.</p><div class="stack"><button class="btn danger block" data-act="withdraw" data-arg="${S.sheet.withdraw}">Withdraw excuse</button><button class="btn block" data-act="closeSheet">Keep it</button></div>`;
+  app.innerHTML = `${header(title, !!page)}<main class="scroll gut">${body}</main>
+    <nav class="tabbar">${TABS.map(([id, label, ic]) => `<button class="tab" data-act="tab" data-arg="${id}" ${S.tab === id ? `aria-current="${page ? "true" : "page"}"` : ""}><span class="tile">${ic}${label}${id === "review" && qn ? `<span class="badge">${qn}</span>` : ""}</span></button>`).join("")}</nav>
+    ${sheet ? `<div class="overlay" data-act="overlay"><div class="sheet gut${S.sheetFresh ? " anim" : ""}" role="dialog"><div class="grab"></div>${sheet}</div></div>` : ""}
+    ${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}`;
+  app.querySelector(".scroll").scrollTop = sc;
+  if (app.querySelector(".sheet")) app.querySelector(".sheet").scrollTop = S.sheetFresh ? 0 : ss;
+  S.sheetFresh = false;
+  renderSide();
+}
+let toastTimer;
+function toast(t) { S.toast = t; clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = null; render(); }, 2600); }
+
+const BEHAVIOURS = [
+  ["today", "An excuse covers today's open day", "The ticket doesn't say what Today shows meanwhile.", [["stay", "Stays in To do"], ["move", "Moves to Waiting"]]],
+  ["rejectAlert", "When a reviewer rejects an excuse", "The spec lists no alert for this, only a notification.", [["alert", "Alert on Today"], ["push", "Push only"]]],
+  ["refile", "Excuse the same day again after a rejection", "Inside the original 48 hours. The window never restarts.", [["yes", "Allowed"], ["no", "Final"]]],
+  ["split", "One excuse covers pacts with different reviewers", "Ticket: one item, and any reviewer of a covered pact decides all of it. File Gym and Read together to see it.", [["one", "One item"], ["split", "One per reviewer set"]]],
+  ["withdraw", "Owner withdraws a waiting excuse", "Not in the spec. Held penalties become owed again.", [["yes", "Allowed"], ["no", "Not allowed"]]],
+  ["fromPact", "File excuse on a pact page starts on", "Matters after Take the L, when the miss is only reachable from the pact page.", [["miss", "Latest miss"], ["today", "Today"]]],
+];
+function renderSide() {
+  const side = document.getElementById("side");
+  const keepScroll = side.scrollTop;
+  const seg = (field, opts, cur) => `<div class="seg">${opts.map(([v, l]) => `<button data-act="set" data-arg="${field},${v}" aria-pressed="${cur === v}">${l}</button>`).join("")}</div>`;
+  side.className = S.sideOpen ? "open" : "";
+  side.innerHTML = `
+    <div class="spread"><span class="tag">PROTOTYPE · TICKET 07</span><button class="btn sm" data-act="side" id="sideClose" style="${innerWidth > 840 ? "display:none" : ""}">Close</button></div>
+    <section><h2>Excuses</h2><p class="muted small">It's Tue Nov 3, 5pm. Jordan missed Gym on Monday, and Alex rejected Monday's reading photo this morning. File an excuse from either, then switch to Sam or Alex to decide it.</p></section>
+    <section><div class="label">Filing form</div>${seg("variant", [["A", "A · One sheet"], ["B", "B · Pick days"], ["C", "C · Steps"]], S.variant)}
+      <p class="small muted">${{ A: "One sheet: pacts, a date range, reason, photos, and a live list of what it covers. The spec's model (pacts + date range) as is.", B: "Starts from a list of the days you can still excuse, ticked from where you came from. Future days are added as a range. The excuse becomes a list of occurrences, not a range.", C: "Three steps like Create pact: which days, why, then check and send. Same model as A, with more room per step." }[S.variant]}</p></section>
+    <section><div class="label">Signed in as</div>${seg("me", [["jordan", "Jordan (owner)"], ["sam", "Sam"], ["alex", "Alex"]], S.me)}<p class="small muted">Sam reviews Gym and Piano. Alex reviews Read and Piano.</p></section>
+    <section><div class="label">Clock · <span class="num">${fmtWhen(S.now)}</span></div><div class="row2"><button class="btn sm" data-act="adv" data-arg="1">+1 hour</button><button class="btn sm" data-act="adv" data-arg="mid">To midnight</button><button class="btn sm" data-act="adv" data-arg="24">+1 day</button><button class="btn sm" data-act="reset">Reset</button></div>
+      <p class="small muted">Midnight judges the day that ended. 48-hour windows count from when a day was judged Missed or its photo was rejected.</p></section>
+    <section><div class="label">Open behaviours</div>${BEHAVIOURS.map(([f, t, d, o]) => `<div class="beh"><b>${t}</b><p>${d}</p>${seg("beh." + f, o, S.beh[f])}</div>`).join("")}</section>
+    <section><div class="label">Settled in this prototype (say if you disagree)</div><ol class="qs">
+      <li>Days in the range that can't be excused (Kept, already on an excuse, past 48 hours) are skipped and listed as Skipped. The excuse goes through if at least one day is covered.</li>
+      <li>Filing an excuse for a rejected photo clears its alert; the day moves to Waiting for approval.</li>
+      <li>A reason is required; photos are optional, up to 3, from the library.</li>
+      <li>A day ahead that an approved excuse covers shows as Excused on the pact page right away, and on its day Today says there's nothing to do.</li>
+      <li>Approval is all or nothing. No approving some of the days.</li>
+      <li>A date range covers at most 62 days.</li>
+    </ol></section>
+    <section><div class="label">Notifications sent</div><div class="log">${S.log.map(l => `<div><span class="t">${fmtWhen(l.t)} → ${PEOPLE[l.who]}</span><br>${esc(l.text)}</div>`).join("") || "<span class='muted'>None yet</span>"}</div></section>`;
+  side.scrollTop = keepScroll;
+}
+
+// ---------- events ----------
+function push(page) { S.stack[S.tab].push(page); }
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const a = el.dataset.act, arg = el.dataset.arg;
+  if (a === "overlay" && e.target !== el) return;
+  switch (a) {
+    case "overlay": case "closeSheet": S.sheet = null; break;
+    case "tab": S.tab = arg; S.stack[arg] = []; S.rejecting = null; break;
+    case "back": S.stack[S.tab].pop(); break;
+    case "openPact": push({ kind: "pact", id: arg }); break;
+    case "openExcuse": push({ kind: "excuse", id: arg }); break;
+    case "openLedger": push({ kind: "ledger", id: arg }); break;
+    case "file": { const [pid, k] = arg.split(","); openExcuse({ pactId: pid, date: k || undefined }); break; }
+    case "refile": { const x = S.excuses.find(x => x.id === arg); const first = x.keys.map(fromKey).find(({ p, k }) => elig(p, k).ok); openExcuse({ pactId: first.p.id, date: first.k }); if (S.variant !== "B") { S.form.pids = uniq(x.keys.map(id => fromKey(id).p.id)); } else x.keys.forEach(id => S.form.picked[id] = true); S.form.reason = ""; break; }
+    case "takeL": S.occ[arg].tookL = true; break;
+    case "ackX": S.excuses.find(x => x.id === arg).alertOpen = false; break;
+    case "photo": toast("Evidence works as on main. It isn't part of this prototype."); break;
+    case "noop": toast("Not part of this prototype."); break;
+    case "preset": { const [ff, tf, from, to] = arg.split(","); S.form[ff] = from; S.form[tf] = to; break; }
+    case "ahead": S.form.ahead = true; S.form.aPids = [...S.form.pids]; break;
+    case "step": S.form.step = +arg; document.querySelector(".sheet").scrollTop = 0; break;
+    case "samplePhoto": { const s = SAMPLES[S.form.photos.length % SAMPLES.length]; S.form.photos.push(sample(s, ["#e8f0fb", "#fdf3e1", "#f3e8f3"][S.form.photos.length % 3])); break; }
+    case "rmPhoto": S.form.photos.splice(+arg, 1); break;
+    case "send": {
+      if (!canSend()) return;
+      const d = draft(), made = fileExcuse(d.keys, S.form.reason.trim(), S.form.photos);
+      S.sheet = null; S.form = null;
+      toast(`Excuse sent to ${listNames(uniq(made.flatMap(x => reviewersOf(x.keys))).map(r => PEOPLE[r]))}`);
+      break;
+    }
+    case "withdrawAsk": S.sheet = { withdraw: arg }; S.sheetFresh = true; break;
+    case "withdraw": { const x = S.excuses.find(x => x.id === arg); x.status = "withdrawn"; for (const r of reviewersOf(x.keys)) notify(r, "Jordan withdrew an excuse."); S.sheet = null; S.stack[S.tab].pop(); toast("Excuse withdrawn"); break; }
+    case "rprev": S.reviewAt = Math.max(0, S.reviewAt - 1); break;
+    case "rnext": S.reviewAt++; { const n = S.excuses.filter(x => x.status === "pending" && reviewersOf(x.keys).includes(S.me)).length; if (S.reviewAt >= n) S.reviewAt = 0; } break;
+    case "approve": decide(S.excuses.find(x => x.id === arg), true); toast("Approved"); break;
+    case "rejOpen": S.rejecting = arg; S.rejReason = ""; break;
+    case "rejCancel": S.rejecting = null; break;
+    case "rejSend": decide(S.excuses.find(x => x.id === arg), false, S.rejReason.trim()); S.rejecting = null; toast("Rejected"); break;
+    case "set": {
+      const [f, v] = arg.split(",");
+      if (f.startsWith("beh.")) S.beh[f.slice(4)] = v;
+      else if (f === "variant") { S.variant = v; if (S.form) { S.form.step = 1; } }
+      else if (f === "me") { S.me = v; S.tab = v === "jordan" ? "today" : "review"; S.stack = { today: [], pacts: [], review: [], ledgers: [] }; S.sheet = null; S.reviewAt = 0; }
+      break;
+    }
+    case "adv": advance(arg === "mid" ? startOf(addDays(today(), 1)) : S.now + (+arg) * HOUR); break;
+    case "reset": reset(); break;
+    case "side": S.sideOpen = !S.sideOpen; break;
+    default: return;
+  }
+  render();
+});
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.id === "ex-file" && el.files?.[0]) {
+    const r = new FileReader(); r.onload = () => { S.form.photos.push(r.result); render(); }; r.readAsDataURL(el.files[0]); return;
+  }
+  if (el.dataset.pick) { S.form.picked[el.dataset.pick] = el.checked; return render(); }
+  if (el.dataset.aoff) { S.form.aOff[el.dataset.aoff] = !el.checked; return render(); }
+  const f = el.dataset.f; if (!f || f === "reason") return;
+  if (el.type === "checkbox") { const set = new Set(S.form[f]); el.checked ? set.add(el.value) : set.delete(el.value); S.form[f] = PACTS.map(p => p.id).filter(id => set.has(id)); }
+  else S.form[f] = el.value;
+  render();
+});
+document.addEventListener("input", e => {
+  const el = e.target;
+  if (el.dataset.f === "reason") {
+    S.form.reason = el.value;
+    document.querySelectorAll('[data-live="send"]').forEach(b => b.disabled = !canSend());
+    document.querySelectorAll('[data-live="reason"]').forEach(b => b.disabled = !S.form.reason.trim());
+  }
+  if ("rej" in el.dataset) { S.rejReason = el.value; document.querySelectorAll('[data-live="rej"]').forEach(b => b.disabled = !el.value.trim()); }
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && S.sheet) { S.sheet = null; render(); } });
+addEventListener("resize", () => renderSide());
+
+reset();
+render();
+</script>
