@@ -1,14 +1,16 @@
-// The Review tab: the account's Review Queue, one item at a time, with
-// Reject (a reason is required, and for evidence the form says what
-// rejecting costs), Approve, and Prev/Skip.
+// The Review tab: the account's Review Queue (evidence, excuses and
+// payments), one item at a time, with Reject (a reason is required, and for
+// evidence and excuses the form says what rejecting costs), Approve, and
+// Prev/Skip.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { formatDate, formatDayTime, money, weekdayName } from "./format.ts";
-import { CameraIcon, DollarIcon } from "./icons.tsx";
-import { Empty, useLoad } from "./ui.tsx";
+import { DayChip, dayNote, excuseDatesText } from "./excuse-days.tsx";
+import { CameraIcon, DollarIcon, ExcuseIcon } from "./icons.tsx";
+import { Empty, useLoad, useNow } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
 export function Review({
@@ -74,8 +76,10 @@ export function Review({
         )}
       </div>
       {notice && <p className="error small">{notice}</p>}
-      {item.kind === "excuse" ? null : item.kind === "evidence" ? (
+      {item.kind === "evidence" ? (
         <EvidenceItem key={item.id} item={item} onDecided={decided} />
+      ) : item.kind === "excuse" ? (
+        <ExcuseItem key={item.id} item={item} onDecided={decided} />
       ) : (
         <PaymentItem key={item.id} item={item} timezone={timezone} onDecided={decided} />
       )}
@@ -90,6 +94,7 @@ const REFUSAL_TEXT: Record<DecideRefusal, string> = {
 };
 
 type EvidenceReviewItem = Extract<Json<ReviewItem>, { kind: "evidence" }>;
+type ExcuseReviewItem = Extract<Json<ReviewItem>, { kind: "excuse" }>;
 type PaymentReviewItem = Extract<Json<ReviewItem>, { kind: "payment" }>;
 
 /** After the core answered: null when the decision went through. */
@@ -134,6 +139,77 @@ function EvidenceItem({ item, onDecided }: { item: EvidenceReviewItem; onDecided
             {item.ownerName}'s {item.recipientName} ledger.
           </p>
         }
+        onDecided={onDecided}
+      />
+    </>
+  );
+}
+
+/**
+ * An Excuse item: the reason, the photos, the days it covers as they stand,
+ * and what approving or rejecting does to them, all at once.
+ */
+function ExcuseItem({ item, onDecided }: { item: ExcuseReviewItem; onDecided: OnDecided }) {
+  const now = useNow();
+  const held = item.heldCents > 0 ? money(item.heldCents) : null;
+  const notJudged = item.days.some(({ status }) => status.kind === "not-judged");
+  // What rejecting does, each half only when it applies.
+  const rejectCost = [
+    ...(held ? [`makes ${held} owed again`] : []),
+    ...(notJudged ? ["leaves the days not judged yet to be judged as usual"] : []),
+  ];
+  const which = item.days.length === 1 ? excuseDatesText(item.days) : `all ${item.days.length} days`;
+  return (
+    <>
+      <div className="row2">
+        <span className="kind k-excuse">
+          <ExcuseIcon />
+          Excuse
+        </span>
+        <span className="muted">from {item.ownerName}</span>
+      </div>
+      <article className="card">
+        <div className="spread">
+          <h3>{item.pactName}</h3>
+          <span className="meta">{excuseDatesText(item.days)}</span>
+        </div>
+        <div className="stack-sm">
+          <span className="label">Reason</span>
+          <span className="quote">“{item.reason}”</span>
+        </div>
+        {item.photoIds.map((photoId, i) => {
+          const src = API_PATHS.photo(encodeURIComponent(photoId));
+          return (
+            // Opens the photo full size in a new tab.
+            <a key={photoId} href={src} target="_blank" rel="noreferrer">
+              <img className="big-photo" src={src} alt={`Photo ${i + 1} of ${item.photoIds.length}`} />
+            </a>
+          );
+        })}
+        <span className="label">Covers</span>
+        <div className="list">
+          {item.days.map(({ date, status }) => {
+            const note = dayNote(status, now);
+            return (
+              <div key={date} className="covrow">
+                <span className="rt">
+                  <b>{formatDate(date)}</b>
+                  {note && <small>{note}</small>}
+                </span>
+                <DayChip status={status} now={now} />
+              </div>
+            );
+          })}
+        </div>
+        <p className="muted small">
+          Approving makes {which} Excused{held && ` and removes ${held} in held penalties`}.
+          {notJudged && " Days not judged yet are Excused when they end."}
+        </p>
+      </article>
+      <Decision
+        itemId={item.id}
+        placeholder="e.g. You were at the party, not sick"
+        cost={rejectCost.length > 0 && <p className="small">Rejecting {rejectCost.join(" and ")}.</p>}
         onDecided={onDecided}
       />
     </>
