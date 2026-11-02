@@ -62,7 +62,7 @@ A link between a Pact account and an outside service that supplies evidence, suc
 _Avoid_: Integration, connector, link
 
 **Excuse**:
-The owner's request to have one or more occurrences treated as excused, either because there was a good reason not to keep them or because the evidence was wrong.
+The owner's request to have one or more occurrences of one pact treated as excused, either because there was a good reason not to keep them or because the evidence was wrong.
 _Avoid_: Appeal, dispute, exemption, pass
 
 **Reviewer**:
