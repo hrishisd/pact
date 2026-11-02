@@ -1,0 +1,72 @@
+// How an excuse's days are written, wherever they show: the File excuse
+// sheet, the excuse page and the Excuse review item. The UI never says
+// "pending".
+
+import type { Json } from "../shared/api.ts";
+import type { ExcuseDay, ExcuseSkipReason, OccurrenceStatus } from "../shared/types.ts";
+import { formatDate, money } from "./format.ts";
+
+type Status = Json<OccurrenceStatus>;
+
+/**
+ * A day's chip as of `now` (ms): Kept, Excused, Missed (with "· excuse
+ * waiting for approval" while one is), "Excuse waiting for approval" for a
+ * day not judged yet with one waiting, and otherwise Due today, Coming up or
+ * Not judged yet. A day ahead with an approved excuse already reads Excused.
+ */
+export function DayChip({ status, now }: { status: Status; now: number }) {
+  switch (status.kind) {
+    case "kept":
+      return <span className="chip c-kept">Kept</span>;
+    case "excused":
+      return <span className="chip c-excused">Excused</span>;
+    case "missed":
+      return <span className="chip c-missed">{status.held ? "Missed · excuse waiting for approval" : "Missed"}</span>;
+    case "not-judged":
+      if (status.excuse === "approved") return <span className="chip c-excused">Excused</span>;
+      if (status.excuse === "waiting") return <span className="chip c-wait">Excuse waiting for approval</span>;
+      if (status.evidenceWaiting) return <span className="chip c-wait">Waiting for approval</span>;
+      if (Date.parse(status.opensAt) > now) return <span className="chip c-soon">Coming up</span>;
+      if (Date.parse(status.dueAt) > now) return <span className="chip c-todo">Due today</span>;
+      return <span className="chip c-soon">Not judged yet</span>;
+  }
+}
+
+/** The small line under a covered day: "$5 held", "Not open yet", "Due at midnight", or nothing. */
+export function dayNote(status: Status, now: number): string {
+  switch (status.kind) {
+    case "missed":
+      return status.held ? `${money(status.penaltyCents)} held` : `${money(status.penaltyCents)} to be held`;
+    case "not-judged":
+      if (Date.parse(status.opensAt) > now) return "Not open yet";
+      if (Date.parse(status.dueAt) > now) return "Due at midnight";
+      return "Not judged yet";
+    default:
+      return "";
+  }
+}
+
+/** Why a day in the dates is skipped, as the sheet's Skipped rows say it. */
+export const SKIP_REASON_TEXT: Record<ExcuseSkipReason, string> = {
+  kept: "Kept",
+  excused: "Already Excused",
+  "on-waiting-excuse": "Already on an excuse waiting for approval",
+  "window-closed": "Missed more than 48 hours ago",
+};
+
+/** "Mon Nov 2", or "Mon Nov 2 – Wed Nov 4" when the first and last days differ. */
+export function datesText(first: string, last: string): string {
+  return first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
+}
+
+/** "Mon Nov 2" or "Mon Nov 2 – Wed Nov 4", for an excuse's days, oldest first. */
+export function excuseDatesText(days: Json<ExcuseDay>[]): string {
+  const first = days[0]?.date;
+  const last = days.at(-1)?.date;
+  return first === undefined || last === undefined ? "" : datesText(first, last);
+}
+
+/** The penalties of `days` that are Missed: what an excuse holds while it waits. */
+export function heldCents(days: Json<ExcuseDay>[]): number {
+  return days.reduce((sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0), 0);
+}
