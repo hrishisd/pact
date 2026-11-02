@@ -57,8 +57,14 @@ export type EvidenceKind = "camera" | "oura";
 export interface NewPact {
   evidenceKind: EvidenceKind;
   name: string;
-  /** For Camera: what the photo will show. */
+  /** For Camera: what the photo will show. Oura Ring pacts have none. */
   description: string;
+  /**
+   * Oura Ring only: the in-bed-by time, "HH:MM" on a 24-hour clock. An
+   * evening time (from 18:00) is due that evening; an earlier one, the
+   * morning after.
+   */
+  inBedBy?: string;
   schedule: Schedule;
   /** The Penalty per missed occurrence, in US cents: a positive whole number. */
   penaltyCents: number;
@@ -69,8 +75,10 @@ export interface NewPact {
 }
 
 export type CreatePactRefusal =
-  /** Oura Ring pacts aren't available yet. */
-  | "evidence-kind-unavailable"
+  /** An Oura Ring pact needs the owner's Oura connection first. */
+  | "oura-not-connected"
+  /** An Oura Ring pact's in-bed-by time is missing or isn't "HH:MM". */
+  | "invalid-in-bed-by"
   | "blank-name"
   | "blank-description"
   | "no-days"
@@ -98,11 +106,18 @@ export type EditPactResult = { ok: true } | { ok: false; reason: EditPactRefusal
 
 export type DeletePactResult = { ok: true } | { ok: false; reason: "pact-not-found" | "edit-window-closed" };
 
+/** What a pact's occurrences follow from, as the create form has it so far. */
+export interface PactTiming {
+  schedule: Schedule;
+  /** Oura Ring only: see `NewPact.inBedBy`. */
+  inBedBy?: string;
+}
+
 /** A pact's first occurrence, as the create form's Check step names it. */
 export interface FirstOccurrence {
   /** The occurrence's day in the owner's timezone, "YYYY-MM-DD". */
   date: string;
-  /** Midnight at the end of that day, in the owner's timezone. */
+  /** Its due time: midnight at the end of that day, or the in-bed-by time, in the owner's timezone. */
   dueAt: Date;
 }
 
@@ -125,6 +140,8 @@ export interface PactTerms {
   name: string;
   description: string;
   evidenceKind: EvidenceKind;
+  /** Oura Ring only: the in-bed-by time, "HH:MM". Null for Camera. */
+  inBedBy: string | null;
   schedule: Schedule;
   penaltyCents: number;
   recipient: Recipient;
@@ -286,6 +303,16 @@ export interface Profile {
   name: string;
   /** IANA zone, e.g. "America/New_York". Null until the user confirms one. */
   timezone: string | null;
+  /** The connections the account has made, if any. */
+  connections: Connection[];
+}
+
+/** A link to an outside service that supplies evidence. Oura only, in v0. */
+export interface Connection {
+  service: "oura";
+  /** Needs reconnecting once the service refuses its tokens; until then, connected. */
+  status: "connected" | "needs-reconnecting";
+  connectedAt: Date;
 }
 
 /**
@@ -361,6 +388,8 @@ export type TodaySection =
    * those Missed through a rejection (alerts) and accepted misses.
    */
   | { kind: "missed"; cards: TodayMissedCard[] }
+  /** Bedtime pacts whose night runs now, soonest deadline first. Nothing to do: Oura reports it. */
+  | { kind: "automatic"; cards: TodayAutomaticCard[] }
   /** Pacts whose first occurrence hasn't opened yet, soonest first. */
   | { kind: "coming-up"; cards: TodayComingUpCard[] };
 
@@ -395,6 +424,23 @@ export interface TodayMissedCard extends TodayPactCard {
   missedAt: Date;
   /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
   excusableUntil: Date;
+  /**
+   * Bedtime pacts only: when Oura says the owner got into bed, "HH:MM" on
+   * Oura's clock, or null when Oura reported no sleep by 18:00 the next day.
+   */
+  night?: { inBedAt: string | null };
+}
+
+/** A bedtime pact's night that runs now. */
+export interface TodayAutomaticCard extends TodayPactCard {
+  /** When its edit window closes; null once it has. */
+  editWindowClosesAt: Date | null;
+  /** The night's day, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  /** Tonight's in-bed-by deadline. */
+  dueAt: Date;
+  /** "HH:MM". */
+  inBedBy: string;
 }
 
 export interface TodayComingUpCard extends TodayPactCard {

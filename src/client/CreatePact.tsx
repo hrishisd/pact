@@ -68,7 +68,8 @@ function formOf(pact: Pact): Form {
 type Problem = EditPactRefusal | "no-amount" | "no-recipient";
 
 const PROBLEMS: Record<Problem, string> = {
-  "evidence-kind-unavailable": "Oura Ring pacts aren't available yet.",
+  "oura-not-connected": "Connect your Oura Ring first.",
+  "invalid-in-bed-by": "Pick a time.",
   "blank-name": "Give it a name.",
   "blank-description": "Say what your photo will show.",
   "no-days": "Pick at least one day.",

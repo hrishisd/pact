@@ -202,6 +202,8 @@ export type DeletePactResponse = DeletePactResult;
 /** POST /api/pacts/first-occurrence: the form's Check step, before the pact exists or its edit is saved. */
 export interface FirstOccurrenceRequest {
   schedule: Schedule;
+  /** Oura Ring only: the in-bed-by time, "HH:MM". */
+  inBedBy?: string;
   /** The pact being edited: the rule then counts from when it was created. */
   editing?: string;
 }

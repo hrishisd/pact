@@ -8,8 +8,23 @@
 import { createECDH, randomBytes, randomUUID } from "node:crypto";
 import { addDays, localDateOf, type LocalDate } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
-import { newOccurrenceTerms, occurrences, type Occurrence, type OccurrenceTerms } from "./occurrences.ts";
-import type { Clock, Notification, NotificationKind, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
+import {
+  newOccurrenceTerms,
+  nightStartsAt,
+  occurrences,
+  type Occurrence,
+  type OccurrenceTerms,
+} from "./occurrences.ts";
+import type {
+  Clock,
+  Notification,
+  NotificationKind,
+  Notifier,
+  OuraSleepPeriod,
+  OuraSource,
+  Photo,
+  PhotoStore,
+} from "./ports.ts";
 import { APP_PATHS } from "../shared/api.ts";
 import { formatDate, money, scheduleText } from "../shared/format.ts";
 import {
@@ -57,6 +72,8 @@ import {
   type NotificationSetting,
   type NotificationSettingState,
   type OccurrenceStatus,
+  type Connection,
+  type PactTiming,
   type PactWaitingItem,
   type PactSummary,
   type PactResult,
@@ -77,6 +94,7 @@ import {
   type SubmitEvidenceResult,
   type Today,
   type TodayAlert,
+  type TodayAutomaticCard,
   type TodayComingUpCard,
   type TodayMissedCard,
   type TodaySection,
@@ -160,16 +178,21 @@ export interface AccountView {
   /** Removes a pact in its edit window, with its evidence, and tells nobody. A refusal changes nothing. */
   deletePact(pactId: string): Promise<DeletePactResult>;
   /**
-   * The first occurrence a pact with `schedule` would have if created now, or
+   * The first occurrence a pact with `timing` would have if created now, or
    * if it's the pact `editing`, when that was created: what the form's Check
    * step names. Same rule as `createPact`.
    */
-  firstOccurrence(schedule: Schedule, editing?: string): FirstOccurrenceResult;
+  firstOccurrence(timing: PactTiming, editing?: string): FirstOccurrenceResult;
   /** This owner's Active pacts, for the Pacts tab: those in their edit window first, then by name. */
   pacts(): PactSummary[];
   /** The pact page's terms. Someone else's pact, or none, is not found. */
   pact(pactId: string): PactResult;
   profile(): Profile;
+  /**
+   * Records that the account connected Oura: the Oura adapter has just stored
+   * its tokens. Connecting again marks the connection connected as of now.
+   */
+  connectOura(): Promise<void>;
   today(): Today;
   /**
    * The owner submits photo evidence for the occurrence of `pactId` open now.
@@ -344,6 +367,7 @@ class Core implements PactCore {
   readonly #clock: Clock;
   readonly #notifier: Notifier;
   readonly #photoStore: PhotoStore;
+  readonly #ouraSource: OuraSource;
   readonly #operatorEmailKey: string;
   readonly #log: (line: string) => void;
   /** Outbox deliveries run one at a time, in this chain. */
@@ -354,6 +378,7 @@ class Core implements PactCore {
     this.#clock = options.clock;
     this.#notifier = options.notifier;
     this.#photoStore = options.photoStore;
+    this.#ouraSource = options.ouraSource;
     this.#operatorEmailKey = emailKey(options.operatorEmail);
     this.#log = options.log ?? ((line) => console.log(line));
   }
@@ -611,9 +636,9 @@ class Core implements PactCore {
           const id = randomUUID();
           this.#db
             .prepare(
-              `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule,
+              `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, in_bed_by,
                                  penalty_cents, recipient_id, stage, first_occurrence, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
             )
             .run(
               id,
@@ -622,6 +647,7 @@ class Core implements PactCore {
               checked.description,
               pact.evidenceKind,
               JSON.stringify(checked.terms.schedule),
+              checked.terms.inBedBy ?? null,
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
@@ -642,14 +668,15 @@ class Core implements PactCore {
 
           this.#db
             .prepare(
-              `UPDATE pact SET name = ?, description = ?, schedule = ?, penalty_cents = ?, recipient_id = ?,
-                               first_occurrence = ?
+              `UPDATE pact SET name = ?, description = ?, schedule = ?, in_bed_by = ?, penalty_cents = ?,
+                               recipient_id = ?, first_occurrence = ?
                WHERE id = ?`,
             )
             .run(
               checked.name,
               checked.description,
               JSON.stringify(checked.terms.schedule),
+              checked.terms.inBedBy ?? null,
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
@@ -674,12 +701,17 @@ class Core implements PactCore {
           this.#db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);
           return { ok: true };
         }),
-      firstOccurrence: (schedule, editing) => {
+      firstOccurrence: ({ schedule, inBedBy }, editing) => {
         const { timezone } = account();
         const pact = editing === undefined ? undefined : this.#ownPact(accountId, editing);
         if (editing !== undefined && !pact) return { ok: false, reason: "pact-not-found" };
         if (timezone === null) return { ok: false, reason: "no-timezone" };
-        const timing = newOccurrenceTerms(schedule, pact ? new Date(pact.created_at) : this.#clock.now(), timezone);
+        const timing = newOccurrenceTerms(
+          schedule,
+          pact ? new Date(pact.created_at) : this.#clock.now(),
+          timezone,
+          inBedBy !== undefined && isClockTime(inBedBy) ? inBedBy : null,
+        );
         if (!timing.ok) return timing;
         return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
       },
@@ -718,6 +750,7 @@ class Core implements PactCore {
           name: row.name,
           description: row.description,
           evidenceKind: row.evidence_kind,
+          inBedBy: row.in_bed_by,
           schedule: terms.schedule,
           penaltyCents: row.penalty_cents,
           recipient,
@@ -736,8 +769,23 @@ class Core implements PactCore {
       },
       profile: () => {
         const { email, name, timezone } = account();
-        return { email, name, timezone };
+        const connections = (
+          this.#db
+            .prepare(`SELECT service, status, connected_at FROM connection WHERE account_id = ? ORDER BY service`)
+            .all(accountId) as { service: "oura"; status: Connection["status"]; connected_at: string }[]
+        ).map((row) => ({ service: row.service, status: row.status, connectedAt: new Date(row.connected_at) }));
+        return { email, name, timezone, connections };
       },
+      connectOura: () =>
+        this.#command(() => {
+          account();
+          this.#db
+            .prepare(
+              `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, 'oura', 'connected', ?)
+               ON CONFLICT (account_id, service) DO UPDATE SET status = 'connected', connected_at = excluded.connected_at`,
+            )
+            .run(accountId, this.#clock.now().toISOString());
+        }),
       today: () => {
         const { timezone } = account();
         // Every pact's owner has a timezone: creating one needs it.
@@ -1692,14 +1740,18 @@ class Core implements PactCore {
   ):
     | { ok: true; name: string; description: string; terms: OccurrenceTerms; reviewerIds: AccountId[] }
     | { ok: false; reason: CreatePactRefusal } {
-    // Oura Ring pacts come with the Oura connection (ticket 08).
-    if (pact.evidenceKind !== "camera") return { ok: false, reason: "evidence-kind-unavailable" };
+    const oura = pact.evidenceKind === "oura";
+    if (oura && !this.#hasOuraConnection(ownerId)) return { ok: false, reason: "oura-not-connected" };
+    if (oura && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
+      return { ok: false, reason: "invalid-in-bed-by" };
+    }
     const name = pact.name.trim();
-    const description = pact.description.trim();
+    // An Oura Ring pact has no photo to describe.
+    const description = oura ? "" : pact.description.trim();
     if (name === "") return { ok: false, reason: "blank-name" };
-    if (description === "") return { ok: false, reason: "blank-description" };
+    if (!oura && description === "") return { ok: false, reason: "blank-description" };
     if (timezone === null) return { ok: false, reason: "no-timezone" };
-    const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone);
+    const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone, oura ? pact.inBedBy! : null);
     if (!timing.ok) return timing;
     if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
       return { ok: false, reason: "invalid-penalty" };
@@ -1712,6 +1764,13 @@ class Core implements PactCore {
     if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
     if (!reviewerIds.every((id) => this.#areFriends(ownerId, id))) return { ok: false, reason: "not-a-friend" };
     return { ok: true, name, description, terms: timing.terms, reviewerIds };
+  }
+
+  #hasOuraConnection(accountId: AccountId): boolean {
+    return (
+      this.#db.prepare(`SELECT 1 FROM connection WHERE account_id = ? AND service = 'oura'`).get(accountId) !==
+      undefined
+    );
   }
 
   #setReviewers(pactId: string, reviewerIds: AccountId[]): void {
@@ -2011,9 +2070,11 @@ class Core implements PactCore {
     at: Date,
   ): { ok: true; occurrence: Occurrence } | { ok: false; reason: SubmitEvidenceRefusal } {
     const row = this.#db
-      .prepare(`SELECT schedule, first_occurrence FROM pact WHERE id = ? AND owner_account_id = ?`)
-      .get(pactId, ownerId) as Pick<PactRow, "schedule" | "first_occurrence"> | undefined;
+      .prepare(`SELECT schedule, first_occurrence, evidence_kind FROM pact WHERE id = ? AND owner_account_id = ?`)
+      .get(pactId, ownerId) as Pick<PactRow, "schedule" | "first_occurrence" | "evidence_kind"> | undefined;
     if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
+    // Oura reports a bedtime night; there's never a photo to submit.
+    if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
     if (photoCount === 0) return { ok: false, reason: "no-photos" };
     if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
     const occurrence = occurrences(occurrenceTermsOf(row), timezone).openAt(at);
@@ -2110,11 +2171,32 @@ class Core implements PactCore {
   #todayCards(ownerId: AccountId, timezone: string): { alerts: TodayAlert[]; sections: TodaySection[] } {
     const now = this.#clock.now();
     const toDo: TodayToDoCard[] = [];
+    const automatic: TodayAutomaticCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
       const card = { pactId: pact.id, name: pact.name, penaltyCents: pact.penaltyCents };
       const { editWindowClosesAt } = pact;
-      const { first, openAt } = occurrences(pact.terms, timezone);
+      const { first, openAt, between } = occurrences(pact.terms, timezone);
+      const { inBedBy } = pact.terms;
+      if (inBedBy) {
+        if (now.getTime() < first.opensAt.getTime()) {
+          comingUp.push({ ...card, editWindowClosesAt, opensOn: first.date });
+          continue;
+        }
+        // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
+        const today = localDateOf(now, timezone);
+        const tonight = between(addDays(today, -1), today).find(
+          (night) =>
+            night.opensAt.getTime() <= now.getTime() &&
+            now.getTime() < night.dueAt.getTime() &&
+            !this.#isJudged(pact.id, night.date) &&
+            this.#excuseOn(pact.id, night.date) === null,
+        );
+        if (tonight) {
+          automatic.push({ ...card, editWindowClosesAt, occurrenceDate: tonight.date, dueAt: tonight.dueAt, inBedBy });
+        }
+        continue;
+      }
       const open = openAt(now);
       // Judged while still open: its evidence was rejected, so it's an alert.
       if (open && this.#isJudged(pact.id, open.date)) continue;
@@ -2131,11 +2213,13 @@ class Core implements PactCore {
     }
     // Rows come sorted by name, and the sorts are stable.
     toDo.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+    automatic.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
     comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn));
     const sections: TodaySection[] = [];
     if (toDo.length > 0) sections.push({ kind: "to-do", cards: toDo });
     const missed = this.#recentlyMissed(ownerId, now);
     if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
+    if (automatic.length > 0) sections.push({ kind: "automatic", cards: automatic });
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
     const alerts = [...this.#rejectedEvidenceAlerts(ownerId), ...this.#rejectedExcuseAlerts(ownerId, now)];
     return { alerts: mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert), sections };
@@ -2204,7 +2288,8 @@ class Core implements PactCore {
     const since = new Date(now.getTime() - EXCUSE_WINDOW_MS);
     const rows = this.#db
       .prepare(
-        `SELECT pact.id, pact.name, penalty.amount_cents, occurrence.date, occurrence.judged_at
+        `SELECT pact.id, pact.name, pact.evidence_kind, penalty.amount_cents, occurrence.date, occurrence.judged_at,
+                occurrence.bedtime_start
          FROM occurrence
          JOIN pact ON pact.id = occurrence.pact_id
          JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
@@ -2220,9 +2305,11 @@ class Core implements PactCore {
       .all(ownerId, since.toISOString()) as {
       id: string;
       name: string;
+      evidence_kind: PactTerms["evidenceKind"];
       amount_cents: number;
       date: LocalDate;
       judged_at: string;
+      bedtime_start: string | null;
     }[];
     return rows.map((row) => ({
       pactId: row.id,
@@ -2231,6 +2318,9 @@ class Core implements PactCore {
       occurrenceDate: row.date,
       missedAt: new Date(row.judged_at),
       excusableUntil: new Date(new Date(row.judged_at).getTime() + EXCUSE_WINDOW_MS),
+      ...(row.evidence_kind === "oura" && {
+        night: { inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) },
+      }),
     }));
   }
 
@@ -2253,15 +2343,15 @@ class Core implements PactCore {
     const now = this.#clock.now();
     const rows = this.#db
       .prepare(
-        `SELECT pact.id, pact.name, pact.schedule, pact.penalty_cents, pact.first_occurrence, pact.created_at,
-                recipient.name AS recipient_name
+        `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.penalty_cents, pact.first_occurrence,
+                pact.created_at, recipient.name AS recipient_name
          FROM pact JOIN recipient ON recipient.id = pact.recipient_id
          WHERE pact.owner_account_id = ? AND pact.stage = 'active'
          ORDER BY pact.name, pact.created_at, pact.id`,
       )
       .all(ownerId) as (Pick<
       PactRow,
-      "id" | "name" | "schedule" | "penalty_cents" | "first_occurrence" | "created_at"
+      "id" | "name" | "schedule" | "in_bed_by" | "penalty_cents" | "first_occurrence" | "created_at"
     > & {
       recipient_name: string;
     })[];
@@ -2283,9 +2373,13 @@ class Core implements PactCore {
   }
 
   async advanceTo(t: Date): Promise<void> {
+    // Before the transaction, never in it: a slow Oura can't hold up other writes.
+    // A call that throws fails the whole tick, which writes nothing; the next one retries.
+    const sleep = await this.#fetchSleep(t);
     await this.#command(() => {
       this.#closeEditWindows(t);
       this.#judgeDueBy(t);
+      this.#judgeNights(t, sleep);
       this.#db
         .prepare(
           `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)
@@ -2302,8 +2396,8 @@ class Core implements PactCore {
    */
   #judgeDueBy(t: Date): void {
     for (const pact of this.#pactsToJudge()) {
-      // Every pact's owner has a timezone: creating one needs it.
-      if (pact.timezone === null) continue;
+      // Every pact's owner has a timezone: creating one needs it. Oura reports bedtime nights.
+      if (pact.timezone === null || pact.evidence_kind !== "camera") continue;
       const due = occurrences(occurrenceTermsOf(pact), pact.timezone).dueAfter(pact.judged_through, t);
       for (const occurrence of due) this.#judgeAtDueTime(pact.id, occurrence);
       const last = due.at(-1);
@@ -2311,11 +2405,93 @@ class Core implements PactCore {
     }
   }
 
+  /**
+   * Each night of a bedtime pact that hasn't been judged, from where judging
+   * got to, whose window (18:00 that day to 18:00 the next) has started by `t`.
+   */
+  #nightsWaiting(t: Date): { pact: PactToJudge & { timezone: string }; night: Occurrence }[] {
+    const waiting = [];
+    for (const pact of this.#pactsToJudge()) {
+      if (pact.evidence_kind !== "oura" || pact.timezone === null) continue;
+      const { timezone } = pact;
+      const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
+      for (const night of occurrences(occurrenceTermsOf(pact), timezone).between(from, localDateOf(t, timezone))) {
+        if (nightStartsAt(night.date, timezone).getTime() > t.getTime()) break;
+        if (!this.#isJudged(pact.id, night.date)) waiting.push({ pact: { ...pact, timezone }, night });
+      }
+    }
+    return waiting;
+  }
+
+  /**
+   * The sleep periods of each account with a bedtime night waiting on Oura
+   * and a connection, for the days those nights could fall on. Accounts with
+   * nothing waiting cause no calls. A "disconnected" result counts as no data.
+   */
+  async #fetchSleep(t: Date): Promise<Map<AccountId, OuraSleepPeriod[]>> {
+    const ranges = new Map<AccountId, { startDate: LocalDate; endDate: LocalDate }>();
+    for (const { pact, night } of this.#nightsWaiting(t)) {
+      if (!this.#hasOuraConnection(pact.owner_account_id)) continue;
+      // Oura files a night's sleep under the day it ends, the day after.
+      const range = ranges.get(pact.owner_account_id);
+      const endDate = addDays(night.date, 1);
+      ranges.set(pact.owner_account_id, {
+        startDate: range && range.startDate < night.date ? range.startDate : night.date,
+        endDate: range && range.endDate > endDate ? range.endDate : endDate,
+      });
+    }
+    const sleep = new Map<AccountId, OuraSleepPeriod[]>();
+    for (const [account, range] of ranges) {
+      const result = await this.#ouraSource.sleepPeriods(account, range);
+      if (result.ok) sleep.set(account, result.periods);
+    }
+    return sleep;
+  }
+
+  /**
+   * Judges bedtime nights in order, from where judging got to. A night is
+   * decided by the first long_sleep Oura reports starting in its window,
+   * read on Oura's own clock: Kept if it starts before the in-bed-by time,
+   * else Missed, as of `t`, when it arrived. With an approved excuse and no
+   * such period, it's Excused at its in-bed-by time. With neither by 18:00
+   * the next day, it's Missed then. The first night still waiting stops the
+   * cursor.
+   */
+  #judgeNights(t: Date, sleep: Map<AccountId, OuraSleepPeriod[]>): void {
+    const stopped = new Set<string>();
+    for (const { pact, night } of this.#nightsWaiting(t)) {
+      if (stopped.has(pact.id)) continue;
+      const inBedBy = pact.in_bed_by!;
+      const period = (sleep.get(pact.owner_account_id) ?? [])
+        .filter((p) => p.type === "long_sleep" && nightOf(p.bedtime_start) === night.date)
+        .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start)))[0];
+      const excuse = this.#excuseOn(pact.id, night.date);
+      if (period) {
+        const kept = wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
+        this.#judge(pact.id, night.date, kept ? "kept" : "missed", t);
+        this.#db
+          .prepare(`UPDATE occurrence SET bedtime_start = ? WHERE pact_id = ? AND date = ?`)
+          .run(period.bedtime_start, pact.id, night.date);
+        if (!kept && excuse === null) this.#enqueueMissed(pact.id, night.date);
+      } else if (excuse === "approved" && night.dueAt.getTime() <= t.getTime()) {
+        this.#judge(pact.id, night.date, "excused", night.dueAt);
+      } else if (night.closesAt.getTime() <= t.getTime()) {
+        this.#judge(pact.id, night.date, "missed", night.closesAt);
+        if (excuse === null) this.#enqueueMissed(pact.id, night.date);
+      } else {
+        stopped.add(pact.id);
+        continue;
+      }
+      this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(night.date, pact.id);
+    }
+  }
+
   /** Every pact (or just `pactId`) with what judging reads of it: its terms, cursor and owner's timezone. */
   #pactsToJudge(pactId?: string): PactToJudge[] {
     return this.#db
       .prepare(
-        `SELECT pact.id, pact.schedule, pact.first_occurrence, pact.judged_through, account.timezone
+        `SELECT pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
+                pact.judged_through, account.timezone, pact.owner_account_id
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE ? IS NULL OR pact.id = ?`,
       )
@@ -2523,8 +2699,39 @@ function editWindowClosesAt(pact: Pick<PactRow, "created_at">, now: Date): Date 
 }
 
 /** A pact row's occurrence terms: the one place a stored schedule is read. */
-function occurrenceTermsOf(row: Pick<PactRow, "schedule" | "first_occurrence">): OccurrenceTerms {
-  return { schedule: JSON.parse(row.schedule) as Schedule, firstOccurrence: row.first_occurrence };
+function occurrenceTermsOf(
+  row: Pick<PactRow, "schedule" | "first_occurrence"> & { in_bed_by?: string | null },
+): OccurrenceTerms {
+  return {
+    schedule: JSON.parse(row.schedule) as Schedule,
+    firstOccurrence: row.first_occurrence,
+    inBedBy: row.in_bed_by ?? null,
+  };
+}
+
+/**
+ * A timestamp as Oura wrote it, read on Oura's own clock: "YYYY-MM-DDTHH:MM".
+ * Oura's timestamps carry the UTC offset where the ring was, so their wall
+ * time is the time there.
+ */
+function wallClock(timestamp: string): string {
+  return timestamp.slice(0, 16);
+}
+
+/** The night a sleep starting at `timestamp` counts for: its day from 18:00, else the day before. */
+function nightOf(timestamp: string): LocalDate {
+  const date = timestamp.slice(0, 10);
+  return Number(timestamp.slice(11, 13)) >= 18 ? date : addDays(date, -1);
+}
+
+/** The night of `date`'s in-bed-by deadline as a wall-clock "YYYY-MM-DDTHH:MM". */
+function deadlineWallClock(date: LocalDate, inBedBy: string): string {
+  return `${Number(inBedBy.slice(0, 2)) >= 18 ? date : addDays(date, 1)}T${inBedBy}`;
+}
+
+/** "HH:MM" on a 24-hour clock. */
+function isClockTime(text: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
 }
 
 interface PactRow {
@@ -2533,6 +2740,7 @@ interface PactRow {
   description: string;
   evidence_kind: PactTerms["evidenceKind"];
   schedule: string;
+  in_bed_by: string | null;
   penalty_cents: number;
   recipient_id: string;
   stage: PactTerms["stage"];
@@ -2542,9 +2750,10 @@ interface PactRow {
 }
 
 /** A pact as judging reads it. */
-type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence"> & {
+type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence" | "evidence_kind" | "in_bed_by"> & {
   judged_through: LocalDate | null;
   timezone: string | null;
+  owner_account_id: AccountId;
 };
 
 /** Evidence a reviewer is deciding on, as `decide` reads it. */

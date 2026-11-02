@@ -35,6 +35,7 @@ describe("a new pact's first occurrence", () => {
         date: "2026-01-12",
         opensAt: new Date("2026-01-12T00:00:00-05:00"),
         dueAt: new Date("2026-01-13T00:00:00-05:00"),
+        closesAt: new Date("2026-01-13T00:00:00-05:00"),
       },
     });
   });
@@ -63,6 +64,7 @@ describe("the occurrence open at a time", () => {
       date: "2026-01-07",
       opensAt: new Date("2026-01-07T00:00:00-05:00"),
       dueAt: new Date("2026-01-08T00:00:00-05:00"),
+      closesAt: new Date("2026-01-08T00:00:00-05:00"),
     };
 
     expect(pact.openAt(new Date("2026-01-07T00:00:00-05:00"))).toEqual(wednesday);
@@ -79,6 +81,7 @@ describe("the occurrence open at a time", () => {
       date: "2026-01-07",
       opensAt: new Date("2026-01-07T00:00:00-05:00"),
       dueAt: new Date("2026-01-08T00:00:00-05:00"),
+      closesAt: new Date("2026-01-08T00:00:00-05:00"),
     });
   });
 
@@ -105,6 +108,7 @@ describe("the occurrences due after a date, by a time", () => {
         date: "2026-01-07",
         opensAt: new Date("2026-01-07T00:00:00-05:00"),
         dueAt: new Date("2026-01-08T00:00:00-05:00"),
+        closesAt: new Date("2026-01-08T00:00:00-05:00"),
       },
     ]);
   });
@@ -138,6 +142,7 @@ describe("daylight saving time", () => {
     expect(occurrences(daily, zone).openAt(new Date(at))).toMatchObject({
       opensAt: new Date(opensAt),
       dueAt: new Date(dueAt),
+      closesAt: new Date(dueAt),
     });
   });
 
@@ -145,10 +150,30 @@ describe("daylight saving time", () => {
     const fallBackWeek = occurrences({ ...daily, firstOccurrence: "2026-10-30" }, NEW_YORK);
 
     expect(fallBackWeek.dueAfter(null, new Date("2026-11-03T00:00:00-05:00"))).toEqual([
-      { date: "2026-10-30", opensAt: new Date("2026-10-30T04:00:00Z"), dueAt: new Date("2026-10-31T04:00:00Z") },
-      { date: "2026-10-31", opensAt: new Date("2026-10-31T04:00:00Z"), dueAt: new Date("2026-11-01T04:00:00Z") },
-      { date: "2026-11-01", opensAt: new Date("2026-11-01T04:00:00Z"), dueAt: new Date("2026-11-02T05:00:00Z") },
-      { date: "2026-11-02", opensAt: new Date("2026-11-02T05:00:00Z"), dueAt: new Date("2026-11-03T05:00:00Z") },
+      {
+        date: "2026-10-30",
+        opensAt: new Date("2026-10-30T04:00:00Z"),
+        dueAt: new Date("2026-10-31T04:00:00Z"),
+        closesAt: new Date("2026-10-31T04:00:00Z"),
+      },
+      {
+        date: "2026-10-31",
+        opensAt: new Date("2026-10-31T04:00:00Z"),
+        dueAt: new Date("2026-11-01T04:00:00Z"),
+        closesAt: new Date("2026-11-01T04:00:00Z"),
+      },
+      {
+        date: "2026-11-01",
+        opensAt: new Date("2026-11-01T04:00:00Z"),
+        dueAt: new Date("2026-11-02T05:00:00Z"),
+        closesAt: new Date("2026-11-02T05:00:00Z"),
+      },
+      {
+        date: "2026-11-02",
+        opensAt: new Date("2026-11-02T05:00:00Z"),
+        dueAt: new Date("2026-11-03T05:00:00Z"),
+        closesAt: new Date("2026-11-03T05:00:00Z"),
+      },
     ]);
     // An hour before Sunday's midnight is still Sunday: 25 hours after it opened, not 24.
     expect(fallBackWeek.dueAfter("2026-10-31", new Date("2026-11-02T04:00:00Z"))).toEqual([]);
@@ -159,5 +184,34 @@ describe("daylight saving time", () => {
     const result = newOccurrenceTerms(daily.schedule, new Date("2026-09-05T22:30:00-04:00"), SANTIAGO);
 
     expect(result).toMatchObject({ ok: true, terms: { firstOccurrence: "2026-09-05" } });
+  });
+});
+
+describe("bedtime nights", () => {
+  const mondays = { schedule: { kind: "fixed-days" as const, days: ["mon" as const] }, firstOccurrence: "2026-01-05" };
+
+  test.each([
+    { inBedBy: "22:30", dueAt: "2026-01-05T22:30:00-05:00" },
+    { inBedBy: "00:00", dueAt: "2026-01-06T00:00:00-05:00" },
+    { inBedBy: "01:30", dueAt: "2026-01-06T01:30:00-05:00" },
+  ])("in bed by $inBedBy: Monday night is due at $dueAt and closes at 18:00 Tuesday", ({ inBedBy, dueAt }) => {
+    expect(occurrences({ ...mondays, inBedBy }, NEW_YORK).first).toEqual({
+      date: "2026-01-05",
+      opensAt: new Date("2026-01-05T00:00:00-05:00"),
+      dueAt: new Date(dueAt),
+      closesAt: new Date("2026-01-06T18:00:00-05:00"),
+    });
+  });
+
+  test("the first night is the first whose in-bed-by time is at least an hour after creation", () => {
+    const created = new Date("2026-01-05T23:10:00-05:00");
+    const schedule = { kind: "fixed-days" as const, days: ["mon" as const, "tue" as const] };
+    expect(newOccurrenceTerms(schedule, created, NEW_YORK, "00:00")).toMatchObject({
+      terms: { firstOccurrence: "2026-01-06", inBedBy: "00:00" },
+    });
+    // Exactly an hour is enough.
+    expect(newOccurrenceTerms(schedule, created, NEW_YORK, "00:10")).toMatchObject({
+      terms: { firstOccurrence: "2026-01-05" },
+    });
   });
 });

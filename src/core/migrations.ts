@@ -307,4 +307,34 @@ export const migrations: readonly string[] = [
     PRIMARY KEY (excuse_id, position)
   );
   `,
+  // 13: Oura connections and bedtime pacts
+  `
+  -- A link between an account and an outside service that supplies evidence.
+  -- A row exists only once the owner has connected the service.
+  CREATE TABLE connection (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    service TEXT NOT NULL CHECK (service IN ('oura')),
+    status TEXT NOT NULL CHECK (status IN ('connected', 'needs-reconnecting')),
+    connected_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, service)
+  );
+
+  -- Oura Ring pacts only: the in-bed-by time, "HH:MM". NULL for Camera.
+  ALTER TABLE pact ADD COLUMN in_bed_by TEXT;
+
+  -- A bedtime night judged from Oura: the bedtime_start of the long_sleep
+  -- that decided it, as Oura wrote it (with Oura's UTC offset). NULL otherwise.
+  ALTER TABLE occurrence ADD COLUMN bedtime_start TEXT;
+
+  -- Oura's OAuth tokens, encrypted. Only the Oura adapter (oura.ts) reads and
+  -- writes this table; the core never does. Refresh tokens are single-use, so
+  -- each refresh replaces both.
+  CREATE TABLE oura_token (
+    account_id TEXT PRIMARY KEY REFERENCES account (id),
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ];

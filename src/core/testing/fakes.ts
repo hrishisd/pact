@@ -122,6 +122,8 @@ export class InMemoryPhotoStore implements PhotoStore {
 export class FakeOuraSource implements OuraSource {
   readonly #periods = new Map<AccountId, OuraSleepPeriod[]>();
   readonly #disconnected = new Set<AccountId>();
+  /** Every call, in order: whose sleep periods, and for which days. */
+  readonly calls: ({ account: AccountId } & OuraDateRange)[] = [];
 
   addSleep(account: AccountId, ...periods: OuraSleepPeriod[]): void {
     this.#periods.set(account, [...(this.#periods.get(account) ?? []), ...periods]);
@@ -136,6 +138,7 @@ export class FakeOuraSource implements OuraSource {
   }
 
   async sleepPeriods(account: AccountId, range: OuraDateRange): Promise<OuraSleepResult> {
+    this.calls.push({ account, ...range });
     if (this.#disconnected.has(account)) return { ok: false, reason: "disconnected" };
     const periods = (this.#periods.get(account) ?? []).filter(
       (p) => p.day >= range.startDate && p.day <= range.endDate,

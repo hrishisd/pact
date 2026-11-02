@@ -290,7 +290,12 @@ describe("sign-in", () => {
     expect(s.authRows()).toEqual({ user: 1, account: 1, session: 1 });
 
     const me = await s.request(API_PATHS.me, { cookie });
-    expect(await me.json()).toEqual({ email: OPERATOR, name: "owner", timezone: null } satisfies MeResponse);
+    expect(await me.json()).toEqual({
+      email: OPERATOR,
+      name: "owner",
+      timezone: null,
+      connections: [],
+    } satisfies MeResponse);
 
     const set = await s.setTimezone(cookie, "America/Los_Angeles");
     expect(set.status).toBe(200);
@@ -471,7 +476,7 @@ describe("dev sign-in", () => {
     expect(response.headers.get("Location")).toBe("/");
     expect(s.authRows()).toEqual({ user: 1, account: 0, session: 1 });
     const me = await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(response) });
-    expect(me).toEqual({ status: 200, body: { email: OPERATOR, name: "owner", timezone: null } });
+    expect(me).toEqual({ status: 200, body: { email: OPERATOR, name: "owner", timezone: null, connections: [] } });
   });
 
   test("in production the route doesn't exist: it answers as any unknown API route, and signs no one in", async () => {
@@ -656,6 +661,7 @@ describe("pacts", () => {
         name: "Gym",
         description: "Me at the gym",
         evidenceKind: "camera",
+        inBedBy: null,
         schedule: pact.schedule,
         penaltyCents: 500,
         recipient: { id: pact.recipientId, name: "Sam" },

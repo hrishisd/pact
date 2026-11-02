@@ -356,7 +356,13 @@ export function createApp({
     if (!schedule) return apiError(c, 400, "invalid-request");
     const editing = request?.editing;
     if (editing !== undefined && typeof editing !== "string") return apiError(c, 400, "invalid-request");
-    const body: FirstOccurrenceResponse = json(core.as(c.get("accountId")).firstOccurrence(schedule, editing));
+    const inBedBy = request?.inBedBy;
+    if (inBedBy !== undefined && typeof inBedBy !== "string") return apiError(c, 400, "invalid-request");
+    const body: FirstOccurrenceResponse = json(
+      core
+        .as(c.get("accountId"))
+        .firstOccurrence(inBedBy === undefined ? { schedule } : { schedule, inBedBy }, editing),
+    );
     return c.json(body);
   });
 
@@ -632,10 +638,11 @@ function parseNewRecipient(value: unknown): AddRecipientRequest | null {
 
 function parseNewPact(value: unknown): CreatePactRequest | null {
   if (!isRecord(value)) return null;
-  const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
+  const { evidenceKind, name, description, inBedBy, penaltyCents, recipientId, reviewerIds } = value;
   const schedule = parseSchedule(value.schedule);
   if (
     (evidenceKind !== "camera" && evidenceKind !== "oura") ||
+    (inBedBy !== undefined && typeof inBedBy !== "string") ||
     typeof name !== "string" ||
     typeof description !== "string" ||
     !schedule ||
@@ -646,7 +653,8 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
   ) {
     return null;
   }
-  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds };
+  const pact: CreatePactRequest = { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds };
+  return inBedBy === undefined ? pact : { ...pact, inBedBy };
 }
 
 function parseDecision(value: unknown): DecideRequest | null {

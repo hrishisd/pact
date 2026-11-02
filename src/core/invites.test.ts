@@ -176,7 +176,12 @@ describe("signing in with an invite", () => {
 
     const reviewer = await s.signIn("reviewer", { inviteToken: invite.token });
 
-    expect(reviewer.profile()).toEqual({ email: "reviewer@example.test", name: "reviewer", timezone: null });
+    expect(reviewer.profile()).toEqual({
+      email: "reviewer@example.test",
+      name: "reviewer",
+      timezone: null,
+      connections: [],
+    });
     expect(reviewer.friends()).toEqual([]);
     expect(reviewer.invite(invite.token)).toMatchObject({ ok: true });
   });
