@@ -176,6 +176,8 @@ textarea.inp{min-height:76px;resize:vertical}
 .seg button{border:0;background:var(--surface);padding:7px 6px;font-size:12.5px;font-weight:600;color:var(--proto)}
 .seg button + button{border-left:1px solid var(--proto-line)}
 .seg button[aria-pressed=true]{background:var(--proto);color:#fff}
+.protobar{display:flex;flex-direction:column;gap:6px;padding:8px;border:1.5px dashed var(--proto-line);border-radius:12px}
+.protobar .tag{align-self:flex-start}
 .beh{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:12px;background:var(--proto-soft)}
 .beh b{font-size:13.5px}
 .beh p{font-size:12.5px;color:var(--muted)}
@@ -254,7 +256,7 @@ let S;
 function reset() {
   S = {
     now: at(2026, 11, 3, 17, 0), me: "jordan", variant: "A",
-    beh: { today: "stay", rejectAlert: "alert", refile: "yes", split: "one", withdraw: "yes" },
+    beh: { refile: "yes", split: "one" },
     occ: {}, excuses: [], log: [], nid: 1,
     tab: "today", stack: { today: [], pacts: [], review: [], ledgers: [] },
     sheet: null, form: null, toast: null, reviewAt: 0, rejecting: null, sideOpen: false,
@@ -284,7 +286,7 @@ function elig(p, k) {
   if (coverBy(id, "pending")) return { ok: false, note: "Already on an excuse waiting for approval" };
   if (coverBy(id, "approved")) return { ok: false, note: "Already excused" };
   if (!o || !o.outcome) {
-    if (k > today()) return { ok: true, note: "Not open yet · Excused when it ends, if approved" };
+    if (k > today()) return { ok: true, note: "Not open yet" };
     if (k === today()) return { ok: true, note: "Today · not judged yet" };
     return { ok: true, note: "Not judged yet" };
   }
@@ -324,7 +326,7 @@ function decide(x, approve, reason) {
   x.status = approve ? "approved" : "rejected";
   x.decidedBy = S.me; x.decidedAt = S.now; x.decisionReason = reason || null;
   if (approve) for (const id of x.keys) { const o = S.occ[id]; if (o && o.outcome === "missed") o.outcome = "excused"; }
-  else if (S.beh.rejectAlert === "alert") x.alertOpen = true;
+  else x.alertOpen = true;
   notify("jordan", approve ? `${PEOPLE[S.me]} approved your excuse.` : `${PEOPLE[S.me]} rejected your excuse: "${reason}"`);
 }
 /** Midnight judges each day that ended. A day an approved excuse covers is Excused; otherwise, with no photo, Missed. */
@@ -429,7 +431,7 @@ function coverList(rows, skipped, empty) {
 /** The day the sheet was opened from, as a small card: its state, what's held, and the time left. */
 function dayCard(p, k) {
   const e = elig(p, k), o = S.occ[okey(p, k)];
-  const what = o?.outcome === "missed" ? `${o.cause === "rejected" ? `${PEOPLE[o.by]} rejected the photo · ` : ""}<b class="pen">${money(p.pen)}</b> held while ${listNames(p.rev.map(r => PEOPLE[r]))} decides` : k === today() ? "Due at midnight. Excused if approved, so no photo needed." : "Excused when it ends, if approved.";
+  const what = o?.outcome === "missed" ? `${o.cause === "rejected" ? `${PEOPLE[o.by]} rejected the photo · ` : ""}<b class="pen">${money(p.pen)}</b> held while ${listNames(p.rev.map(r => PEOPLE[r]))} decides` : k === today() ? "Due at midnight" : "Not open yet";
   return `<div class="card"><div class="spread"><b>${fmtDate(k)}</b>${occChip(p, k)}</div><span class="meta">${what}</span>${e.left ? `<span class="meta due">${timeLeftLong(e.left)} left to file an excuse</span>` : ""}</div>`;
 }
 function sendFooter(d) {
@@ -446,7 +448,8 @@ function dateInputs(fromF, toF, minK) {
 }
 function excuseSheet() {
   const f = S.form, p = pact(f.pid), d = draft();
-  const head = `<div class="stack-sm"><h2>Excuse ${esc(p.name)}${f.date && S.variant === "A" ? `, ${fmtDate(f.date)}` : ""}</h2><span class="meta">${esc(p.name)} is ${scheduleText(p)} · ${money(p.pen)} per miss</span></div>`;
+  const switcher = `<div class="protobar"><span class="tag">PROTOTYPE</span><div class="seg">${[["A", "A · This day"], ["B", "B · Tap days"], ["C", "C · Range"]].map(([v, l]) => `<button data-act="set" data-arg="variant,${v}" aria-pressed="${S.variant === v}">${l}</button>`).join("")}</div></div>`;
+  const head = switcher + `<div class="stack-sm"><h2>Excuse ${esc(p.name)}${f.date && S.variant === "A" ? `, ${fmtDate(f.date)}` : ""}</h2><span class="meta">${esc(p.name)} is ${scheduleText(p)} · ${money(p.pen)} per miss</span></div>`;
   const earliest = pactDays(p).find(r => r.ok)?.k || today();
 
   if (S.variant === "A") {
@@ -527,11 +530,7 @@ function todayScreen() {
     if (!scheduled(p, t) || S.occ[okey(p, t)]?.outcome) continue;
     const id = okey(p, t);
     if (coverBy(id, "approved")) { out.push(pactCard(p, t, `<span class="chip c-excused">Excused</span>`, `<div class="meta">Nothing to do today. ${PEOPLE[coverBy(id, "approved").decidedBy]} approved your excuse.</div>`)); continue; }
-    if (coverBy(id, "pending")) {
-      if (S.beh.today === "move") continue;
-      out.push(pactCard(p, t, `<span class="chip c-todo">To do</span>`, `<div class="meta due">Due at midnight · ${timeLeftLong(startOf(addDays(t, 1)) - S.now)}</div><div class="meta">Excuse waiting for approval. A photo still counts if it's rejected.</div><button class="btn primary self-start" data-act="photo">${IC.camera}Take photo</button>`));
-      continue;
-    }
+    if (coverBy(id, "pending")) continue; // shows under Waiting for approval
     out.push(pactCard(p, t, `<span class="chip c-todo">To do</span>`, `<div class="meta due">Due at midnight · ${timeLeftLong(startOf(addDays(t, 1)) - S.now)}</div><div class="row2"><button class="btn primary" data-act="photo">${IC.camera}Take photo</button><button class="btn" data-act="file" data-arg="${p.id},${t}">File excuse</button></div>`));
   }
   // Missed: misses that can still be excused.
@@ -573,14 +572,14 @@ function coverRowsForReview(x) {
 }
 function excusePage(xid) {
   const x = S.excuses.find(e => e.id === xid);
-  const status = { pending: `<span class="chip c-wait">Waiting for approval</span>`, approved: `<span class="chip c-excused">Approved by ${PEOPLE[x.decidedBy]}</span>`, rejected: `<span class="chip c-missed">Rejected by ${PEOPLE[x.decidedBy]}</span>`, withdrawn: `<span class="chip c-soon">Withdrawn</span>` }[x.status];
+  const status = { pending: `<span class="chip c-wait">Waiting for approval</span>`, approved: `<span class="chip c-excused">Approved by ${PEOPLE[x.decidedBy]}</span>`, rejected: `<span class="chip c-missed">Rejected by ${PEOPLE[x.decidedBy]}</span>` }[x.status];
   return `<div class="row2"><span class="kind k-excuse">${IC.excuse}Excuse</span>${status}</div>
     <article class="card"><h3>${excuseDates(x)}</h3><span class="quote">“${esc(x.reason)}”</span>
       ${x.photos.map((src, i) => `<img class="big-photo" src="${src}" alt="Excuse photo ${i + 1}">`).join("")}
       ${x.status === "rejected" ? `<p class="small"><b>${PEOPLE[x.decidedBy]}:</b> “${esc(x.decisionReason)}”</p>` : ""}
       <span class="label">Covers</span><div class="list">${coverRowsForReview(x)}</div>
       <span class="meta">Sent to ${listNames(reviewersOf(x.keys).map(r => PEOPLE[r]))} · ${fmtWhen(x.filedAt)}</span></article>
-    ${x.status === "pending" && S.beh.withdraw === "yes" ? `<button class="btn danger self-start sm" data-act="withdrawAsk" data-arg="${x.id}">Withdraw excuse</button>` : ""}`;
+`;
 }
 
 function reviewScreen() {
@@ -636,7 +635,6 @@ function render() {
   const qn = S.excuses.filter(x => x.status === "pending" && reviewersOf(x.keys).includes(S.me)).length;
   let sheet = "";
   if (S.sheet === "excuse") sheet = excuseSheet();
-  if (S.sheet?.withdraw) sheet = `<h2>Withdraw this excuse?</h2><p>Any held penalties become owed again, and days not judged yet are judged as usual. You can file a new one while the days are still in their 48 hours.</p><div class="stack"><button class="btn danger block" data-act="withdraw" data-arg="${S.sheet.withdraw}">Withdraw excuse</button><button class="btn block" data-act="closeSheet">Keep it</button></div>`;
   app.innerHTML = `${header(title, !!page)}<main class="scroll gut">${body}</main>
     <nav class="tabbar">${TABS.map(([id, label, ic]) => `<button class="tab" data-act="tab" data-arg="${id}" ${S.tab === id ? `aria-current="${page ? "true" : "page"}"` : ""}><span class="tile">${ic}${label}${id === "review" && qn ? `<span class="badge">${qn}</span>` : ""}</span></button>`).join("")}</nav>
     ${sheet ? `<div class="overlay" data-act="overlay"><div class="sheet gut${S.sheetFresh ? " anim" : ""}" role="dialog"><div class="grab"></div>${sheet}</div></div>` : ""}
@@ -650,10 +648,7 @@ let toastTimer;
 function toast(t) { S.toast = t; clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = null; render(); }, 2600); }
 
 const BEHAVIOURS = [
-  ["today", "An excuse covers today's open day", "The ticket doesn't say what Today shows meanwhile.", [["stay", "Stays in To do"], ["move", "Moves to Waiting"]]],
-  ["rejectAlert", "When a reviewer rejects an excuse", "The spec lists no alert for this, only a notification.", [["alert", "Alert on Today"], ["push", "Push only"]]],
   ["refile", "Excuse the same day again after a rejection", "Inside the original 48 hours. The window never restarts.", [["yes", "Allowed"], ["no", "Final"]]],
-  ["withdraw", "Owner withdraws a waiting excuse", "Not in the spec. Held penalties become owed again.", [["yes", "Allowed"], ["no", "Not allowed"]]],
 ];
 function renderSide() {
   const side = document.getElementById("side");
@@ -662,7 +657,7 @@ function renderSide() {
   side.className = S.sideOpen ? "open" : "";
   side.innerHTML = `
     <div class="spread"><span class="tag">PROTOTYPE · TICKET 07</span><button class="btn sm" data-act="side" id="sideClose" style="${innerWidth > 840 ? "display:none" : ""}">Close</button></div>
-    <section><h2>Excuses · round 3</h2><p class="muted small">Every excuse now starts from one pact. It's Tue Nov 3, 5pm. Jordan missed Gym on Monday, and Alex rejected Monday's reading photo this morning. File an excuse from either, then switch to Sam or Alex to decide it.</p></section>
+    <section><h2>Excuses · round 4</h2><p class="muted small">Every excuse now starts from one pact. It's Tue Nov 3, 5pm. Jordan missed Gym on Monday, and Alex rejected Monday's reading photo this morning. File an excuse from either, then switch to Sam or Alex to decide it.</p></section>
     <section><div class="label">Filing form</div>${seg("variant", [["A", "A · This day"], ["B", "B · Tap days"], ["C", "C · Date range"]], S.variant)}
       <p class="small muted">${{ A: "From a card, the excuse is for that one day, shown as a card, with an option to run it on to later days. From the pact page you pick one recent day, or a range of days ahead.", B: "Shows the pact's real days only, a week back and four weeks ahead, as tiles. Tap any of them; the one you came from starts ticked. Days that can't be excused are greyed.", C: "A From and To date, starting on the day you came from (or the earliest day you can still excuse). The list under it shows the pact's days in that range, and says so when there are none." }[S.variant]}</p></section>
     <section><div class="label">Signed in as</div>${seg("me", [["jordan", "Jordan (owner)"], ["sam", "Sam"], ["alex", "Alex"]], S.me)}<p class="small muted">Sam reviews Gym and Piano. Alex reviews Read and Piano.</p></section>
@@ -672,6 +667,9 @@ function renderSide() {
     <section><div class="label">Settled in this prototype (say if you disagree)</div><ol class="qs">
       <li>An excuse covers one pact. A sick week across several pacts takes one excuse per pact (story 45 is dropped).</li><li>Every File excuse button opens the sheet for its own pact. There's no all-pacts form any more, and no Yesterday / Today / Tomorrow shortcuts.</li><li>Days that can't be excused (Kept, already on an excuse, past 48 hours) are listed as Skipped. The excuse goes through if at least one day is covered.</li>
       <li>Filing an excuse for a rejected photo clears its alert; the day moves to Waiting for approval.</li>
+      <li>When an excuse covers today, today's card leaves To do and the excuse shows under Waiting for approval.</li>
+      <li>A rejected excuse raises an alert on Today with Take the L.</li>
+      <li>No withdrawing an excuse in v0.</li>
       <li>A reason is required; photos are optional, up to 3, from the library.</li>
       <li>A day ahead that an approved excuse covers shows as Excused on the pact page right away, and on its day Today says there's nothing to do.</li>
       <li>Approval is all or nothing. No approving some of the days.</li>
@@ -718,8 +716,6 @@ document.addEventListener("click", e => {
       toast(`Excuse sent to ${sentTo}`);
       break;
     }
-    case "withdrawAsk": S.sheet = { withdraw: arg }; S.sheetFresh = true; break;
-    case "withdraw": { const x = S.excuses.find(x => x.id === arg); x.status = "withdrawn"; for (const r of reviewersOf(x.keys)) notify(r, "Jordan withdrew an excuse."); S.sheet = null; S.stack[S.tab].pop(); toast("Excuse withdrawn"); break; }
     case "rprev": S.reviewAt = Math.max(0, S.reviewAt - 1); break;
     case "rnext": S.reviewAt++; { const n = S.excuses.filter(x => x.status === "pending" && reviewersOf(x.keys).includes(S.me)).length; if (S.reviewAt >= n) S.reviewAt = 0; } break;
     case "approve": decide(S.excuses.find(x => x.id === arg), true); toast("Approved"); break;
