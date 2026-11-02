@@ -1,7 +1,8 @@
 // The Ledgers tab: one card per recipient, with what's owed and Record
 // payment, each opening its ledger's page: the penalties Missed occurrences
-// added (and who rejected the evidence when that's why), the payments, and
-// which penalties those have paid. Bills come later.
+// added (and who rejected the evidence when that's why, or that an excuse
+// waiting for approval holds them), the payments, and which penalties those
+// have paid. Bills come later.
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
@@ -119,7 +120,10 @@ export function LedgerPage({
   );
 }
 
-/** A penalty in the history: its pact, the day Missed, how much payments have paid, and who rejected the evidence. */
+/**
+ * A penalty in the history: its pact, the day Missed, how much payments have
+ * paid (or that an excuse holds it, so it isn't owed), and who rejected the evidence.
+ */
 function PenaltyRow({
   penalty,
   onOpenPact,
@@ -135,7 +139,9 @@ function PenaltyRow({
         </button>
         <small>
           Missed {formatDate(penalty.occurrenceDate)}
-          {penalty.paidCents === penalty.amountCents ? (
+          {penalty.held ? (
+            " · Held while an excuse waits for approval"
+          ) : penalty.paidCents === penalty.amountCents ? (
             <span className="paid"> · Paid</span>
           ) : (
             penalty.paidCents > 0 && ` · ${money(penalty.paidCents)} of ${money(penalty.amountCents)} paid`
@@ -147,7 +153,11 @@ function PenaltyRow({
           </small>
         )}
       </span>
-      <span className="pen num">+{money(penalty.amountCents)}</span>
+      {penalty.held ? (
+        <span className="num muted">{money(penalty.amountCents)}</span>
+      ) : (
+        <span className="pen num">+{money(penalty.amountCents)}</span>
+      )}
     </div>
   );
 }
