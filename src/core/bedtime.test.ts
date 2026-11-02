@@ -236,6 +236,24 @@ describe("judging a night", () => {
     expect(night(owner, pactId, TUE)).toBe("excused");
   });
 
+  test("an approved excuse beats a late bedtime Oura reports afterwards; an on-time one is still Kept", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
+    s.setClockTo("Tue 10:00");
+    const filed = await owner.fileExcuse(pactId, { from: TUE, to: "2026-01-07", reason: "Night shifts" }, []);
+    if (!filed.ok) throw new Error(filed.reason);
+    await reviewer.decide(filed.excuseId, { kind: "approve" });
+
+    s.ouraSource.addSleep(owner.id, sleep("Wed 02:00"), sleep("Wed 23:00"));
+    await s.advanceTo("Thu 07:00");
+
+    expect(night(owner, pactId, TUE)).toBe("excused");
+    expect(night(owner, pactId, "2026-01-07")).toBe("kept");
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+  });
+
   test("a Missed night on an excuse waiting for approval holds its penalty and sends no Missed push", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithOura(s);
@@ -263,8 +281,8 @@ describe("polling Oura", () => {
     await s.advanceTo("Mon 18:00");
     await s.advanceTo("Mon 18:01");
     expect(s.ouraSource.calls).toEqual([
-      { account: owner.id, startDate: MON, endDate: TUE },
-      { account: owner.id, startDate: MON, endDate: TUE },
+      { account: owner.id, startDate: MON, endDate: "2026-01-07" },
+      { account: owner.id, startDate: MON, endDate: "2026-01-07" },
     ]);
 
     s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));

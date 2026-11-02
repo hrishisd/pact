@@ -2432,9 +2432,10 @@ class Core implements PactCore {
     const ranges = new Map<AccountId, { startDate: LocalDate; endDate: LocalDate }>();
     for (const { pact, night } of this.#nightsWaiting(t)) {
       if (!this.#hasOuraConnection(pact.owner_account_id)) continue;
-      // Oura files a night's sleep under the day it ends, the day after.
+      // Oura files a night's sleep under the day it ends, usually the day after;
+      // a day more covers a sleep that ends late, whether Oura's end_date is inclusive or not.
       const range = ranges.get(pact.owner_account_id);
-      const endDate = addDays(night.date, 1);
+      const endDate = addDays(night.date, 2);
       ranges.set(pact.owner_account_id, {
         startDate: range && range.startDate < night.date ? range.startDate : night.date,
         endDate: range && range.endDate > endDate ? range.endDate : endDate,
@@ -2453,7 +2454,7 @@ class Core implements PactCore {
    * decided by the first long_sleep Oura reports starting in its window,
    * read on Oura's own clock: Kept if it starts before the in-bed-by time,
    * else Missed, as of `t`, when it arrived. With an approved excuse and no
-   * such period, it's Excused at its in-bed-by time. With neither by 18:00
+   * on-time period, it's Excused at its in-bed-by time. With neither by 18:00
    * the next day, it's Missed then. The first night still waiting stops the
    * cursor.
    */
@@ -2466,15 +2467,16 @@ class Core implements PactCore {
         .filter((p) => p.type === "long_sleep" && nightOf(p.bedtime_start) === night.date)
         .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start)))[0];
       const excuse = this.#excuseOn(pact.id, night.date);
-      if (period) {
-        const kept = wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
+      const kept = period !== undefined && wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
+      // As for a photo: an on-time bedtime beats an approved excuse, and an approved excuse beats a late one.
+      if (excuse === "approved" && !kept && night.dueAt.getTime() <= t.getTime()) {
+        this.#judge(pact.id, night.date, "excused", night.dueAt);
+      } else if (period) {
         this.#judge(pact.id, night.date, kept ? "kept" : "missed", t);
         this.#db
           .prepare(`UPDATE occurrence SET bedtime_start = ? WHERE pact_id = ? AND date = ?`)
           .run(period.bedtime_start, pact.id, night.date);
         if (!kept && excuse === null) this.#enqueueMissed(pact.id, night.date);
-      } else if (excuse === "approved" && night.dueAt.getTime() <= t.getTime()) {
-        this.#judge(pact.id, night.date, "excused", night.dueAt);
       } else if (night.closesAt.getTime() <= t.getTime()) {
         this.#judge(pact.id, night.date, "missed", night.closesAt);
         if (excuse === null) this.#enqueueMissed(pact.id, night.date);

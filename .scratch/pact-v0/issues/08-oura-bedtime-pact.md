@@ -44,15 +44,15 @@ Use the recorded response (scrubbed) as the seed for the fake Oura source.
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] In bed by 00:00; `long_sleep` starting 23:40 Tue → Tue night Kept as soon as the period arrives.
-- [ ] `long_sleep` starting 01:00 Wed → counts for Tue night → Missed, $ owed.
-- [ ] A nap at 19:00 Tue is ignored; the `long_sleep` at 23:30 decides the night.
-- [ ] First `long_sleep` at 01:10 (Missed), a second at 03:00 → stays Missed.
-- [ ] No period by 18:00 Wed → Tue night Missed at 18:00.
-- [ ] No calls to the Oura source once every night is judged; calls every tick while one isn't.
-- [ ] Two concurrent refreshes never both use the same refresh token.
-- [ ] The Oura source failing on its third call during advance to T leaves nothing half-applied; the next tick finishes the work.
-- [ ] Oura timestamps in a timezone different from the account's are judged in Oura's timezone.
+- [x] In bed by 00:00; `long_sleep` starting 23:40 Tue → Tue night Kept as soon as the period arrives.
+- [x] `long_sleep` starting 01:00 Wed → counts for Tue night → Missed, $ owed.
+- [x] A nap at 19:00 Tue is ignored; the `long_sleep` at 23:30 decides the night.
+- [x] First `long_sleep` at 01:10 (Missed), a second at 03:00 → stays Missed.
+- [x] No period by 18:00 Wed → Tue night Missed at 18:00.
+- [x] No calls to the Oura source once every night is judged; calls every tick while one isn't.
+- [x] Two concurrent refreshes never both use the same refresh token.
+- [x] The Oura source failing on its third call during advance to T leaves nothing half-applied; the next tick finishes the work.
+- [x] Oura timestamps in a timezone different from the account's are judged in Oura's timezone.
 
 ## Notes
 
@@ -61,3 +61,20 @@ Use the recorded response (scrubbed) as the seed for the fake Oura source.
 ## Out of this ticket
 
 The No Oura data card, check-now, the 3pm push and disconnection handling (09). Bedtime reminders (13).
+
+## Comments
+
+**Built on `claude/admiring-franklin-7zbf41` (2026-11-02).** Every acceptance criterion has a scenario in `src/core/bedtime.test.ts`, and the refresh one is also in `src/core/oura.test.ts`.
+
+**Not verified against a live response yet.** That needs a real ring connected to the deployed app. The fake is shaped from Oura's documented `sleep` fields. The adapter reads `bedtime_start` on its own wall clock, which is right if the timestamps carry Oura's offset (as `ports.ts` assumes). If they come back in UTC, nights will be judged on UTC time, which is wrong. Still open:
+- Does `bedtime_start` carry an offset?
+- Is sleep under about 3 hours ever reported as `long_sleep`?
+- Is `end_date` inclusive? Each request asks for the night's date through two days later, so either way works.
+- Are Oura's authorize and token URLs `cloud.ouraring.com/oauth/authorize` and `api.ouraring.com/oauth/token`? They're configurable in `src/core/oura.ts`.
+
+**Rate limit.** A third-party integration page (nango.dev) gives 5000 requests per 5 minutes. Oura's OpenAPI spec says there are per-token and per-app limits and that approved apps have none. Polling once a minute per account with a night waiting is far below either.
+
+**Decided while building:**
+- An approved excuse beats a late bedtime, and an on-time bedtime beats an excuse, as approved photos do for Camera pacts.
+- A failed Oura call fails the whole tick, so nothing is half-applied, and the next tick retries.
+- Connecting needs `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and `OURA_TOKEN_KEY` in production. Development without them connects at once and reads sleep from `oura-sleep.json` next to the database.
