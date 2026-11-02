@@ -5,6 +5,8 @@ Blocked by: 03
 
 Spec stories: 10, 12, 13, 14 (Oura), 35, 36 (on arrival and at 6pm), 39, 40, 93. Rules: Judging bedtime pacts, Oura polling, Oura calls stay out of the way.
 
+Settled with the prototype `.scratch/pact-v0/prototype/oura.prototype.html`: a Connect step before Oura's page (1B), the phone's own time field for the in-bed-by time (2A), a tonight-only Automatic card (3A), and a Missed card that says when Oura saw the owner get into bed.
+
 ## What to build
 
 The owner connects their Oura Ring and makes an in-bed-by pact that's judged automatically from Oura's sleep data.
@@ -22,8 +24,9 @@ Use the recorded response (scrubbed) as the seed for the fake Oura source.
 - A Connection exists only after the owner connects.
 
 ### Create a bedtime pact
-- The Oura Ring tile on Source now works. If the owner has no connection, it goes straight to connecting the ring; cancelling returns to the source picker.
-- **Goal:** in-bed-by time (e.g. 12:00am). The name fills in from it ("In bed by midnight") until the owner changes it.
+- The Oura Ring tile on Source now works. If the owner has no connection, the next step is **Connect your Oura Ring**: "Oura asks you to sign in and allow Pact." and "Pact checks when your main sleep each night starts. Your reviewers see only Kept or Missed and that time.", with Back and **Connect Oura**. Connect Oura opens Oura's page; allowing it returns to the form at Goal, and cancelling there returns to the source picker. With a connection, the tile goes straight to Goal.
+- **Goal:** "In bed by", the phone's own time field (e.g. 12:00am), with "Late is when your ring says you got into bed after this." Then Name, which fills in from the time ("In bed by midnight", "In bed by 11:30pm", "In bed by 1am") until the owner changes it.
+- **Schedule** says "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed." **Reviewers** says "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses." **Check** names the first night: "The first night is Mon Nov 2, in bed by 12:00am."
 - **Schedule:** Fixed days only. Reviewers and Reminders text adapts (no photos to review).
 - First occurrence: the first scheduled night whose in-bed-by time is at least 1 hour after creation.
 
@@ -35,8 +38,9 @@ Use the recorded response (scrubbed) as the seed for the fake Oura source.
 - Missed nights put the penalty on the ledger and can be excused, exactly as in tickets 03 and 07.
 
 ### Today
-- **Automatic** section (grey): bedtime pacts that run tonight, with tonight's deadline and the cost.
-- Last night shows as Missed while it can still be excused (ticket 07's card).
+- **Automatic** section (grey): bedtime pacts that run tonight, one card each with an "Automatic" chip, the cost, and "Tonight, in bed by 12:00am · 3h 12m". A night already Kept isn't shown.
+- Last night shows as Missed while it can still be excused (ticket 07's card), with why: "Tue Nov 3 night · in bed at 1:00am", or "· no sleep data by 6pm".
+- The pact page's terms add "In bed by 12:00am", and Profile lists the connection as "Oura Ring · Connected Mon Nov 2".
 
 ## Acceptance criteria (core scenarios)
 
