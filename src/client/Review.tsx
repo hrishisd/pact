@@ -196,7 +196,7 @@ function ExcuseItem({ item, onDecided }: { item: ExcuseReviewItem; onDecided: On
                   <b>{formatDate(date)}</b>
                   {note && <small>{note}</small>}
                 </span>
-                <DayChip status={status} now={now} />
+                <DayChip status={status} now={now} compact />
               </div>
             );
           })}

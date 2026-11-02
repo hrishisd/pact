@@ -13,8 +13,12 @@ type Status = Json<OccurrenceStatus>;
  * waiting for approval" while one is), "Excuse waiting for approval" for a
  * day not judged yet with one waiting, and otherwise Due today, Coming up or
  * Not judged yet. A day ahead with an approved excuse already reads Excused.
+ * `compact` drops the excuse wording, and the chip of a day not judged yet.
  */
-export function DayChip({ status, now }: { status: Status; now: number }) {
+export function DayChip({ status, now, compact = false }: { status: Status; now: number; compact?: boolean }) {
+  // Compact, as in a review item's rows, where the line under the day says what's held.
+  if (compact && status.kind === "missed") return <span className="chip c-missed">Missed</span>;
+  if (compact && status.kind === "not-judged") return null;
   switch (status.kind) {
     case "kept":
       return <span className="chip c-kept">Kept</span>;
@@ -64,9 +68,4 @@ export function excuseDatesText(days: Json<ExcuseDay>[]): string {
   const first = days[0]?.date;
   const last = days.at(-1)?.date;
   return first === undefined || last === undefined ? "" : datesText(first, last);
-}
-
-/** The penalties of `days` that are Missed: what an excuse holds while it waits. */
-export function heldCents(days: Json<ExcuseDay>[]): number {
-  return days.reduce((sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0), 0);
 }

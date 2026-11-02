@@ -18,6 +18,10 @@
   --due: #b0520a;
   --fresh: #1d64c2;
   --fresh-bg: #ddeafb;
+  --excused: #8f5c0c;
+  --excused-bg: #f4e8cf;
+  --slate: #4f5675;
+  --slate-bg: #e4e6ef;
   --scrim: rgba(14, 22, 18, 0.45);
   --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -419,6 +423,14 @@ p {
   background: var(--sunk);
   color: var(--muted);
 }
+.c-excused {
+  background: var(--excused-bg);
+  color: var(--excused);
+}
+.c-wait {
+  background: var(--slate-bg);
+  color: var(--slate);
+}
 
 /* A pact in its edit window: a blue chip next to its name, a blue left edge, a blue bar on its page. */
 .c-new {
@@ -701,6 +713,10 @@ p {
   flex-direction: column;
   gap: 18px;
 }
+/* A tall sheet scrolls; its parts keep their height instead of shrinking to fit. */
+.sheet > * {
+  flex-shrink: 0;
+}
 .grab {
   width: 42px;
   height: 5px;
@@ -973,6 +989,10 @@ textarea.inp {
   background: var(--missed-bg);
   color: var(--missed);
 }
+.k-excuse {
+  background: var(--slate-bg);
+  color: var(--slate);
+}
 
 /* A review item kind as a coloured badge with its icon, on Review. */
 .kind {
@@ -1025,3 +1045,87 @@ textarea.inp {
   border-color: var(--kept);
   color: var(--surface);
 }
+
+/* Excuses: one day per row, with its chip on the right (sheet, excuse page, review item). */
+.covrow {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+}
+.covrow .rt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.covrow .rt b {
+  white-space: nowrap;
+}
+.covrow .rt small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* Excuses: the File excuse sheet (slice A adds its rules here). */
+/* The schedule line sits just under the sheet's title. */
+.excuse-sub {
+  margin-top: -14px;
+}
+.excuse-day {
+  gap: 4px;
+}
+.covrow.skip b {
+  color: var(--muted);
+  font-weight: 600;
+}
+.opt input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.dates > * {
+  min-width: 0;
+}
+/* The browser's own date field (the iPhone's calendar picker), drawn like
+   .inp. iOS Safari collapses an empty one, so it keeps a height. */
+.inp[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-width: 0;
+  line-height: 1.45;
+  min-height: calc(1.45em + 22px);
+  text-align: left;
+}
+.inp[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+}
+/* The footer's line over Send to Sam. */
+.excuse-foot {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+/* A Waiting on row that doesn't open anything: no chevron. */
+.cards > .rowbtn.still::after {
+  content: none;
+}
+
+/* Excuses: the excuse page and ledger held rows (slice D adds its rules here). */
+.excuse-reason {
+  font-size: 16px;
+}
+
+/* Excuses: the Excuse review item (slice C adds its rules here). */
+.quote {
+  font-size: 16px;
+}
+
+/* Excuses: Today's excuse rows and alerts (slice B adds its rules here). */

@@ -1,11 +1,13 @@
 // The Today tab: alerts, then what's open now, then recent misses, then
 // what's coming up, then what's waiting for approval. Evidence is submitted
-// inline on a To do card.
+// inline on a To do card; an excuse is filed in the File excuse sheet, opened
+// from a To do or Missed card or an alert.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
+  type AcceptExcuseRejectionResult,
   type AcceptMissRefusal,
   type SubmitEvidenceRefusal,
   type TodayAlert,
@@ -13,24 +15,39 @@ import {
   type TodayWaitingItem,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
-import { formatDate, minutesLeft, money, timeLeft } from "./format.ts";
-import { CameraIcon, DollarIcon } from "./icons.tsx";
+import { formatDate, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
+import { datesText } from "./excuse-days.tsx";
+import { ExcuseSheet } from "./ExcuseSheet.tsx";
+import { CameraIcon, DollarIcon, ExcuseIcon } from "./icons.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
+
+/** What the File excuse sheet is open on: a pact, and the day it was opened from (none for the pact-page form). */
+interface ExcuseTarget {
+  pactId: string;
+  pactName: string;
+  day?: string;
+}
+
+/** Opens the File excuse sheet. */
+type OnFileExcuse = (target: ExcuseTarget) => void;
 
 export function Today({
   onOpenPact,
   onOpenLedger,
+  onOpenExcuse,
   onCreate,
   onInvite,
 }: {
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
+  onOpenExcuse: (excuseId: string) => void;
   onCreate: () => void;
   onInvite: () => void;
 }) {
   const { data: today, failed, reload } = useLoad(api.today);
   const now = useNow();
+  const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
 
   if (failed)
     return (
@@ -65,14 +82,40 @@ export function Today({
         <Alert
           key={alert.kind === "evidence-rejected" ? `${alert.pactId}:${alert.occurrenceDate}` : alert.excuseId}
           alert={alert}
+          now={now}
+          onFileExcuse={setExcusing}
           onChanged={reload}
         />
       ))}
       {today.sections.map((section) => (
-        <Section key={section.kind} section={section} now={now} onOpenPact={onOpenPact} onChanged={reload} />
+        <Section
+          key={section.kind}
+          section={section}
+          now={now}
+          onOpenPact={onOpenPact}
+          onFileExcuse={setExcusing}
+          onChanged={reload}
+        />
       ))}
       {today.waiting.length > 0 && (
-        <Waiting items={today.waiting} onOpenPact={onOpenPact} onOpenLedger={onOpenLedger} />
+        <Waiting
+          items={today.waiting}
+          onOpenPact={onOpenPact}
+          onOpenLedger={onOpenLedger}
+          onOpenExcuse={onOpenExcuse}
+        />
+      )}
+      {excusing && (
+        <ExcuseSheet
+          pactId={excusing.pactId}
+          pactName={excusing.pactName}
+          {...(excusing.day !== undefined && { day: excusing.day })}
+          onClose={() => setExcusing(null)}
+          onFiled={() => {
+            setExcusing(null);
+            reload();
+          }}
+        />
       )}
     </>
   );
@@ -82,12 +125,14 @@ function Section({
   section,
   now,
   onOpenPact,
+  onFileExcuse,
   onChanged,
 }: {
   section: Json<TodaySection>;
   now: number;
   onOpenPact: (id: string, name: string) => void;
-  /** After evidence is submitted: Today reloads. */
+  onFileExcuse: OnFileExcuse;
+  /** After evidence is submitted or a miss is taken: Today reloads. */
   onChanged: () => void;
 }) {
   switch (section.kind) {
@@ -103,7 +148,11 @@ function Section({
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
           <div className="meta due">Due at midnight · {timeLeft(Date.parse(card.dueAt) - now)}</div>
-          <EvidenceForm pactId={card.pactId} onSubmitted={onChanged} />
+          <EvidenceForm
+            pactId={card.pactId}
+            onSubmitted={onChanged}
+            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+          />
         </PactCard>
       ));
     case "missed":
@@ -116,6 +165,14 @@ function Section({
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
           <div className="meta">{formatDate(card.occurrenceDate)}</div>
+          <MissedActions
+            pactId={card.pactId}
+            occurrenceDate={card.occurrenceDate}
+            excusableUntil={card.excusableUntil}
+            now={now}
+            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+            onTaken={onChanged}
+          />
         </PactCard>
       ));
     case "coming-up":
@@ -139,43 +196,121 @@ function Section({
 }
 
 /** Something that needs the owner, first on Today. */
-function Alert({ alert, onChanged }: { alert: Json<TodayAlert>; onChanged: () => void }) {
+function Alert({
+  alert,
+  now,
+  onFileExcuse,
+  onChanged,
+}: {
+  alert: Json<TodayAlert>;
+  now: number;
+  onFileExcuse: OnFileExcuse;
+  onChanged: () => void;
+}) {
   switch (alert.kind) {
     case "evidence-rejected":
-      return <RejectedEvidenceAlert alert={alert} onTaken={onChanged} />;
+      return <RejectedEvidenceAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "excuse-rejected":
-      return null;
+      return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
   }
 }
 
 /**
- * Rejected evidence: the day is already Missed, with its penalty. Take the L
- * clears the alert and changes nothing else, so it sends at once.
+ * Take the L: it only takes a card or alert off Today and changes nothing
+ * else, so it sends at once, with no confirmation.
  */
-function RejectedEvidenceAlert({
-  alert,
-  onTaken,
-}: {
-  alert: Extract<Json<TodayAlert>, { kind: "evidence-rejected" }>;
-  /** After Take the L: Today reloads. */
-  onTaken: () => void;
-}) {
+function useTakeTheL<Refusal extends string>(
+  send: () => Promise<{ ok: true } | { ok: false; reason: Refusal }>,
+  refusalText: Record<Refusal, string>,
+  onTaken: () => void,
+) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const take = async () => {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.acceptMiss(alert.pactId, alert.occurrenceDate);
+      const result = await send();
       if (result.ok) return onTaken();
-      setError(ACCEPT_MISS_REFUSAL_TEXT[result.reason]);
+      setError(refusalText[result.reason]);
     } catch (failure) {
       setError(failureText(failure, "Couldn't send. Check your connection and try again."));
     } finally {
       setBusy(false);
     }
   };
+  return { busy, error, take: () => void take() };
+}
+
+/** "File excuse · 31h 12m left" until `excusableUntil`; nothing once it's passed. */
+function fileExcuseLabel(text: string, excusableUntil: string, now: number): string | null {
+  const ms = Date.parse(excusableUntil) - now;
+  return ms > 0 ? `${text} · ${hoursLeft(ms)} left` : null;
+}
+
+/** A Missed card's File excuse and Take the L. Clicks stay here rather than opening the pact. */
+function MissedActions({
+  pactId,
+  occurrenceDate,
+  excusableUntil,
+  now,
+  onFileExcuse,
+  onTaken,
+}: {
+  pactId: string;
+  occurrenceDate: string;
+  excusableUntil: string;
+  now: number;
+  onFileExcuse: () => void;
+  /** After Take the L: Today reloads. */
+  onTaken: () => void;
+}) {
+  const { busy, error, take } = useTakeTheL(
+    () => api.acceptMiss(pactId, occurrenceDate),
+    ACCEPT_MISS_REFUSAL_TEXT,
+    onTaken,
+  );
+  const fileLabel = fileExcuseLabel("File excuse", excusableUntil, now);
+  return (
+    <div className="stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <div className="row2">
+        {fileLabel && (
+          <button className="btn" onClick={onFileExcuse}>
+            {fileLabel}
+          </button>
+        )}
+        <button className="btn" disabled={busy} onClick={take}>
+          {busy ? "Sending…" : "Take the L"}
+        </button>
+      </div>
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Rejected evidence: the day is already Missed, with its penalty. File
+ * excuse while the 48 hours from the rejection last, or Take the L, which
+ * clears the alert.
+ */
+function RejectedEvidenceAlert({
+  alert,
+  now,
+  onFileExcuse,
+  onTaken,
+}: {
+  alert: Extract<Json<TodayAlert>, { kind: "evidence-rejected" }>;
+  now: number;
+  onFileExcuse: OnFileExcuse;
+  /** After Take the L: Today reloads. */
+  onTaken: () => void;
+}) {
+  const { busy, error, take } = useTakeTheL(
+    () => api.acceptMiss(alert.pactId, alert.occurrenceDate),
+    ACCEPT_MISS_REFUSAL_TEXT,
+    onTaken,
+  );
+  const fileLabel = fileExcuseLabel("File excuse", alert.excusableUntil, now);
 
   return (
     <div className="alert bad" role="status">
@@ -189,9 +324,19 @@ function RejectedEvidenceAlert({
           {money(alert.penaltyCents)} to {alert.recipientName}
         </b>
       </span>
-      <button className="btn sm danger self-start" disabled={busy} onClick={() => void take()}>
-        {busy ? "Sending…" : "Take the L"}
-      </button>
+      <div className="row2">
+        {fileLabel && (
+          <button
+            className="btn sm"
+            onClick={() => onFileExcuse({ pactId: alert.pactId, pactName: alert.name, day: alert.occurrenceDate })}
+          >
+            {fileLabel}
+          </button>
+        )}
+        <button className="btn sm danger" disabled={busy} onClick={take}>
+          {busy ? "Sending…" : "Take the L"}
+        </button>
+      </div>
       {error && <p className="error small">{error}</p>}
     </div>
   );
@@ -203,24 +348,115 @@ const ACCEPT_MISS_REFUSAL_TEXT: Record<AcceptMissRefusal, string> = {
 };
 
 /**
+ * A rejected excuse: its held penalties are owed again, and its days not
+ * judged yet are judged as usual. File another excuse while a day is still
+ * in its window, or Take the L, which clears the alert.
+ */
+function RejectedExcuseAlert({
+  alert,
+  now,
+  onFileExcuse,
+  onTaken,
+}: {
+  alert: Extract<Json<TodayAlert>, { kind: "excuse-rejected" }>;
+  now: number;
+  onFileExcuse: OnFileExcuse;
+  /** After Take the L: Today reloads. */
+  onTaken: () => void;
+}) {
+  const { busy, error, take } = useTakeTheL(
+    () => api.acceptExcuseRejection(alert.excuseId),
+    ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT,
+    onTaken,
+  );
+  const owedAgain = alert.owedAgainCents > 0;
+  // One day opens the sheet on it; several open the pact-page form, which
+  // offers only the days that can still be excused.
+  const refile = () =>
+    onFileExcuse({
+      pactId: alert.pactId,
+      pactName: alert.name,
+      ...(alert.firstDate === alert.lastDate && { day: alert.firstDate }),
+    });
+  const refileLabel =
+    alert.refile === null
+      ? null
+      : alert.refile.closesAt === null
+        ? "File another excuse"
+        : fileExcuseLabel("File another excuse", alert.refile.closesAt, now);
+
+  return (
+    <div className="alert bad" role="status">
+      <b>
+        {alert.reviewerName} rejected your excuse for {alert.name}
+      </b>
+      <span>“{alert.reason}”</span>
+      <span className="small">
+        {datesText(alert.firstDate, alert.lastDate)}
+        {owedAgain && (
+          <>
+            {" · "}
+            <b className="pen">{money(alert.owedAgainCents)} is owed again</b>
+          </>
+        )}
+        {alert.hasDaysNotJudged &&
+          (owedAgain ? ", and days not judged yet are judged as usual" : " · days not judged yet are judged as usual")}
+      </span>
+      <div className="row2">
+        {refileLabel && (
+          <button className="btn sm" onClick={refile}>
+            {refileLabel}
+          </button>
+        )}
+        <button className="btn sm danger" disabled={busy} onClick={take}>
+          {busy ? "Sending…" : "Take the L"}
+        </button>
+      </div>
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
+const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<
+  Extract<AcceptExcuseRejectionResult, { ok: false }>["reason"],
+  string
+> = {
+  "excuse-not-found": "This excuse wasn't found.",
+  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
+};
+
+/**
  * Waiting for approval, last on Today: each item with its kind's icon in a
- * coloured square. Evidence opens its pact; a payment, its recipient's ledger.
+ * coloured square. Evidence opens its pact; an excuse, its excuse page; a
+ * payment, its recipient's ledger.
  */
 function Waiting({
   items,
   onOpenPact,
   onOpenLedger,
+  onOpenExcuse,
 }: {
   items: Json<TodayWaitingItem>[];
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
+  onOpenExcuse: (excuseId: string) => void;
 }) {
   return (
     <section className="stack">
       <div className="label">Waiting for approval</div>
       <div className="cards">
         {items.map((item) =>
-          item.kind === "excuse" ? null : item.kind === "evidence" ? (
+          item.kind === "excuse" ? (
+            <button key={item.id} className="rowbtn" onClick={() => onOpenExcuse(item.id)}>
+              <span className="kico k-excuse">
+                <ExcuseIcon />
+              </span>
+              <span className="rt">
+                <b>{item.name}</b>
+                <small>Excuse · {datesText(item.firstDate, item.lastDate)}</small>
+              </span>
+            </button>
+          ) : item.kind === "evidence" ? (
             <button key={item.id} className="rowbtn" onClick={() => onOpenPact(item.pactId, item.name)}>
               <span className="kico k-evidence">
                 <CameraIcon />
@@ -251,10 +487,19 @@ function Waiting({
 
 /**
  * Evidence on a To do card: live camera capture only (no photo library), one
- * photo at a time, each shrunk before it's shown. Clicks stay inside the
- * form rather than opening the pact.
+ * photo at a time, each shrunk before it's shown. Beside Take photo, File
+ * excuse for today, until a photo is taken. Clicks stay inside the form
+ * rather than opening the pact.
  */
-function EvidenceForm({ pactId, onSubmitted }: { pactId: string; onSubmitted: () => void }) {
+function EvidenceForm({
+  pactId,
+  onSubmitted,
+  onFileExcuse,
+}: {
+  pactId: string;
+  onSubmitted: () => void;
+  onFileExcuse: () => void;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<ShrunkPhoto[]>([]);
   const [busy, setBusy] = useState(false);
@@ -315,10 +560,15 @@ function EvidenceForm({ pactId, onSubmitted }: { pactId: string; onSubmitted: ()
         }}
       />
       {photos.length === 0 ? (
-        <button className="btn primary self-start" onClick={takePhoto}>
-          <CameraIcon />
-          Take photo
-        </button>
+        <div className="row2">
+          <button className="btn primary" onClick={takePhoto}>
+            <CameraIcon />
+            Take photo
+          </button>
+          <button className="btn" onClick={onFileExcuse}>
+            File excuse
+          </button>
+        </div>
       ) : (
         <>
           <div className="photos">

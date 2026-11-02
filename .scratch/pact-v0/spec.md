@@ -336,6 +336,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - The ledger history marks each penalty payments have covered: "Paid", or "$2 of $5 paid" for part of it. The prototype worked this out but didn't show it.
   - A rejected payment shows in the ledger history with who rejected it and why. The prototype had no copy for it.
   - Excuses cover one pact and open from a day or a pact (see File excuse). The prototype's excuse sheet picked several pacts and a date range. A held penalty in the ledger history reads "Held while an excuse waits for approval", and its amount is grey with no "+".
+  - The excuse page and the Excuse review item are titled with the pact's name, with the dates beside it; the prototype titled them with the dates. A review item's days use the short Missed chip, with "$5 held" under the date.
 
 ## Testing Decisions
 

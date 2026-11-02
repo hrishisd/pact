@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { CreatePact, EditPact } from "./CreatePact.tsx";
+import { ExcusePage } from "./ExcusePage.tsx";
 import { initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
 import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
@@ -236,6 +237,7 @@ function Shell({
 
   const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
   const openLedger = (recipientId: string, name: string) => nav.push({ kind: "ledger", recipientId, name });
+  const openExcuse = (id: string) => nav.push({ kind: "excuse", id });
   const create = () => nav.push({ kind: "create" });
   const openNotifications = () => {
     setProfileOpen(false);
@@ -248,6 +250,7 @@ function Shell({
   else if (page?.kind === "create") title = "New pact";
   else if (page?.kind === "edit-pact") title = "Edit pact";
   else if (page?.kind === "ledger") title = ledgerNames[page.recipientId] ?? page.name ?? "";
+  else if (page?.kind === "excuse") title = "Excuse";
   else if (page?.kind === "notifications") title = "Notifications";
   else {
     title = TABS.find((t) => t.id === tab)!.label;
@@ -285,6 +288,7 @@ function Shell({
             onLoaded={pactLoaded}
             onEdit={() => nav.push({ kind: "edit-pact", id: page.id })}
             onDeleted={nav.back}
+            onOpenExcuse={openExcuse}
           />
         )}
         {page?.kind === "edit-pact" && (
@@ -303,6 +307,7 @@ function Shell({
           <Today
             onOpenPact={openPact}
             onOpenLedger={openLedger}
+            onOpenExcuse={openExcuse}
             onCreate={create}
             onInvite={() => setProfileOpen(true)}
           />
@@ -317,6 +322,9 @@ function Shell({
             onLoaded={ledgerLoaded}
             onOpenPact={openPact}
           />
+        )}
+        {page?.kind === "excuse" && (
+          <ExcusePage key={page.id} excuseId={page.id} timezone={profile.timezone} onOpenPact={openPact} />
         )}
         {!page && tab === "ledgers" && <Ledgers onOpenLedger={openLedger} />}
       </main>

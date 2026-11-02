@@ -41,6 +41,12 @@ export function timeLeft(ms: number): string {
   return `${hours}h ${minutes % 60}m`;
 }
 
+/** Time left to file an excuse, in whole hours as the spec writes it: "31h", or "45m" under an hour. Never negative. */
+export function hoursLeft(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
+}
+
 /** The whole minutes left until `closesAt`, rounded up: "7 min" holds until 6 have passed. Null once it's reached or if none. */
 export function minutesLeft(closesAt: string | null, now: number): number | null {
   if (closesAt === null) return null;

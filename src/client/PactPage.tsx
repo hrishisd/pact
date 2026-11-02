@@ -1,11 +1,15 @@
-// A pact's page, pushed on the current tab: its terms, and Edit and Delete in
-// its edit window. History and other actions come later.
+// A pact's page, pushed on the current tab: its terms, Edit and Delete in
+// its edit window, File excuse after it, and what's waiting on a reviewer.
+// History and other actions come later.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type { PactTerms } from "../shared/types.ts";
+import type { PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { minutesLeft, money, scheduleText } from "./format.ts";
+import { datesText } from "./excuse-days.tsx";
+import { ExcuseSheet } from "./ExcuseSheet.tsx";
+import { formatDate, minutesLeft, money, scheduleText } from "./format.ts";
+import { CameraIcon, ExcuseIcon } from "./icons.tsx";
 import { Empty, Sheet, useNow } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
@@ -22,15 +26,17 @@ export function PactPage({
   onLoaded,
   onEdit,
   onDeleted,
+  onOpenExcuse,
 }: {
   pactId: string;
   onLoaded: (pactId: string, name: string) => void;
   onEdit: () => void;
   onDeleted: () => void;
+  onOpenExcuse: (excuseId: string) => void;
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api.pact(pactId).then(
       (result) => {
         if (!result.ok) return setState({ kind: "not-found" });
@@ -40,6 +46,7 @@ export function PactPage({
       (error: unknown) => setState({ kind: "failed", error }),
     );
   }, [pactId, onLoaded]);
+  useEffect(load, [load]);
 
   switch (state.kind) {
     case "loading":
@@ -57,6 +64,9 @@ export function PactPage({
       return (
         <>
           <EditWindowBar pact={state.pact} onEdit={onEdit} onDeleted={onDeleted} />
+          <StageLine pact={state.pact} />
+          <Actions pact={state.pact} onFiled={load} />
+          {state.pact.waiting.length > 0 && <WaitingOn items={state.pact.waiting} onOpenExcuse={onOpenExcuse} />}
           <Terms pact={state.pact} />
         </>
       );
@@ -117,19 +127,91 @@ function EditWindowBar({ pact, onEdit, onDeleted }: { pact: Pact; onEdit: () => 
   );
 }
 
-function Terms({ pact }: { pact: Pact }) {
+function StageLine({ pact }: { pact: Pact }) {
   const chip = STAGE_CHIPS[pact.stage];
   return (
-    <>
-      <div className="row2">
-        <span className={`chip ${chip.className}`}>{chip.label}</span>
-        <span className="muted">{pact.description}</span>
+    <div className="row2">
+      <span className={`chip ${chip.className}`}>{chip.label}</span>
+      <span className="muted">{pact.description}</span>
+    </div>
+  );
+}
+
+/** File excuse, once the edit window has closed. The sheet asks which day. */
+function Actions({ pact, onFiled }: { pact: Pact; onFiled: () => void }) {
+  const now = useNow();
+  const [filing, setFiling] = useState(false);
+  const close = useCallback(() => setFiling(false), []);
+  if (minutesLeft(pact.editWindowClosesAt, now) !== null) return null;
+  return (
+    <div className="row2">
+      <button className="btn" onClick={() => setFiling(true)}>
+        File excuse
+      </button>
+      {filing && (
+        <ExcuseSheet
+          pactId={pact.id}
+          pactName={pact.name}
+          onClose={close}
+          onFiled={() => {
+            setFiling(false);
+            onFiled();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The pact's evidence and excuses waiting for a reviewer, like Today's
+ * Waiting for approval rows. An excuse opens its page; evidence has no page.
+ */
+function WaitingOn({
+  items,
+  onOpenExcuse,
+}: {
+  items: Json<PactWaitingItem>[];
+  onOpenExcuse: (excuseId: string) => void;
+}) {
+  return (
+    <section className="stack">
+      <div className="label">Waiting on</div>
+      <div className="cards">
+        {items.map((item) =>
+          item.kind === "excuse" ? (
+            <button key={item.id} className="rowbtn" onClick={() => onOpenExcuse(item.id)}>
+              <span className="kico k-excuse">
+                <ExcuseIcon />
+              </span>
+              <span className="rt">
+                <b>{item.name}</b>
+                <small>Excuse · {datesText(item.firstDate, item.lastDate)}</small>
+              </span>
+            </button>
+          ) : (
+            <div key={item.id} className="rowbtn still">
+              <span className="kico k-evidence">
+                <CameraIcon />
+              </span>
+              <span className="rt">
+                <b>{item.name}</b>
+                <small>Evidence · {formatDate(item.occurrenceDate)}</small>
+              </span>
+            </div>
+          ),
+        )}
       </div>
-      <section className="card">
-        <h3>Terms</h3>
-        <TermsList terms={pact} />
-      </section>
-    </>
+    </section>
+  );
+}
+
+function Terms({ pact }: { pact: Pact }) {
+  return (
+    <section className="card">
+      <h3>Terms</h3>
+      <TermsList terms={pact} />
+    </section>
   );
 }
 

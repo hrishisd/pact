@@ -1,6 +1,6 @@
 # 07 Excuses, penalty holds and Take the L on Missed cards
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec stories: 42–44, 46–49, 51, 89 (excuses; 45 is dropped). Rules: Excuses. Screens: Today, File excuse, Excuse review item, Pact page, Occurrence labels, Changes since the prototype.
@@ -39,21 +39,21 @@ The owner asks a reviewer to treat one or more occurrences of **one pact** as Ex
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Spec example: Mon/Wed/Fri $5 gym pact → Monday Missed, $5 owed → excuse within 48h → held, owed $0 → reviewer approves → Excused, owed $0, no penalty in history.
-- [ ] Same, but rejected → owed $5 again, and a rejected-excuse alert is raised.
-- [ ] After that rejection, a new excuse for Monday inside the original 48 hours is accepted; one after the 48 hours is refused.
-- [ ] Excuse filed 49 hours after a miss is refused; one filed 47 hours after is accepted.
-- [ ] Excuse for next Fri–Sun filed Wednesday, approved Thursday → those days are Excused when they end, with no penalty.
-- [ ] Excuse covering today, still waiting at midnight → today is Missed with its penalty held; approval then makes it Excused.
-- [ ] A date range including a Kept day and a day Missed 3 days ago covers only the excusable days, and reports the others as skipped with their reasons; a range with no excusable day is refused.
-- [ ] A day already on a waiting excuse can't go on a second one.
-- [ ] Rejected evidence on Monday → excuse filed within 48h of the rejection is accepted, and resolves the rejected-evidence alert.
-- [ ] Take the L removes the Missed card from Today, leaves owed unchanged, and an excuse is still accepted afterwards inside the window.
-- [ ] The rejected-evidence alert shows "File excuse" with the time left counted from the rejection; after Take the L on the alert, an excuse is still accepted within 48 hours of the rejection.
-- [ ] A held penalty never goes on a Wednesday bill; once released by a rejection it goes on the next bill after its 48 hours.
-- [ ] Either reviewer of a two-reviewer pact can decide; the second decision is refused.
-- [ ] A pending excuse survives a restart with its holds intact.
-- [ ] Screens checked in the browser against the prototype (Missed card → sheet → Waiting → reviewer approve and reject → alert), with screenshots.
+- [x] Spec example: Mon/Wed/Fri $5 gym pact → Monday Missed, $5 owed → excuse within 48h → held, owed $0 → reviewer approves → Excused, owed $0, no penalty in history.
+- [x] Same, but rejected → owed $5 again, and a rejected-excuse alert is raised.
+- [x] After that rejection, a new excuse for Monday inside the original 48 hours is accepted; one after the 48 hours is refused.
+- [x] Excuse filed 49 hours after a miss is refused; one filed 47 hours after is accepted.
+- [x] Excuse for next Fri–Sun filed Wednesday, approved Thursday → those days are Excused when they end, with no penalty.
+- [x] Excuse covering today, still waiting at midnight → today is Missed with its penalty held; approval then makes it Excused.
+- [x] A date range including a Kept day and a day Missed 3 days ago covers only the excusable days, and reports the others as skipped with their reasons; a range with no excusable day is refused.
+- [x] A day already on a waiting excuse can't go on a second one.
+- [x] Rejected evidence on Monday → excuse filed within 48h of the rejection is accepted, and resolves the rejected-evidence alert.
+- [x] Take the L removes the Missed card from Today, leaves owed unchanged, and an excuse is still accepted afterwards inside the window.
+- [x] The rejected-evidence alert shows "File excuse" with the time left counted from the rejection; after Take the L on the alert, an excuse is still accepted within 48 hours of the rejection.
+- [x] A held penalty never goes on a Wednesday bill; once released by a rejection it goes on the next bill after its 48 hours. (Bills aren't built yet. What's tested now: a held penalty isn't owed or payable, and a rejection makes it both. The bill ticket must leave held penalties off bills.)
+- [x] Either reviewer of a two-reviewer pact can decide; the second decision is refused.
+- [x] A pending excuse survives a restart with its holds intact.
+- [x] Screens checked in the browser against the prototype (Missed card → sheet → Waiting → reviewer approve and reject → alert), with screenshots.
 
 ## Out of this ticket
 
@@ -70,3 +70,12 @@ Weekly count whole-week excuses (14). Oura nights (08/09) reuse this as-is. With
 **Prototype, round 4.** Decided by the human: when an excuse covers today, today's card leaves To do and the excuse shows under Waiting for approval; a rejected excuse raises an alert on Today with Take the L; no withdrawing an excuse in v0. "Excused when it ends, if approved" is dropped from the owner's copy. The sheet gets a prototype-only A/B/C switch so the filing forms can be compared on a phone. Still open: which filing form, and whether a day can be excused again after its excuse is rejected.
 
 **Settled (round 4 follow-up).** Option A chosen. A day can be excused again after its excuse is rejected, inside its original 48 hours. iPhone dates use the native picker from `<input type="date">`. The spec and this ticket are updated with every decision; ready to build.
+
+**Built.** Core (`fileExcuse`, `excusePreview`, `excuseOptions`, `excuse`, `acceptExcuseRejection`, excuses in `decide`, judging and Today), with scenarios in `src/core/excuses.test.ts` and routes in `src/server/app.ts`. Screens: `ExcuseSheet.tsx`, `ExcusePage.tsx`, and excuse parts of Today, the pact page, Review and the ledger. Clicked through locally: Missed card, sheet, Waiting, the reviewer approves; then a reject, the alert, File another excuse; the pact page's Which day? and Days ahead. Where it differs from the prototype, decided while building:
+- The excuse page and the Excuse review item are titled with the pact's name, with the dates beside or under it. The prototype titled them with the dates only.
+- The review item's day rows use the short chip (Missed) with "$5 held" under the date.
+- Times left read "31h left" ("45m left" under an hour), as in the spec.
+- Filing is refused in a pact's edit window ("edit-window-open"); the pact page offers File excuse only after it, as the spec's Pact page bullet says.
+- A day covered by a waiting excuse that's judged Missed at its due time sends no Missed push.
+- Evidence rejected on a day ahead with an approved excuse leaves the day for judging at its due time, which makes it Excused.
+

@@ -25,6 +25,7 @@ export type Page =
   | { kind: "create" }
   | { kind: "edit-pact"; id: string }
   | { kind: "ledger"; recipientId: string; name?: string }
+  | { kind: "excuse"; id: string }
   | { kind: "notifications" };
 
 interface Route {
@@ -51,6 +52,8 @@ function pagePath(page: Page): string {
       return APP_PATHS.editPact(page.id);
     case "ledger":
       return APP_PATHS.ledger(page.recipientId);
+    case "excuse":
+      return APP_PATHS.excuse(page.id);
     case "notifications":
       return NOTIFICATIONS_PATH;
   }
@@ -79,6 +82,9 @@ function routeFromPath(pathname: string): Route {
   if (pact) return { tab: "pacts", stack: [{ kind: "pact", id: decodeURIComponent(pact[1]!) }] };
   const ledger = /^\/ledgers\/([^/]+)$/.exec(pathname);
   if (ledger) return { tab: "ledgers", stack: [{ kind: "ledger", recipientId: decodeURIComponent(ledger[1]!) }] };
+  // An excuse opens from Today or a pact; a link to one (an approved excuse's push) lands on Today.
+  const excuse = /^\/excuses\/([^/]+)$/.exec(pathname);
+  if (excuse) return { tab: "today", stack: [{ kind: "excuse", id: decodeURIComponent(excuse[1]!) }] };
   const tab = (Object.keys(TAB_PATHS) as TabId[]).find((t) => TAB_PATHS[t] === pathname) ?? "today";
   return { tab, stack: [] };
 }
