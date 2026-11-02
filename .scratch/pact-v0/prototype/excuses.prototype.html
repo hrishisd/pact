@@ -129,6 +129,7 @@ textarea.inp{min-height:76px;resize:vertical}
 /* sheets */
 .overlay{position:absolute;inset:0;background:var(--scrim);display:flex;align-items:flex-end;z-index:30}
 .sheet{background:var(--paper);width:100%;max-height:92%;overflow:auto;border-radius:22px 22px 0 0;padding-block:10px 24px;display:flex;flex-direction:column;gap:16px}
+.sheet > *{flex-shrink:0}
 .grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
 .sheet h2{font-size:20px}
 @media (prefers-reduced-motion:no-preference){.sheet.anim{animation:up .22s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
@@ -140,6 +141,17 @@ textarea.inp{min-height:76px;resize:vertical}
 .opt small{color:var(--muted);font-size:12.5px}
 .opt input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:none}
 .opt.off{opacity:.6;cursor:default;background:var(--paper)}
+.opt input[type=radio]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.wkrow{display:flex;flex-direction:column;gap:4px}
+.wk{font-size:12px;color:var(--muted);font-weight:600}
+.dtiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.dtile{display:flex;flex-direction:column;align-items:center;gap:0;border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:6px 2px;font-size:13px;line-height:1.25}
+.dtile b{font-size:12px;color:var(--muted)}
+.dtile small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.dtile.miss small{color:var(--missed);font-weight:600}
+.dtile[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
+.dtile[aria-pressed=true] b{color:var(--accent)}
+.dtile:disabled{background:var(--paper);opacity:.55;cursor:not-allowed}
 .pills{display:flex;gap:6px;flex-wrap:wrap}
 .pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600}
 .pill[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
@@ -242,7 +254,7 @@ let S;
 function reset() {
   S = {
     now: at(2026, 11, 3, 17, 0), me: "jordan", variant: "A",
-    beh: { today: "stay", rejectAlert: "alert", refile: "yes", split: "one", withdraw: "yes", fromPact: "miss" },
+    beh: { today: "stay", rejectAlert: "alert", refile: "yes", split: "one", withdraw: "yes", multi: "sheet" },
     occ: {}, excuses: [], log: [], nid: 1,
     tab: "today", stack: { today: [], pacts: [], review: [], ledgers: [] },
     sheet: null, form: null, toast: null, reviewAt: 0, rejecting: null, sideOpen: false,
@@ -291,14 +303,6 @@ function rowsFor(pactIds, from, to) {
     for (const pid of pactIds) { const p = pact(pid); if (scheduled(p, k)) rows.push({ p, k, id: okey(p, k), ...elig(p, k) }); }
   return rows;
 }
-/** Every occurrence up to today that could go on an excuse now (option B's list). */
-function excusableNow() {
-  const rows = [];
-  for (let k = addDays(today(), -3); k <= today(); k = addDays(k, 1))
-    for (const p of PACTS) if (scheduled(p, k)) { const e = elig(p, k); if (e.ok) rows.push({ p, k, id: okey(p, k), ...e }); }
-  return rows.sort((a, b) => (b.k > a.k) - (b.k < a.k));
-}
-
 function fileExcuse(keys, reason, photos) {
   const groups = {};
   for (const id of keys) {
@@ -365,42 +369,50 @@ function occChip(p, k, compact) {
 }
 
 // ---------- the filing sheet ----------
-function openExcuse(ctx = {}) {
-  let { pactId, date } = ctx;
-  if (pactId && !date) {
-    const miss = S.beh.fromPact === "miss" && excusableNow().find(r => r.p.id === pactId && r.k < today());
-    date = miss ? miss.k : today();
-  }
-  date ||= today();
-  const pids = pactId ? [pactId] : [PACTS[0].id];
-  S.form = { pids, from: date, to: date, reason: "", photos: [], step: 1, picked: pactId ? { [okey(pact(pactId), date)]: true } : {}, ahead: false, aPids: [], aFrom: addDays(today(), 1), aTo: addDays(today(), 1), aOff: {} };
+// Round 2: an excuse always starts from one pact. From a card it also starts from one day of it.
+const scheduleText = p => p.days.length === 7 ? "every day" : p.days.map(d => WD[d]).join(", ");
+/** This pact's real days around now: the last week (what can still be excused) and the next four weeks. */
+function pactDays(p) {
+  const out = [];
+  for (let k = addDays(today(), -6); k <= addDays(today(), 28); k = addDays(k, 1)) if (scheduled(p, k)) out.push({ p, k, id: okey(p, k), ...elig(p, k) });
+  return out;
+}
+function openExcuse(ctx) {
+  const p = pact(ctx.pactId), date = ctx.date || null;
+  const first = date || (pactDays(p).find(r => r.ok)?.k ?? today());
+  S.form = {
+    pid: p.id, date, reason: "", photos: [], others: [],
+    more: false, to: date || today(),                    // A
+    choice: date ? okey(p, date) : null,                 // A, from the pact page
+    from2: date || today(), to2: date || today(),        // A's "days ahead" when started from the pact page
+    sel: date ? { [okey(p, date)]: true } : {},          // B
+    from: first, to: first,                              // C
+  };
   S.sheet = "excuse"; S.sheetFresh = true;
 }
-/** What the form would file now: the covered rows and the skipped ones. */
-function draft() {
-  const f = S.form;
-  if (S.variant === "B") {
-    const now = excusableNow().filter(r => f.picked[r.id]);
-    const ahead = f.ahead ? rowsFor(f.aPids, f.aFrom, f.aTo).filter(r => r.k > today()) : [];
-    const rows = [...now, ...ahead.filter(r => r.ok && !f.aOff[r.id])];
-    return { rows, skipped: ahead.filter(r => !r.ok), keys: rows.map(r => r.id) };
+/** The pact's own days this form covers. */
+function ownRows() {
+  const f = S.form, p = pact(f.pid);
+  if (S.variant === "A") {
+    if (f.date) return rowsFor([p.id], f.date, f.more ? f.to : f.date);
+    if (!f.choice) return [];
+    if (f.choice === "range") return rowsFor([p.id], f.from2, f.to2);
+    const { k } = fromKey(f.choice);
+    return rowsFor([p.id], k, k);
   }
-  const all = rowsFor(f.pids, f.from, f.to);
-  const rows = all.filter(r => r.ok);
-  return { rows, skipped: all.filter(r => !r.ok), keys: rows.map(r => r.id) };
+  if (S.variant === "B") return pactDays(p).filter(r => f.sel[r.id]);
+  return rowsFor([p.id], f.from, f.to);
+}
+function draft() {
+  const own = ownRows(), ok = own.filter(r => r.ok);
+  const ks = ok.map(r => r.k).sort();
+  const span = ks.length ? [ks[0], ks[ks.length - 1]] : null;
+  const extra = S.beh.multi === "sheet" && span ? rowsFor(S.form.others, span[0], span[1]) : [];
+  const rows = [...ok, ...extra.filter(r => r.ok)];
+  return { own, rows, skipped: [...own, ...extra].filter(r => !r.ok), keys: rows.map(r => r.id), span };
 }
 const canSend = () => draft().keys.length > 0 && S.form.reason.trim() !== "";
 
-function pactPicker(field) {
-  const sel = S.form[field];
-  return `<div class="stack">${PACTS.map(p => `<label class="opt"><input type="checkbox" id="${field}-${p.id}" data-f="${field}" value="${p.id}" ${sel.includes(p.id) ? "checked" : ""}><span class="rt"><b>${esc(p.name)}</b><small>${p.days.length === 7 ? "Every day" : p.days.map(d => WD[d]).join(", ")} · ${money(p.pen)} · ${listNames(p.rev.map(r => PEOPLE[r]))}</small></span></label>`).join("")}</div>`;
-}
-function rangePicker(fromF, toF) {
-  const f = S.form, t = today();
-  const presets = [["Yesterday", addDays(t, -1), addDays(t, -1)], ["Today", t, t], ["Tomorrow", addDays(t, 1), addDays(t, 1)]];
-  return `<div class="pills">${presets.map(([l, a, b]) => `<button class="pill" data-act="preset" data-arg="${fromF},${toF},${a},${b}" aria-pressed="${f[fromF] === a && f[toF] === b}">${l}</button>`).join("")}</div>
-    <div class="dates"><label class="field"><span>From</span><input class="inp" type="date" id="${fromF}" data-f="${fromF}" value="${f[fromF]}"></label><label class="field"><span>To</span><input class="inp" type="date" id="${toF}" data-f="${toF}" value="${f[toF]}"></label></div>`;
-}
 function reasonField() {
   return `<label class="field"><span>Reason</span><textarea class="inp" id="ex-reason" data-f="reason" placeholder="e.g. Sick with the flu, or: that photo was today's page, the book has two page 112s">${esc(S.form.reason)}</textarea><small>For a good reason not to keep it, or for a judgment that was wrong.</small></label>`;
 }
@@ -411,53 +423,96 @@ function photosField() {
     <input type="file" id="ex-file" accept="image/*" hidden>
     <small>From your camera or photo library, since these are often screenshots. <button class="link" data-act="samplePhoto">Add a sample screenshot</button></small></div>`;
 }
-function coverList(d, opts = {}) {
-  const row = (r, ok) => `<div class="covrow ${ok ? "" : "skip"}"><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span>${ok ? `<span class="chip c-excused">Covered</span>` : `<span class="chip c-soon">Skipped</span>`}</div>`;
-  if (!d.rows.length && !d.skipped.length) return `<p class="muted small">${opts.empty || "Pick at least one pact and the days."}</p>`;
-  return `<div class="list">${d.rows.map(r => row(r, true)).join("")}${d.skipped.map(r => row(r, false)).join("")}</div>`;
+function coverList(rows, skipped, empty) {
+  const row = (r, ok) => `<div class="covrow ${ok ? "" : "skip"}"><span class="rt"><b>${fmtDate(r.k)}${S.form.others.length ? ` · ${esc(r.p.name)}` : ""}</b><small>${r.note}</small></span>${ok ? `<span class="chip c-excused">Covered</span>` : `<span class="chip c-soon">Skipped</span>`}</div>`;
+  if (!rows.length && !skipped.length) return `<p class="muted small">${empty}</p>`;
+  return `<div class="list">${rows.map(r => row(r, true)).join("")}${skipped.map(r => row(r, false)).join("")}</div>`;
+}
+/** The day the sheet was opened from, as a small card: its state, what's held, and the time left. */
+function dayCard(p, k) {
+  const e = elig(p, k), o = S.occ[okey(p, k)];
+  const what = o?.outcome === "missed" ? `${o.cause === "rejected" ? `${PEOPLE[o.by]} rejected the photo · ` : ""}<b class="pen">${money(p.pen)}</b> held while ${listNames(p.rev.map(r => PEOPLE[r]))} decides` : k === today() ? "Due at midnight. Excused if approved, so no photo needed." : "Excused when it ends, if approved.";
+  return `<div class="card"><div class="spread"><b>${fmtDate(k)}</b>${occChip(p, k)}</div><span class="meta">${what}</span>${e.left ? `<span class="meta due">${timeLeftLong(e.left)} left to file an excuse</span>` : ""}</div>`;
+}
+function othersField(d) {
+  if (S.beh.multi !== "sheet") return "";
+  const f = S.form, others = PACTS.filter(q => q.id !== f.pid);
+  return `<div class="field"><span>Other pacts (optional)</span>
+    <div class="pills">${others.map(q => `<button class="pill" data-act="other" data-arg="${q.id}" aria-pressed="${f.others.includes(q.id)}">+ ${esc(q.name)}</button>`).join("")}</div>
+    <small>${d.span ? `Covers their days from ${fmtRange(d.span[0], d.span[1])} too, the same days as above.` : "Pick the days above first."}</small></div>`;
 }
 function sendFooter(d) {
   const held = d.rows.reduce((a, r) => a + (r.held || 0), 0);
   const revs = reviewersOf(d.keys).map(r => PEOPLE[r]);
   const items = S.beh.split === "split" ? uniq(d.keys.map(id => fromKey(id).p.rev.join("+"))).length : 1;
-  const line = d.keys.length === 0 ? "Nothing to cover yet." :
+  const line = d.keys.length === 0 ? "Pick at least one day that can be excused." :
     `Covers ${d.keys.length} ${d.keys.length === 1 ? "day" : "days"}.${held ? ` ${money(held)} is held off what you owe until it's decided.` : ""}${items > 1 ? ` Sent as ${items} separate excuses, one per set of reviewers.` : ""}`;
   return `<div class="footbar"><span class="meta">${line}</span><button class="btn primary block" data-act="send" data-live="send" ${canSend() ? "" : "disabled"}>Send to ${listNames(revs) || "your reviewer"}</button></div>`;
 }
+function dateInputs(fromF, toF, minK) {
+  const f = S.form;
+  return `<div class="dates"><label class="field"><span>From</span><input class="inp" type="date" id="${fromF}" data-f="${fromF}" value="${f[fromF]}" min="${minK}"></label><label class="field"><span>To</span><input class="inp" type="date" id="${toF}" data-f="${toF}" value="${f[toF]}" min="${f[fromF]}"></label></div>`;
+}
 function excuseSheet() {
-  const f = S.form, d = draft();
-  if (S.variant === "A") return `<h2>File excuse</h2>
-    <div class="field"><span>Which pacts?</span>${pactPicker("pids")}</div>
-    <div class="field"><span>Which days?</span>${rangePicker("from", "to")}</div>
-    ${reasonField()}${photosField()}
-    <div class="stack"><div class="label">This excuse covers</div>${coverList(d)}</div>
-    ${sendFooter(d)}`;
-  if (S.variant === "B") {
-    const now = excusableNow();
-    const ahead = f.ahead ? rowsFor(f.aPids, f.aFrom, f.aTo).filter(r => r.k > today()) : [];
-    return `<h2>File excuse</h2>
-      <div class="field"><span>Days you can still excuse</span>
-        <div class="stack">${now.map(r => `<label class="opt"><input type="checkbox" id="pk-${r.id}" data-pick="${r.id}" ${f.picked[r.id] ? "checked" : ""}><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span></label>`).join("") || `<p class="muted small">Nothing from the last few days can be excused.</p>`}</div></div>
-      <div class="field"><span>Days ahead</span>
-        ${f.ahead ? `${pactPicker("aPids")}${rangePicker("aFrom", "aTo")}
-          ${ahead.length ? `<div class="stack">${ahead.map(r => r.ok ? `<label class="opt"><input type="checkbox" id="ao-${r.id}" data-aoff="${r.id}" ${f.aOff[r.id] ? "" : "checked"}><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span></label>` : `<div class="opt off"><span class="rt"><b>${esc(r.p.name)} · ${fmtDate(r.k)}</b><small>${r.note}</small></span></div>`).join("")}</div>` : `<p class="muted small">Pick pacts and future dates.</p>`}`
-        : `<button class="btn sm self-start" data-act="ahead">+ Add days ahead, like a trip</button>`}</div>
-      ${reasonField()}${photosField()}
-      ${sendFooter(d)}`;
+  const f = S.form, p = pact(f.pid), d = draft();
+  const extraCover = d.rows.filter(r => r.p.id !== p.id);
+  const extraList = extraCover.length ? `<div class="stack"><div class="label">Also covers</div>${coverList(extraCover, d.skipped.filter(r => r.p.id !== p.id), "")}</div>` : "";
+  const head = `<div class="stack-sm"><h2>Excuse ${esc(p.name)}${f.date && S.variant === "A" ? `, ${fmtDate(f.date)}` : ""}</h2><span class="meta">${esc(p.name)} is ${scheduleText(p)} · ${money(p.pen)} per miss</span></div>`;
+  const earliest = pactDays(p).find(r => r.ok)?.k || today();
+
+  if (S.variant === "A") {
+    let days;
+    if (f.date) {
+      const later = f.more ? rowsFor([p.id], addDays(f.date, 1), f.to) : [];
+      days = `${dayCard(p, f.date)}
+        ${f.more ? `<div class="field"><span>Also excuse ${esc(p.name)} through</span><input class="inp" type="date" id="to" data-f="to" value="${f.to}" min="${f.date}"></div>
+          ${coverList(later.filter(r => r.ok), later.filter(r => !r.ok), `No other ${esc(p.name)} days by then. It's ${scheduleText(p)}.`)}`
+        : `<button class="btn sm self-start" data-act="more">+ Later days too, e.g. still sick</button>`}`;
+    } else {
+      const recent = pactDays(p).filter(r => r.ok && r.k <= today());
+      days = `<div class="field"><span>Which day?</span><div class="stack">
+        ${recent.map(r => `<label class="opt"><input type="radio" name="choice" id="ch-${r.id}" data-choice="${r.id}" ${f.choice === r.id ? "checked" : ""}><span class="rt"><b>${fmtDate(r.k)}</b><small>${r.note}</small></span></label>`).join("")}
+        <label class="opt"><input type="radio" name="choice" id="ch-range" data-choice="range" ${f.choice === "range" ? "checked" : ""}><span class="rt"><b>Days ahead</b><small>A trip, or anything you know is coming</small></span></label></div></div>
+        ${f.choice === "range" ? `${dateInputs("from2", "to2", today())}${coverList(d.own.filter(r => r.ok), d.own.filter(r => !r.ok), `No ${esc(p.name)} days in this range. It's ${scheduleText(p)}.`)}` : ""}`;
+    }
+    return `${head}${days}${othersField(d)}${extraList}${reasonField()}${photosField()}${sendFooter(d)}`;
   }
-  // C: three steps.
-  const steps = `<div class="steps">${[1, 2, 3].map(i => `<i class="${i <= f.step ? "on" : ""}"></i>`).join("")}</div>`;
-  if (f.step === 1) return `${steps}<h2>Which days?</h2>
-    <div class="field"><span>Pacts</span>${pactPicker("pids")}</div>
-    <div class="field"><span>Dates</span>${rangePicker("from", "to")}</div>
-    <div class="footbar"><span class="meta">${d.keys.length ? `${d.keys.length} ${d.keys.length === 1 ? "day" : "days"} can be covered${d.skipped.length ? `, ${d.skipped.length} skipped` : ""}.` : "None of these days can be excused."}</span><button class="btn primary block" data-act="step" data-arg="2" ${d.keys.length ? "" : "disabled"}>Next</button></div>`;
-  if (f.step === 2) return `${steps}<h2>Why?</h2>${reasonField()}${photosField()}
-    <div class="footbar"><div class="row2"><button class="btn" data-act="step" data-arg="1">Back</button><button class="btn primary grow" data-act="step" data-arg="3" data-live="reason" ${f.reason.trim() ? "" : "disabled"}>Next</button></div></div>`;
-  return `${steps}<h2>Check and send</h2>
-    <div class="card"><span class="label">Reason</span><span class="quote">“${esc(f.reason)}”</span>${f.photos.length ? `<span class="meta">${f.photos.length} ${f.photos.length === 1 ? "photo" : "photos"}</span>` : ""}</div>
-    <div class="stack"><div class="label">This excuse covers</div>${coverList(d)}</div>
-    <button class="btn self-start sm" data-act="step" data-arg="1">Change days</button>
-    ${sendFooter(d)}`;
+
+  if (S.variant === "B") {
+    const tiles = pactDays(p);
+    const weeks = [];
+    for (const r of tiles) { const wk = addDays(r.k, -((wday(r.k) + 6) % 7)); (weeks.at(-1)?.wk === wk ? weeks.at(-1).rows : (weeks.push({ wk, rows: [] }), weeks.at(-1).rows)).push(r); }
+    const tile = r => {
+      const o = S.occ[r.id], on = !!f.sel[r.id];
+      const sub = r.ok ? (o?.outcome === "missed" ? `Missed · ${timeLeft(r.left)}` : r.k === today() ? "Today" : "") : (o?.outcome === "kept" ? "Kept" : o?.outcome === "excused" || coverBy(r.id, "approved") ? "Excused" : coverBy(r.id, "pending") ? "Waiting" : "Too late");
+      return `<button class="dtile ${on ? "on" : ""} ${o?.outcome === "missed" && r.ok ? "miss" : ""}" data-act="tile" data-arg="${r.id}" ${r.ok ? "" : "disabled"} aria-pressed="${on}"><b>${WD[wday(r.k)]}</b><span>${MO[new Date(startOf(r.k)).getMonth()]} ${new Date(startOf(r.k)).getDate()}</span><small>${sub || "&nbsp;"}</small></button>`;
+    };
+    return `${head}
+      <div class="field"><span>Tap the days to excuse</span>
+        <div class="stack">${weeks.map(w => `<div class="wkrow"><span class="wk">${w.wk === addDays(today(), -((wday(today()) + 6) % 7)) ? "This week" : `Week of ${fmtDate(w.wk).slice(4)}`}</span><div class="dtiles">${w.rows.map(tile).join("")}</div></div>`).join("")}</div>
+        <small>Only ${esc(p.name)}'s own days are shown. Greyed days can't be excused.</small></div>
+      ${othersField(d)}${extraList}${reasonField()}${photosField()}${sendFooter(d)}`;
+  }
+
+  // C: a date range, limited to this pact's days.
+  const own = d.own;
+  return `${head}
+    <div class="field"><span>Which days?</span>${dateInputs("from", "to", earliest)}<small>The earliest ${esc(p.name)} day you can still excuse is ${fmtDate(earliest)}.</small></div>
+    <div class="stack"><div class="label">${esc(p.name)} days in this range</div>${coverList(own.filter(r => r.ok), own.filter(r => !r.ok), `${f.from === f.to ? `No ${esc(p.name)} day on ${fmtDate(f.from)}` : `No ${esc(p.name)} days from ${fmtRange(f.from, f.to)}`}. It's ${scheduleText(p)}.`)}</div>
+    ${othersField(d)}${extraList}${reasonField()}${photosField()}${sendFooter(d)}`;
+}
+/** After sending, when other pacts are offered afterwards: the same days on the owner's other pacts. */
+function followupSheet() {
+  const fu = S.follow;
+  const rows = rowsFor(PACTS.filter(q => q.id !== fu.pid).map(q => q.id), fu.span[0], fu.span[1]).filter(r => r.ok);
+  const byPact = uniq(rows.map(r => r.p.id)).map(pid => ({ p: pact(pid), rows: rows.filter(r => r.p.id === pid) }));
+  return `<h2>Sent to ${esc(fu.sentTo)}</h2><p>Excuse your other pacts for ${fmtRange(fu.span[0], fu.span[1])} too? They get the same reason and photos.</p>
+    <div class="stack">${byPact.map(({ p, rows }) => `<label class="opt"><input type="checkbox" id="fu-${p.id}" data-fu="${p.id}" ${fu.picks[p.id] ? "checked" : ""}><span class="rt"><b>${esc(p.name)}</b><small>${rows.map(r => `${fmtDate(r.k)}${r.held ? ` · ${money(r.held)} held` : ""}`).join("; ")}</small></span></label>`).join("")}</div>
+    <div class="stack"><button class="btn primary block" data-act="fuSend" ${Object.values(fu.picks).some(Boolean) ? "" : "disabled"}>Send these too</button><button class="btn block" data-act="closeSheet">No thanks</button></div>`;
+}
+function followupRows() {
+  const fu = S.follow;
+  return rowsFor(Object.keys(fu.picks).filter(k => fu.picks[k]), fu.span[0], fu.span[1]).filter(r => r.ok);
 }
 
 // ---------- screens ----------
@@ -606,6 +661,7 @@ function render() {
   const qn = S.excuses.filter(x => x.status === "pending" && reviewersOf(x.keys).includes(S.me)).length;
   let sheet = "";
   if (S.sheet === "excuse") sheet = excuseSheet();
+  if (S.sheet === "followup") sheet = followupSheet();
   if (S.sheet?.withdraw) sheet = `<h2>Withdraw this excuse?</h2><p>Any held penalties become owed again, and days not judged yet are judged as usual. You can file a new one while the days are still in their 48 hours.</p><div class="stack"><button class="btn danger block" data-act="withdraw" data-arg="${S.sheet.withdraw}">Withdraw excuse</button><button class="btn block" data-act="closeSheet">Keep it</button></div>`;
   app.innerHTML = `${header(title, !!page)}<main class="scroll gut">${body}</main>
     <nav class="tabbar">${TABS.map(([id, label, ic]) => `<button class="tab" data-act="tab" data-arg="${id}" ${S.tab === id ? `aria-current="${page ? "true" : "page"}"` : ""}><span class="tile">${ic}${label}${id === "review" && qn ? `<span class="badge">${qn}</span>` : ""}</span></button>`).join("")}</nav>
@@ -625,7 +681,7 @@ const BEHAVIOURS = [
   ["refile", "Excuse the same day again after a rejection", "Inside the original 48 hours. The window never restarts.", [["yes", "Allowed"], ["no", "Final"]]],
   ["split", "One excuse covers pacts with different reviewers", "Ticket: one item, and any reviewer of a covered pact decides all of it. File Gym and Read together to see it.", [["one", "One item"], ["split", "One per reviewer set"]]],
   ["withdraw", "Owner withdraws a waiting excuse", "Not in the spec. Held penalties become owed again.", [["yes", "Allowed"], ["no", "Not allowed"]]],
-  ["fromPact", "File excuse on a pact page starts on", "Matters after Take the L, when the miss is only reachable from the pact page.", [["miss", "Latest miss"], ["today", "Today"]]],
+  ["multi", "One excuse for several pacts (story 45)", "A sick week shouldn't take five excuses. Each excuse still starts from one pact.", [["sheet", "Add in the sheet"], ["after", "Offer after sending"], ["no", "One pact each"]]],
 ];
 function renderSide() {
   const side = document.getElementById("side");
@@ -634,15 +690,15 @@ function renderSide() {
   side.className = S.sideOpen ? "open" : "";
   side.innerHTML = `
     <div class="spread"><span class="tag">PROTOTYPE · TICKET 07</span><button class="btn sm" data-act="side" id="sideClose" style="${innerWidth > 840 ? "display:none" : ""}">Close</button></div>
-    <section><h2>Excuses</h2><p class="muted small">It's Tue Nov 3, 5pm. Jordan missed Gym on Monday, and Alex rejected Monday's reading photo this morning. File an excuse from either, then switch to Sam or Alex to decide it.</p></section>
-    <section><div class="label">Filing form</div>${seg("variant", [["A", "A · One sheet"], ["B", "B · Pick days"], ["C", "C · Steps"]], S.variant)}
-      <p class="small muted">${{ A: "One sheet: pacts, a date range, reason, photos, and a live list of what it covers. The spec's model (pacts + date range) as is.", B: "Starts from a list of the days you can still excuse, ticked from where you came from. Future days are added as a range. The excuse becomes a list of occurrences, not a range.", C: "Three steps like Create pact: which days, why, then check and send. Same model as A, with more room per step." }[S.variant]}</p></section>
+    <section><h2>Excuses · round 2</h2><p class="muted small">Every excuse now starts from one pact. It's Tue Nov 3, 5pm. Jordan missed Gym on Monday, and Alex rejected Monday's reading photo this morning. File an excuse from either, then switch to Sam or Alex to decide it.</p></section>
+    <section><div class="label">Filing form</div>${seg("variant", [["A", "A · This day"], ["B", "B · Tap days"], ["C", "C · Date range"]], S.variant)}
+      <p class="small muted">${{ A: "From a card, the excuse is for that one day, shown as a card, with an option to run it on to later days. From the pact page you pick one recent day, or a range of days ahead.", B: "Shows the pact's real days only, a week back and four weeks ahead, as tiles. Tap any of them; the one you came from starts ticked. Days that can't be excused are greyed.", C: "A From and To date, starting on the day you came from (or the earliest day you can still excuse). The list under it shows the pact's days in that range, and says so when there are none." }[S.variant]}</p></section>
     <section><div class="label">Signed in as</div>${seg("me", [["jordan", "Jordan (owner)"], ["sam", "Sam"], ["alex", "Alex"]], S.me)}<p class="small muted">Sam reviews Gym and Piano. Alex reviews Read and Piano.</p></section>
     <section><div class="label">Clock · <span class="num">${fmtWhen(S.now)}</span></div><div class="row2"><button class="btn sm" data-act="adv" data-arg="1">+1 hour</button><button class="btn sm" data-act="adv" data-arg="mid">To midnight</button><button class="btn sm" data-act="adv" data-arg="24">+1 day</button><button class="btn sm" data-act="reset">Reset</button></div>
       <p class="small muted">Midnight judges the day that ended. 48-hour windows count from when a day was judged Missed or its photo was rejected.</p></section>
     <section><div class="label">Open behaviours</div>${BEHAVIOURS.map(([f, t, d, o]) => `<div class="beh"><b>${t}</b><p>${d}</p>${seg("beh." + f, o, S.beh[f])}</div>`).join("")}</section>
     <section><div class="label">Settled in this prototype (say if you disagree)</div><ol class="qs">
-      <li>Days in the range that can't be excused (Kept, already on an excuse, past 48 hours) are skipped and listed as Skipped. The excuse goes through if at least one day is covered.</li>
+      <li>Every File excuse button opens the sheet for its own pact. There's no all-pacts form any more, and no Yesterday / Today / Tomorrow shortcuts.</li><li>Days that can't be excused (Kept, already on an excuse, past 48 hours) are listed as Skipped. The excuse goes through if at least one day is covered.</li>
       <li>Filing an excuse for a rejected photo clears its alert; the day moves to Waiting for approval.</li>
       <li>A reason is required; photos are optional, up to 3, from the library.</li>
       <li>A day ahead that an approved excuse covers shows as Excused on the pact page right away, and on its day Today says there's nothing to do.</li>
@@ -667,21 +723,32 @@ document.addEventListener("click", e => {
     case "openExcuse": push({ kind: "excuse", id: arg }); break;
     case "openLedger": push({ kind: "ledger", id: arg }); break;
     case "file": { const [pid, k] = arg.split(","); openExcuse({ pactId: pid, date: k || undefined }); break; }
-    case "refile": { const x = S.excuses.find(x => x.id === arg); const first = x.keys.map(fromKey).find(({ p, k }) => elig(p, k).ok); openExcuse({ pactId: first.p.id, date: first.k }); if (S.variant !== "B") { S.form.pids = uniq(x.keys.map(id => fromKey(id).p.id)); } else x.keys.forEach(id => S.form.picked[id] = true); S.form.reason = ""; break; }
+    case "refile": {
+      const x = S.excuses.find(x => x.id === arg), open = x.keys.map(fromKey).filter(({ p, k }) => elig(p, k).ok);
+      const first = open[0], same = open.filter(o => o.p.id === first.p.id).map(o => o.k), last = same[same.length - 1];
+      openExcuse({ pactId: first.p.id, date: first.k });
+      if (last !== first.k) { S.form.more = true; S.form.to = last; S.form.to2 = last; S.form.to = last; same.forEach(k => S.form.sel[okey(first.p, k)] = true); }
+      S.form.others = uniq(open.map(o => o.p.id)).filter(id => id !== first.p.id);
+      break;
+    }
     case "takeL": S.occ[arg].tookL = true; break;
     case "ackX": S.excuses.find(x => x.id === arg).alertOpen = false; break;
     case "photo": toast("Evidence works as on main. It isn't part of this prototype."); break;
     case "noop": toast("Not part of this prototype."); break;
-    case "preset": { const [ff, tf, from, to] = arg.split(","); S.form[ff] = from; S.form[tf] = to; break; }
-    case "ahead": S.form.ahead = true; S.form.aPids = [...S.form.pids]; break;
-    case "step": S.form.step = +arg; document.querySelector(".sheet").scrollTop = 0; break;
+    case "more": S.form.more = true; S.form.to = addDays(S.form.date, 2); break;
+    case "tile": S.form.sel[arg] = !S.form.sel[arg]; break;
+    case "other": { const o = S.form.others; S.form.others = o.includes(arg) ? o.filter(x => x !== arg) : [...o, arg]; break; }
+    case "fuSend": { const rows = followupRows(); const made = fileExcuse(rows.map(r => r.id), S.follow.reason, S.follow.photos); S.sheet = null; toast(`Also sent to ${listNames(uniq(made.flatMap(x => reviewersOf(x.keys))).map(r => PEOPLE[r]))}`); break; }
     case "samplePhoto": { const s = SAMPLES[S.form.photos.length % SAMPLES.length]; S.form.photos.push(sample(s, ["#e8f0fb", "#fdf3e1", "#f3e8f3"][S.form.photos.length % 3])); break; }
     case "rmPhoto": S.form.photos.splice(+arg, 1); break;
     case "send": {
       if (!canSend()) return;
       const d = draft(), made = fileExcuse(d.keys, S.form.reason.trim(), S.form.photos);
+      const sentTo = listNames(uniq(made.flatMap(x => reviewersOf(x.keys))).map(r => PEOPLE[r]));
+      S.follow = { pid: S.form.pid, span: d.span, reason: S.form.reason.trim(), photos: S.form.photos, picks: {}, sentTo };
       S.sheet = null; S.form = null;
-      toast(`Excuse sent to ${listNames(uniq(made.flatMap(x => reviewersOf(x.keys))).map(r => PEOPLE[r]))}`);
+      if (S.beh.multi === "after" && rowsFor(PACTS.filter(q => q.id !== S.follow.pid).map(q => q.id), d.span[0], d.span[1]).some(r => r.ok)) { S.sheet = "followup"; S.sheetFresh = true; }
+      else toast(`Excuse sent to ${sentTo}`);
       break;
     }
     case "withdrawAsk": S.sheet = { withdraw: arg }; S.sheetFresh = true; break;
@@ -695,7 +762,7 @@ document.addEventListener("click", e => {
     case "set": {
       const [f, v] = arg.split(",");
       if (f.startsWith("beh.")) S.beh[f.slice(4)] = v;
-      else if (f === "variant") { S.variant = v; if (S.form) { S.form.step = 1; } }
+      else if (f === "variant") S.variant = v;
       else if (f === "me") { S.me = v; S.tab = v === "jordan" ? "today" : "review"; S.stack = { today: [], pacts: [], review: [], ledgers: [] }; S.sheet = null; S.reviewAt = 0; }
       break;
     }
@@ -711,11 +778,12 @@ document.addEventListener("change", e => {
   if (el.id === "ex-file" && el.files?.[0]) {
     const r = new FileReader(); r.onload = () => { S.form.photos.push(r.result); render(); }; r.readAsDataURL(el.files[0]); return;
   }
-  if (el.dataset.pick) { S.form.picked[el.dataset.pick] = el.checked; return render(); }
-  if (el.dataset.aoff) { S.form.aOff[el.dataset.aoff] = !el.checked; return render(); }
+  if (el.dataset.choice) { S.form.choice = el.dataset.choice; return render(); }
+  if (el.dataset.fu) { S.follow.picks[el.dataset.fu] = el.checked; return render(); }
   const f = el.dataset.f; if (!f || f === "reason") return;
   if (el.type === "checkbox") { const set = new Set(S.form[f]); el.checked ? set.add(el.value) : set.delete(el.value); S.form[f] = PACTS.map(p => p.id).filter(id => set.has(id)); }
   else S.form[f] = el.value;
+  for (const [a, b] of [["from", "to"], ["from2", "to2"]]) if (S.form[a] && S.form[b] && S.form[b] < S.form[a]) S.form[b] = S.form[a];
   render();
 });
 document.addEventListener("input", e => {
