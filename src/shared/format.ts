@@ -49,3 +49,17 @@ export function scheduleText(schedule: Schedule): string {
   if (schedule.days.length === WEEKDAYS.length) return "Every day";
   return schedule.days.map((day) => WEEKDAY_LABELS[day]).join(", ");
 }
+
+/** A clock time, "HH:MM" on a 24-hour clock, as "12:00am" or "11:30pm". */
+export function clockText(time: string): string {
+  const [hour, minute] = time.split(":").map(Number) as [number, number];
+  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")}${hour < 12 ? "am" : "pm"}`;
+}
+
+/** The name a bedtime pact fills in from its in-bed-by time: "In bed by midnight", "In bed by 11:30pm", "In bed by 1am". */
+export function inBedByName(time: string): string {
+  const [hour, minute] = time.split(":").map(Number) as [number, number];
+  if (hour === 0 && minute === 0) return "In bed by midnight";
+  const clock = clockText(time);
+  return `In bed by ${minute === 0 ? clock.replace(":00", "") : clock}`;
+}

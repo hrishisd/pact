@@ -3,9 +3,9 @@ import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { CreatePact, EditPact } from "./CreatePact.tsx";
 import { ExcusePage } from "./ExcusePage.tsx";
-import { initial } from "./format.ts";
+import { formatDay, initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
-import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
+import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, RingIcon, TodayIcon } from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
 import { forgetThisDevice, usePush, type Push } from "./push.ts";
@@ -296,6 +296,7 @@ function Shell({
         )}
         {page?.kind === "create" && (
           <CreatePact
+            ouraConnected={profile.connections.some((connection) => connection.service === "oura")}
             onCancel={nav.back}
             onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
             onInvite={() => setProfileOpen(true)}
@@ -427,6 +428,30 @@ function ProfileSheet({
       <FriendsSection />
 
       <NotificationsSection push={push} onSetUp={onSetUpNotifications} />
+
+      {profile.connections.length > 0 && (
+        <section className="stack">
+          <div className="label">Connections</div>
+          <div className="list">
+            {profile.connections.map((connection) => (
+              <div key={connection.service} className="rowbtn">
+                <span className="kico k-ring" aria-hidden="true">
+                  <RingIcon />
+                </span>
+                <span className="rt">
+                  <b>Oura Ring</b>
+                  <small>Connected {formatDay(connection.connectedAt, profile.timezone)}</small>
+                </span>
+                {connection.status === "connected" ? (
+                  <span className="chip c-kept">Connected</span>
+                ) : (
+                  <span className="chip c-missed">Needs reconnecting</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="stack">
         <div className="label">Timezone</div>

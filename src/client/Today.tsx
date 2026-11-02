@@ -11,11 +11,12 @@ import {
   type AcceptMissRefusal,
   type SubmitEvidenceRefusal,
   type TodayAlert,
+  type TodayMissedCard,
   type TodaySection,
   type TodayWaitingItem,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
-import { formatDate, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
+import { clockText, formatDate, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { CameraIcon, DollarIcon, ExcuseIcon } from "./icons.tsx";
@@ -164,7 +165,7 @@ function Section({
           chip={<span className="chip c-missed">Missed</span>}
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
-          <div className="meta">{formatDate(card.occurrenceDate)}</div>
+          <div className="meta">{missedLine(card)}</div>
           <MissedActions
             pactId={card.pactId}
             occurrenceDate={card.occurrenceDate}
@@ -173,6 +174,22 @@ function Section({
             onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
             onTaken={onChanged}
           />
+        </PactCard>
+      ));
+    case "automatic":
+      return section.cards.map((card) => (
+        <PactCard
+          key={card.pactId}
+          name={card.name}
+          penaltyCents={card.penaltyCents}
+          editWindowClosesAt={card.editWindowClosesAt}
+          now={now}
+          chip={<span className="chip c-soon">Automatic</span>}
+          onOpen={() => onOpenPact(card.pactId, card.name)}
+        >
+          <div className="meta">
+            Tonight, in bed by {clockText(card.inBedBy)} · {timeLeft(Date.parse(card.dueAt) - now)}
+          </div>
         </PactCard>
       ));
     case "coming-up":
@@ -193,6 +210,13 @@ function Section({
         </section>
       );
   }
+}
+
+/** A Missed card's day, and for a bedtime night when Oura saw the owner get into bed. */
+function missedLine(card: Json<TodayMissedCard>): string {
+  if (!card.night) return formatDate(card.occurrenceDate);
+  const { inBedAt } = card.night;
+  return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;
 }
 
 /** Something that needs the owner, first on Today. */

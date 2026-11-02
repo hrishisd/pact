@@ -335,7 +335,7 @@ export function createApp({
   });
 
   app.get(API_PATHS.me, (c) => {
-    const body: MeResponse = core.as(c.get("accountId")).profile();
+    const body: MeResponse = json(core.as(c.get("accountId")).profile());
     return c.json(body);
   });
 

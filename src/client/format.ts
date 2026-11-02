@@ -2,7 +2,7 @@
 
 import { formatDay } from "../shared/format.ts";
 
-export { formatDate, formatDay, money, scheduleText } from "../shared/format.ts";
+export { clockText, formatDate, formatDay, inBedByName, money, scheduleText } from "../shared/format.ts";
 
 /** Dollars as typed ("5", "$2.50", "0.5", ".50") in whole cents, or null when it isn't an amount. */
 export function parseCents(text: string): number | null {

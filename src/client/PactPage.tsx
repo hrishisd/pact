@@ -8,7 +8,7 @@ import type { PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
-import { formatDate, minutesLeft, money, scheduleText } from "./format.ts";
+import { clockText, formatDate, minutesLeft, money, scheduleText } from "./format.ts";
 import { CameraIcon, ExcuseIcon } from "./icons.tsx";
 import { Empty, Sheet, useNow } from "./ui.tsx";
 
@@ -132,7 +132,9 @@ function StageLine({ pact }: { pact: Pact }) {
   return (
     <div className="row2">
       <span className={`chip ${chip.className}`}>{chip.label}</span>
-      <span className="muted">{pact.description}</span>
+      <span className="muted">
+        {pact.inBedBy === null ? pact.description : `In bed by ${clockText(pact.inBedBy)}, judged from your ring`}
+      </span>
     </div>
   );
 }
@@ -219,13 +221,21 @@ function Terms({ pact }: { pact: Pact }) {
 export function TermsList({
   terms,
 }: {
-  terms: Pick<Pact, "evidenceKind" | "schedule" | "penaltyCents" | "recipient"> & { reviewers: { name: string }[] };
+  terms: Pick<Pact, "evidenceKind" | "inBedBy" | "schedule" | "penaltyCents" | "recipient"> & {
+    reviewers: { name: string }[];
+  };
 }) {
   const { recipient, reviewers } = terms;
   return (
     <dl className="kv">
       <dt>Evidence</dt>
       <dd>{terms.evidenceKind === "camera" ? "Camera photo, checked by a reviewer" : "Oura Ring"}</dd>
+      {terms.inBedBy !== null && (
+        <>
+          <dt>In bed by</dt>
+          <dd>{clockText(terms.inBedBy)}</dd>
+        </>
+      )}
       <dt>Schedule</dt>
       <dd>{scheduleText(terms.schedule)}</dd>
       <dt>Penalty</dt>

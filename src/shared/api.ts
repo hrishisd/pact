@@ -319,7 +319,7 @@ export interface RemovePushSubscriptionRequest {
 }
 
 /** GET /api/me: the signed-in account's profile. */
-export type MeResponse = Profile;
+export type MeResponse = Json<Profile>;
 
 /**
  * POST /api/me/timezone. Answers 200 with the core's result whether the zone

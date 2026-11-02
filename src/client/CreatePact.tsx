@@ -1,29 +1,48 @@
 // The step-by-step pact form: evidence kind, goal, schedule, penalty, reviewers,
-// then a check before Create pact. Editing a pact in its edit window reuses it
-// without the evidence kind step. The core decides every rule; the steps only
+// then a check before Create pact. Picking Oura Ring with no connection adds
+// a Connect step, which leaves for Oura's page; Oura's callback brings the
+// browser back here (`?oura=connected`) at Goal. Editing a pact in its edit
+// window reuses the form without the evidence kind step. The core decides every rule; the steps only
 // stop the owner moving on with a field left empty.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   WEEKDAYS,
   type EditPactRefusal,
+  type EvidenceKind,
   type FirstOccurrence,
   type Friend,
   type PactTerms,
   type Recipient,
   type Weekday,
 } from "../shared/types.ts";
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, OURA_RESULT_PARAM, type Json, type OuraResult } from "../shared/api.ts";
 import { api, failureText } from "./api.ts";
-import { centsInputText, clockTime, formatDate, initial, minutesLeft, parseCents } from "./format.ts";
+import {
+  centsInputText,
+  clockText,
+  clockTime,
+  formatDate,
+  inBedByName,
+  initial,
+  minutesLeft,
+  parseCents,
+} from "./format.ts";
 import { CameraIcon, RingIcon } from "./icons.tsx";
 import { TermsList } from "./PactPage.tsx";
 import { Empty, useLoad, useNow } from "./ui.tsx";
 
-const STEPS = ["kind", "goal", "schedule", "penalty", "reviewers", "check"] as const;
-type Step = (typeof STEPS)[number];
-/** A pact's evidence kind never changes, so editing skips that step. */
-const EDIT_STEPS = STEPS.slice(1);
+type Step = "kind" | "connect" | "goal" | "schedule" | "penalty" | "reviewers" | "check";
+const AFTER_KIND: Step[] = ["goal", "schedule", "penalty", "reviewers", "check"];
+
+/** The form's steps. A pact's evidence kind never changes, so editing skips that step. */
+function stepsFor(
+  kind: EvidenceKind,
+  { editing, ouraConnected }: { editing: boolean; ouraConnected: boolean },
+): Step[] {
+  if (editing) return AFTER_KIND;
+  return ["kind", ...(kind === "oura" && !ouraConnected ? (["connect"] as const) : []), ...AFTER_KIND];
+}
 
 type Pact = Json<PactTerms>;
 
@@ -39,6 +58,11 @@ const DAY_BUTTONS: Record<Weekday, { short: string; full: string }> = {
 };
 
 interface Form {
+  kind: EvidenceKind;
+  /** Oura Ring: "HH:MM" as the time field gives it, or "" until picked. */
+  inBedBy: string;
+  /** Whether the owner typed the name; until then a bedtime pact's name follows its in-bed-by time. */
+  named: boolean;
   name: string;
   description: string;
   days: Weekday[];
@@ -48,10 +72,23 @@ interface Form {
   reviewerIds: string[];
 }
 
-const EMPTY_FORM: Form = { name: "", description: "", days: [], penalty: "", recipientId: null, reviewerIds: [] };
+const EMPTY_FORM: Form = {
+  kind: "camera",
+  inBedBy: "",
+  named: false,
+  name: "",
+  description: "",
+  days: [],
+  penalty: "",
+  recipientId: null,
+  reviewerIds: [],
+};
 
 function formOf(pact: Pact): Form {
   return {
+    kind: pact.evidenceKind,
+    inBedBy: pact.inBedBy ?? "",
+    named: true,
     name: pact.name,
     description: pact.description,
     days: pact.schedule.days,
@@ -65,7 +102,7 @@ function formOf(pact: Pact): Form {
  * What's wrong, in the owner's words: the core's refusals at Create or Save,
  * and the steps' own checks that a field is filled in.
  */
-type Problem = EditPactRefusal | "no-amount" | "no-recipient";
+type Problem = EditPactRefusal | "no-amount" | "no-recipient" | "oura-failed";
 
 const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
@@ -76,6 +113,7 @@ const PROBLEMS: Record<Problem, string> = {
   "no-amount": "Enter an amount, like 5 or 2.50.",
   "invalid-penalty": "Set a penalty above $0.",
   "no-recipient": "Pick a recipient.",
+  "oura-failed": "Oura didn't connect. Try again.",
   "unknown-recipient": "That recipient isn't on your list. Pick another.",
   "no-reviewers": "Pick at least one reviewer.",
   "not-a-friend": "Only friends can be reviewers.",
@@ -89,7 +127,9 @@ const PROBLEMS: Record<Problem, string> = {
 function stepProblem(step: Step, form: Form): Problem | null {
   switch (step) {
     case "goal":
+      if (form.kind === "oura" && form.inBedBy === "") return "invalid-in-bed-by";
       if (form.name.trim() === "") return "blank-name";
+      if (form.kind === "oura") return null;
       if (form.description.trim() === "") return "blank-description";
       return null;
     case "schedule":
@@ -129,33 +169,42 @@ export function EditPact({
   }
   if (data === null) return null;
   if (!data.ok) return <Empty title="Pact not found" body="It isn't one of your pacts." />;
-  return <CreatePact editing={data.pact} onCancel={onDone} onCreated={onDone} onInvite={onInvite} />;
+  return <CreatePact editing={data.pact} ouraConnected onCancel={onDone} onCreated={onDone} onInvite={onInvite} />;
 }
 
 /** The form, for a new pact or for `editing`. */
 export function CreatePact({
   editing,
+  ouraConnected,
   onCancel,
   onCreated,
   onInvite,
 }: {
   editing?: Pact;
+  /** Whether the account has an Oura connection: without one, Oura Ring adds the Connect step. */
+  ouraConnected: boolean;
   onCancel: () => void;
   /** After creating the pact, or saving the edit. */
   onCreated: (pactId: string, name: string) => void;
   onInvite: () => void;
 }) {
-  const steps = editing ? EDIT_STEPS : STEPS;
   const now = useNow();
   const [windowClosed, setWindowClosed] = useState(false);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [form, setForm] = useState<Form>(editing ? formOf(editing) : EMPTY_FORM);
+  // Back from Oura's page: connected goes on to Goal; anything else stays at the kind step.
+  const [ouraResult] = useState(takeOuraResult);
+  const [form, setForm] = useState<Form>(
+    editing ? formOf(editing) : { ...EMPTY_FORM, kind: ouraResult === "connected" ? "oura" : "camera" },
+  );
+  const steps = stepsFor(form.kind, { editing: editing !== undefined, ouraConnected });
+  const [stepIndex, setStepIndex] = useState(ouraResult === "connected" ? steps.indexOf("goal") : 0);
   const [tried, setTried] = useState(false);
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
   const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
   const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(
+    ouraResult === "failed" ? PROBLEMS["oura-failed"] : null,
+  );
   const top = useRef<HTMLDivElement>(null);
 
   const step = steps[stepIndex]!;
@@ -197,9 +246,10 @@ export function CreatePact({
     setCreateError(null);
     try {
       const pact = {
-        evidenceKind: editing?.evidenceKind ?? "camera",
+        evidenceKind: form.kind,
         name: form.name.trim(),
-        description: form.description.trim(),
+        description: form.kind === "oura" ? "" : form.description.trim(),
+        ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
         schedule: { kind: "fixed-days", days: form.days },
         penaltyCents,
         recipientId,
@@ -225,13 +275,23 @@ export function CreatePact({
   let body: ReactNode;
   switch (step) {
     case "kind":
-      body = <KindStep onCamera={() => goTo(1)} />;
+      body = (
+        <KindStep
+          onPick={(kind) => {
+            update({ kind });
+            goTo(1);
+          }}
+        />
+      );
+      break;
+    case "connect":
+      body = <ConnectStep />;
       break;
     case "goal":
       body = <GoalStep form={form} update={update} />;
       break;
     case "schedule":
-      body = <ScheduleStep days={form.days} onDays={(days) => update({ days })} />;
+      body = <ScheduleStep kind={form.kind} days={form.days} onDays={(days) => update({ days })} />;
       break;
     case "penalty":
       body = (
@@ -252,6 +312,7 @@ export function CreatePact({
           friends={friends}
           reviewerIds={form.reviewerIds}
           onReviewerIds={(reviewerIds) => update({ reviewerIds })}
+          kind={form.kind}
           onInvite={onInvite}
           onCheckAgain={() => void loadFriends()}
         />
@@ -312,6 +373,11 @@ export function CreatePact({
           <button className="btn primary grow" disabled={creating} onClick={() => void create()}>
             {editing ? "Save changes" : "Create pact"}
           </button>
+        ) : step === "connect" ? (
+          // A full page load: Oura's page, then its callback, which brings the browser back here.
+          <a className="btn primary grow" href={API_PATHS.ouraConnect}>
+            Connect Oura
+          </a>
         ) : (
           step !== "kind" && (
             <button className="btn primary grow" onClick={next}>
@@ -326,25 +392,38 @@ export function CreatePact({
 
 // ---------- steps ----------
 
-function KindStep({ onCamera }: { onCamera: () => void }) {
+/**
+ * How connecting Oura went, when Oura's callback just brought the browser
+ * back: read once, then taken off the URL so a reload doesn't repeat it.
+ */
+function takeOuraResult(): OuraResult | null {
+  const params = new URLSearchParams(window.location.search);
+  const result = params.get(OURA_RESULT_PARAM);
+  if (result === null) return null;
+  params.delete(OURA_RESULT_PARAM);
+  const search = params.toString();
+  window.history.replaceState(window.history.state, "", window.location.pathname + (search ? `?${search}` : ""));
+  return result === "connected" || result === "cancelled" ? result : "failed";
+}
+
+function KindStep({ onPick }: { onPick: (kind: EvidenceKind) => void }) {
   return (
     <>
       <h2>How will you prove it?</h2>
       <div className="kind-tiles">
-        <button className="kind-tile" onClick={onCamera}>
+        <button className="kind-tile" onClick={() => onPick("camera")}>
           <span className="tico">
             <CameraIcon />
           </span>
           <b>Camera</b>
           <small>Take a photo each time. Your reviewer checks it.</small>
         </button>
-        <button className="kind-tile" disabled>
+        <button className="kind-tile" onClick={() => onPick("oura")}>
           <span className="tico">
             <RingIcon />
           </span>
           <b>Oura Ring</b>
           <small>Your ring reports when you got into bed. Nothing to submit.</small>
-          <span className="chip c-soon">Not available yet</span>
         </button>
       </div>
       <small className="muted">You can't change this later.</small>
@@ -352,7 +431,55 @@ function KindStep({ onCamera }: { onCamera: () => void }) {
   );
 }
 
+function ConnectStep() {
+  return (
+    <>
+      <h2>Connect your Oura Ring</h2>
+      <div className="card">
+        <div className="row2">
+          <span className="kico k-ring">
+            <RingIcon />
+          </span>
+          <b>Oura asks you to sign in and allow Pact.</b>
+        </div>
+        <p>Pact checks when your main sleep each night starts. Your reviewers see only Kept or Missed and that time.</p>
+      </div>
+      <small className="muted">You'll come back here to set your bedtime.</small>
+    </>
+  );
+}
+
 function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+  if (form.kind === "oura") {
+    return (
+      <>
+        <h2>Goal</h2>
+        <label className="field">
+          <span>In bed by</span>
+          <input
+            className="inp time-inp"
+            type="time"
+            value={form.inBedBy}
+            onChange={(e) => {
+              const inBedBy = e.target.value;
+              update(form.named || inBedBy === "" ? { inBedBy } : { inBedBy, name: inBedByName(inBedBy) });
+            }}
+          />
+          <small>Late is when your ring says you got into bed after this.</small>
+        </label>
+        <label className="field">
+          <span>Name</span>
+          <input
+            className="inp"
+            value={form.name}
+            placeholder="e.g. In bed by midnight"
+            onChange={(e) => update({ name: e.target.value, named: e.target.value.trim() !== "" })}
+          />
+          <small>Shown on Today.</small>
+        </label>
+      </>
+    );
+  }
   return (
     <>
       <h2>Goal</h2>
@@ -380,7 +507,16 @@ function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>
   );
 }
 
-function ScheduleStep({ days, onDays }: { days: Weekday[]; onDays: (days: Weekday[]) => void }) {
+function ScheduleStep({
+  kind,
+  days,
+  onDays,
+}: {
+  kind: EvidenceKind;
+  days: Weekday[];
+  onDays: (days: Weekday[]) => void;
+}) {
+  const oura = kind === "oura";
   const everyDay = days.length === WEEKDAYS.length;
   // Kept in week order, Monday first.
   const toggle = (day: Weekday) => onDays(WEEKDAYS.filter((d) => (d === day ? !days.includes(d) : days.includes(d))));
@@ -388,8 +524,8 @@ function ScheduleStep({ days, onDays }: { days: Weekday[]; onDays: (days: Weekda
     <>
       <h2>Schedule</h2>
       <div className="field">
-        <span>Days</span>
-        <div className="days" role="group" aria-label="Days">
+        <span>{oura ? "Nights" : "Days"}</span>
+        <div className="days" role="group" aria-label={oura ? "Nights" : "Days"}>
           {WEEKDAYS.map((day) => (
             <button
               key={day}
@@ -407,9 +543,13 @@ function ScheduleStep({ days, onDays }: { days: Weekday[]; onDays: (days: Weekda
         aria-pressed={everyDay}
         onClick={() => onDays(everyDay ? [] : [...WEEKDAYS])}
       >
-        Every day
+        {oura ? "Every night" : "Every day"}
       </button>
-      <small className="muted">You can submit on scheduled days only, until midnight.</small>
+      <small className="muted">
+        {oura
+          ? "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed."
+          : "You can submit on scheduled days only, until midnight."}
+      </small>
     </>
   );
 }
@@ -571,12 +711,14 @@ function ReviewersStep({
   friends,
   reviewerIds,
   onReviewerIds,
+  kind,
   onInvite,
   onCheckAgain,
 }: {
   friends: Friend[] | null;
   reviewerIds: string[];
   onReviewerIds: (ids: string[]) => void;
+  kind: EvidenceKind;
   onInvite: () => void;
   onCheckAgain: () => void;
 }) {
@@ -620,7 +762,11 @@ function ReviewersStep({
           </label>
         ))}
       </div>
-      <small className="muted">Any reviewer you pick can check your photos.</small>
+      <small className="muted">
+        {kind === "oura"
+          ? "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses."
+          : "Any reviewer you pick can check your photos."}
+      </small>
     </>
   );
 }
@@ -644,6 +790,7 @@ function CheckStep({
 }) {
   const [first, setFirst] = useState<FirstState>({ kind: "loading" });
   const days = form.days;
+  const inBedBy = form.kind === "oura" ? form.inBedBy : undefined;
 
   useEffect(() => {
     let current = true;
@@ -651,7 +798,7 @@ function CheckStep({
       if (current) setFirst(state);
     };
     const load = () =>
-      api.firstOccurrence({ schedule: { kind: "fixed-days", days }, editing: editing?.id }).then(
+      api.firstOccurrence({ schedule: { kind: "fixed-days", days }, inBedBy, editing: editing?.id }).then(
         (result) =>
           show(
             result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
@@ -664,7 +811,7 @@ function CheckStep({
       current = false;
       window.clearInterval(timer);
     };
-  }, [days, editing?.id]);
+  }, [days, inBedBy, editing?.id]);
 
   const recipient = recipients.find((r) => r.id === form.recipientId);
   return (
@@ -672,11 +819,12 @@ function CheckStep({
       <h2>Check it over</h2>
       <div className="card">
         <h3>{form.name.trim()}</h3>
-        <p className="muted">{form.description.trim()}</p>
+        {form.kind === "camera" && <p className="muted">{form.description.trim()}</p>}
         {recipient && (
           <TermsList
             terms={{
-              evidenceKind: editing?.evidenceKind ?? "camera",
+              evidenceKind: form.kind,
+              inBedBy: inBedBy ?? null,
               schedule: { kind: "fixed-days", days },
               penaltyCents: parseCents(form.penalty) ?? 0,
               recipient,
@@ -691,7 +839,15 @@ function CheckStep({
           {first.kind === "loaded" && (
             <>
               {" "}
-              The first one is <b>{formatDate(first.first.date)}</b>, due midnight.
+              {inBedBy ? (
+                <>
+                  The first night is <b>{formatDate(first.first.date)}</b>, in bed by {clockText(inBedBy)}.
+                </>
+              ) : (
+                <>
+                  The first one is <b>{formatDate(first.first.date)}</b>, due midnight.
+                </>
+              )}
             </>
           )}
           {editing?.editWindowClosesAt && (

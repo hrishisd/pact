@@ -993,6 +993,11 @@ textarea.inp {
   background: var(--slate-bg);
   color: var(--slate);
 }
+/* An Oura connection: grey, like the Automatic section, since it needs nothing. */
+.k-ring {
+  background: var(--sunk);
+  color: var(--muted);
+}
 
 /* A review item kind as a coloured badge with its icon, on Review. */
 .kind {
@@ -1129,3 +1134,16 @@ textarea.inp {
 }
 
 /* Excuses: Today's excuse rows and alerts (slice B adds its rules here). */
+
+/* The in-bed-by time: the phone's own time field, no wider than it needs. */
+.time-inp {
+  max-width: 170px;
+}
+/* Connect Oura is a link to the server's redirect, styled as the step's button. */
+a.btn {
+  text-decoration: none;
+  color: inherit;
+}
+a.btn.primary {
+  color: var(--accent-ink);
+}
