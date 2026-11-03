@@ -1,7 +1,13 @@
 # 08 Connect Oura and judge a bedtime pact
 
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 03
+
+**Not finished: needs checking with a real ring.** The code is built and tested on `claude/admiring-franklin-7zbf41` (not merged), but it hasn't been tried against real Oura data. To finish:
+- [ ] Set the Fly secrets `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and `OURA_TOKEN_KEY` (`openssl rand -base64 32`). Production refuses to deploy without them, so merge only once they're set.
+- [ ] Add `https://pact.hrishisd.com/api/oura/callback` as a redirect address in the Oura app.
+- [ ] Connect a real ring and record a `sleep` response. Answer the open questions under Comments (UTC offset, short `long_sleep`, `end_date`, Oura's URLs), and seed the fake from it.
+- [ ] Decide whether a failing Oura call should stop the whole tick (as now) or skip only that account's nights.
 
 Spec stories: 10, 12, 13, 14 (Oura), 35, 36 (on arrival and at 6pm), 39, 40, 93. Rules: Judging bedtime pacts, Oura polling, Oura calls stay out of the way.
 
