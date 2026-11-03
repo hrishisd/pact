@@ -7,7 +7,11 @@ import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 
-/** Gym on Mon/Wed/Fri at $5, every day Missed in the first week: $15 to Sam, the last judged Sat 00:00. */
+/**
+ * Gym on Mon/Wed/Fri at $5, every day Missed in the first week: $15 to Sam,
+ * the last judged Sat 00:00. It goes on being Missed after that: each week
+ * adds $15 more.
+ */
 async function missedWeek(s: Scenario) {
   const setup = await ownerWithReviewers(s);
   const gym = await setup.createPact("Gym", MON_WED_FRI);
@@ -41,6 +45,8 @@ describe("Wednesday bills", () => {
     const ledger = owner.ledger(sam.id);
     if (!ledger.ok) throw new Error(ledger.reason);
     expect(ledger.ledger.history.map((entry) => entry.kind === "penalty" && entry.bill)).toEqual([
+      // Monday+1's, judged Tuesday+1, can still be excused.
+      { kind: "next-bill", billedOn: "2026-01-21" },
       { kind: "on-bill", billedOn: "2026-01-14", dueAt: s.at("Wed+2 18:00") },
       { kind: "on-bill", billedOn: "2026-01-14", dueAt: s.at("Wed+2 18:00") },
       { kind: "on-bill", billedOn: "2026-01-14", dueAt: s.at("Wed+2 18:00") },
@@ -68,8 +74,10 @@ describe("Wednesday bills", () => {
     await s.advanceTo("Wed+1 18:00");
     // Only the first Monday's $5 is billed.
     expect(owner.ledgers()[0]!.billDue).toEqual({ amountCents: 500, dueAt: s.at("Wed+2 18:00") });
+    // Monday+1's goes on the next one; Monday+2's, judged Tuesday+2, waits again.
+    await s.advanceTo("Tue+2 00:00");
     await s.advanceTo("Wed+2 18:00");
-    expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $5 to Sam", "New bill: $10 to Sam"]);
+    expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $5 to Sam", "New bill: $5 to Sam"]);
   });
 
   test("a held penalty released by a rejected excuse goes on the next bill; the earlier bill doesn't change", async () => {
@@ -89,8 +97,20 @@ describe("Wednesday bills", () => {
     const friday = ledger.ledger.history.find((e) => e.kind === "penalty" && e.occurrenceDate === "2026-01-09");
     expect(friday).toMatchObject({ bill: { kind: "next-bill", billedOn: "2026-01-21" } });
 
+    // Friday's $5 joins the second week's $15.
     await s.advanceTo("Wed+2 18:00");
-    expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $10 to Sam", "New bill: $5 to Sam"]);
+    expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $10 to Sam", "New bill: $20 to Sam"]);
+    const after = owner.ledger(sam.id);
+    if (!after.ok) throw new Error(after.reason);
+    const billedOn = (date: string) => {
+      const entry = after.ledger.history.find((e) => e.kind === "penalty" && e.occurrenceDate === date);
+      return entry?.kind === "penalty" && entry.bill?.kind === "on-bill" ? entry.bill.billedOn : null;
+    };
+    expect([billedOn("2026-01-05"), billedOn("2026-01-07"), billedOn("2026-01-09")]).toEqual([
+      "2026-01-14",
+      "2026-01-14",
+      "2026-01-21",
+    ]);
   });
 
   test("no penalties, no bill and no notification", async () => {
@@ -99,7 +119,7 @@ describe("Wednesday bills", () => {
     await createPact("Gym", ["sun"]);
     await s.advanceTo("Sun 12:00");
     await owner.submitEvidence(owner.pacts()[0]!.id, [photo()]);
-    await s.advanceTo("Wed+2 18:00");
+    await s.advanceTo("Wed+1 18:00");
     expect(bills(s, owner.id)).toEqual([]);
   });
 
@@ -107,8 +127,12 @@ describe("Wednesday bills", () => {
     const s = scenario();
     const { owner, reviewer } = await missedWeek(s);
     await s.advanceTo("Thu+2 09:00");
-    expect(bills(s, owner.id)).toHaveLength(1);
-    expect(owner.ledgers()[0]).toMatchObject({ overdueCents: 1500, billDue: null });
+    // Wednesday+1's bill, now overdue, and Wednesday+2's for the second week.
+    expect(bills(s, owner.id)).toHaveLength(2);
+    expect(owner.ledgers()[0]).toMatchObject({
+      overdueCents: 1500,
+      billDue: { amountCents: 1500, dueAt: s.at("Wed+3 18:00") },
+    });
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "overdue-bill")).toHaveLength(1);
     expect(s.notifier.sentTo(reviewer).filter((n) => n.kind === "overdue-bill")).toHaveLength(1);
   });
@@ -119,7 +143,12 @@ describe("Wednesday bills", () => {
     const paid = await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
     await reviewer.decide(paid, { kind: "approve" });
     await s.advanceTo("Wed+2 18:00");
-    expect(owner.ledgers()[0]).toMatchObject({ overdueCents: 0, billDue: null });
+    // Nothing to pay on Wednesday+1's bill, so only the second week's is announced.
+    expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $15 to Sam"]);
+    expect(owner.ledgers()[0]).toMatchObject({
+      overdueCents: 0,
+      billDue: { amountCents: 1500, dueAt: s.at("Wed+3 18:00") },
+    });
     expect(owner.today().alerts).toEqual([]);
   });
 });
@@ -151,7 +180,8 @@ describe("Today and the bill", () => {
     await s.advanceTo("Wed+1 18:00");
     await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
     const today = owner.today();
-    expect(today.sections.flatMap((section) => (section.kind === "to-do" ? section.cards : []))).toEqual([]);
+    const cards = today.sections.flatMap((section) => (section.kind === "to-do" ? section.cards : []));
+    expect(cards.filter((card) => card.kind === "bill")).toEqual([]);
     expect(owner.ledgers()[0]!.billDue).toBeNull();
   });
 });

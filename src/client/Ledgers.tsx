@@ -1,8 +1,9 @@
-// The Ledgers tab: one card per recipient, with what's owed and Record
+// The Ledgers tab: one card per recipient, with what's owed, a status line
+// for an overdue bill, a bill due or a payment awaiting approval, and Record
 // payment, each opening its ledger's page: the penalties Missed occurrences
 // added (and who rejected the evidence when that's why, or that an excuse
-// waiting for approval holds them), the payments, and which penalties those
-// have paid. Bills come later.
+// waiting for approval holds them), the bill each is on or goes on, the
+// payments, and which penalties those have paid.
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
@@ -12,10 +13,17 @@ import { formatDate, formatDay, money } from "./format.ts";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
 import { Empty, useLoad } from "./ui.tsx";
 
-export function Ledgers({ onOpenLedger }: { onOpenLedger: (recipientId: string, name: string) => void }) {
+export function Ledgers({
+  timezone,
+  onOpenLedger,
+}: {
+  /** The profile's timezone, for when a bill is due. */
+  timezone: string;
+  onOpenLedger: (recipientId: string, name: string) => void;
+}) {
   const { data: ledgers, failed, reload } = useLoad(api.ledgers);
   // The ledger whose Record a payment sheet is open, outside the cards.
-  const [paying, setPaying] = useState<LedgerSummary | null>(null);
+  const [paying, setPaying] = useState<Json<LedgerSummary> | null>(null);
 
   if (failed) {
     return (
@@ -34,7 +42,7 @@ export function Ledgers({ onOpenLedger }: { onOpenLedger: (recipientId: string, 
             <button className="rowbtn" onClick={() => onOpenLedger(ledger.recipientId, ledger.name)}>
               <span className="rt">
                 <b>{ledger.name}</b>
-                <Summary ledger={ledger} />
+                <Summary ledger={ledger} timezone={timezone} />
               </span>
             </button>
             <RecordPaymentButton ledger={ledger} onRecord={() => setPaying(ledger)} />
@@ -63,7 +71,7 @@ export function LedgerPage({
   onOpenPact,
 }: {
   recipientId: string;
-  /** The profile's timezone, for when payments were recorded. */
+  /** The profile's timezone, for when payments were recorded and bills are due. */
   timezone: string;
   onLoaded: (recipientId: string, name: string) => void;
   onOpenPact: (pactId: string, name: string) => void;
@@ -89,7 +97,7 @@ export function LedgerPage({
   return (
     <>
       <section className="card">
-        <Summary ledger={summary} />
+        <Summary ledger={summary} timezone={timezone} />
         <RecordPaymentButton ledger={summary} onRecord={() => setPaying(true)} />
       </section>
       <section className="stack">
@@ -121,8 +129,9 @@ export function LedgerPage({
 }
 
 /**
- * A penalty in the history: its pact, the day Missed, how much payments have
- * paid (or that an excuse holds it, so it isn't owed), and who rejected the evidence.
+ * A penalty in the history: its pact, the day Missed, the bill it's on or
+ * goes on, how much payments have paid (or that an excuse holds it, so it
+ * isn't owed), and who rejected the evidence.
  */
 function PenaltyRow({
   penalty,
@@ -139,6 +148,8 @@ function PenaltyRow({
         </button>
         <small>
           Missed {formatDate(penalty.occurrenceDate)}
+          {penalty.bill?.kind === "on-bill" && ` · On the ${formatDate(penalty.bill.billedOn)} bill`}
+          {penalty.bill?.kind === "next-bill" && ` · Goes on the ${formatDate(penalty.bill.billedOn)} bill`}
           {penalty.held ? (
             " · Held while an excuse waits for approval"
           ) : penalty.paidCents === penalty.amountCents ? (
@@ -193,7 +204,7 @@ function PaymentRow({ payment, timezone }: { payment: Json<LedgerPayment>; timez
 }
 
 /** Record payment, opening its sheet. It's off while nothing more may be paid. */
-function RecordPaymentButton({ ledger, onRecord }: { ledger: LedgerSummary; onRecord: () => void }) {
+function RecordPaymentButton({ ledger, onRecord }: { ledger: Json<LedgerSummary>; onRecord: () => void }) {
   return (
     <button className="btn primary sm self-start record-pay" disabled={ledger.payableCents <= 0} onClick={onRecord}>
       Record payment
@@ -201,21 +212,39 @@ function RecordPaymentButton({ ledger, onRecord }: { ledger: LedgerSummary; onRe
   );
 }
 
-/** The big owed amount, then a status line while payments await approval, then lifetime paid. */
-function Summary({ ledger }: { ledger: LedgerSummary }) {
+/**
+ * The big owed amount, then one status line only when needed (overdue, else
+ * a bill due, else payments awaiting approval), then lifetime paid.
+ */
+function Summary({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezone: string }) {
   return (
     <span className="ledger-sum">
       <span className="bigmoney">{money(ledger.owedCents)}</span>
       <span className="meta">owed</span>
-      {ledger.awaitingCount === 1 && (
-        <span className="meta">{money(ledger.awaitingCents)} payment awaiting approval</span>
-      )}
-      {ledger.awaitingCount > 1 && (
-        <span className="meta">
-          {ledger.awaitingCount} payments awaiting approval · {money(ledger.awaitingCents)}
-        </span>
-      )}
+      <StatusLine ledger={ledger} timezone={timezone} />
       <span className="meta">Lifetime paid {money(ledger.paidCents)}</span>
     </span>
   );
+}
+
+function StatusLine({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezone: string }) {
+  if (ledger.overdueCents > 0) return <span className="meta pen">{money(ledger.overdueCents)} overdue</span>;
+  if (ledger.billDue) {
+    return (
+      <span className="meta">
+        {money(ledger.billDue.amountCents)} bill due {formatDay(ledger.billDue.dueAt, timezone)}
+      </span>
+    );
+  }
+  if (ledger.awaitingCount === 1) {
+    return <span className="meta">{money(ledger.awaitingCents)} payment awaiting approval</span>;
+  }
+  if (ledger.awaitingCount > 1) {
+    return (
+      <span className="meta">
+        {ledger.awaitingCount} payments awaiting approval · {money(ledger.awaitingCents)}
+      </span>
+    );
+  }
+  return null;
 }

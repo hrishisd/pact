@@ -140,6 +140,8 @@ describe("judging at the end of a scheduled day", () => {
         awaitingCents: 0,
         awaitingCount: 0,
         paidCents: 0,
+        overdueCents: 0,
+        billDue: null,
       },
     ]);
     expect(missedOn(owner.today()).map((card) => card.pactId)).toEqual([gym, run]);
@@ -257,12 +259,9 @@ describe("Today's order", () => {
 
     const today = owner.today();
     expect(today.sections.map((section) => section.kind)).toEqual(["to-do", "missed", "coming-up"]);
-    expect(today.sections.flatMap((section) => section.cards.map((card) => card.pactId))).toEqual([
-      gym,
-      gym,
-      run,
-      swim,
-    ]);
+    expect(
+      today.sections.flatMap((section) => section.cards.map((card) => ("pactId" in card ? card.pactId : null))),
+    ).toEqual([gym, gym, run, swim]);
     expect(today.waiting).toEqual([expect.objectContaining({ pactId: run })]);
   });
 });

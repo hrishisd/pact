@@ -276,7 +276,7 @@ export type DecideRequest = ReviewDecision;
 export type DecideResponse = DecideResult;
 
 /** GET /api/ledgers: the Ledgers tab, one per recipient, sorted by name. */
-export type LedgersResponse = LedgerSummary[];
+export type LedgersResponse = Json<LedgerSummary>[];
 
 /** GET /api/ledgers/:recipientId: a ledger's page. Another account's recipient, or none, is a 200 refusal. */
 export type LedgerResponse = Json<LedgerResult>;

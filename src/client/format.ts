@@ -1,6 +1,6 @@
 // How the client writes money, schedules, dates and time left.
 
-import { formatDay } from "../shared/format.ts";
+import { clockText, formatDay } from "../shared/format.ts";
 
 export { clockText, formatDate, formatDay, inBedByName, money, scheduleText } from "../shared/format.ts";
 
@@ -31,6 +31,23 @@ export function formatDayTime(instant: string, timeZone: string): string {
   );
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
   return `${formatDay(instant, timeZone)}, ${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
+}
+
+/**
+ * An instant, as an ISO string, as its day and time in `timeZone` (the
+ * profile's), the way bills are due: "Wed Jan 21 at 6pm", or "at 6:30pm"
+ * off the hour.
+ */
+export function formatDueAt(instant: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  const clock = clockText(`${part("hour")}:${part("minute")}`);
+  return `${formatDay(instant, timeZone)} at ${clock.replace(":00", "")}`;
 }
 
 /** Time left as "16h 19m", or "3d 4h" from 48 hours up. Never negative. */

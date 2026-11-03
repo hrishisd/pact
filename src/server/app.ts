@@ -553,7 +553,7 @@ export function createApp({
   });
 
   app.get(API_PATHS.ledgers, (c) => {
-    const body: LedgersResponse = core.as(c.get("accountId")).ledgers();
+    const body: LedgersResponse = json(core.as(c.get("accountId")).ledgers());
     return c.json(body);
   });
 

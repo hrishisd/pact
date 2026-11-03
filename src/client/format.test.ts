@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from "vitest";
-import { clockText, inBedByName, parseCents } from "./format.ts";
+import { clockText, formatDueAt, inBedByName, parseCents } from "./format.ts";
 
 describe("parseCents", () => {
   it.each([
@@ -30,5 +30,16 @@ describe("bedtimes", () => {
   ])("%s reads %s, and names the pact %s", (time, clock, name) => {
     expect(clockText(time)).toBe(clock);
     expect(inBedByName(time)).toBe(name);
+  });
+});
+
+describe("formatDueAt", () => {
+  test.each([
+    ["2026-01-21T23:00:00.000Z", "America/New_York", "Wed Jan 21 at 6pm"],
+    ["2026-01-21T23:30:00.000Z", "America/New_York", "Wed Jan 21 at 6:30pm"],
+    ["2026-01-22T05:00:00.000Z", "America/New_York", "Thu Jan 22 at 12am"],
+    ["2026-01-21T05:00:00.000Z", "Pacific/Auckland", "Wed Jan 21 at 6pm"],
+  ])("%s in %s reads %s", (instant, timeZone, text) => {
+    expect(formatDueAt(instant, timeZone)).toBe(text);
   });
 });

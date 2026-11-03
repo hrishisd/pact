@@ -306,6 +306,7 @@ function Shell({
         {!page && tab === "today" && <NotificationsAlert push={push} onSetUp={openNotifications} />}
         {!page && tab === "today" && (
           <Today
+            timezone={profile.timezone}
             onOpenPact={openPact}
             onOpenLedger={openLedger}
             onOpenExcuse={openExcuse}
@@ -327,7 +328,7 @@ function Shell({
         {page?.kind === "excuse" && (
           <ExcusePage key={page.id} excuseId={page.id} timezone={profile.timezone} onOpenPact={openPact} />
         )}
-        {!page && tab === "ledgers" && <Ledgers onOpenLedger={openLedger} />}
+        {!page && tab === "ledgers" && <Ledgers timezone={profile.timezone} onOpenLedger={openLedger} />}
       </main>
       <nav className="tabbar" aria-label="Main">
         {TABS.map(({ id, label, Icon }) => (

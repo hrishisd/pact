@@ -15,6 +15,8 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
   "review-item": { label: "New review item", hint: "Evidence or a payment is waiting for you" },
   decision: { label: "Decision", hint: "A reviewer approved or rejected something of yours" },
   "missed-occurrence": { label: "Missed occurrence", hint: "One of your pacts was judged Missed" },
+  "new-bill": { label: "New bill", hint: "Your Wednesday bill to a recipient is ready" },
+  "overdue-bill": { label: "Overdue bill", hint: "A bill of yours is overdue, or one of a friend's you review" },
 };
 
 function alertWasCleared(): boolean {

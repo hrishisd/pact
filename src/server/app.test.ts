@@ -648,6 +648,7 @@ describe("pacts", () => {
           kind: "to-do",
           cards: [
             {
+              kind: "evidence",
               pactId,
               name: "Gym",
               penaltyCents: 500,
@@ -1200,6 +1201,8 @@ describe("ledgers", () => {
       awaitingCents: 0,
       awaitingCount: 0,
       paidCents: 0,
+      overdueCents: 0,
+      billDue: null,
     };
     expect(ledgers).toEqual({ status: 200, body: [summary] satisfies LedgersResponse });
     const ledger = await s.api(API_PATHS.ledger(pact.recipientId), { cookie: owner.cookie });
@@ -1220,6 +1223,7 @@ describe("ledgers", () => {
               addedAt: "2026-01-06T05:00:00.000Z",
               paidCents: 0,
               held: false,
+              bill: { kind: "next-bill", billedOn: "2026-01-14" },
             },
           ],
         },
@@ -1289,6 +1293,8 @@ describe("payments", () => {
         awaitingCents: 1000,
         awaitingCount: 1,
         paidCents: 0,
+        overdueCents: 0,
+        billDue: null,
       },
     ] satisfies LedgersResponse);
 
@@ -1342,6 +1348,8 @@ describe("payments", () => {
         awaitingCents: 0,
         awaitingCount: 0,
         paidCents: 1000,
+        overdueCents: 0,
+        billDue: null,
       },
     ] satisfies LedgersResponse);
   });
@@ -1693,6 +1701,8 @@ describe("notifications", () => {
         { setting: "review-item", enabled: true },
         { setting: "decision", enabled: false },
         { setting: "missed-occurrence", enabled: true },
+        { setting: "new-bill", enabled: true },
+        { setting: "overdue-bill", enabled: true },
       ],
     });
   });

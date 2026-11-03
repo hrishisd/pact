@@ -64,6 +64,7 @@ describe("Today", () => {
           kind: "to-do",
           cards: [
             {
+              kind: "evidence",
               pactId: gym,
               name: "Gym",
               penaltyCents: 500,
@@ -104,6 +105,7 @@ describe("Today", () => {
         kind: "to-do",
         cards: [
           {
+            kind: "evidence",
             pactId: stretch,
             name: "Stretch",
             penaltyCents: 500,
@@ -121,6 +123,7 @@ describe("Today", () => {
         kind: "to-do",
         cards: [
           {
+            kind: "evidence",
             pactId: gym,
             name: "Gym",
             penaltyCents: 500,
@@ -129,6 +132,7 @@ describe("Today", () => {
             dueAt: s.at("Thu 00:00"),
           },
           {
+            kind: "evidence",
             pactId: stretch,
             name: "Stretch",
             penaltyCents: 500,
@@ -155,6 +159,7 @@ describe("Today", () => {
         // Midnight ending Tuesday in Auckland.
         cards: [
           {
+            kind: "evidence",
             pactId: tuesday,
             name: "Tuesday pact",
             penaltyCents: 500,

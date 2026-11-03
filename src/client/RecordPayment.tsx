@@ -3,6 +3,7 @@
 // it doesn't lower what's owed.
 
 import { useEffect, useRef, useState } from "react";
+import type { Json } from "../shared/api.ts";
 import type { LedgerSummary, RecordPaymentRefusal } from "../shared/types.ts";
 import { api, uploadFailureText } from "./api.ts";
 import { centsInputText, money, parseCents } from "./format.ts";
@@ -10,22 +11,23 @@ import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { Sheet } from "./ui.tsx";
 
 /**
- * The Record a payment sheet for one ledger. The amount starts at the most
- * it may be, the ledger's `payableCents`.
+ * The Record a payment sheet for one ledger. The amount starts at the open
+ * bills' amount (overdue and due), or with no open bill at the most it may
+ * be, the ledger's `payableCents`.
  */
 export function RecordPaymentSheet({
   ledger,
   onClose,
   onSent,
 }: {
-  ledger: LedgerSummary;
+  ledger: Json<LedgerSummary>;
   onClose: () => void;
   /** After the payment was recorded: the sheet's owner closes it and reloads. */
   onSent: () => void;
 }) {
   const { payableCents } = ledger;
   const input = useRef<HTMLInputElement>(null);
-  const [amount, setAmount] = useState(() => centsInputText(payableCents));
+  const [amount, setAmount] = useState(() => centsInputText(startingCents(ledger)));
   const [screenshot, setScreenshot] = useState<ShrunkPhoto | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -153,7 +155,13 @@ const REFUSAL_TEXT: Record<Exclude<RecordPaymentRefusal, "payment-exceeds-owed">
   "no-screenshot": "Choose a screenshot of the payment.",
 };
 
+/** What the amount starts at: the open bills' amount, or everything that may be paid when no bill is open. */
+function startingCents(ledger: Json<LedgerSummary>): number {
+  const billsCents = ledger.overdueCents + (ledger.billDue?.amountCents ?? 0);
+  return billsCents > 0 ? Math.min(billsCents, ledger.payableCents) : ledger.payableCents;
+}
+
 /** An amount over the ledger's `payableCents`: more than owed, or, with payments awaiting approval, more than what's left. */
-function overLimitText(ledger: LedgerSummary): string {
+function overLimitText(ledger: Json<LedgerSummary>): string {
   return ledger.awaitingCents === 0 ? "That's more than you owe." : `That's more than ${money(ledger.payableCents)}.`;
 }
