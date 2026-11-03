@@ -17,6 +17,9 @@ export const TERM_LABELS: Record<Term, string> = {
   description: "Photo shows",
   "in-bed-by": "In bed by",
   schedule: "Days",
+  "due-by": "Due by",
+  "start-date": "Starts",
+  "end-date": "Ends",
   penalty: "Penalty",
   recipient: "Recipient",
   reviewers: "Reviewers",
@@ -25,8 +28,8 @@ export const TERM_LABELS: Record<Term, string> = {
 /** The terms a pact of this kind lists, in the Request change order. */
 export function termsOfKind(current: Pick<Current, "evidenceKind">): Term[] {
   return current.evidenceKind === "oura"
-    ? ["name", "in-bed-by", "schedule", "penalty", "recipient", "reviewers"]
-    : ["name", "description", "schedule", "penalty", "recipient", "reviewers"];
+    ? ["name", "in-bed-by", "schedule", "start-date", "end-date", "penalty", "recipient", "reviewers"]
+    : ["name", "description", "schedule", "due-by", "start-date", "end-date", "penalty", "recipient", "reviewers"];
 }
 
 /** A term's value in the pact as it stands. */
@@ -40,6 +43,12 @@ export function currentValue(term: Term, current: Current): string {
       return current.inBedBy === null ? "—" : clockText(current.inBedBy);
     case "schedule":
       return scheduleText(current.schedule);
+    case "due-by":
+      return dueByText(current.dueBy);
+    case "start-date":
+      return dateText(current.startDate, "No start date");
+    case "end-date":
+      return dateText(current.endDate, "No end date");
     case "penalty":
       return `${money(current.penaltyCents)} per miss`;
     case "recipient":
@@ -47,6 +56,15 @@ export function currentValue(term: Term, current: Current): string {
     case "reviewers":
       return names(current.reviewers);
   }
+}
+
+/** A due-by time, "9:00pm", or "Midnight" without one. */
+function dueByText(dueBy: string | null): string {
+  return dueBy === null ? "Midnight" : clockText(dueBy);
+}
+
+function dateText(date: string | null, none: string): string {
+  return date === null ? none : formatDate(date);
 }
 
 /** A changed term's old or new value. */
@@ -59,6 +77,12 @@ export function changeValue(change: Change, side: "before" | "after"): string {
       return clockText(change[side]);
     case "schedule":
       return scheduleText(change[side]);
+    case "due-by":
+      return dueByText(change[side]);
+    case "start-date":
+      return dateText(change[side], "No start date");
+    case "end-date":
+      return dateText(change[side], "No end date");
     case "penalty":
       return `${money(change[side])} per miss`;
     case "recipient":
@@ -86,6 +110,12 @@ export function effectText(change: Change): string {
       return "Needs approval: a later time";
     case "schedule":
       return "Needs approval: fewer days";
+    case "due-by":
+      return change.after === null ? "Needs approval: due at midnight instead" : "Needs approval: a later time";
+    case "start-date":
+      return change.before === null ? "Needs approval: adding a start date" : "Needs approval: a later start";
+    case "end-date":
+      return change.before === null ? "Needs approval: adding an end date" : "Needs approval: an earlier end";
     case "penalty":
       return "Needs approval: a lower penalty";
     case "recipient":

@@ -1,4 +1,5 @@
-// The step-by-step pact form: evidence kind, goal, schedule, penalty, reviewers,
+// The step-by-step pact form: evidence kind, goal, schedule (with the optional
+// due-by time, start date and end date), penalty, reviewers,
 // then a check before Create pact. Picking Oura Ring with no connection adds
 // a Connect step, which leaves for Oura's page; Oura's callback brings the
 // browser back here (`?oura=connected`) at Goal. Editing a pact in its edit
@@ -66,6 +67,13 @@ export interface Form {
   name: string;
   description: string;
   days: Weekday[];
+  /** Camera only: whether evidence is due by a set time instead of midnight. */
+  dueByOn: boolean;
+  /** "HH:MM" as the time field gives it, or "" until picked. */
+  dueBy: string;
+  /** "YYYY-MM-DD" as the date field gives it, or "" for none. */
+  startDate: string;
+  endDate: string;
   /** As typed, in dollars: "5" or "2.50". */
   penalty: string;
   recipientId: string | null;
@@ -79,6 +87,10 @@ const EMPTY_FORM: Form = {
   name: "",
   description: "",
   days: [],
+  dueByOn: false,
+  dueBy: "",
+  startDate: "",
+  endDate: "",
   penalty: "",
   recipientId: null,
   reviewerIds: [],
@@ -87,7 +99,17 @@ const EMPTY_FORM: Form = {
 export function formOf(
   pact: Pick<
     Pact,
-    "evidenceKind" | "inBedBy" | "name" | "description" | "schedule" | "penaltyCents" | "recipient" | "reviewers"
+    | "evidenceKind"
+    | "inBedBy"
+    | "dueBy"
+    | "startDate"
+    | "endDate"
+    | "name"
+    | "description"
+    | "schedule"
+    | "penaltyCents"
+    | "recipient"
+    | "reviewers"
   >,
 ): Form {
   return {
@@ -97,6 +119,10 @@ export function formOf(
     name: pact.name,
     description: pact.description,
     days: pact.schedule.days,
+    dueByOn: pact.dueBy !== null,
+    dueBy: pact.dueBy ?? "",
+    startDate: pact.startDate ?? "",
+    endDate: pact.endDate ?? "",
     penalty: centsInputText(pact.penaltyCents),
     recipientId: pact.recipient.id,
     reviewerIds: pact.reviewers.map((reviewer) => reviewer.id),
@@ -115,6 +141,10 @@ export const PROBLEMS: Record<Problem, string> = {
   "blank-name": "Give it a name.",
   "blank-description": "Say what your photo will show.",
   "no-days": "Pick at least one day.",
+  "invalid-due-by": "Pick a time before midnight, or turn off Due by a set time.",
+  "invalid-start-date": "Pick a start date, or clear it.",
+  "invalid-end-date": "Pick an end date, or clear it.",
+  "end-date-too-early": "The end date is before the first day. Pick a later one.",
   "no-amount": "Enter an amount, like 5 or 2.50.",
   "invalid-penalty": "Set a penalty above $0.",
   "no-recipient": "Pick a recipient.",
@@ -138,7 +168,8 @@ function stepProblem(step: Step, form: Form): Problem | null {
       if (form.description.trim() === "") return "blank-description";
       return null;
     case "schedule":
-      return form.days.length === 0 ? "no-days" : null;
+      if (form.days.length === 0) return "no-days";
+      return form.kind === "camera" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
     case "penalty": {
       const penaltyCents = parseCents(form.penalty);
       if (penaltyCents === null) return "no-amount";
@@ -255,6 +286,7 @@ export function CreatePact({
         name: form.name.trim(),
         description: form.kind === "oura" ? "" : form.description.trim(),
         ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
+        ...optionalTimes(form),
         schedule: { kind: "fixed-days", days: form.days },
         penaltyCents,
         recipientId,
@@ -296,7 +328,7 @@ export function CreatePact({
       body = <GoalStep form={form} update={update} />;
       break;
     case "schedule":
-      body = <ScheduleStep kind={form.kind} days={form.days} onDays={(days) => update({ days })} />;
+      body = <ScheduleStep form={form} update={update} />;
       break;
     case "penalty":
       body = (
@@ -512,19 +544,23 @@ export function GoalStep({ form, update }: { form: Form; update: (change: Partia
   );
 }
 
-export function ScheduleStep({
-  kind,
-  days,
-  onDays,
-}: {
-  kind: EvidenceKind;
-  days: Weekday[];
-  onDays: (days: Weekday[]) => void;
-}) {
-  const oura = kind === "oura";
+/** The form's optional times as the core takes them: each left out when it isn't set. */
+export function optionalTimes(form: Form): { dueBy?: string; startDate?: string; endDate?: string } {
+  return {
+    ...(form.kind === "camera" && form.dueByOn && { dueBy: form.dueBy }),
+    ...(form.startDate !== "" && { startDate: form.startDate }),
+    ...(form.endDate !== "" && { endDate: form.endDate }),
+  };
+}
+
+export function ScheduleStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+  const { days } = form;
+  const oura = form.kind === "oura";
   const everyDay = days.length === WEEKDAYS.length;
+  const onDays = (days: Weekday[]) => update({ days });
   // Kept in week order, Monday first.
   const toggle = (day: Weekday) => onDays(WEEKDAYS.filter((d) => (d === day ? !days.includes(d) : days.includes(d))));
+  const until = form.dueByOn && form.dueBy !== "" ? clockText(form.dueBy) : "midnight";
   return (
     <>
       <h2>Schedule</h2>
@@ -553,7 +589,62 @@ export function ScheduleStep({
       <small className="muted">
         {oura
           ? "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed."
-          : "You can submit on scheduled days only, until midnight."}
+          : `You can submit on scheduled days only, until ${until}.`}
+      </small>
+      {!oura && (
+        <>
+          <div className="list">
+            <label className="switch-row">
+              <span className="rt">
+                <b>Due by a set time</b>
+                <small>Instead of midnight</small>
+              </span>
+              <input
+                className="switch"
+                type="checkbox"
+                role="switch"
+                checked={form.dueByOn}
+                onChange={(e) => update({ dueByOn: e.target.checked })}
+              />
+            </label>
+          </div>
+          {form.dueByOn && (
+            <label className="field">
+              <span>Due by</span>
+              <input
+                className="inp time-inp"
+                type="time"
+                value={form.dueBy}
+                onChange={(e) => update({ dueBy: e.target.value })}
+              />
+            </label>
+          )}
+        </>
+      )}
+      <div className="dates">
+        <label className="field">
+          <span>Start (optional)</span>
+          <input
+            className="inp"
+            type="date"
+            value={form.startDate}
+            onChange={(e) => update({ startDate: e.target.value })}
+          />
+        </label>
+        <label className="field">
+          <span>End (optional)</span>
+          <input
+            className="inp"
+            type="date"
+            value={form.endDate}
+            min={form.startDate || undefined}
+            onChange={(e) => update({ endDate: e.target.value })}
+          />
+        </label>
+      </div>
+      <small className="muted">
+        It starts with the first {oura ? "night" : "day"} that's due at least an hour after you create it, or on the
+        start date if that's later. After the end date it makes no more {oura ? "nights" : "days"} and is Ended.
       </small>
     </>
   );
@@ -800,6 +891,7 @@ function CheckStep({
   const [first, setFirst] = useState<FirstState>({ kind: "loading" });
   const days = form.days;
   const inBedBy = form.kind === "oura" ? form.inBedBy : undefined;
+  const { dueBy, startDate, endDate } = optionalTimes(form);
 
   useEffect(() => {
     let current = true;
@@ -807,20 +899,22 @@ function CheckStep({
       if (current) setFirst(state);
     };
     const load = () =>
-      api.firstOccurrence({ schedule: { kind: "fixed-days", days }, inBedBy, editing: editing?.id }).then(
-        (result) =>
-          show(
-            result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
-          ),
-        (error: unknown) => show({ kind: "failed", error }),
-      );
+      api
+        .firstOccurrence({ schedule: { kind: "fixed-days", days }, inBedBy, dueBy, startDate, editing: editing?.id })
+        .then(
+          (result) =>
+            show(
+              result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
+            ),
+          (error: unknown) => show({ kind: "failed", error }),
+        );
     void load();
     const timer = window.setInterval(() => void load(), FIRST_OCCURRENCE_REFRESH_MS);
     return () => {
       current = false;
       window.clearInterval(timer);
     };
-  }, [days, inBedBy, editing?.id]);
+  }, [days, inBedBy, dueBy, startDate, editing?.id]);
 
   const recipient = recipients.find((r) => r.id === form.recipientId);
   return (
@@ -834,6 +928,9 @@ function CheckStep({
             terms={{
               evidenceKind: form.kind,
               inBedBy: inBedBy ?? null,
+              dueBy: dueBy ?? null,
+              startDate: startDate ?? null,
+              endDate: endDate ?? null,
               schedule: { kind: "fixed-days", days },
               penaltyCents: parseCents(form.penalty) ?? 0,
               recipient,
@@ -854,7 +951,7 @@ function CheckStep({
                 </>
               ) : (
                 <>
-                  The first one is <b>{formatDate(first.first.date)}</b>, due midnight.
+                  The first one is <b>{formatDate(first.first.date)}</b>, due {dueBy ? clockText(dueBy) : "midnight"}.
                 </>
               )}
             </>

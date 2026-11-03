@@ -25,7 +25,16 @@ import {
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
-import { formOf, GoalStep, PenaltyStep, PROBLEMS, ReviewersStep, ScheduleStep, type Form } from "./CreatePact.tsx";
+import {
+  formOf,
+  GoalStep,
+  optionalTimes,
+  PenaltyStep,
+  PROBLEMS,
+  ReviewersStep,
+  ScheduleStep,
+  type Form,
+} from "./CreatePact.tsx";
 import { formatDate, money, parseCents } from "./format.ts";
 import { Empty, Sheet, useLoad } from "./ui.tsx";
 
@@ -38,6 +47,9 @@ const STEP_OF: Record<Term, Step> = {
   description: "goal",
   "in-bed-by": "goal",
   schedule: "schedule",
+  "due-by": "schedule",
+  "start-date": "schedule",
+  "end-date": "schedule",
   penalty: "penalty",
   recipient: "penalty",
   reviewers: "reviewers",
@@ -56,6 +68,7 @@ const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = 
   "pact-ended": "This pact has Ended.",
   "change-request-waiting":
     "A change request is waiting. Until it's decided or you withdraw it, only the name and new reviewers can change.",
+  "pact-started": "It has already started, so the start date can't change.",
   "nothing-changed": "Nothing changed yet.",
 };
 
@@ -98,6 +111,7 @@ function changeOf(form: Form, note: string): PactChange | { problem: "no-amount"
     name: form.name.trim(),
     description: form.kind === "oura" ? "" : form.description.trim(),
     ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
+    ...optionalTimes(form),
     schedule: { kind: "fixed-days", days: form.days },
     penaltyCents,
     recipientId: form.recipientId,
@@ -182,7 +196,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
         body = <GoalStep form={form} update={update} />;
         break;
       case "schedule":
-        body = <ScheduleStep kind={form.kind} days={form.days} onDays={(days) => update({ days })} />;
+        body = <ScheduleStep form={form} update={update} />;
         break;
       case "penalty":
         body = (

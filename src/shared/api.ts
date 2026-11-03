@@ -254,6 +254,10 @@ export interface FirstOccurrenceRequest {
   schedule: Schedule;
   /** Oura Ring only: the in-bed-by time, "HH:MM". */
   inBedBy?: string;
+  /** Camera only: the due-by time, "HH:MM". */
+  dueBy?: string;
+  /** The start date, "YYYY-MM-DD". */
+  startDate?: string;
   /** The pact being edited: the rule then counts from when it was created. */
   editing?: string;
 }

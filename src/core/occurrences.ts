@@ -10,7 +10,7 @@ export interface Occurrence {
   /** Names the occurrence (with its pact): the day its period starts, in the owner's timezone. */
   date: LocalDate;
   opensAt: Date;
-  /** Its due time: midnight ending its day, or a bedtime night's in-bed-by time. */
+  /** Its due time: midnight ending its day, its due-by time that day, or a bedtime night's in-bed-by time. */
   dueAt: Date;
   /**
    * The latest it's judged, with no evidence: its due time, or for a bedtime
@@ -26,6 +26,18 @@ export interface OccurrenceTerms {
   firstOccurrence: LocalDate;
   /** Bedtime pacts only: the in-bed-by time, "HH:MM". */
   inBedBy?: string | null;
+  /** Camera pacts only, optional: the due-by time, "HH:MM", each day's due time instead of midnight. */
+  dueBy?: string | null;
+  /** Optional: the last day the pact has an occurrence on. */
+  endDate?: LocalDate | null;
+}
+
+/** The optional times a new pact's first occurrence depends on. */
+export interface NewOccurrenceOptions {
+  inBedBy?: string | null;
+  dueBy?: string | null;
+  /** The first occurrence is on this day or later. */
+  startDate?: LocalDate | null;
 }
 
 export type NewOccurrenceTermsResult =
@@ -37,23 +49,31 @@ const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
 /**
  * The terms a pact made at `createdAt` with `schedule` gets: the schedule as
  * stored, and its first occurrence, the first scheduled day due at least an
- * hour after `createdAt`. A schedule with no days is refused.
+ * hour after `createdAt` (by its due-by or in-bed-by time, if it has one),
+ * and not before the start date. A schedule with no days is refused.
  */
 export function newOccurrenceTerms(
   schedule: Schedule,
   createdAt: Date,
   timezone: string,
-  inBedBy: string | null = null,
+  { inBedBy = null, dueBy = null, startDate = null }: NewOccurrenceOptions = {},
 ): NewOccurrenceTermsResult {
   const days = WEEKDAYS.filter((day) => schedule.days.includes(day));
   if (days.length === 0) return { ok: false, reason: "no-days" };
-  // A day within an hour of its end can be skipped, so look one day past a full week.
-  for (let date = localDateOf(createdAt, timezone), i = 0; i <= 7; date = addDays(date, 1), i++) {
+  const created = localDateOf(createdAt, timezone);
+  const from = startDate !== null && startDate > created ? startDate : created;
+  // A day within an hour of its due time can be skipped, so look one day past a full week.
+  for (let date = from, i = 0; i <= 7; date = addDays(date, 1), i++) {
     if (!days.includes(weekdayOf(date))) continue;
-    const first = fixedDaysOccurrence(date, timezone, inBedBy);
+    const first = fixedDaysOccurrence(date, timezone, inBedBy, dueBy);
     if (first.dueAt.getTime() - createdAt.getTime() >= FIRST_OCCURRENCE_LEAD_MS) {
-      const terms: OccurrenceTerms = { schedule: { kind: "fixed-days", days }, firstOccurrence: date };
-      return { ok: true, terms: inBedBy === null ? terms : { ...terms, inBedBy }, first };
+      const terms: OccurrenceTerms = {
+        schedule: { kind: "fixed-days", days },
+        firstOccurrence: date,
+        ...(inBedBy !== null && { inBedBy }),
+        ...(dueBy !== null && { dueBy }),
+      };
+      return { ok: true, terms, first };
     }
   }
   throw new Error("unreachable: every scheduled weekday recurs within 8 days");
@@ -94,14 +114,18 @@ export interface TermsEra {
 /**
  * The occurrences of a pact whose terms changed over time: each date follows
  * the era it falls in. `eras` are oldest first, the last with `until` null,
- * and all share the pact's first occurrence.
+ * and the pact's first occurrence and end date are the last era's.
  */
 export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string): Occurrences {
   const termsOn = (date: LocalDate) =>
     (eras.find((era) => era.until === null || date < era.until) ?? eras.at(-1)!).terms;
-  const firstOccurrence = eras.at(-1)!.terms.firstOccurrence;
-  const occurrence = (date: LocalDate) => fixedDaysOccurrence(date, timezone, termsOn(date).inBedBy ?? null);
-  const scheduled = (date: LocalDate) => termsOn(date).schedule.days.includes(weekdayOf(date));
+  const { firstOccurrence, endDate = null } = eras.at(-1)!.terms;
+  const occurrence = (date: LocalDate) => {
+    const terms = termsOn(date);
+    return fixedDaysOccurrence(date, timezone, terms.inBedBy ?? null, terms.dueBy ?? null);
+  };
+  const ended = (date: LocalDate) => endDate !== null && date > endDate;
+  const scheduled = (date: LocalDate) => !ended(date) && termsOn(date).schedule.days.includes(weekdayOf(date));
   const includes = (date: LocalDate) => date >= firstOccurrence && scheduled(date);
   return {
     first: occurrence(firstOccurrence),
@@ -114,11 +138,12 @@ export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string)
       const due: Occurrence[] = [];
       const start = after === null || after < firstOccurrence ? firstOccurrence : addDays(after, 1);
       // Due times only grow with the date, so the first not due yet ends the list.
-      for (let date = start; ; date = addDays(date, 1)) {
+      for (let date = start; !ended(date); date = addDays(date, 1)) {
         const next = occurrence(date);
         if (next.dueAt.getTime() > t.getTime()) return due;
         if (scheduled(date)) due.push(next);
       }
+      return due;
     },
     between(from, to) {
       const found: Occurrence[] = [];
@@ -134,18 +159,23 @@ export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string)
 const NIGHT_STARTS_HOUR = 18;
 
 /**
- * A Fixed-days occurrence on `date`, open from the start of its day. Without
- * an in-bed-by time it's due at the midnight ending its day. A bedtime night
- * is due at its in-bed-by time (that evening from 18:00, else the morning
- * after) and closes at 18:00 the next day.
+ * A Fixed-days occurrence on `date`, open from the start of its day. It's due
+ * at its due-by time that day if it has one, else at the midnight ending its
+ * day. A bedtime night is due at its in-bed-by time (that evening from 18:00,
+ * else the morning after) and closes at 18:00 the next day.
  */
-function fixedDaysOccurrence(date: LocalDate, timezone: string, inBedBy: string | null): Occurrence {
+function fixedDaysOccurrence(
+  date: LocalDate,
+  timezone: string,
+  inBedBy: string | null,
+  dueBy: string | null,
+): Occurrence {
   const opensAt = startOfDay(date, timezone);
   if (inBedBy === null) {
-    const dueAt = startOfDay(addDays(date, 1), timezone);
+    const dueAt = dueBy === null ? startOfDay(addDays(date, 1), timezone) : wallTime(date, ...clockOf(dueBy), timezone);
     return { date, opensAt, dueAt, closesAt: dueAt };
   }
-  const [hour, minute] = inBedBy.split(":").map(Number) as [number, number];
+  const [hour, minute] = clockOf(inBedBy);
   return {
     date,
     opensAt,
@@ -157,6 +187,11 @@ function fixedDaysOccurrence(date: LocalDate, timezone: string, inBedBy: string 
 /** 18:00 on `date` in `timezone`: when the night of `date` starts, and the night before closes. */
 export function nightStartsAt(date: LocalDate, timezone: string): Date {
   return wallTime(date, NIGHT_STARTS_HOUR, 0, timezone);
+}
+
+/** "HH:MM" as hour and minute. */
+function clockOf(time: string): [number, number] {
+  return time.split(":").map(Number) as [number, number];
 }
 
 function wallTime(date: LocalDate, hour: number, minute: number, timezone: string): Date {

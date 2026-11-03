@@ -6,7 +6,7 @@
 // reads. The core reads time only from the Clock port.
 
 import { createECDH, randomBytes, randomUUID } from "node:crypto";
-import { addDays, localDateOf, weekdayOf, zonedWallTimeToInstant, type LocalDate } from "./calendar.ts";
+import { addDays, localDateOf, startOfDay, weekdayOf, zonedWallTimeToInstant, type LocalDate } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
@@ -737,8 +737,9 @@ class Core implements PactCore {
           this.#db
             .prepare(
               `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, in_bed_by,
-                                 penalty_cents, recipient_id, stage, first_occurrence, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+                                 due_by, start_date, end_date, penalty_cents, recipient_id, stage,
+                                 first_occurrence, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
             )
             .run(
               id,
@@ -748,6 +749,9 @@ class Core implements PactCore {
               pact.evidenceKind,
               JSON.stringify(checked.terms.schedule),
               checked.terms.inBedBy ?? null,
+              checked.terms.dueBy ?? null,
+              checked.startDate,
+              checked.terms.endDate ?? null,
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
@@ -768,8 +772,8 @@ class Core implements PactCore {
 
           this.#db
             .prepare(
-              `UPDATE pact SET name = ?, description = ?, schedule = ?, in_bed_by = ?, penalty_cents = ?,
-                               recipient_id = ?, first_occurrence = ?
+              `UPDATE pact SET name = ?, description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?,
+                               end_date = ?, penalty_cents = ?, recipient_id = ?, first_occurrence = ?
                WHERE id = ?`,
             )
             .run(
@@ -777,6 +781,9 @@ class Core implements PactCore {
               checked.description,
               JSON.stringify(checked.terms.schedule),
               checked.terms.inBedBy ?? null,
+              checked.terms.dueBy ?? null,
+              checked.startDate,
+              checked.terms.endDate ?? null,
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
@@ -801,17 +808,17 @@ class Core implements PactCore {
           this.#db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);
           return { ok: true };
         }),
-      firstOccurrence: ({ schedule, inBedBy }, editing) => {
+      firstOccurrence: ({ schedule, inBedBy, dueBy, startDate }, editing) => {
         const { timezone } = account();
         const pact = editing === undefined ? undefined : this.#ownPact(accountId, editing);
         if (editing !== undefined && !pact) return { ok: false, reason: "pact-not-found" };
         if (timezone === null) return { ok: false, reason: "no-timezone" };
-        const timing = newOccurrenceTerms(
-          schedule,
-          pact ? new Date(pact.created_at) : this.#clock.now(),
-          timezone,
-          inBedBy !== undefined && isClockTime(inBedBy) ? inBedBy : null,
-        );
+        // The form may not have a valid time or date yet: those count as not set.
+        const timing = newOccurrenceTerms(schedule, pact ? new Date(pact.created_at) : this.#clock.now(), timezone, {
+          inBedBy: inBedBy !== undefined && isClockTime(inBedBy) ? inBedBy : null,
+          dueBy: dueBy !== undefined && isDueBy(dueBy) ? dueBy : null,
+          startDate: startDate !== undefined && isLocalDate(startDate) ? startDate : null,
+        });
         if (!timing.ok) return timing;
         return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
       },
@@ -2601,10 +2608,12 @@ class Core implements PactCore {
   }
 
   /** The pact's terms over time, oldest first: those it had before each change, then those it has now. */
-  #erasOf(pact: Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by">): TermsEra[] {
+  #erasOf(
+    pact: Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date">,
+  ): TermsEra[] {
     const earlier = this.#db
-      .prepare(`SELECT until, schedule, in_bed_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`)
-      .all(pact.id) as { until: LocalDate; schedule: string; in_bed_by: string | null }[];
+      .prepare(`SELECT until, schedule, in_bed_by, due_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`)
+      .all(pact.id) as { until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }[];
     return [
       ...earlier.map((row) => ({
         until: row.until,
@@ -2617,15 +2626,16 @@ class Core implements PactCore {
   /** The occurrences of pact `pactId` in `timezone`, each dated one on the terms it opened with. */
   #occurrencesOf(pactId: string, timezone: string): Occurrences {
     const pact = this.#db
-      .prepare(`SELECT id, schedule, first_occurrence, in_bed_by FROM pact WHERE id = ?`)
-      .get(pactId) as Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by"> | undefined;
+      .prepare(`SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date FROM pact WHERE id = ?`)
+      .get(pactId) as
+      Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date"> | undefined;
     if (!pact) throw new Error(`no pact ${pactId}`);
     return occurrencesOverTime(this.#erasOf(pact), timezone);
   }
 
   /** The terms the pact's occurrence dated `date` follows: those in force when it opened. */
   #termsOn(pactId: string, date: LocalDate): DatedTerms {
-    const columns = `description, schedule, in_bed_by, penalty_cents, recipient_id`;
+    const columns = `description, schedule, in_bed_by, due_by, penalty_cents, recipient_id`;
     const earlier = this.#db
       .prepare(`SELECT ${columns} FROM pact_earlier_terms WHERE pact_id = ? AND until > ? ORDER BY until LIMIT 1`)
       .get(pactId, date) as DatedTerms | undefined;
@@ -2638,6 +2648,9 @@ class Core implements PactCore {
       name: pact.name,
       description: pact.description,
       inBedBy: pact.in_bed_by,
+      dueBy: pact.due_by,
+      startDate: pact.start_date,
+      endDate: pact.end_date,
       schedule: JSON.parse(pact.schedule) as Schedule,
       penaltyCents: pact.penalty_cents,
       recipientId: pact.recipient_id,
@@ -2654,6 +2667,9 @@ class Core implements PactCore {
       description: pact.description,
       evidenceKind: pact.evidence_kind,
       inBedBy: pact.in_bed_by,
+      dueBy: pact.due_by,
+      startDate: pact.start_date,
+      endDate: pact.end_date,
       schedule: JSON.parse(pact.schedule) as Schedule,
       penaltyCents: pact.penalty_cents,
       recipient,
@@ -2717,6 +2733,9 @@ class Core implements PactCore {
       name: checked.name,
       description: checked.description,
       inBedBy: checked.terms.inBedBy ?? null,
+      dueBy: checked.terms.dueBy ?? null,
+      startDate: checked.startDate,
+      endDate: checked.terms.endDate ?? null,
       schedule: checked.terms.schedule,
       penaltyCents: change.penaltyCents,
       recipientId: change.recipientId,
@@ -2725,6 +2744,18 @@ class Core implements PactCore {
     const diffs = termDiffs(before, after);
     if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
       return { ok: false, reason: "change-request-waiting" };
+    }
+    // Days already open keep their terms: a start date means nothing once the first has opened,
+    // and an end date can't take away a day that has.
+    const from = addDays(localDateOf(now, zone), 1);
+    if (after.startDate !== before.startDate && pact.first_occurrence < from) {
+      return { ok: false, reason: "pact-started" };
+    }
+    const firstFrom = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
+    if (after.endDate !== null && after.endDate !== before.endDate) {
+      if (after.endDate < addDays(from, -1) || after.endDate < firstFrom) {
+        return { ok: false, reason: "end-date-too-early" };
+      }
     }
     return {
       ok: true,
@@ -2769,13 +2800,14 @@ class Core implements PactCore {
   #startOfNewTerms(
     pact: PactRow,
     timezone: string,
-    after: Pick<ChangeableTerms, "schedule" | "inBedBy" | "penaltyCents">,
+    after: Pick<ChangeableTerms, "schedule" | "inBedBy" | "dueBy" | "startDate" | "endDate" | "penaltyCents">,
     at: Date,
   ): { appliesFrom: LocalDate; todayKeepsCents: number | null } {
     const today = localDateOf(at, timezone);
     const from = addDays(today, 1);
     const eras = this.#erasOf(pact);
     const earlier = eras.slice(0, -1);
+    const firstOccurrence = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
     const planned: TermsEra[] = [
       ...earlier,
       ...(earlier.some((era) => era.until === from) ? [] : [{ until: from, terms: eras.at(-1)!.terms }]),
@@ -2783,17 +2815,20 @@ class Core implements PactCore {
         until: null,
         terms: {
           schedule: after.schedule,
-          firstOccurrence: firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from),
+          firstOccurrence,
           inBedBy: after.inBedBy,
+          dueBy: after.dueBy,
+          endDate: after.endDate,
         },
       },
     ];
-    const [first] = occurrencesOverTime(planned, timezone).between(from, addDays(from, 7));
-    if (!first) throw new Error("unreachable: every scheduled weekday recurs within 8 days");
+    const start = firstOccurrence > from ? firstOccurrence : from;
+    // With no day left before its end date, the change still starts tomorrow.
+    const [first] = occurrencesOverTime(planned, timezone).between(from, addDays(start, 7));
     const todayTerms = this.#termsOn(pact.id, today);
     const keeps =
       occurrencesOverTime(eras, timezone).includes(today) && todayTerms.penalty_cents !== after.penaltyCents;
-    return { appliesFrom: first.date, todayKeepsCents: keeps ? todayTerms.penalty_cents : null };
+    return { appliesFrom: first?.date ?? from, todayKeepsCents: keeps ? todayTerms.penalty_cents : null };
   }
 
   /**
@@ -2804,28 +2839,37 @@ class Core implements PactCore {
    * left as they are.
    */
   #applyTerms(pact: PactRow, after: ChangeableTerms, at: Date, timezone: string): void {
-    const from = addDays(localDateOf(at, timezone), 1);
+    const today = localDateOf(at, timezone);
+    const from = addDays(today, 1);
     // A change already made today put the terms today keeps there first.
     this.#db
       .prepare(
-        `INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, in_bed_by, penalty_cents, recipient_id)
-         SELECT id, ?, description, schedule, in_bed_by, penalty_cents, recipient_id FROM pact WHERE id = ?
+        `INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, in_bed_by, due_by, penalty_cents,
+                                         recipient_id)
+         SELECT id, ?, description, schedule, in_bed_by, due_by, penalty_cents, recipient_id FROM pact WHERE id = ?
          ON CONFLICT (pact_id, until) DO NOTHING`,
       )
       .run(from, pact.id);
+    // Approved after the pact started, a new start date is moot; approved after
+    // the end date it asked for, the pact still keeps today, which is open.
+    const started = pact.first_occurrence < from;
+    const endDate = after.endDate !== null && after.endDate < today ? today : after.endDate;
     this.#db
       .prepare(
-        `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, penalty_cents = ?, recipient_id = ?,
-                         first_occurrence = ?
+        `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?, end_date = ?,
+                         penalty_cents = ?, recipient_id = ?, first_occurrence = ?
          WHERE id = ?`,
       )
       .run(
         after.description,
         JSON.stringify(after.schedule),
         after.inBedBy,
+        after.dueBy,
+        started ? pact.start_date : after.startDate,
+        endDate,
         after.penaltyCents,
         after.recipientId,
-        firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from),
+        firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate),
         pact.id,
       );
   }
@@ -2840,6 +2884,12 @@ class Core implements PactCore {
           return { term, before: before.description, after: after.description, effect };
         case "in-bed-by":
           return { term, before: before.inBedBy!, after: after.inBedBy!, effect };
+        case "due-by":
+          return { term, before: before.dueBy, after: after.dueBy, effect };
+        case "start-date":
+          return { term, before: before.startDate, after: after.startDate, effect };
+        case "end-date":
+          return { term, before: before.endDate, after: after.endDate, effect };
         case "schedule":
           return { term, before: before.schedule, after: after.schedule, effect };
         case "penalty":
@@ -2923,8 +2973,8 @@ class Core implements PactCore {
 
   #changeRequestView(row: ChangeRequestRow): ChangeRequestView {
     const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
-    const before = JSON.parse(row.before_terms) as ChangeableTerms;
-    const after = row.after_terms === null ? null : (JSON.parse(row.after_terms) as ChangeableTerms);
+    const before = storedTerms(row.before_terms);
+    const after = row.after_terms === null ? null : storedTerms(row.after_terms);
     const waiting = row.decision === null && row.withdrawn_at === null;
     // Every pact's owner has a timezone: creating one needs it.
     const start =
@@ -3017,8 +3067,8 @@ class Core implements PactCore {
       this.#db.prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ?`).run(now.toISOString(), pact.id);
       body = `${pact.name} is Ended`;
     } else if (outcome === "approved") {
-      const before = JSON.parse(row.before_terms) as ChangeableTerms;
-      const after = JSON.parse(row.after_terms!) as ChangeableTerms;
+      const before = storedTerms(row.before_terms);
+      const after = storedTerms(row.after_terms!);
       for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
         this.#db
           .prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`)
@@ -3054,7 +3104,9 @@ class Core implements PactCore {
       .get(pact.id) as { until: LocalDate } | undefined;
     if (!latest) return null;
     const occurrences = this.#occurrencesOf(pact.id, timezone);
-    const [start] = occurrences.between(latest.until, addDays(latest.until, 7));
+    // A start date may put the first occurrence further off than a week.
+    const from = pact.first_occurrence > latest.until ? pact.first_occurrence : latest.until;
+    const [start] = occurrences.between(from, addDays(from, 7));
     const today = localDateOf(now, timezone);
     if (!start || start.date <= today) return null;
     const todayTerms = this.#termsOn(pact.id, today);
@@ -3075,21 +3127,40 @@ class Core implements PactCore {
     pact: NewPact,
     createdAt: Date,
   ):
-    | { ok: true; name: string; description: string; terms: OccurrenceTerms; reviewerIds: AccountId[] }
+    | {
+        ok: true;
+        name: string;
+        description: string;
+        terms: OccurrenceTerms;
+        startDate: LocalDate | null;
+        reviewerIds: AccountId[];
+      }
     | { ok: false; reason: CreatePactRefusal } {
     const oura = pact.evidenceKind === "oura";
     if (oura && !this.#hasOuraConnection(ownerId)) return { ok: false, reason: "oura-not-connected" };
     if (oura && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
       return { ok: false, reason: "invalid-in-bed-by" };
     }
+    // A due-by time is for evidence the owner submits; a ring's night has its in-bed-by time.
+    if (pact.dueBy !== undefined && (oura || !isDueBy(pact.dueBy))) return { ok: false, reason: "invalid-due-by" };
+    if (pact.startDate !== undefined && !isLocalDate(pact.startDate)) {
+      return { ok: false, reason: "invalid-start-date" };
+    }
+    if (pact.endDate !== undefined && !isLocalDate(pact.endDate)) return { ok: false, reason: "invalid-end-date" };
     const name = pact.name.trim();
     // An Oura Ring pact has no photo to describe.
     const description = oura ? "" : pact.description.trim();
     if (name === "") return { ok: false, reason: "blank-name" };
     if (!oura && description === "") return { ok: false, reason: "blank-description" };
     if (timezone === null) return { ok: false, reason: "no-timezone" };
-    const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone, oura ? pact.inBedBy! : null);
+    const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone, {
+      inBedBy: oura ? pact.inBedBy! : null,
+      dueBy: pact.dueBy ?? null,
+      startDate: pact.startDate ?? null,
+    });
     if (!timing.ok) return timing;
+    const endDate = pact.endDate ?? null;
+    if (endDate !== null && endDate < timing.terms.firstOccurrence) return { ok: false, reason: "end-date-too-early" };
     if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
       return { ok: false, reason: "invalid-penalty" };
     }
@@ -3100,7 +3171,14 @@ class Core implements PactCore {
     const reviewerIds = [...new Set(pact.reviewerIds)];
     if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
     if (!reviewerIds.every((id) => this.#areFriends(ownerId, id))) return { ok: false, reason: "not-a-friend" };
-    return { ok: true, name, description, terms: timing.terms, reviewerIds };
+    return {
+      ok: true,
+      name,
+      description,
+      terms: endDate === null ? timing.terms : { ...timing.terms, endDate },
+      startDate: pact.startDate ?? null,
+      reviewerIds,
+    };
   }
 
   #hasOuraConnection(accountId: AccountId): boolean {
@@ -3416,7 +3494,8 @@ class Core implements PactCore {
     if (photoCount === 0) return { ok: false, reason: "no-photos" };
     if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
     const occurrence = this.#occurrencesOf(pactId, timezone).openAt(at);
-    if (!occurrence) return { ok: false, reason: "not-open" };
+    // Past its due-by time, the day takes no more evidence.
+    if (!occurrence || at.getTime() >= occurrence.dueAt.getTime()) return { ok: false, reason: "not-open" };
     const decision = this.#evidenceDecision(pactId, occurrence.date);
     if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
     if (decision === "approved") return { ok: false, reason: "already-approved" };
@@ -3524,7 +3603,7 @@ class Core implements PactCore {
       const { first, openAt, between } = this.#occurrencesOf(pact.id, timezone);
       if (pact.terms.inBedBy) {
         if (now.getTime() < first.opensAt.getTime()) {
-          comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date });
+          comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date, startDate: pact.startDate });
           continue;
         }
         // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
@@ -3548,8 +3627,10 @@ class Core implements PactCore {
         continue;
       }
       const open = openAt(now);
-      // Judged while still open: its evidence was rejected, so it's an alert.
-      if (open && this.#isJudged(pact.id, open.date)) continue;
+      // Judged while still open: its evidence was rejected, so it's an alert, or
+      // it's past its due-by time, so it's Missed. Past it and not judged yet,
+      // the next tick judges it.
+      if (open && (this.#isJudged(pact.id, open.date) || now.getTime() >= open.dueAt.getTime())) continue;
       if (open) {
         // Evidence waiting or approved: Waiting for approval, or done.
         const decision = this.#evidenceDecision(pact.id, open.date);
@@ -3562,9 +3643,10 @@ class Core implements PactCore {
           editWindowClosesAt,
           occurrenceDate: open.date,
           dueAt: open.dueAt,
+          dueBy: this.#termsOn(pact.id, open.date).due_by,
         });
       } else if (now.getTime() < first.opensAt.getTime()) {
-        comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date });
+        comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date, startDate: pact.startDate });
       }
     }
     const bills = this.#billsForToday(ownerId, now);
@@ -3575,7 +3657,7 @@ class Core implements PactCore {
     comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn));
     const sections: TodaySection[] = [];
     if (toDo.length > 0) sections.push({ kind: "to-do", cards: toDo });
-    const missed = this.#recentlyMissed(ownerId, now);
+    const missed = this.#recentlyMissed(ownerId, timezone, now);
     if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
     if (automatic.length > 0) sections.push({ kind: "automatic", cards: automatic });
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
@@ -3647,9 +3729,11 @@ class Core implements PactCore {
    * The owner's occurrences judged Missed in the 48 hours before `now`,
    * latest first, but not accepted misses, nor those Missed through a
    * rejection or on a rejected excuse (those are alerts), nor those on an
-   * excuse waiting for approval.
+   * excuse waiting for approval. Today's day of a Camera pact with a due-by
+   * time is Closed.
    */
-  #recentlyMissed(ownerId: AccountId, now: Date): TodayMissedCard[] {
+  #recentlyMissed(ownerId: AccountId, timezone: string, now: Date): TodayMissedCard[] {
+    const today = localDateOf(now, timezone);
     const since = new Date(now.getTime() - EXCUSE_WINDOW_MS);
     const rows = this.#db
       .prepare(
@@ -3676,17 +3760,21 @@ class Core implements PactCore {
       judged_at: string;
       bedtime_start: string | null;
     }[];
-    return rows.map((row) => ({
-      pactId: row.id,
-      name: row.name,
-      penaltyCents: row.amount_cents,
-      occurrenceDate: row.date,
-      missedAt: new Date(row.judged_at),
-      excusableUntil: new Date(new Date(row.judged_at).getTime() + EXCUSE_WINDOW_MS),
-      ...(row.evidence_kind === "oura" && {
-        night: { inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) },
-      }),
-    }));
+    return rows.map((row) => {
+      const dueBy = row.date === today ? this.#termsOn(row.id, row.date).due_by : null;
+      return {
+        pactId: row.id,
+        name: row.name,
+        penaltyCents: row.amount_cents,
+        occurrenceDate: row.date,
+        missedAt: new Date(row.judged_at),
+        excusableUntil: new Date(new Date(row.judged_at).getTime() + EXCUSE_WINDOW_MS),
+        ...(row.evidence_kind === "oura" && {
+          night: { inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) },
+        }),
+        ...(dueBy !== null && { closed: { dueBy } }),
+      };
+    });
   }
 
   /** Who rejected the latest rejected evidence for an occurrence, and why; null if none was rejected. */
@@ -3708,15 +3796,24 @@ class Core implements PactCore {
     const now = this.#clock.now();
     const rows = this.#db
       .prepare(
-        `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.penalty_cents, pact.first_occurrence,
-                pact.created_at, recipient.name AS recipient_name
+        `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.due_by, pact.start_date, pact.end_date,
+                pact.penalty_cents, pact.first_occurrence, pact.created_at, recipient.name AS recipient_name
          FROM pact JOIN recipient ON recipient.id = pact.recipient_id
          WHERE pact.owner_account_id = ? AND pact.stage = 'active'
          ORDER BY pact.name, pact.created_at, pact.id`,
       )
       .all(ownerId) as (Pick<
       PactRow,
-      "id" | "name" | "schedule" | "in_bed_by" | "penalty_cents" | "first_occurrence" | "created_at"
+      | "id"
+      | "name"
+      | "schedule"
+      | "in_bed_by"
+      | "due_by"
+      | "start_date"
+      | "end_date"
+      | "penalty_cents"
+      | "first_occurrence"
+      | "created_at"
     > & {
       recipient_name: string;
     })[];
@@ -3726,6 +3823,7 @@ class Core implements PactCore {
       penaltyCents: row.penalty_cents,
       recipientName: row.recipient_name,
       terms: occurrenceTermsOf(row),
+      startDate: row.start_date,
       editWindowClosesAt: editWindowClosesAt(row, now),
     }));
   }
@@ -3745,6 +3843,7 @@ class Core implements PactCore {
       this.#closeEditWindows(t);
       this.#judgeDueBy(t);
       this.#judgeNights(t, sleep);
+      this.#endPastEndDate(t);
       this.#makeBills(t);
       this.#remindOverdue(t);
       this.#db
@@ -3769,6 +3868,31 @@ class Core implements PactCore {
       for (const occurrence of due) this.#judgeAtDueTime(pact.id, occurrence);
       const last = due.at(-1);
       if (last) this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(last.date, pact.id);
+    }
+  }
+
+  /**
+   * Ends each Active pact whose end date has passed by `t`: at the start of
+   * the next day, or once its last occurrence closes if that's later (a
+   * bedtime night closes at 18:00 the next day). Judging has had its turn
+   * first, so the last occurrence is judged unless its evidence still waits
+   * for a decision, which judges it then.
+   */
+  #endPastEndDate(t: Date): void {
+    const rows = this.#db
+      .prepare(
+        `SELECT pact.id, pact.end_date, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
+         WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL`,
+      )
+      .all() as { id: string; end_date: LocalDate; timezone: string | null }[];
+    for (const { id, end_date: endDate, timezone } of rows) {
+      // Every pact's owner has a timezone: creating one needs it.
+      if (timezone === null) continue;
+      const dayAfter = startOfDay(addDays(endDate, 1), timezone);
+      const last = this.#occurrencesOf(id, timezone).between(addDays(endDate, -7), endDate).at(-1);
+      const endsAt = last && last.closesAt.getTime() > dayAfter.getTime() ? last.closesAt : dayAfter;
+      if (endsAt.getTime() > t.getTime()) continue;
+      this.#db.prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ?`).run(endsAt.toISOString(), id);
     }
   }
 
@@ -4065,6 +4189,7 @@ interface ActivePact {
   penaltyCents: number;
   recipientName: string;
   terms: OccurrenceTerms;
+  startDate: LocalDate | null;
   editWindowClosesAt: Date | null;
 }
 
@@ -4080,12 +4205,18 @@ function editWindowClosesAt(pact: Pick<PactRow, "created_at">, now: Date): Date 
 
 /** A pact row's occurrence terms: the one place a stored schedule is read. */
 function occurrenceTermsOf(
-  row: Pick<PactRow, "schedule" | "first_occurrence"> & { in_bed_by?: string | null },
+  row: Pick<PactRow, "schedule" | "first_occurrence"> & {
+    in_bed_by?: string | null;
+    due_by?: string | null;
+    end_date?: string | null;
+  },
 ): OccurrenceTerms {
   return {
     schedule: JSON.parse(row.schedule) as Schedule,
     firstOccurrence: row.first_occurrence,
     inBedBy: row.in_bed_by ?? null,
+    dueBy: row.due_by ?? null,
+    endDate: row.end_date ?? null,
   };
 }
 
@@ -4114,6 +4245,11 @@ function isClockTime(text: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
 }
 
+/** A due-by time: a clock time after the day starts. Midnight ending the day is the due time without one. */
+function isDueBy(text: string): boolean {
+  return isClockTime(text) && text !== "00:00";
+}
+
 interface PactRow {
   id: string;
   name: string;
@@ -4121,6 +4257,9 @@ interface PactRow {
   evidence_kind: PactTerms["evidenceKind"];
   schedule: string;
   in_bed_by: string | null;
+  due_by: string | null;
+  start_date: string | null;
+  end_date: string | null;
   penalty_cents: number;
   recipient_id: string;
   stage: PactTerms["stage"];
@@ -4131,7 +4270,7 @@ interface PactRow {
 }
 
 /** The terms an occurrence follows: the pact's, as they stood when it opened. */
-type DatedTerms = Pick<PactRow, "description" | "schedule" | "in_bed_by" | "penalty_cents" | "recipient_id">;
+type DatedTerms = Pick<PactRow, "description" | "schedule" | "in_bed_by" | "due_by" | "penalty_cents" | "recipient_id">;
 
 /** A change request as stored, with its pact's owner, their name and timezone. */
 interface ChangeRequestRow {
@@ -4207,22 +4346,42 @@ const TERM_LABELS: Record<TermDiff["term"], string> = {
   description: "Photo shows",
   "in-bed-by": "In bed by",
   schedule: "Days",
+  "due-by": "Due by",
+  "start-date": "Starts",
+  "end-date": "Ends",
   penalty: "Penalty",
   recipient: "Recipient",
   reviewers: "Reviewers",
 };
 
 /**
- * A pact's first occurrence once a change to `schedule` takes effect `from`
- * a date: as it was if that's before `from`; otherwise, as the change came
- * before the pact started, the first day of the new schedule from `from`.
+ * A pact's first occurrence once a change to `schedule` and `startDate` takes
+ * effect `from` a date: as it was if that's before `from`; otherwise, as the
+ * change came before the pact started, the first day of the new schedule
+ * from `from`, or from the start date if that's later.
  */
-function firstOccurrenceAfterChange(firstOccurrence: LocalDate, schedule: Schedule, from: LocalDate): LocalDate {
+function firstOccurrenceAfterChange(
+  firstOccurrence: LocalDate,
+  schedule: Schedule,
+  from: LocalDate,
+  startDate: LocalDate | null,
+): LocalDate {
   if (firstOccurrence < from) return firstOccurrence;
-  for (let date = from, i = 0; i < 7; date = addDays(date, 1), i++) {
+  const start = startDate !== null && startDate > from ? startDate : from;
+  for (let date = start, i = 0; i < 7; date = addDays(date, 1), i++) {
     if (schedule.days.includes(weekdayOf(date))) return date;
   }
   throw new Error("unreachable: a schedule has at least one day");
+}
+
+/** A change request's stored terms. Those sent before due-by times and dates existed have none. */
+function storedTerms(json: string): ChangeableTerms {
+  return {
+    dueBy: null,
+    startDate: null,
+    endDate: null,
+    ...(JSON.parse(json) as Partial<ChangeableTerms>),
+  } as ChangeableTerms;
 }
 
 /** A pact as judging reads it. */

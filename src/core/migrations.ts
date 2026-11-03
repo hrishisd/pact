@@ -436,4 +436,17 @@ export const migrations: readonly string[] = [
   );
   CREATE INDEX comment_item ON comment (item_id, id);
   `,
+  // 17: due-by time, start date and end date
+  `
+  -- Camera only: "HH:MM", the time each day's evidence is due by instead of
+  -- midnight. It's a term an occurrence keeps from when it opened, so earlier
+  -- terms carry it too.
+  ALTER TABLE pact ADD COLUMN due_by TEXT;
+  ALTER TABLE pact_earlier_terms ADD COLUMN due_by TEXT;
+  -- "YYYY-MM-DD" in the owner's timezone. The start date only pushes
+  -- first_occurrence later; it's kept to show and change. After the end date
+  -- the pact has no occurrences, and it's Ended once the last one closes.
+  ALTER TABLE pact ADD COLUMN start_date TEXT;
+  ALTER TABLE pact ADD COLUMN end_date TEXT;
+  `,
 ];

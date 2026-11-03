@@ -667,6 +667,7 @@ describe("pacts", () => {
               editWindowClosesAt,
               occurrenceDate: firstOccurrence.date,
               dueAt: firstOccurrence.dueAt,
+              dueBy: null,
             },
           ],
         },
@@ -685,6 +686,9 @@ describe("pacts", () => {
         description: "Me at the gym",
         evidenceKind: "camera",
         inBedBy: null,
+        dueBy: null,
+        startDate: null,
+        endDate: null,
         schedule: pact.schedule,
         penaltyCents: 500,
         recipient: { id: pact.recipientId, name: "Sam" },
@@ -771,6 +775,9 @@ describe("pacts", () => {
       { ...pact, penaltyCents: 5.5 },
       { ...pact, reviewerIds: "someone" },
       { ...pact, reviewerIds: [1] },
+      { ...pact, dueBy: 900 },
+      { ...pact, startDate: null },
+      { ...pact, endDate: ["2026-01-09"] },
     ];
 
     for (const sent of malformedPacts) {
@@ -781,6 +788,66 @@ describe("pacts", () => {
     expect(recipient).toEqual({ status: 400, body: { error: "invalid-request" } });
     const check = await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: {} });
     expect(check).toEqual({ status: 400, body: { error: "invalid-request" } });
+    const timing = { schedule: pact.schedule, dueBy: 9 };
+    expect(await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: timing })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
+    });
+  });
+
+  test("a due-by time, start date and end date go through to the core, and its refusals come back as data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    const times = { dueBy: "21:00", startDate: "2026-01-12", endDate: "2026-01-31" };
+
+    const check = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: pact.schedule, dueBy: times.dueBy, startDate: times.startDate },
+    });
+    expect(check.body).toEqual({
+      ok: true,
+      firstOccurrence: { date: "2026-01-12", dueAt: "2026-01-13T02:00:00.000Z" },
+    } satisfies FirstOccurrenceResponse);
+    const refused = await s.api(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...pact, ...times, endDate: "2026-01-09" },
+    });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "end-date-too-early" } });
+
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...pact, ...times },
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { ...times, firstOccurrence: { date: "2026-01-12" } },
+    });
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie })).body.sections).toEqual([
+      { kind: "coming-up", cards: [expect.objectContaining({ opensOn: "2026-01-12", startDate: "2026-01-12" })] },
+    ]);
+
+    s.clock.set(s.at("Tue 10:00"));
+    const { endDate: _endDate, ...rest } = times;
+    const preview = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...pact, ...rest, dueBy: "22:00" },
+    });
+    expect(preview.body).toEqual({
+      ok: true,
+      preview: {
+        changes: [
+          { term: "due-by", before: "21:00", after: "22:00", effect: "needs-approval" },
+          { term: "end-date", before: "2026-01-31", after: null, effect: "stricter" },
+        ],
+        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: true },
+      },
+    });
   });
 
   test("someone else's pact, or one that doesn't exist, is not found, as data", async () => {

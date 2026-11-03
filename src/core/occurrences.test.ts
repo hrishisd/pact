@@ -206,12 +206,38 @@ describe("bedtime nights", () => {
   test("the first night is the first whose in-bed-by time is at least an hour after creation", () => {
     const created = new Date("2026-01-05T23:10:00-05:00");
     const schedule = { kind: "fixed-days" as const, days: ["mon" as const, "tue" as const] };
-    expect(newOccurrenceTerms(schedule, created, NEW_YORK, "00:00")).toMatchObject({
+    expect(newOccurrenceTerms(schedule, created, NEW_YORK, { inBedBy: "00:00" })).toMatchObject({
       terms: { firstOccurrence: "2026-01-06", inBedBy: "00:00" },
     });
     // Exactly an hour is enough.
-    expect(newOccurrenceTerms(schedule, created, NEW_YORK, "00:10")).toMatchObject({
+    expect(newOccurrenceTerms(schedule, created, NEW_YORK, { inBedBy: "00:10" })).toMatchObject({
       terms: { firstOccurrence: "2026-01-05" },
     });
+  });
+});
+
+describe("due-by times", () => {
+  const daily = fixedDays("mon", "tue", "wed", "thu", "fri", "sat", "sun");
+
+  test("a day is due at its due-by time on its own date, whatever the clocks do that night", () => {
+    // New York springs forward at 02:00 on Sun Mar 8 2026: 09:00 that day is EDT.
+    const pact = occurrences({ schedule: daily, firstOccurrence: "2026-03-07", dueBy: "09:00" }, NEW_YORK);
+
+    expect(pact.between("2026-03-07", "2026-03-08").map((o) => o.dueAt)).toEqual([
+      new Date("2026-03-07T09:00:00-05:00"),
+      new Date("2026-03-08T09:00:00-04:00"),
+    ]);
+  });
+
+  test("no day after the end date is an occurrence, or ever falls due", () => {
+    const pact = occurrences({ schedule: daily, firstOccurrence: "2026-01-05", endDate: "2026-01-07" }, NEW_YORK);
+
+    expect(pact.includes("2026-01-07")).toBe(true);
+    expect(pact.includes("2026-01-08")).toBe(false);
+    expect(pact.dueAfter(null, new Date("2026-02-01T00:00:00Z")).map((o) => o.date)).toEqual([
+      "2026-01-05",
+      "2026-01-06",
+      "2026-01-07",
+    ]);
   });
 });

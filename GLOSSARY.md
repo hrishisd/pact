@@ -49,6 +49,12 @@ A bedtime pact's occurrence: the night of Tue Oct 21 runs from 6pm Tuesday to 6p
 **Due-by time**:
 An optional time of day, such as 9:00am, that a Camera pact's evidence is due by instead of midnight. On a recurring pact it applies each day; on a One-time pact it's the time of the deadline.
 
+**Start date / End date**:
+Optional days that bound a recurring pact. The start date can only push its first occurrence later. The end date is its last day: once that day's occurrence closes, the pact has no more and is Ended.
+
+**Closed**:
+How Today shows a Camera pact's day once its due-by time has passed: Missed, and no evidence counts for it any more.
+
 **Kept / Missed / Excused**:
 The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**.
 _Avoid_: Passed, failed, success, failure, pending
@@ -90,7 +96,7 @@ A reviewer's comment on a review item (evidence, an excuse, a payment or a chang
 The owner's answer to a question, in text only. It sends the item back to every reviewer's Review Queue.
 
 **Terms**:
-What a pact holds its owner to: its schedule, what its photo must show or its in-bed-by time, its penalty, recipient and reviewers. Each occurrence follows the terms in force when it opened, so a change applies only to occurrences not open yet.
+What a pact holds its owner to: its schedule, its due-by time, start date and end date, what its photo must show or its in-bed-by time, its penalty, recipient and reviewers. Each occurrence follows the terms in force when it opened, so a change applies only to occurrences not open yet.
 
 **Change Request**:
 An owner's proposed change to a pact after its edit window that makes it less strict, such as ending it, lowering the penalty, removing a day or a reviewer, or changing the recipient or description. The pact keeps its terms until a reviewer approves it; a change that relaxes anything is reviewed as a whole. A pact has at most one waiting, and the owner can withdraw it. It may carry a note saying why.

@@ -376,7 +376,10 @@ function Terms({ pact }: { pact: Pact }) {
 export function TermsList({
   terms,
 }: {
-  terms: Pick<Pact, "evidenceKind" | "inBedBy" | "schedule" | "penaltyCents" | "recipient"> & {
+  terms: Pick<
+    Pact,
+    "evidenceKind" | "inBedBy" | "dueBy" | "startDate" | "endDate" | "schedule" | "penaltyCents" | "recipient"
+  > & {
     reviewers: { name: string }[];
   };
 }) {
@@ -393,6 +396,24 @@ export function TermsList({
       )}
       <dt>Schedule</dt>
       <dd>{scheduleText(terms.schedule)}</dd>
+      {terms.dueBy !== null && (
+        <>
+          <dt>Due by</dt>
+          <dd>{clockText(terms.dueBy)}</dd>
+        </>
+      )}
+      {terms.startDate !== null && (
+        <>
+          <dt>Starts</dt>
+          <dd>{formatDate(terms.startDate)}</dd>
+        </>
+      )}
+      {terms.endDate !== null && (
+        <>
+          <dt>Ends</dt>
+          <dd>{formatDate(terms.endDate)}</dd>
+        </>
+      )}
       <dt>Penalty</dt>
       <dd>{money(terms.penaltyCents)} per miss</dd>
       <dt>Recipient</dt>

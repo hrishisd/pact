@@ -210,7 +210,10 @@ function Section({
             chip={<span className="chip c-todo">To do</span>}
             onOpen={() => onOpenPact(card.pactId, card.name)}
           >
-            <div className="meta due">Due at midnight · {timeLeft(Date.parse(card.dueAt) - now)}</div>
+            <div className="meta due">
+              Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
+              {timeLeft(Date.parse(card.dueAt) - now)}
+            </div>
             <EvidenceForm
               pactId={card.pactId}
               onSubmitted={onChanged}
@@ -225,7 +228,7 @@ function Section({
           key={`${card.pactId}:${card.occurrenceDate}`}
           name={card.name}
           penaltyCents={card.penaltyCents}
-          chip={<span className="chip c-missed">Missed</span>}
+          chip={<span className="chip c-missed">{card.closed ? "Closed" : "Missed"}</span>}
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
           <div className="meta">{missedLine(card)}</div>
@@ -266,7 +269,11 @@ function Section({
               penaltyCents={card.penaltyCents}
               editWindowClosesAt={card.editWindowClosesAt}
               now={now}
-              chip={<span className="chip c-soon">Opens {formatDate(card.opensOn)}</span>}
+              chip={
+                <span className="chip c-soon">
+                  {card.startDate === null ? "Opens" : "Starts"} {formatDate(card.opensOn)}
+                </span>
+              }
               onOpen={() => onOpenPact(card.pactId, card.name)}
             />
           ))}
@@ -275,8 +282,12 @@ function Section({
   }
 }
 
-/** A Missed card's day, and for a bedtime night when Oura saw the owner get into bed. */
+/**
+ * A Missed card's day, and for a bedtime night when Oura saw the owner get
+ * into bed. Today's day past its due-by time says when evidence was due.
+ */
 function missedLine(card: Json<TodayMissedCard>): string {
+  if (card.closed) return `Evidence was due by ${clockText(card.closed.dueBy)}.`;
   if (!card.night) return formatDate(card.occurrenceDate);
   const { inBedAt } = card.night;
   return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;

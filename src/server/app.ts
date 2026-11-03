@@ -411,12 +411,10 @@ export function createApp({
     if (!schedule) return apiError(c, 400, "invalid-request");
     const editing = request?.editing;
     if (editing !== undefined && typeof editing !== "string") return apiError(c, 400, "invalid-request");
-    const inBedBy = request?.inBedBy;
-    if (inBedBy !== undefined && typeof inBedBy !== "string") return apiError(c, 400, "invalid-request");
+    const timing = parseOptionalStrings(request ?? {}, ["inBedBy", "dueBy", "startDate"]);
+    if (!timing) return apiError(c, 400, "invalid-request");
     const body: FirstOccurrenceResponse = json(
-      core
-        .as(c.get("accountId"))
-        .firstOccurrence(inBedBy === undefined ? { schedule } : { schedule, inBedBy }, editing),
+      core.as(c.get("accountId")).firstOccurrence({ schedule, ...timing }, editing),
     );
     return c.json(body);
   });
@@ -755,13 +753,32 @@ function parseNewRecipient(value: unknown): AddRecipientRequest | null {
   return { name: value.name };
 }
 
+/** The optional string fields `keys` of `value`, those it has; null if any isn't a string. */
+function parseOptionalStrings<Key extends string>(
+  value: Record<string, unknown>,
+  keys: readonly Key[],
+): Partial<Record<Key, string>> | null {
+  const found: Partial<Record<Key, string>> = {};
+  for (const key of keys) {
+    const field = value[key];
+    if (field === undefined) continue;
+    if (typeof field !== "string") return null;
+    found[key] = field;
+  }
+  return found;
+}
+
+/** A pact's optional times: the in-bed-by and due-by times, and the start and end dates. */
+const PACT_TIMES = ["inBedBy", "dueBy", "startDate", "endDate"] as const;
+
 function parseNewPact(value: unknown): CreatePactRequest | null {
   if (!isRecord(value)) return null;
-  const { evidenceKind, name, description, inBedBy, penaltyCents, recipientId, reviewerIds } = value;
+  const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
   const schedule = parseSchedule(value.schedule);
+  const times = parseOptionalStrings(value, PACT_TIMES);
   if (
     (evidenceKind !== "camera" && evidenceKind !== "oura") ||
-    (inBedBy !== undefined && typeof inBedBy !== "string") ||
+    !times ||
     typeof name !== "string" ||
     typeof description !== "string" ||
     !schedule ||
@@ -772,16 +789,16 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
   ) {
     return null;
   }
-  const pact: CreatePactRequest = { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds };
-  return inBedBy === undefined ? pact : { ...pact, inBedBy };
+  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times };
 }
 
 function parsePactChange(value: unknown): ChangePactRequest | null {
   if (!isRecord(value)) return null;
-  const { name, description, inBedBy, penaltyCents, recipientId, reviewerIds, note } = value;
+  const { name, description, penaltyCents, recipientId, reviewerIds, note } = value;
   const schedule = parseSchedule(value.schedule);
+  const times = parseOptionalStrings(value, PACT_TIMES);
   if (
-    (inBedBy !== undefined && typeof inBedBy !== "string") ||
+    !times ||
     (note !== undefined && typeof note !== "string") ||
     typeof name !== "string" ||
     typeof description !== "string" ||
@@ -800,7 +817,7 @@ function parsePactChange(value: unknown): ChangePactRequest | null {
     penaltyCents,
     recipientId,
     reviewerIds,
-    ...(inBedBy !== undefined && { inBedBy }),
+    ...times,
     ...(note !== undefined && { note }),
   };
 }

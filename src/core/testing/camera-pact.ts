@@ -15,7 +15,8 @@ export function photo(n = 1): Photo {
 /**
  * An owner in New York with friends "reviewer" and "second", and a recipient
  * "Sam". `createPact` makes a Camera pact with Sam (or `recipientId`) that
- * both friends review (or just `reviewers`), described as "A photo of <name>".
+ * both friends review (or just `reviewers`), described as "A photo of <name>",
+ * with the optional due-by time, start date and end date in `dates`.
  */
 export async function ownerWithReviewers(s: Scenario) {
   const owner = await s.signIn("owner");
@@ -31,7 +32,13 @@ export async function ownerWithReviewers(s: Scenario) {
       by = owner,
       reviewers = [reviewer, second],
       recipientId = added.recipient.id,
-    }: { by?: AccountHandle; reviewers?: AccountHandle[]; recipientId?: string } = {},
+      dates = {},
+    }: {
+      by?: AccountHandle;
+      reviewers?: AccountHandle[];
+      recipientId?: string;
+      dates?: Pick<NewPact, "dueBy" | "startDate" | "endDate">;
+    } = {},
   ) => {
     const pact: NewPact = {
       evidenceKind: "camera",
@@ -41,6 +48,7 @@ export async function ownerWithReviewers(s: Scenario) {
       penaltyCents: 500,
       recipientId,
       reviewerIds: reviewers.map((r) => r.id),
+      ...dates,
     };
     const created = await by.createPact(pact);
     if (!created.ok) throw new Error(created.reason);

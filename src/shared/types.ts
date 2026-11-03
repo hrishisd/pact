@@ -65,6 +65,16 @@ export interface NewPact {
    * morning after.
    */
   inBedBy?: string;
+  /**
+   * Camera only, optional: the due-by time, "HH:MM" on a 24-hour clock after
+   * 00:00. Evidence is due by it each day instead of midnight, and the day is
+   * judged then.
+   */
+  dueBy?: string;
+  /** Optional, "YYYY-MM-DD": the pact starts no earlier than this day. It can only push the first occurrence later. */
+  startDate?: string;
+  /** Optional, "YYYY-MM-DD": the pact's last day. Once it passes, the pact makes no more occurrences and is Ended. */
+  endDate?: string;
   schedule: Schedule;
   /** The Penalty per missed occurrence, in US cents: a positive whole number. */
   penaltyCents: number;
@@ -79,6 +89,14 @@ export type CreatePactRefusal =
   | "oura-not-connected"
   /** An Oura Ring pact's in-bed-by time is missing or isn't "HH:MM". */
   | "invalid-in-bed-by"
+  /** A due-by time on an Oura Ring pact, at midnight, or not "HH:MM". */
+  | "invalid-due-by"
+  /** A start date that isn't "YYYY-MM-DD". */
+  | "invalid-start-date"
+  /** An end date that isn't "YYYY-MM-DD". */
+  | "invalid-end-date"
+  /** An end date before the first occurrence (or, for a change, before today): the pact would have no days left. */
+  | "end-date-too-early"
   | "blank-name"
   | "blank-description"
   | "no-days"
@@ -111,13 +129,17 @@ export interface PactTiming {
   schedule: Schedule;
   /** Oura Ring only: see `NewPact.inBedBy`. */
   inBedBy?: string;
+  /** Camera only: see `NewPact.dueBy`. */
+  dueBy?: string;
+  /** See `NewPact.startDate`. */
+  startDate?: string;
 }
 
 /** A pact's first occurrence, as the create form's Check step names it. */
 export interface FirstOccurrence {
   /** The occurrence's day in the owner's timezone, "YYYY-MM-DD". */
   date: string;
-  /** Its due time: midnight at the end of that day, or the in-bed-by time, in the owner's timezone. */
+  /** Its due time: midnight at the end of that day, or the due-by or in-bed-by time, in the owner's timezone. */
   dueAt: Date;
 }
 
@@ -136,7 +158,7 @@ export interface PactSummary {
   editWindowClosesAt: Date | null;
 }
 
-/** Active from creation; Ended once an approved change request ends it. */
+/** Active from creation; Ended once its end date passes or an approved change request ends it. */
 export type PactStage = "active" | "ended";
 
 /** The pact page: the pact's terms. */
@@ -147,13 +169,22 @@ export interface PactTerms {
   evidenceKind: EvidenceKind;
   /** Oura Ring only: the in-bed-by time, "HH:MM". Null for Camera. */
   inBedBy: string | null;
+  /** Camera only: the due-by time, "HH:MM", or null for midnight. */
+  dueBy: string | null;
+  /** "YYYY-MM-DD", or null: see `NewPact.startDate`. */
+  startDate: string | null;
+  /** "YYYY-MM-DD", or null: see `NewPact.endDate`. */
+  endDate: string | null;
   schedule: Schedule;
   penaltyCents: number;
   recipient: Recipient;
   /** Sorted by name. */
   reviewers: { id: AccountId; name: string }[];
   stage: PactStage;
-  /** When an approved change request ended it; null while Active. */
+  /**
+   * When it Ended: when an approved change request ended it, or when its end
+   * date passed (once its last occurrence closed); null while Active.
+   */
   endedAt: Date | null;
   firstOccurrence: FirstOccurrence;
   /** When its edit window closes; null once it has. */
@@ -605,8 +636,10 @@ export interface TodayToDoCard extends TodayPactCard {
   editWindowClosesAt: Date | null;
   /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
   occurrenceDate: string;
-  /** Midnight ending today, in the owner's timezone. */
+  /** Its due-by time today, or midnight ending today, in the owner's timezone. */
   dueAt: Date;
+  /** Its due-by time, "HH:MM", or null when it's due at midnight. */
+  dueBy: string | null;
 }
 
 /**
@@ -643,6 +676,11 @@ export interface TodayMissedCard extends TodayPactCard {
    * Oura's clock, or null when Oura reported no sleep by 18:00 the next day.
    */
   night?: { inBedAt: string | null };
+  /**
+   * Today's occurrence of a Camera pact, Missed at its due-by time ("HH:MM")
+   * with no evidence: it shows as Closed.
+   */
+  closed?: { dueBy: string };
 }
 
 /** A bedtime pact's night that runs now. */
@@ -662,6 +700,8 @@ export interface TodayComingUpCard extends TodayPactCard {
   editWindowClosesAt: Date | null;
   /** The first occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
   opensOn: string;
+  /** The pact's start date, "YYYY-MM-DD", when the owner set one: it starts rather than opens. */
+  startDate: string | null;
 }
 
 /** Something of the owner's waiting for a reviewer's decision, newest first. */
@@ -974,6 +1014,12 @@ export interface PactChange {
   description: string;
   /** Oura Ring only: see `NewPact.inBedBy`. */
   inBedBy?: string;
+  /** Camera only: see `NewPact.dueBy`. Left out to have none. */
+  dueBy?: string;
+  /** See `NewPact.startDate`. It can change only before the first occurrence opens. Left out to have none. */
+  startDate?: string;
+  /** See `NewPact.endDate`. Left out to have none. */
+  endDate?: string;
   schedule: Schedule;
   /** In US cents: a positive whole number. */
   penaltyCents: number;
@@ -998,6 +1044,12 @@ export type TermChange =
   | { term: "description"; before: string; after: string; effect: ChangeEffect }
   /** "HH:MM". */
   | { term: "in-bed-by"; before: string; after: string; effect: ChangeEffect }
+  /** "HH:MM", or null for midnight. */
+  | { term: "due-by"; before: string | null; after: string | null; effect: ChangeEffect }
+  /** "YYYY-MM-DD", or null for none. */
+  | { term: "start-date"; before: string | null; after: string | null; effect: ChangeEffect }
+  /** "YYYY-MM-DD", or null for none. */
+  | { term: "end-date"; before: string | null; after: string | null; effect: ChangeEffect }
   | { term: "schedule"; before: Schedule; after: Schedule; effect: ChangeEffect }
   /** In US cents. */
   | { term: "penalty"; before: number; after: number; effect: ChangeEffect }
@@ -1047,6 +1099,8 @@ export type ChangePactRefusal =
   | "pact-ended"
   /** A change request waits: until it's decided or withdrawn, only the name and added reviewers change. */
   | "change-request-waiting"
+  /** The start date can't change once the first occurrence has opened. */
+  | "pact-started"
   | "nothing-changed";
 
 export type ChangePreviewResult = { ok: true; preview: ChangePreview } | { ok: false; reason: ChangePactRefusal };
@@ -1062,7 +1116,17 @@ export type RequestEndResult =
 /** A pact's terms as they stand, as a change request shows those it leaves alone. */
 export type CurrentTerms = Pick<
   PactTerms,
-  "name" | "description" | "evidenceKind" | "inBedBy" | "schedule" | "penaltyCents" | "recipient" | "reviewers"
+  | "name"
+  | "description"
+  | "evidenceKind"
+  | "inBedBy"
+  | "dueBy"
+  | "startDate"
+  | "endDate"
+  | "schedule"
+  | "penaltyCents"
+  | "recipient"
+  | "reviewers"
 >;
 
 /** A change request, as its reviewers and its owner see it. */
