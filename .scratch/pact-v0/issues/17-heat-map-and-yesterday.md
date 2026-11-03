@@ -16,3 +16,7 @@ History views, once there's history to show.
 
 - [ ] The pact page query returns every occurrence since the first with its outcome, including Excused and not judged yet.
 - [ ] Yesterday lists yesterday's Kept, Missed and Excused occurrences and leaves out pacts not due yesterday.
+
+## Comments
+
+**Prototype round 1 (2026-11-03):** `.scratch/pact-v0/prototype/changes.prototype.html`, History tab. Option A, the GitHub grid, was chosen; Weekly count gets one square per week with its session count (ticket 14 adds that). See the spec's Screens (Heat map, Yesterday).

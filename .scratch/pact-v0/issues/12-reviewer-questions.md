@@ -21,3 +21,7 @@ A reviewer can ask the owner about any review item instead of deciding it; the i
 - [ ] Reviewer asks about evidence → queue count drops to 0 for both reviewers, owner sees the alert → owner replies → back in both queues, alert resolved.
 - [ ] An occurrence whose evidence is waiting on the owner's reply at midnight stays not judged yet.
 - [ ] Queue order: a change request filed after two evidence items still comes first.
+
+## Comments
+
+**Prototype round 1 (2026-11-03):** `.scratch/pact-v0/prototype/changes.prototype.html`, Ask tab. Option B was chosen: the Today alert's Reply opens the item's page with the thread and a reply box. Replies are text only. See the spec's Screens (Reviewer questions).

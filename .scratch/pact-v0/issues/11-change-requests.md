@@ -36,3 +36,7 @@ After the edit window, an owner can change an Active pact: stricter changes appl
 ## Notes
 
 - Trap: `#pactsToJudge` in `src/core/core.ts` selects every pact with no filter on `stage`, so judging keeps adding a penalty for an Ended pact, and setting `stage = 'ended'` alone doesn't stop it. `#judgingReached` also calls it and throws if the pact is missing, so a filter inside it isn't enough on its own.
+
+## Comments
+
+**Prototype round 1 (2026-11-03):** `.scratch/pact-v0/prototype/changes.prototype.html`, Change tab. Option B (open on Check, Change per row) was chosen. Also settled: one waiting change request per pact, withdrawable; no stricter change while one waits (withdraw first); an optional "Why?" note; name, reminders and adding a reviewer apply at once even inside a waiting change; End pact is its own button and sheet, and there's no Delete after the edit window. The spec's Screens (Request change, Waiting change request, End pact, Change request review item) and Rules (Creation and change) hold the details.
