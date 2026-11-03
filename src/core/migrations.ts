@@ -478,4 +478,18 @@ export const migrations: readonly string[] = [
   -- occurrence, and occurrence.miss_accepted_at records it.
   ALTER TABLE evidence ADD COLUMN rejection_accepted_at TEXT;
   `,
+  // 20: no bills for Wednesdays before billing existed
+  `
+  -- Migration 14 left billed_through NULL, and billing starts a NULL account
+  -- from its created_at, so an account made before billing existed would get
+  -- a bill for every Wednesday since then on the first tick, already overdue.
+  -- Start their billing now instead; their owed penalties go on the next
+  -- Wednesday's bill. A migration has no Clock, so this reads SQLite's (as
+  -- migration 5 does), in the format the core writes. An account with a bill
+  -- has been billed, so only accounts with none are moved. Accounts made
+  -- after this keep NULL and are billed from their creation.
+  UPDATE account SET billed_through = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  WHERE billed_through IS NULL
+    AND NOT EXISTS (SELECT 1 FROM bill WHERE bill.owner_account_id = account.id);
+  `,
 ];

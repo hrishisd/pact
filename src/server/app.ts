@@ -105,8 +105,12 @@ export interface AppOptions {
   operatorEmail: string;
   /** The key browsers subscribe to push with. See Config. */
   vapidPublicKey: string;
-  /** Oura's OAuth steps: the real adapter, or in development without Oura credentials a stand-in. */
-  oura: OuraConnector;
+  /**
+   * Oura's OAuth steps: the real adapter, or in development without Oura
+   * credentials a stand-in. Null in production without them: Oura isn't set
+   * up, so connecting returns to the form as `unavailable`.
+   */
+  oura: OuraConnector | null;
   /** Where the app writes log lines. Default: console.log. */
   log?: (line: string) => void;
 }
@@ -318,6 +322,7 @@ export function createApp({
   // short-lived cookie this browser brings back to the callback, where it
   // must match. Lax, so Oura's redirect back (a top-level GET) carries it.
   app.get(API_PATHS.ouraConnect, (c) => {
+    if (!oura) return c.redirect(`${APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${"unavailable" satisfies OuraResult}`);
     const state = randomBytes(16).toString("base64url");
     setCookie(c, OURA_STATE_COOKIE, state, {
       httpOnly: true,
@@ -330,6 +335,7 @@ export function createApp({
   });
   app.get(API_PATHS.ouraCallback, async (c) => {
     const back = (result: OuraResult) => c.redirect(`${APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${result}`);
+    if (!oura) return back("unavailable");
     const expected = getCookie(c, OURA_STATE_COOKIE);
     deleteCookie(c, OURA_STATE_COOKIE, { path: API_PATHS.ouraCallback });
     const { state, code, error } = c.req.query();

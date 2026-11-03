@@ -11,6 +11,7 @@ import {
   ouraAdapter,
   r2PhotoStore,
   systemClock,
+  unavailableOura,
   webPushNotifier,
   type OuraConnector,
   type OuraSource,
@@ -46,19 +47,23 @@ if (!config.production) {
   exitUnlessNativeBinaryLoads();
 }
 
-const oura: OuraSource & OuraConnector & { close?: () => void } = config.oura
+// Production without Oura credentials gets no connector (connecting is refused)
+// and a source with no sleep; only development falls back to the stand-in.
+const oura: (OuraSource & OuraConnector & { close?: () => void }) | null = config.oura
   ? ouraAdapter(
       config.dbPath,
       { ...config.oura, redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString() },
       systemClock,
     )
-  : devOura(dataDir, API_PATHS.ouraCallback);
+  : config.production
+    ? null
+    : devOura(dataDir, API_PATHS.ouraCallback);
 
 const core = createPactCore({
   dbPath: config.dbPath,
   clock: systemClock,
   notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, systemClock),
-  ouraSource: oura,
+  ouraSource: oura ?? unavailableOura,
   photoStore:
     config.photos.kind === "r2"
       ? r2PhotoStore(config.photos, systemClock)
@@ -114,7 +119,7 @@ async function shutdown(signal: string): Promise<void> {
   ]);
   await scheduler.stop();
   await core.close();
-  oura.close?.();
+  oura?.close?.();
   closeAuth();
   process.exit(0);
 }

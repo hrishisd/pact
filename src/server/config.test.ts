@@ -73,10 +73,15 @@ describe("deployed commit", () => {
 });
 
 describe("Oura", () => {
-  test("production needs the Oura client and a 32-byte token key", () => {
+  test("production without an Oura client starts with Oura not set up", () => {
     const { OURA_CLIENT_ID: _id, OURA_CLIENT_SECRET: _secret, OURA_TOKEN_KEY: _key, ...withoutOura } = PRODUCTION;
-    expect(() => loadConfig({ ...withoutOura, ...PHOTOS_BUCKET })).toThrow(
-      "missing required environment variables: OURA_CLIENT_ID, OURA_CLIENT_SECRET, OURA_TOKEN_KEY",
+    expect(loadConfig({ ...withoutOura, ...PHOTOS_BUCKET }).oura).toBeNull();
+  });
+
+  test("production with an Oura client needs its secret and a 32-byte token key", () => {
+    const { OURA_CLIENT_SECRET: _secret, OURA_TOKEN_KEY: _key, ...clientOnly } = PRODUCTION;
+    expect(() => loadConfig({ ...clientOnly, ...PHOTOS_BUCKET })).toThrow(
+      "missing required environment variables: OURA_CLIENT_SECRET, OURA_TOKEN_KEY",
     );
     expect(() => loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, OURA_TOKEN_KEY: "c2hvcnQ=" })).toThrow(
       "OURA_TOKEN_KEY must be 32 bytes, base64",

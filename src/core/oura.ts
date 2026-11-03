@@ -62,6 +62,14 @@ export function ouraAdapter(dbPath: string, client: OuraClient, clock: Clock, op
 }
 
 /**
+ * Production without Oura credentials: no account can connect, so there is
+ * never sleep. Never the dev stand-in, which would read sleep from a file.
+ */
+export const unavailableOura: OuraSource = {
+  sleepPeriods: async () => ({ ok: false, reason: "disconnected" }),
+};
+
+/**
  * Development only, for running the app without Oura credentials: connecting
  * skips Oura's page (it sends the browser straight to `callbackPath`), and
  * sleep comes from `oura-sleep.json` in `dir`, an array of periods in Oura's

@@ -42,8 +42,11 @@ export interface Config {
   vapid: { publicKey: string; privateKey: string };
   /**
    * The Oura OAuth app, and the key that encrypts its tokens in the database.
-   * Required in production. Development without OURA_CLIENT_ID gets null:
-   * connecting skips Oura, and sleep comes from a file (see devOura).
+   * Optional: without OURA_CLIENT_ID it is null; with it, the secret and the key
+   * are required too (in production; development has a default key). Null in
+   * production means Oura isn't set up: connecting is refused and there is no
+   * sleep. Null in development: connecting skips Oura, and sleep comes from a
+   * file (see devOura).
    */
   oura: { clientId: string; clientSecret: string; tokenKey: string } | null;
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
@@ -101,14 +104,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       publicKey: read("VAPID_PUBLIC_KEY", DEV_VAPID_PUBLIC_KEY),
       privateKey: read("VAPID_PRIVATE_KEY", DEV_VAPID_PRIVATE_KEY),
     },
-    oura:
-      production || env.OURA_CLIENT_ID?.trim()
-        ? {
-            clientId: read("OURA_CLIENT_ID", ""),
-            clientSecret: read("OURA_CLIENT_SECRET", ""),
-            tokenKey: read("OURA_TOKEN_KEY", DEV_OURA_TOKEN_KEY),
-          }
-        : null,
+    oura: env.OURA_CLIENT_ID?.trim()
+      ? {
+          clientId: read("OURA_CLIENT_ID", ""),
+          clientSecret: read("OURA_CLIENT_SECRET", ""),
+          tokenKey: read("OURA_TOKEN_KEY", DEV_OURA_TOKEN_KEY),
+        }
+      : null,
     restored: env.PACT_RESTORED === "1",
     commit: env.PACT_COMMIT?.trim() || null,
   };

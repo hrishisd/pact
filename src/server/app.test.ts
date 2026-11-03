@@ -82,17 +82,20 @@ const OURA_AUTHORIZE = "https://cloud.oura.test/oauth/authorize";
  * `canonicalOrigin` is the config's: null unless the server is in production.
  * `commit` is the config's: null unless the image was built with one.
  * `diskUsedFraction` stands in for the volume's disk use: half full unless a test says otherwise.
+ * `ouraSetUp: false` is production without Oura credentials: no connector.
  */
 async function server({
   canonicalOrigin = null,
   commit = null,
   diskUsedFraction = () => 0.5,
   production = false,
+  ouraSetUp = true,
 }: {
   canonicalOrigin?: string | null;
   commit?: string | null;
   diskUsedFraction?: () => number;
   production?: boolean;
+  ouraSetUp?: boolean;
 } = {}) {
   const s = scenario();
   const ouraConnects: { account: string; code: string }[] = [];
@@ -117,13 +120,15 @@ async function server({
     production,
     operatorEmail: OPERATOR,
     vapidPublicKey: VAPID_PUBLIC_KEY,
-    oura: {
-      authorizeUrl: (state) => `${OURA_AUTHORIZE}?state=${state}`,
-      async connect(account, code) {
-        ouraConnects.push({ account, code });
-        return code === "good-code" ? { ok: true } : { ok: false, reason: "exchange-failed" };
-      },
-    },
+    oura: ouraSetUp
+      ? {
+          authorizeUrl: (state) => `${OURA_AUTHORIZE}?state=${state}`,
+          async connect(account, code) {
+            ouraConnects.push({ account, code });
+            return code === "good-code" ? { ok: true } : { ok: false, reason: "exchange-failed" };
+          },
+        }
+      : null,
     log: (line) => s.logs.push(line),
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
@@ -2330,6 +2335,20 @@ describe("connecting Oura", () => {
 
     expect(cancelled.headers.get("Location")).toBe("/pacts/new?oura=cancelled");
     expect(refused.headers.get("Location")).toBe("/pacts/new?oura=failed");
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+  });
+
+  test("with Oura not set up, connecting returns to the form as unavailable and connects nothing", async () => {
+    const s = await server({ production: true, ouraSetUp: false });
+    const { cookie } = await operatorWithInvite(s);
+
+    const started = await s.request(API_PATHS.ouraConnect, { cookie });
+    const callback = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=any`, { cookie });
+
+    for (const response of [started, callback]) {
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe("/pacts/new?oura=unavailable");
+    }
     expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
   });
 

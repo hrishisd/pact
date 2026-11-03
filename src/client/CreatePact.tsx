@@ -161,7 +161,7 @@ export function formOf(
  * What's wrong, in the owner's words: the core's refusals at Create or Save,
  * and the steps' own checks that a field is filled in.
  */
-type Problem = EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "oura-failed";
+type Problem = EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "oura-failed" | "oura-unavailable";
 
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
@@ -181,6 +181,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "invalid-penalty": "Set a penalty above $0.",
   "no-recipient": "Pick a recipient.",
   "oura-failed": "Oura didn't connect. Try again.",
+  "oura-unavailable": "Oura isn't set up yet.",
   "unknown-recipient": "That recipient isn't on your list. Pick another.",
   "no-reviewers": "Pick at least one reviewer.",
   "not-a-friend": "Only friends can be reviewers.",
@@ -274,7 +275,11 @@ export function CreatePact({
   const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(
-    ouraResult === "failed" ? PROBLEMS["oura-failed"] : null,
+    ouraResult === "failed"
+      ? PROBLEMS["oura-failed"]
+      : ouraResult === "unavailable"
+        ? PROBLEMS["oura-unavailable"]
+        : null,
   );
   const top = useRef<HTMLDivElement>(null);
 
@@ -479,7 +484,7 @@ function takeOuraResult(): OuraResult | null {
   params.delete(OURA_RESULT_PARAM);
   const search = params.toString();
   window.history.replaceState(window.history.state, "", window.location.pathname + (search ? `?${search}` : ""));
-  return result === "connected" || result === "cancelled" ? result : "failed";
+  return result === "connected" || result === "cancelled" || result === "unavailable" ? result : "failed";
 }
 
 function KindStep({ onPick }: { onPick: (kind: EvidenceKind) => void }) {

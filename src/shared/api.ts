@@ -87,11 +87,11 @@ export const INVITE_TOKEN_SIGN_IN_KEY = "inviteToken";
 
 /**
  * How connecting Oura went, on the new pact form's URL after Oura's callback:
- * `/pacts/new?oura=connected`, `cancelled` (the owner said no on Oura's page)
- * or `failed`.
+ * `/pacts/new?oura=connected`, `cancelled` (the owner said no on Oura's page),
+ * `failed`, or `unavailable` (Oura isn't set up on this server).
  */
 export const OURA_RESULT_PARAM = "oura";
-export type OuraResult = "connected" | "cancelled" | "failed";
+export type OuraResult = "connected" | "cancelled" | "failed" | "unavailable";
 
 /** The client route of an invite link; the SPA renders it. */
 export function invitePath(token: string): string {
