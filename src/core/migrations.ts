@@ -337,4 +337,37 @@ export const migrations: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // 14: weekly bills and overdue reminders
+  `
+  -- Every Wednesday at 18:00 in the owner's timezone, one bill per recipient
+  -- for the owner's owed penalties that can't be excused any more. A bill
+  -- never changes once made. It's due at 18:00 seven days later.
+  CREATE TABLE bill (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    billed_on TEXT NOT NULL, -- the Wednesday, "YYYY-MM-DD" in the owner's timezone
+    created_at TEXT NOT NULL,
+    due_at TEXT NOT NULL
+  );
+  CREATE INDEX bill_ledger ON bill (owner_account_id, recipient_id);
+
+  -- The bill a penalty is on; NULL until a Wednesday bills it.
+  ALTER TABLE penalty ADD COLUMN bill_id TEXT REFERENCES bill (id);
+
+  -- How far billing has run for the account: the last instant it checked.
+  -- NULL until the first tick after the account was made.
+  ALTER TABLE account ADD COLUMN billed_through TEXT;
+
+  -- When an owner Overdue to a recipient was last reminded, and when the
+  -- reviewers were last told. Kept after the bill is paid, so a payment
+  -- that's later rejected doesn't tell the reviewers again within the week.
+  CREATE TABLE overdue_notice (
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    owner_reminded_at TEXT,
+    reviewers_told_at TEXT,
+    PRIMARY KEY (owner_account_id, recipient_id)
+  );
+  `,
 ];

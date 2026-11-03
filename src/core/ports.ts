@@ -54,7 +54,11 @@ export type NotificationKind =
   /** To the owner: a reviewer approved or rejected their payment. */
   | "payment-decided"
   /** To the owner: an occurrence reached its due time and was judged Missed. */
-  | "missed-occurrence";
+  | "missed-occurrence"
+  /** To the owner: a Wednesday bill to one recipient. */
+  | "new-bill"
+  /** To the owner, daily while Overdue; to the reviewers of pacts with that recipient, at first and weekly. */
+  | "overdue-bill";
 export type NotificationChannel = "push";
 
 export interface NotificationPayload {

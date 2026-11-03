@@ -6,7 +6,7 @@
 // reads. The core reads time only from the Clock port.
 
 import { createECDH, randomBytes, randomUUID } from "node:crypto";
-import { addDays, localDateOf, type LocalDate } from "./calendar.ts";
+import { addDays, localDateOf, weekdayOf, zonedWallTimeToInstant, type LocalDate } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
 import {
   newOccurrenceTerms,
@@ -26,7 +26,7 @@ import type {
   PhotoStore,
 } from "./ports.ts";
 import { APP_PATHS } from "../shared/api.ts";
-import { formatDate, money, scheduleText } from "../shared/format.ts";
+import { clockText, formatDate, money, scheduleText } from "../shared/format.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
   MAX_EXCUSE_PHOTOS,
@@ -95,6 +95,7 @@ import {
   type Today,
   type TodayAlert,
   type TodayAutomaticCard,
+  type TodayBillCard,
   type TodayComingUpCard,
   type TodayMissedCard,
   type TodaySection,
@@ -313,6 +314,8 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "payment-decided": "decision",
   "missed-occurrence": "missed-occurrence",
   "excuse-decided": "decision",
+  "new-bill": "new-bill",
+  "overdue-bill": "overdue-bill",
 };
 /** The push services browsers use, as domains; a saved endpoint must be on one of them. */
 const PUSH_SERVICE_DOMAINS = [
@@ -331,6 +334,14 @@ const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
  * occurrence can be excused. A Missed card stays on Today that long.
  */
 const EXCUSE_WINDOW_MS = 48 * 60 * 60 * 1000;
+/** How long after its Wednesday a bill is due. */
+const BILL_TERM_DAYS = 7;
+/** Bills are made on Wednesdays at this time, in the owner's timezone, and fall due at it. */
+const BILL_TIME = { hour: 18, minute: 0 } as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** How often an Overdue owner is reminded, and how often their reviewers are told. */
+const OVERDUE_REMINDER_MS = DAY_MS;
+const OVERDUE_REVIEWER_NOTICE_MS = 7 * DAY_MS;
 /** How long after creation the owner can edit or delete a pact freely. */
 const EDIT_WINDOW_MS = 10 * 60 * 1000;
 /**
@@ -1185,7 +1196,7 @@ class Core implements PactCore {
         const penaltyRows = this.#db
           .prepare(
             `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
-                    penalty.amount_cents, penalty.added_at, ${PENALTY_HELD} AS held
+                    penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held
              FROM penalty JOIN pact ON pact.id = penalty.pact_id
              WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
              ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
@@ -1197,34 +1208,39 @@ class Core implements PactCore {
           occurrence_date: string;
           amount_cents: number;
           added_at: string;
+          bill_id: string | null;
           held: 0 | 1;
         }[];
-        // Approved payments pay off penalties oldest first: walk the history
-        // backwards, giving each penalty what's left of the approved total.
-        // A held penalty isn't owed, so payments skip it.
-        let unallocatedCents = summary.paidCents;
-        const penalties = penaltyRows
-          .toReversed()
-          .map((row): LedgerPenalty => {
-            const held = row.held === 1;
-            const paidCents = held ? 0 : Math.min(row.amount_cents, unallocatedCents);
-            unallocatedCents -= paidCents;
-            // Missed with evidence means all of it was rejected.
-            const rejection = this.#rejection(row.pact_id, row.occurrence_date);
-            return {
-              kind: "penalty",
-              penaltyId: row.id,
-              pactId: row.pact_id,
-              pactName: row.pact_name,
-              occurrenceDate: row.occurrence_date,
-              amountCents: row.amount_cents,
-              addedAt: new Date(row.added_at),
-              paidCents,
-              ...(rejection && { rejection }),
-              held,
-            };
-          })
-          .toReversed();
+        const allocation = this.#allocate(accountId, recipientId);
+        const bills = this.#billsOf(accountId, recipientId);
+        const timezone = account().timezone;
+        const penalties = penaltyRows.map((row): LedgerPenalty => {
+          const held = row.held === 1;
+          // Missed with evidence means all of it was rejected.
+          const rejection = this.#rejection(row.pact_id, row.occurrence_date);
+          const bill = bills.find((b) => b.id === row.bill_id);
+          return {
+            kind: "penalty",
+            penaltyId: row.id,
+            pactId: row.pact_id,
+            pactName: row.pact_name,
+            occurrenceDate: row.occurrence_date,
+            amountCents: row.amount_cents,
+            addedAt: new Date(row.added_at),
+            paidCents: allocation.get(row.id)?.paidCents ?? 0,
+            ...(rejection && { rejection }),
+            held,
+            bill: held
+              ? null
+              : bill
+                ? { kind: "on-bill", billedOn: bill.billedOn, dueAt: bill.dueAt }
+                : {
+                    kind: "next-bill",
+                    // Every owner with a penalty has a timezone: making a pact needs it.
+                    billedOn: nextBillDay(new Date(row.added_at), this.#clock.now(), timezone!),
+                  },
+          };
+        });
         // A payment recorded the instant a penalty was added came after it, so it's listed first.
         const history = mergeByTime<LedgerEntry>(
           (entry) => (entry.kind === "penalty" ? entry.addedAt : entry.recordedAt),
@@ -1269,8 +1285,11 @@ class Core implements PactCore {
       awaiting_cents: number;
       awaiting_count: number;
     }[];
+    const now = this.#clock.now();
     return rows.map((row) => {
       const owedCents = row.penalty_cents - row.paid_cents;
+      const bills = this.#billsOf(ownerId, row.id);
+      const due = bills.filter((bill) => bill.dueAt.getTime() > now.getTime() && bill.uncoveredCents > 0);
       return {
         recipientId: row.id,
         name: row.name,
@@ -1279,8 +1298,260 @@ class Core implements PactCore {
         awaitingCents: row.awaiting_cents,
         awaitingCount: row.awaiting_count,
         paidCents: row.paid_cents,
+        overdueCents: overdueOf(bills, now).cents,
+        billDue:
+          due.length === 0 ? null : { amountCents: sum(due.map((bill) => bill.uncoveredCents)), dueAt: due[0]!.dueAt },
       };
     });
+  }
+
+  /**
+   * How payments to `recipientId` apply to the owner's penalties, oldest
+   * penalty first: approved payments pay them (`paidCents`), then payments
+   * awaiting approval cover what's left (`coveredCents`). Held penalties
+   * aren't owed, so payments skip them.
+   */
+  #allocate(ownerId: AccountId, recipientId: string): Map<string, { paidCents: number; coveredCents: number }> {
+    const totals = this.#db
+      .prepare(
+        `SELECT COALESCE(SUM(amount_cents) FILTER (WHERE decision = 'approved'), 0) AS approved,
+                COALESCE(SUM(amount_cents) FILTER (WHERE decision IS NULL), 0) AS awaiting
+         FROM payment WHERE owner_account_id = ? AND recipient_id = ?`,
+      )
+      .get(ownerId, recipientId) as { approved: number; awaiting: number };
+    const rows = this.#db
+      .prepare(
+        `SELECT penalty.id, penalty.amount_cents FROM penalty JOIN pact ON pact.id = penalty.pact_id
+         WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ? AND NOT ${PENALTY_HELD}
+         ORDER BY penalty.added_at, penalty.occurrence_date, pact.name DESC, penalty.id DESC`,
+      )
+      .all(ownerId, recipientId) as { id: string; amount_cents: number }[];
+    let approved = totals.approved;
+    let awaiting = totals.awaiting;
+    const allocation = new Map<string, { paidCents: number; coveredCents: number }>();
+    for (const row of rows) {
+      const paidCents = Math.min(row.amount_cents, approved);
+      approved -= paidCents;
+      const coveredCents = Math.min(row.amount_cents - paidCents, awaiting);
+      awaiting -= coveredCents;
+      allocation.set(row.id, { paidCents, coveredCents });
+    }
+    return allocation;
+  }
+
+  /** The owner's bills to `recipientId`, oldest first, with what's unpaid and what payments awaiting approval don't cover. */
+  #billsOf(ownerId: AccountId, recipientId: string): BillState[] {
+    const allocation = this.#allocate(ownerId, recipientId);
+    const bills = this.#db
+      .prepare(
+        `SELECT id, billed_on, due_at FROM bill WHERE owner_account_id = ? AND recipient_id = ?
+         ORDER BY created_at, id`,
+      )
+      .all(ownerId, recipientId) as { id: string; billed_on: LocalDate; due_at: string }[];
+    return bills.map((bill) => {
+      const penalties = this.#db.prepare(`SELECT id, amount_cents FROM penalty WHERE bill_id = ?`).all(bill.id) as {
+        id: string;
+        amount_cents: number;
+      }[];
+      let unpaidCents = 0;
+      let uncoveredCents = 0;
+      for (const penalty of penalties) {
+        const { paidCents, coveredCents } = allocation.get(penalty.id) ?? { paidCents: 0, coveredCents: 0 };
+        unpaidCents += penalty.amount_cents - paidCents;
+        uncoveredCents += penalty.amount_cents - paidCents - coveredCents;
+      }
+      return { id: bill.id, billedOn: bill.billed_on, dueAt: new Date(bill.due_at), unpaidCents, uncoveredCents };
+    });
+  }
+
+  /**
+   * Makes the Wednesday bills due by `t` for every account with a timezone,
+   * from where billing got to (catching up after downtime): at each
+   * Wednesday 18:00, one bill per recipient for the owed penalties not on a
+   * bill whose 48-hour excuse window had closed by then. No penalties, no
+   * bill. The owner is told of each bill with something left to pay.
+   */
+  #makeBills(t: Date): void {
+    const accounts = this.#db
+      .prepare(`SELECT id, timezone, created_at, billed_through FROM account WHERE timezone IS NOT NULL`)
+      .all() as { id: AccountId; timezone: string; created_at: string; billed_through: string | null }[];
+    for (const account of accounts) {
+      const from = new Date(account.billed_through ?? account.created_at);
+      if (from.getTime() >= t.getTime()) continue;
+      for (const wednesday of billDays(from, t, account.timezone)) {
+        this.#billOwner(account.id, wednesday, account.timezone);
+      }
+      this.#db.prepare(`UPDATE account SET billed_through = ? WHERE id = ?`).run(t.toISOString(), account.id);
+    }
+  }
+
+  #billOwner(ownerId: AccountId, wednesday: LocalDate, timezone: string): void {
+    const createdAt = billInstant(wednesday, timezone);
+    const dueAt = billInstant(addDays(wednesday, BILL_TERM_DAYS), timezone);
+    const excusableAfter = new Date(createdAt.getTime() - EXCUSE_WINDOW_MS).toISOString();
+    const recipients = this.#db
+      .prepare(
+        `SELECT DISTINCT penalty.recipient_id FROM penalty
+         WHERE penalty.owner_account_id = ? AND penalty.bill_id IS NULL AND penalty.added_at <= ?
+           AND NOT ${PENALTY_HELD}
+         ORDER BY penalty.recipient_id`,
+      )
+      .all(ownerId, excusableAfter) as { recipient_id: string }[];
+    for (const { recipient_id: recipientId } of recipients) {
+      const billId = randomUUID();
+      this.#db
+        .prepare(
+          `INSERT INTO bill (id, owner_account_id, recipient_id, billed_on, created_at, due_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(billId, ownerId, recipientId, wednesday, createdAt.toISOString(), dueAt.toISOString());
+      this.#db
+        .prepare(
+          `UPDATE penalty SET bill_id = ?
+           WHERE owner_account_id = ? AND recipient_id = ? AND bill_id IS NULL AND added_at <= ?
+             AND NOT ${PENALTY_HELD}`,
+        )
+        .run(billId, ownerId, recipientId, excusableAfter);
+      const bill = this.#billsOf(ownerId, recipientId).find((b) => b.id === billId)!;
+      if (bill.unpaidCents === 0) continue;
+      this.#enqueue({
+        recipient: ownerId,
+        kind: "new-bill",
+        channel: "push",
+        payload: {
+          recipientId,
+          title: `New bill: ${money(bill.unpaidCents)} to ${this.#recipientName(recipientId)}`,
+          body: `Due ${formatDate(addDays(wednesday, BILL_TERM_DAYS))} at ${clockText(BILL_CLOCK)}`,
+          url: APP_PATHS.ledger(recipientId),
+        },
+      });
+    }
+  }
+
+  /**
+   * For each owner Overdue to a recipient at `t` (bills past due that
+   * payments awaiting approval don't cover): reminds the owner once a day,
+   * and tells the reviewers of the owner's pacts with that recipient when
+   * the owner first goes Overdue, then once a week while it lasts.
+   */
+  #remindOverdue(t: Date): void {
+    const ledgers = this.#db
+      .prepare(
+        `SELECT DISTINCT bill.owner_account_id, bill.recipient_id, account.name AS owner_name
+         FROM bill JOIN account ON account.id = bill.owner_account_id
+         WHERE bill.due_at <= ?
+         ORDER BY bill.owner_account_id, bill.recipient_id`,
+      )
+      .all(t.toISOString()) as { owner_account_id: AccountId; recipient_id: string; owner_name: string }[];
+    for (const { owner_account_id: ownerId, recipient_id: recipientId, owner_name: ownerName } of ledgers) {
+      const overdue = overdueOf(this.#billsOf(ownerId, recipientId), t);
+      if (overdue.cents === 0) continue;
+      const notice = this.#db
+        .prepare(
+          `SELECT owner_reminded_at, reviewers_told_at FROM overdue_notice
+           WHERE owner_account_id = ? AND recipient_id = ?`,
+        )
+        .get(ownerId, recipientId) as
+        { owner_reminded_at: string | null; reviewers_told_at: string | null } | undefined;
+      const since = (at: string | null | undefined) =>
+        at === null || at === undefined ? Infinity : t.getTime() - new Date(at).getTime();
+      const recipientName = this.#recipientName(recipientId);
+      const remind = since(notice?.owner_reminded_at) >= OVERDUE_REMINDER_MS;
+      const tell = since(notice?.reviewers_told_at) >= OVERDUE_REVIEWER_NOTICE_MS;
+      if (remind) {
+        this.#enqueue({
+          recipient: ownerId,
+          kind: "overdue-bill",
+          channel: "push",
+          payload: {
+            recipientId,
+            title: `${money(overdue.cents)} overdue to ${recipientName}`,
+            body: `Your ${formatDate(overdue.billedOn!)} bill was due ${formatDate(localDateOf(overdue.dueAt!, this.#timezoneOf(ownerId)))}. Record your payment.`,
+            url: APP_PATHS.ledger(recipientId),
+          },
+        });
+      }
+      if (tell) {
+        for (const reviewerId of this.#paymentReviewers(ownerId, recipientId)) {
+          this.#enqueue({
+            recipient: reviewerId,
+            kind: "overdue-bill",
+            channel: "push",
+            payload: {
+              recipientId,
+              title: `${ownerName} is overdue`,
+              body: `${money(overdue.cents)} to ${recipientName}, due ${formatDate(localDateOf(overdue.dueAt!, this.#timezoneOf(ownerId)))}`,
+              url: APP_PATHS.today,
+            },
+          });
+        }
+      }
+      if (remind || tell) {
+        this.#db
+          .prepare(
+            `INSERT INTO overdue_notice (owner_account_id, recipient_id, owner_reminded_at, reviewers_told_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (owner_account_id, recipient_id) DO UPDATE
+             SET owner_reminded_at = excluded.owner_reminded_at, reviewers_told_at = excluded.reviewers_told_at`,
+          )
+          .run(
+            ownerId,
+            recipientId,
+            remind ? t.toISOString() : (notice?.owner_reminded_at ?? null),
+            tell ? t.toISOString() : (notice?.reviewers_told_at ?? null),
+          );
+      }
+    }
+  }
+
+  #timezoneOf(accountId: AccountId): string {
+    const row = this.#db.prepare(`SELECT timezone FROM account WHERE id = ?`).get(accountId) as {
+      timezone: string | null;
+    };
+    // Every owner with a bill has a timezone: billing needs it.
+    return row.timezone!;
+  }
+
+  /** Today's bill cards and overdue alerts: one of each at most per recipient. */
+  #billsForToday(ownerId: AccountId, now: Date): { cards: TodayBillCard[]; alerts: TodayAlert[] } {
+    const cards: TodayBillCard[] = [];
+    const alerts: TodayAlert[] = [];
+    const recipients = this.#db
+      .prepare(
+        `SELECT DISTINCT bill.recipient_id, recipient.name FROM bill
+         JOIN recipient ON recipient.id = bill.recipient_id
+         WHERE bill.owner_account_id = ? ORDER BY recipient.name, recipient.id`,
+      )
+      .all(ownerId) as { recipient_id: string; name: string }[];
+    for (const { recipient_id: recipientId, name } of recipients) {
+      const bills = this.#billsOf(ownerId, recipientId);
+      const overdue = overdueOf(bills, now);
+      if (overdue.cents > 0) {
+        alerts.push({
+          kind: "bill-overdue",
+          recipientId,
+          recipientName: name,
+          overdueCents: overdue.cents,
+          billedOn: overdue.billedOn!,
+          dueAt: overdue.dueAt!,
+          reviewerNames: this.#paymentReviewers(ownerId, recipientId)
+            .map((id) => this.#accountName(id))
+            .sort(),
+        });
+      }
+      const due = bills.filter((bill) => bill.dueAt.getTime() > now.getTime() && bill.uncoveredCents > 0);
+      if (due.length > 0) {
+        cards.push({
+          kind: "bill",
+          recipientId,
+          recipientName: name,
+          amountCents: sum(due.map((bill) => bill.uncoveredCents)),
+          dueAt: due[0]!.dueAt,
+          billedOn: due[0]!.billedOn,
+        });
+      }
+    }
+    return { cards, alerts };
   }
 
   /** The owner's payments to `recipientId` and where each one's review stands, newest recorded first. */
@@ -2170,7 +2441,7 @@ class Core implements PactCore {
    */
   #todayCards(ownerId: AccountId, timezone: string): { alerts: TodayAlert[]; sections: TodaySection[] } {
     const now = this.#clock.now();
-    const toDo: TodayToDoCard[] = [];
+    const toDo: (TodayToDoCard | TodayBillCard)[] = [];
     const automatic: TodayAutomaticCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
@@ -2206,11 +2477,13 @@ class Core implements PactCore {
         if (decision === "waiting" || decision === "approved") continue;
         // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
         if (this.#excuseOn(pact.id, open.date) !== null) continue;
-        toDo.push({ ...card, editWindowClosesAt, occurrenceDate: open.date, dueAt: open.dueAt });
+        toDo.push({ kind: "evidence", ...card, editWindowClosesAt, occurrenceDate: open.date, dueAt: open.dueAt });
       } else if (now.getTime() < first.opensAt.getTime()) {
         comingUp.push({ ...card, editWindowClosesAt, opensOn: first.date });
       }
     }
+    const bills = this.#billsForToday(ownerId, now);
+    toDo.push(...bills.cards);
     // Rows come sorted by name, and the sorts are stable.
     toDo.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
     automatic.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
@@ -2222,7 +2495,10 @@ class Core implements PactCore {
     if (automatic.length > 0) sections.push({ kind: "automatic", cards: automatic });
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
     const alerts = [...this.#rejectedEvidenceAlerts(ownerId), ...this.#rejectedExcuseAlerts(ownerId, now)];
-    return { alerts: mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert), sections };
+    return {
+      alerts: [...bills.alerts, ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert)],
+      sections,
+    };
   }
 
   /**
@@ -2380,6 +2656,8 @@ class Core implements PactCore {
       this.#closeEditWindows(t);
       this.#judgeDueBy(t);
       this.#judgeNights(t, sleep);
+      this.#makeBills(t);
+      this.#remindOverdue(t);
       this.#db
         .prepare(
           `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)
@@ -2785,6 +3063,63 @@ function waitingSince(item: TodayWaitingItem): Date {
     case "payment":
       return item.recordedAt;
   }
+}
+
+/** A bill as the ledger, Today and overdue reminders read it. */
+interface BillState {
+  id: string;
+  /** The Wednesday it was made, "YYYY-MM-DD" in the owner's timezone. */
+  billedOn: LocalDate;
+  dueAt: Date;
+  /** Its penalties less what approved payments have paid of them. */
+  unpaidCents: number;
+  /** `unpaidCents` less what payments awaiting approval cover. */
+  uncoveredCents: number;
+}
+
+/** What's Overdue at `now`: the uncovered part of bills past due, and the oldest such bill. */
+function overdueOf(bills: BillState[], now: Date): { cents: number; billedOn: LocalDate | null; dueAt: Date | null } {
+  const overdue = bills.filter((bill) => bill.dueAt.getTime() <= now.getTime() && bill.uncoveredCents > 0);
+  return {
+    cents: sum(overdue.map((bill) => bill.uncoveredCents)),
+    billedOn: overdue[0]?.billedOn ?? null,
+    dueAt: overdue[0]?.dueAt ?? null,
+  };
+}
+
+function sum(values: number[]): number {
+  return values.reduce((total, value) => total + value, 0);
+}
+
+const BILL_CLOCK = `${String(BILL_TIME.hour).padStart(2, "0")}:${String(BILL_TIME.minute).padStart(2, "0")}`;
+
+/** Wednesday `date` (or any day) at the bill time, in `timezone`. */
+function billInstant(date: LocalDate, timezone: string): Date {
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  return zonedWallTimeToInstant(year, month, day, BILL_TIME.hour, BILL_TIME.minute, timezone);
+}
+
+/** The Wednesdays whose bill time falls after `from` and by `to`, in `timezone`. */
+function billDays(from: Date, to: Date, timezone: string): LocalDate[] {
+  const days: LocalDate[] = [];
+  const last = localDateOf(to, timezone);
+  for (let date = localDateOf(from, timezone); date <= last; date = addDays(date, 1)) {
+    if (weekdayOf(date) !== "wed") continue;
+    const at = billInstant(date, timezone).getTime();
+    if (at > from.getTime() && at <= to.getTime()) days.push(date);
+  }
+  return days;
+}
+
+/**
+ * The Wednesday whose bill a penalty added at `addedAt` goes on, if nothing
+ * excuses it: the first bill time after both its 48-hour window and `now`.
+ */
+function nextBillDay(addedAt: Date, now: Date, timezone: string): LocalDate {
+  const after = Math.max(addedAt.getTime() + EXCUSE_WINDOW_MS - 1, now.getTime());
+  let date = localDateOf(new Date(after), timezone);
+  while (weekdayOf(date) !== "wed" || billInstant(date, timezone).getTime() <= after) date = addDays(date, 1);
+  return date;
 }
 
 /** Whether `text` is a real calendar day written "YYYY-MM-DD". */

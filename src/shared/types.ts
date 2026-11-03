@@ -281,7 +281,14 @@ export type SetTimezoneResult =
  * The kinds of notification an account can turn off, on all its devices. Every
  * kind starts on. Later tickets add theirs (story 88).
  */
-export const NOTIFICATION_SETTINGS = ["picked-as-reviewer", "review-item", "decision", "missed-occurrence"] as const;
+export const NOTIFICATION_SETTINGS = [
+  "picked-as-reviewer",
+  "review-item",
+  "decision",
+  "missed-occurrence",
+  "new-bill",
+  "overdue-bill",
+] as const;
 export type NotificationSetting = (typeof NOTIFICATION_SETTINGS)[number];
 
 export interface NotificationSettingState {
@@ -379,10 +386,27 @@ export type TodayAlert =
        * whose window hasn't started.
        */
       refile: { closesAt: Date | null } | null;
+    }
+  /**
+   * Bills to one recipient are past their due time and not all paid, and
+   * payments awaiting approval don't cover the rest. One per recipient. It
+   * goes once paid, or once a payment awaiting approval covers it.
+   */
+  | {
+      kind: "bill-overdue";
+      recipientId: string;
+      recipientName: string;
+      /** The unpaid part of the overdue bills that payments awaiting approval don't cover. */
+      overdueCents: number;
+      /** The oldest overdue bill: the Wednesday it was made, "YYYY-MM-DD", and when it was due. */
+      billedOn: string;
+      dueAt: Date;
+      /** Who has been told: the reviewers of the owner's pacts with this recipient. */
+      reviewerNames: string[];
     };
 export type TodaySection =
-  /** Pacts whose occurrence is open today, soonest due first. */
-  | { kind: "to-do"; cards: TodayToDoCard[] }
+  /** Pacts whose occurrence is open today, and bills to pay, soonest due first. */
+  | { kind: "to-do"; cards: (TodayToDoCard | TodayBillCard)[] }
   /**
    * Occurrences judged Missed in the last 48 hours, latest first, except
    * those Missed through a rejection (alerts) and accepted misses.
@@ -402,12 +426,28 @@ interface TodayPactCard {
 
 /** A Fixed-days pact whose occurrence is open today. */
 export interface TodayToDoCard extends TodayPactCard {
+  kind: "evidence";
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
   /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
   occurrenceDate: string;
   /** Midnight ending today, in the owner's timezone. */
   dueAt: Date;
+}
+
+/**
+ * Bills to one recipient not due yet, with an unpaid part that payments
+ * awaiting approval don't cover. One per recipient.
+ */
+export interface TodayBillCard {
+  kind: "bill";
+  recipientId: string;
+  recipientName: string;
+  /** What's left to pay on those bills, less payments awaiting approval. */
+  amountCents: number;
+  /** The soonest due of them, and the Wednesday it was made, "YYYY-MM-DD". */
+  dueAt: Date;
+  billedOn: string;
 }
 
 /** Who rejected some evidence, and why. */
@@ -505,6 +545,16 @@ export interface LedgerSummary {
   awaitingCount: number;
   /** Approved payments, lifetime. */
   paidCents: number;
+  /**
+   * The unpaid part of bills past their due time that payments awaiting
+   * approval don't cover. Above zero, the owner is Overdue to this recipient.
+   */
+  overdueCents: number;
+  /**
+   * Bills not due yet with an unpaid part payments awaiting approval don't
+   * cover: that part, and the soonest due time. Null when there's none.
+   */
+  billDue: { amountCents: number; dueAt: Date } | null;
 }
 
 /** A payment the owner made to a recipient outside the app, to record with its screenshot. */
@@ -553,6 +603,11 @@ export interface LedgerPenalty {
   rejection?: EvidenceRejection;
   /** Held while an excuse for the occurrence waits for approval: it doesn't count toward owed, and payments don't pay it. */
   held: boolean;
+  /**
+   * The bill it's on, or the Wednesday bill it goes on once it can't be
+   * excused (dates "YYYY-MM-DD"). Null while it's held.
+   */
+  bill: { kind: "on-bill"; billedOn: string; dueAt: Date } | { kind: "next-bill"; billedOn: string } | null;
 }
 
 /** A payment to the recipient the owner recorded, and where its review stands. */
