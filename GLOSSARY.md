@@ -15,7 +15,7 @@ The person who made a pact and is held to it.
 _Avoid_: Creator, user (when the role matters)
 
 **Active / Ended**:
-The stages a pact goes through. A pact is Active from the moment it's created; nobody approves it first. An Ended pact is past its end date or was ended through an approved change request.
+The stages a pact goes through. A pact is Active from the moment it's created; nobody approves it first. An Ended pact is past its end date, was ended through an approved change request, or is a One-time pact whose occurrence has been judged.
 _Avoid_: Draft, pending, live, archived
 
 **Edit window**:
@@ -114,7 +114,7 @@ A change that only makes a pact stricter, such as a higher penalty or more days.
 One device's permission to get an account's notifications, as its browser reports it. An account can have several. Turning notifications on is per device.
 
 **Reminder**:
-A push to a pact's owner at a time of day they set on the pact, before an occurrence's due time, while it's still useful: on a scheduled day with no evidence yet, or every scheduled night for a bedtime pact. Changing reminders applies at once, with no review. They aren't terms.
+A push to a pact's owner at a time of day they set on the pact, before an occurrence's due time, while it's still useful: on a scheduled day with no evidence yet, or every scheduled night for a bedtime pact. On a One-time pact each reminder has its own date too, and goes off once. Changing reminders applies at once, with no review. They aren't terms.
 
 **Notification setting**:
 An account's on/off for one kind of notification, on all its devices. Every kind starts on.

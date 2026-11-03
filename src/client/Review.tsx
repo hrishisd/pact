@@ -242,6 +242,7 @@ const REFUSAL_TEXT: Record<DecideRefusal, string> = {
   "item-not-found": "That item isn't in your queue any more.",
   "already-decided": "Another reviewer already decided that one.",
   "blank-reason": "Say why you're rejecting it.",
+  "deadline-too-soon": "The new deadline is less than an hour away now, so it can only be rejected.",
 };
 
 type EvidenceReviewItem = Extract<Json<ReviewItem>, { kind: "evidence" }>;

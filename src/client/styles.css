@@ -1499,6 +1499,28 @@ details.folded .kv {
   border-radius: 10px;
   background: var(--sunk);
 }
+/* A One-time pact's History: its one square beside how it went. */
+.hmdetail.one {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+.hmdetail.one > .cell {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+.hmdetail.one > .cell.none {
+  outline-color: var(--line);
+}
+.hmdetail.one > .rt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
 /* A reminder on the Reminders step: its time field and Remove. */
 .remrow {
   display: flex;

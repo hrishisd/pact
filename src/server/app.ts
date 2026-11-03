@@ -747,6 +747,12 @@ function parseSchedule(value: unknown): Schedule | null {
     const { target } = value;
     return typeof target === "number" ? { kind: "weekly-count", target } : null;
   }
+  if (value.kind === "one-time") {
+    const { deadline, submitAnytime } = value;
+    return typeof deadline === "string" && typeof submitAnytime === "boolean"
+      ? { kind: "one-time", deadline, submitAnytime }
+      : null;
+  }
   if (value.kind !== "fixed-days") return null;
   const { days } = value;
   if (!isStringArray(days) || !days.every(isWeekday)) return null;

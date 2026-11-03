@@ -413,6 +413,8 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
   const form = {
     kind: pact.evidenceKind,
     weekly: pact.schedule.kind === "weekly-count",
+    oneTime: pact.schedule.kind === "one-time",
+    deadline: pact.schedule.kind === "one-time" ? pact.schedule.deadline : "",
     inBedBy: pact.inBedBy ?? "",
     dueByOn: pact.dueBy !== null,
     dueBy: pact.dueBy ?? "",

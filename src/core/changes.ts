@@ -1,8 +1,7 @@
 // What a change to a pact after its edit window does, term by term: relaxes
 // it (a change request, waiting for a reviewer), only makes it stricter
 // (applies without approval to occurrences not open yet), or doesn't change
-// what counts (applies at once), like the name and the reminders. Ticket 15
-// adds its terms here.
+// what counts (applies at once), like the name and the reminders.
 
 import type { AccountId, ChangeEffect, Schedule } from "../shared/types.ts";
 
@@ -85,7 +84,9 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms): Term
 /**
  * What changing the schedule from `before` to `after` does: fewer days, or a
  * lower Weekly count target, relaxes it; only more days, or a higher target,
- * is stricter. Swapping one kind for the other is refused before this, after
+ * is stricter. On One-time, turning Submit anytime on relaxes it, and so does
+ * a later deadline with it on, or any other date with it off; turning it off,
+ * or an earlier deadline with it on, is stricter. Swapping one kind for the other is refused before this, after
  * the edit window; a reviewer would have to judge it. Null when it's the same.
  */
 function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null {
@@ -96,6 +97,15 @@ function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null 
   if (before.kind === "weekly-count" && after.kind === "weekly-count") {
     if (after.target === before.target) return null;
     return after.target < before.target ? "needs-approval" : "stricter";
+  }
+  if (before.kind === "one-time" && after.kind === "one-time") {
+    const moved = after.deadline !== before.deadline;
+    if (!moved && after.submitAnytime === before.submitAnytime) return null;
+    // Turning Submit anytime on relaxes. Without it on both sides, only a
+    // reviewer can judge whether another day is easier.
+    if (after.submitAnytime && !before.submitAnytime) return "needs-approval";
+    if (moved && !(before.submitAnytime && after.submitAnytime)) return "needs-approval";
+    return after.deadline > before.deadline ? "needs-approval" : "stricter";
   }
   return "needs-approval";
 }

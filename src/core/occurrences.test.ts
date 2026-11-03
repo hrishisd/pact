@@ -278,3 +278,33 @@ describe("Weekly count weeks", () => {
     expect(result).toMatchObject({ ok: true, terms: { firstOccurrence: "2026-11-02" } });
   });
 });
+
+describe("a One-time occurrence", () => {
+  const createdAt = new Date("2026-03-02T10:00:00-05:00");
+  const oneTime = (submitAnytime: boolean) => ({ kind: "one-time" as const, deadline: "2026-03-08", submitAnytime });
+
+  test("on the day New York springs forward, a 9:00am deadline is 9:00am daylight time", () => {
+    const made = newOccurrenceTerms(oneTime(false), createdAt, NEW_YORK, { dueBy: "09:00" });
+
+    expect(made).toMatchObject({
+      ok: true,
+      first: {
+        date: "2026-03-08",
+        opensAt: new Date("2026-03-08T00:00:00-05:00"),
+        dueAt: new Date("2026-03-08T09:00:00-04:00"),
+      },
+    });
+  });
+
+  test("with Submit anytime it covers every day from the pact's creation to the deadline", () => {
+    const made = newOccurrenceTerms(oneTime(true), createdAt, NEW_YORK);
+    if (!made.ok) throw new Error(made.reason);
+    const { first, openAt, covering, includes } = occurrences(made.terms, NEW_YORK);
+
+    expect(first.opensAt).toEqual(createdAt);
+    expect(openAt(new Date("2026-03-02T09:59:00-05:00"))).toBeNull();
+    expect(covering("2026-03-04")).toEqual(first);
+    expect(covering("2026-03-09")).toBeNull();
+    expect([includes("2026-03-04"), includes("2026-03-08")]).toEqual([false, true]);
+  });
+});

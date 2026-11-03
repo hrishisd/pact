@@ -55,7 +55,14 @@ export type Schedule =
    * of it have approved evidence (at most one counts per day): a whole number
    * from 1 to `MAX_WEEKLY_TARGET`.
    */
-  | { kind: "weekly-count"; target: number };
+  | { kind: "weekly-count"; target: number }
+  /**
+   * Camera only: one occurrence, due at the deadline: `deadline`, a
+   * "YYYY-MM-DD" day in the owner's timezone, at the pact's due-by time, or
+   * else the midnight ending it. With `submitAnytime` off, evidence counts
+   * only on that day; on, from the pact's creation until the deadline.
+   */
+  | { kind: "one-time"; deadline: string; submitAnytime: boolean };
 
 /** A Weekly count target can't be more than one day of evidence a day. */
 export const MAX_WEEKLY_TARGET = 7;
@@ -80,11 +87,20 @@ export interface NewPact {
    * judged then.
    */
   dueBy?: string;
-  /** Optional, "YYYY-MM-DD": the pact starts no earlier than this day. It can only push the first occurrence later. */
+  /**
+   * Optional, "YYYY-MM-DD": the pact starts no earlier than this day. It can
+   * only push the first occurrence later. Recurring pacts only: One-time has none.
+   */
   startDate?: string;
-  /** Optional, "YYYY-MM-DD": the pact's last day. Once it passes, the pact makes no more occurrences and is Ended. */
+  /**
+   * Optional, "YYYY-MM-DD": the pact's last day. Once it passes, the pact
+   * makes no more occurrences and is Ended. Recurring pacts only: One-time has none.
+   */
   endDate?: string;
-  /** Optional: when to remind the owner, each "HH:MM" in their timezone. See `PactTerms.reminders`. */
+  /**
+   * Optional: when to remind the owner, each "HH:MM" in their timezone, or on
+   * a One-time pact "YYYY-MM-DDTHH:MM". See `PactTerms.reminders`.
+   */
   reminders?: string[];
   schedule: Schedule;
   /** The Penalty per missed occurrence, in US cents: a positive whole number. */
@@ -102,21 +118,26 @@ export type CreatePactRefusal =
   | "invalid-in-bed-by"
   /** A due-by time on an Oura Ring pact, at midnight, or not "HH:MM". */
   | "invalid-due-by"
-  /** A start date that isn't "YYYY-MM-DD". */
+  /** A start date that isn't "YYYY-MM-DD", or one on a One-time pact. */
   | "invalid-start-date"
-  /** An end date that isn't "YYYY-MM-DD". */
+  /** An end date that isn't "YYYY-MM-DD", or one on a One-time pact. */
   | "invalid-end-date"
   /** An end date before the first occurrence (or, for a change, before today): the pact would have no days left. */
   | "end-date-too-early"
-  /** A reminder that isn't "HH:MM", or more than `MAX_REMINDERS`. */
+  /** A reminder that isn't "HH:MM" (on One-time, "YYYY-MM-DDTHH:MM"), or more than `MAX_REMINDERS`. */
   | "invalid-reminders"
   /** A reminder at or after the due time (a bedtime's in-bed-by time), which would never go off. */
   | "reminder-after-due-time"
   | "blank-name"
   | "blank-description"
   | "no-days"
-  /** A Weekly count on an Oura Ring pact, or a target that isn't a whole number from 1 to `MAX_WEEKLY_TARGET`. */
+  /**
+   * A Weekly count or One-time on an Oura Ring pact, a target that isn't a
+   * whole number from 1 to `MAX_WEEKLY_TARGET`, or a deadline that isn't "YYYY-MM-DD".
+   */
   | "invalid-schedule"
+  /** A One-time deadline less than an hour after the pact's creation (for a change, after it takes effect). */
+  | "deadline-too-soon"
   | "invalid-penalty"
   /** Not one of this owner's saved recipients. */
   | "unknown-recipient"
@@ -167,7 +188,8 @@ export interface FirstOccurrence {
 }
 
 export type FirstOccurrenceResult =
-  { ok: true; firstOccurrence: FirstOccurrence } | { ok: false; reason: "no-days" | "no-timezone" | "pact-not-found" };
+  | { ok: true; firstOccurrence: FirstOccurrence }
+  | { ok: false; reason: "no-days" | "deadline-too-soon" | "no-timezone" | "pact-not-found" };
 
 /** A card in the Pacts tab. */
 export interface PactSummary {
@@ -181,7 +203,7 @@ export interface PactSummary {
   editWindowClosesAt: Date | null;
 }
 
-/** Active from creation; Ended once its end date passes or an approved change request ends it. */
+/** Active from creation; Ended once its end date passes, an approved change request ends it, or a One-time occurrence is judged. */
 export type PactStage = "active" | "ended";
 
 /** The pact page: the pact's terms. */
@@ -209,13 +231,16 @@ export interface PactTerms {
    * the day's due time, while it has no evidence. On an Oura Ring pact: each
    * scheduled night (from 18:00 that evening, else the morning after), before
    * the in-bed-by time, even if the owner is already in bed. Neither fires on
-   * an occurrence an approved excuse covers.
+   * an occurrence an approved excuse covers. On a One-time pact each is
+   * "YYYY-MM-DDTHH:MM" and goes off once, before the deadline, unless
+   * evidence was already submitted.
    */
   reminders: string[];
   stage: PactStage;
   /**
-   * When it Ended: when an approved change request ended it, or when its end
-   * date passed (once its last occurrence closed); null while Active.
+   * When it Ended: when an approved change request ended it, when its end
+   * date passed (once its last occurrence closed), or for One-time when its
+   * occurrence was judged; null while Active.
    */
   endedAt: Date | null;
   firstOccurrence: FirstOccurrence;
@@ -251,6 +276,11 @@ export type PactHistory =
       kind: "weekly-count";
       /** Every week from the first occurrence through this week (or the week it Ended, or the first while it's coming up), oldest first. */
       weeks: HeatMapWeek[];
+    }
+  | {
+      kind: "one-time";
+      /** Its one occurrence, dated by the deadline's date. */
+      day: HeatMapDay;
     };
 
 /** One week on a Weekly count pact's heat map. */
@@ -524,7 +554,9 @@ export type DecideRefusal =
   | "item-not-found"
   /** A reviewer of the pact has already decided it; the first decision is final. */
   | "already-decided"
-  | "blank-reason";
+  | "blank-reason"
+  /** Approving a change to a One-time pact whose new deadline is less than an hour away: it can only be rejected. */
+  | "deadline-too-soon";
 
 export type DecideResult = { ok: true } | { ok: false; reason: DecideRefusal };
 

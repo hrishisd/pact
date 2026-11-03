@@ -773,6 +773,8 @@ describe("pacts", () => {
       { ...pact, schedule: { kind: "fixed-days", days: ["monday"] } },
       { ...pact, schedule: { kind: "weekly-count", days: ["mon"] } },
       { ...pact, schedule: { kind: "weekly-count", target: "3" } },
+      { ...pact, schedule: { kind: "one-time", deadline: "2026-01-08" } },
+      { ...pact, schedule: { kind: "one-time", deadline: 20260108, submitAnytime: false } },
       { ...pact, penaltyCents: "500" },
       { ...pact, penaltyCents: 5.5 },
       { ...pact, reviewerIds: "someone" },
@@ -920,6 +922,79 @@ describe("pacts", () => {
       body: { ...weekly, schedule: { kind: "weekly-count", target: 2 } },
     });
     expect(lowered.body).toMatchObject({
+      ok: true,
+      preview: { changes: [{ term: "schedule", effect: "needs-approval" }] },
+    });
+  });
+
+  test("a One-time pact goes through to the core: Today shows it, the pact page its one occurrence, and its refusals are data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    const taxes = {
+      ...pact,
+      name: "Taxes",
+      schedule: { kind: "one-time", deadline: "2026-01-08", submitAnytime: true },
+      dueBy: "17:00",
+      reminders: ["2026-01-07T09:00"],
+    } satisfies CreatePactRequest;
+
+    const check = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: taxes.schedule, dueBy: "17:00" },
+    });
+    expect(check.body).toEqual({
+      ok: true,
+      firstOccurrence: { date: "2026-01-08", dueAt: "2026-01-08T22:00:00.000Z" },
+    } satisfies FirstOccurrenceResponse);
+    const tooSoon = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: { ...taxes.schedule, deadline: "2026-01-05" }, dueBy: "09:30" },
+    });
+    expect(tooSoon.body).toEqual({ ok: false, reason: "deadline-too-soon" } satisfies FirstOccurrenceResponse);
+    const refused = await s.api(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...taxes, startDate: "2026-01-06" },
+    });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-start-date" } });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: taxes });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+
+    s.clock.set(s.at("Tue 10:00"));
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie })).body.sections).toEqual([
+      {
+        kind: "to-do",
+        cards: [
+          {
+            kind: "evidence",
+            pactId,
+            name: "Taxes",
+            penaltyCents: 500,
+            editWindowClosesAt: null,
+            occurrenceDate: "2026-01-08",
+            dueAt: "2026-01-08T22:00:00.000Z",
+            dueBy: "17:00",
+          },
+        ],
+      },
+    ] satisfies TodayResponse["sections"]);
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: {
+        schedule: taxes.schedule,
+        reminders: ["2026-01-07T09:00"],
+        history: { kind: "one-time", day: { date: "2026-01-08", occurrence: { status: { kind: "not-judged" } } } },
+      },
+    });
+    const later = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...taxes, schedule: { ...taxes.schedule, deadline: "2026-01-09" } },
+    });
+    expect(later.body).toMatchObject({
       ok: true,
       preview: { changes: [{ term: "schedule", effect: "needs-approval" }] },
     });

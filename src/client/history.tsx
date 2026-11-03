@@ -143,11 +143,63 @@ const SQUARE_TEXT: Record<Exclude<Square, "none">, string> = {
  */
 export function HeatMap({ pact, now }: { pact: Json<PactTerms>; now: number }) {
   const { history } = pact;
-  return history.kind === "weekly-count" ? (
-    <WeeklyHeatMap weeks={history.weeks} now={now} />
-  ) : (
-    <DailyHeatMap pact={pact} days={history.days} now={now} />
+  switch (history.kind) {
+    case "weekly-count":
+      return <WeeklyHeatMap weeks={history.weeks} now={now} />;
+    case "one-time":
+      return <OneTimeHistory pact={pact} day={history.day} now={now} />;
+    case "fixed-days":
+      return <DailyHeatMap pact={pact} days={history.days} now={now} />;
+  }
+}
+
+/**
+ * A One-time pact's History: its one square, the deadline's date, with how
+ * it went (or what it's waiting for) beside it. With Submit anytime, an open
+ * occurrence is due on that date, not today.
+ */
+function OneTimeHistory({ pact, day, now }: { pact: Json<PactTerms>; day: Day; now: number }) {
+  const record = day.occurrence;
+  if (record === null) return null;
+  const square = squareOf(record, now);
+  const line = occurrenceLine(
+    record,
+    pact.reviewers.map((r) => r.name),
   );
+  // Open before its date, with Submit anytime: it's due on the deadline's date, not today.
+  const { status } = record;
+  const dueOn =
+    status.kind === "not-judged" &&
+    !status.evidenceWaiting &&
+    status.excuse === null &&
+    square === "open" &&
+    deviceDate(now) !== day.date;
+  return (
+    <section className="card">
+      <h3>History</h3>
+      <div className="hmdetail one" role="status">
+        <span className={`cell ${square === "none" ? "none" : square}`} aria-hidden="true" />
+        <span className="rt">
+          <span className="spread">
+            <b>{formatDate(day.date)}</b>
+            {dueOn ? (
+              <span className="chip c-todo">Due {formatDate(day.date)}</span>
+            ) : (
+              <OccurrenceChip record={record} evidenceKind={pact.evidenceKind} now={now} />
+            )}
+          </span>
+          {line && <span className="small muted">{line}</span>}
+        </span>
+      </div>
+      <Legend />
+    </section>
+  );
+}
+
+/** `now` (ms) as "YYYY-MM-DD" on this device's calendar. */
+function deviceDate(now: number): string {
+  const at = new Date(now);
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
 }
 
 function DailyHeatMap({ pact, days, now }: { pact: Json<PactTerms>; days: Day[]; now: number }) {

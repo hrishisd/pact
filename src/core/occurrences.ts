@@ -44,6 +44,8 @@ export interface OccurrenceTerms {
   dueBy?: string | null;
   /** Optional: the pact's last day. Every occurrence ends by it: a Weekly count week counts only if its Sunday does. */
   endDate?: LocalDate | null;
+  /** One-time only: when the pact was created, which opens its occurrence with Submit anytime. */
+  createdAt?: Date | null;
 }
 
 /** The optional times a new pact's first occurrence depends on. */
@@ -55,7 +57,7 @@ export interface NewOccurrenceOptions {
 }
 
 export type NewOccurrenceTermsResult =
-  { ok: true; terms: OccurrenceTerms; first: Occurrence } | { ok: false; reason: "no-days" };
+  { ok: true; terms: OccurrenceTerms; first: Occurrence } | { ok: false; reason: "no-days" | "deadline-too-soon" };
 
 /** A pact's first occurrence is due at least this long after it's created. */
 const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
@@ -65,8 +67,9 @@ const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
  * stored, and its first occurrence, the first scheduled day due at least an
  * hour after `createdAt` (by its due-by or in-bed-by time, if it has one),
  * and not before the start date; for Weekly count, the week starting the
- * Monday after `createdAt`, or the first starting on or after the start date.
- * Fixed days with no days is refused.
+ * Monday after `createdAt`, or the first starting on or after the start date;
+ * for One-time, its one occurrence, which must be due at least an hour after
+ * `createdAt` (a start date doesn't apply). Fixed days with no days is refused.
  */
 export function newOccurrenceTerms(
   schedule: Schedule,
@@ -75,6 +78,17 @@ export function newOccurrenceTerms(
   { inBedBy = null, dueBy = null, startDate = null }: NewOccurrenceOptions = {},
 ): NewOccurrenceTermsResult {
   const created = localDateOf(createdAt, timezone);
+  if (schedule.kind === "one-time") {
+    const terms: OccurrenceTerms = {
+      schedule: { kind: "one-time", deadline: schedule.deadline, submitAnytime: schedule.submitAnytime },
+      firstOccurrence: schedule.deadline,
+      ...(dueBy !== null && { dueBy }),
+      createdAt,
+    };
+    const first = oneTimeOccurrence(terms, timezone);
+    if (!dueSoonEnough(first, createdAt)) return { ok: false, reason: "deadline-too-soon" };
+    return { ok: true, terms, first };
+  }
   if (schedule.kind === "weekly-count") {
     const firstOccurrence = firstWeekFrom(addDays(created, 1), startDate);
     const terms: OccurrenceTerms = {
@@ -91,7 +105,7 @@ export function newOccurrenceTerms(
   for (let date = from, i = 0; i <= 7; date = addDays(date, 1), i++) {
     if (!days.includes(weekdayOf(date))) continue;
     const first = fixedDaysOccurrence(date, timezone, inBedBy, dueBy);
-    if (first.dueAt.getTime() - createdAt.getTime() >= FIRST_OCCURRENCE_LEAD_MS) {
+    if (dueSoonEnough(first, createdAt)) {
       const terms: OccurrenceTerms = {
         schedule: { kind: "fixed-days", days },
         firstOccurrence: date,
@@ -104,6 +118,11 @@ export function newOccurrenceTerms(
   throw new Error("unreachable: every scheduled weekday recurs within 8 days");
 }
 
+/** Whether `occurrence` is due at least an hour after `at`: a first occurrence, or a One-time deadline once changed. */
+export function dueSoonEnough(occurrence: Occurrence, at: Date): boolean {
+  return occurrence.dueAt.getTime() - at.getTime() >= FIRST_OCCURRENCE_LEAD_MS;
+}
+
 /**
  * The first Monday on or after `from`, or after the start date if that's
  * later: a Weekly count pact's first week once it starts from `from`.
@@ -114,7 +133,7 @@ export function firstWeekFrom(from: LocalDate, startDate: LocalDate | null): Loc
   return monday < start ? addDays(monday, 7) : monday;
 }
 
-/** The last day of the period of the occurrence dated `date` on `schedule`: its Sunday for a Weekly count week. */
+/** The last day of the period of the occurrence dated `date` on `schedule`: its Sunday for a Weekly count week. A One-time occurrence is dated by its deadline's date, its last. */
 export function lastDayOf(schedule: Schedule, date: LocalDate): LocalDate {
   return schedule.kind === "weekly-count" ? addDays(date, WEEKDAYS.length - 1) : date;
 }
@@ -169,7 +188,10 @@ export interface TermsEra {
 export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string): Occurrences {
   const termsOn = (date: LocalDate) =>
     (eras.find((era) => era.until === null || date < era.until) ?? eras.at(-1)!).terms;
-  const { firstOccurrence, endDate = null } = eras.at(-1)!.terms;
+  const current = eras.at(-1)!.terms;
+  // One occurrence, which a change applies to even once it's open: no era but the last.
+  if (current.schedule.kind === "one-time") return oneTimeOccurrences(current, timezone);
+  const { firstOccurrence, endDate = null } = current;
   // A pact's schedule keeps its kind once its edit window has closed, so every era has the same.
   const weekly = eras.at(-1)!.terms.schedule.kind === "weekly-count";
   // The day the period with `day` in it starts: the day itself, or its week's Monday.
@@ -184,6 +206,7 @@ export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string)
   const scheduled = (date: LocalDate) => {
     if (ended(date)) return false;
     const { schedule } = termsOn(date);
+    if (schedule.kind === "one-time") return date === schedule.deadline;
     return schedule.kind === "weekly-count" ? date === mondayOf(date) : schedule.days.includes(weekdayOf(date));
   };
   const includes = (date: LocalDate) => date >= firstOccurrence && scheduled(date);
@@ -224,6 +247,44 @@ export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string)
       return between(periodOf(from), to);
     },
   };
+}
+
+/**
+ * A One-time pact's occurrences: just the one, dated by the deadline's date.
+ * Its period runs from that date (from the pact's creation, with Submit
+ * anytime) to the deadline, and evidence on any day of it is due then.
+ */
+function oneTimeOccurrences(terms: OccurrenceTerms, timezone: string): Occurrences {
+  const only = oneTimeOccurrence(terms, timezone);
+  const firstDay = localDateOf(only.opensAt, timezone);
+  const covering = (day: LocalDate) => (day >= firstDay && day <= only.date ? only : null);
+  const between = (from: LocalDate, to: LocalDate) => (from <= only.date && only.date <= to ? [only] : []);
+  return {
+    first: only,
+    openAt: (t) => (t.getTime() >= only.opensAt.getTime() ? covering(localDateOf(t, timezone)) : null),
+    covering,
+    dayDueAt: (day) => covering(day)?.dueAt ?? null,
+    includes: (date) => date === only.date,
+    dueAfter: (after, t) =>
+      (after === null || after < only.date) && only.dueAt.getTime() <= t.getTime() ? [only] : [],
+    between,
+    overlapping: (from, to) => (from <= only.date && firstDay <= to ? [only] : []),
+  };
+}
+
+/**
+ * A One-time occurrence: due at the due-by time on the deadline's date, or the
+ * midnight ending it. It opens at the start of that date, or with Submit
+ * anytime when the pact was created.
+ */
+function oneTimeOccurrence(terms: OccurrenceTerms, timezone: string): Occurrence {
+  const { schedule, dueBy = null, createdAt = null } = terms;
+  if (schedule.kind !== "one-time") throw new Error(`not One-time: ${schedule.kind}`);
+  const date = schedule.deadline;
+  const dueAt = dueBy === null ? startOfDay(addDays(date, 1), timezone) : wallTime(date, ...clockOf(dueBy), timezone);
+  const dayStarts = startOfDay(date, timezone);
+  const opensAt = schedule.submitAnytime && createdAt !== null && createdAt < dayStarts ? createdAt : dayStarts;
+  return { date, opensAt, dueAt, closesAt: dueAt };
 }
 
 /** A Weekly count week starting on the Monday `date`: open from its start, due at the end of its Sunday. */
@@ -269,6 +330,12 @@ function fixedDaysOccurrence(
 export function reminderAt(date: LocalDate, time: string, timezone: string, night: boolean): Date {
   const [hour, minute] = clockOf(time);
   return wallTime(night && hour < NIGHT_STARTS_HOUR ? addDays(date, 1) : date, hour, minute, timezone);
+}
+
+/** When a One-time pact's reminder, "YYYY-MM-DDTHH:MM" on the owner's clock, goes off. */
+export function oneTimeReminderAt(reminder: string, timezone: string): Date {
+  const [date = "", time = ""] = reminder.split("T");
+  return wallTime(date, ...clockOf(time), timezone);
 }
 
 /** 18:00 on `date` in `timezone`: when the night of `date` starts, and the night before closes. */

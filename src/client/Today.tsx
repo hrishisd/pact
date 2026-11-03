@@ -216,7 +216,7 @@ function Section({
               <WeekToDo card={card} week={card.week} timezone={timezone} />
             ) : (
               <div className="meta due">
-                Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
+                Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
                 {timeLeft(Date.parse(card.dueAt) - now)}
               </div>
             )}
@@ -287,6 +287,16 @@ function Section({
         </section>
       );
   }
+}
+
+/**
+ * A To do card's due day, when it isn't today: a One-time pact with Submit
+ * anytime is due on the deadline's date ("Thu Nov 12 "). Empty for today.
+ */
+function dueDayText(card: Json<TodayToDoCard>, timezone: string, now: number): string {
+  const today = formatDay(new Date(now).toISOString(), timezone);
+  const due = formatDate(card.occurrenceDate);
+  return due === today ? "" : `${due} `;
 }
 
 /**

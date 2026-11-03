@@ -18,9 +18,11 @@ import {
 import { openDatabase, type Db } from "./db.ts";
 import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
+  dueSoonEnough,
   firstWeekFrom,
   lastDayOf,
   newOccurrenceTerms,
+  oneTimeReminderAt,
   nightStartsAt,
   occurrences,
   occurrencesOverTime,
@@ -91,6 +93,7 @@ import {
   type FirstOccurrenceResult,
   type HeatMapDay,
   type HeatMapWeek,
+  type PactHistory,
   type Friend,
   type Health,
   type Invite,
@@ -465,17 +468,15 @@ function paymentReviewersSql(owner: string, recipient: string): string {
 }
 /** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
 const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
-/** SQL: the `pact` row's schedule is Fixed days. */
-const FIXED_DAYS_PACT = `json_extract(pact.schedule, '$.kind') = 'fixed-days'`;
 /** SQL: the `pact` row's schedule is Weekly count. */
 const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
 /**
  * SQL: the Missed `occurrence` row (of the `pact` row) was judged through a
- * rejection. Any rejected evidence will do: on Fixed days a rejection judges
- * the occurrence at once. A Weekly count week's rejected evidence just
- * doesn't count, so a short week is never Missed through it.
+ * rejection. Any rejected evidence will do: on Fixed days and One-time a
+ * rejection judges the occurrence at once. A Weekly count week's rejected
+ * evidence just doesn't count, so a short week is never Missed through it.
  */
-const MISSED_THROUGH_REJECTION = `(${FIXED_DAYS_PACT} AND EXISTS (SELECT 1 FROM evidence
+const MISSED_THROUGH_REJECTION = `(NOT ${WEEKLY_COUNT_PACT} AND EXISTS (SELECT 1 FROM evidence
   WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
     AND evidence.decision = 'rejected'))`;
 /**
@@ -821,6 +822,11 @@ class Core implements PactCore {
             );
           this.#db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
           this.#setReviewers(pactId, checked.reviewerIds);
+          // A One-time pact's evidence is for its one occurrence, wherever its deadline goes.
+          if (isOneTime(row.schedule) && checked.terms.schedule.kind === "one-time") {
+            this.#moveOneTimeOccurrence(pactId, row.first_occurrence, checked.terms.firstOccurrence);
+            return { ok: true };
+          }
           // #checkedPact refuses an owner with no timezone.
           const { includes } = occurrences(checked.terms, timezone!);
           this.#removeEvidence(pactId, (date) => !includes(date));
@@ -891,7 +897,17 @@ class Core implements PactCore {
         const row = this.#ownPact(accountId, pactId);
         if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
         const now = this.#clock.now();
-        const { first } = this.#occurrencesOf(pactId, timezone);
+        const occurrences = this.#occurrencesOf(pactId, timezone);
+        const { first } = occurrences;
+        const schedule = JSON.parse(row.schedule) as Schedule;
+        let history: PactHistory;
+        if (schedule.kind === "one-time") {
+          history = { kind: "one-time", day: { date: first.date, occurrence: this.#occurrenceRecord(row, first) } };
+        } else if (schedule.kind === "weekly-count") {
+          history = { kind: "weekly-count", weeks: this.#heatMapWeeks(row, timezone, first.date, now) };
+        } else {
+          history = { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) };
+        }
         const pact: PactTerms = {
           id: row.id,
           ...this.#currentTerms(row),
@@ -907,10 +923,7 @@ class Core implements PactCore {
             this.#waitingEvidence(accountId, pactId),
             this.#waitingExcuses(accountId, pactId),
           ) as PactWaitingItem[],
-          history:
-            (JSON.parse(row.schedule) as Schedule).kind === "weekly-count"
-              ? { kind: "weekly-count", weeks: this.#heatMapWeeks(row, timezone, first.date, now) }
-              : { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) },
+          history,
         };
         return { ok: true, pact };
       },
@@ -1500,6 +1513,9 @@ class Core implements PactCore {
               this.#decidePayment(item.row, decided, accountId);
               break;
             case "change-request":
+              if (decided.outcome === "approved" && !this.#approvableNow(item.row.id)) {
+                return { ok: false, reason: "deadline-too-soon" };
+              }
               this.#decideChangeRequest(item.row, decided, accountId);
               break;
           }
@@ -2303,7 +2319,9 @@ class Core implements PactCore {
     const yesterday = addDays(localDateOf(this.#clock.now(), timezone), -1);
     // A Weekly count week isn't due on any one day.
     const pacts = this.#db
-      .prepare(`SELECT * FROM pact WHERE owner_account_id = ? AND ${FIXED_DAYS_PACT} ORDER BY name, created_at, id`)
+      .prepare(
+        `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${WEEKLY_COUNT_PACT} ORDER BY name, created_at, id`,
+      )
       .all(ownerId) as PactRow[];
     return pacts.flatMap((pact) =>
       this.#occurrenceRecords(pact, timezone, yesterday, yesterday).flatMap(({ date, occurrence }) =>
@@ -2713,7 +2731,7 @@ class Core implements PactCore {
 
   /** The pact's terms over time, oldest first: those it had before each change, then those it has now. */
   #erasOf(
-    pact: Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date">,
+    pact: Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date" | "created_at">,
   ): TermsEra[] {
     const earlier = this.#db
       .prepare(`SELECT until, schedule, in_bed_by, due_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`)
@@ -2730,9 +2748,10 @@ class Core implements PactCore {
   /** The occurrences of pact `pactId` in `timezone`, each dated one on the terms it opened with. */
   #occurrencesOf(pactId: string, timezone: string): Occurrences {
     const pact = this.#db
-      .prepare(`SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date FROM pact WHERE id = ?`)
+      .prepare(`SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at FROM pact WHERE id = ?`)
       .get(pactId) as
-      Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date"> | undefined;
+      | Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date" | "created_at">
+      | undefined;
     if (!pact) throw new Error(`no pact ${pactId}`);
     return occurrencesOverTime(this.#erasOf(pact), timezone);
   }
@@ -2854,6 +2873,10 @@ class Core implements PactCore {
     if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
       return { ok: false, reason: "change-request-waiting" };
     }
+    // A One-time change applies to its occurrence even once it's open, given an hour to the new deadline.
+    if (checked.terms.schedule.kind === "one-time" && !this.#deadlineFarEnough(pact, zone, after, now)) {
+      return { ok: false, reason: "deadline-too-soon" };
+    }
     // Occurrences already open keep their terms: a start date means nothing once the first has opened,
     // and an end date can't take away a day (or a week) that has.
     const from = firstDayNotOpen(before.schedule, localDateOf(now, zone));
@@ -2912,6 +2935,8 @@ class Core implements PactCore {
     after: Pick<ChangeableTerms, "schedule" | "inBedBy" | "dueBy" | "startDate" | "endDate" | "penaltyCents">,
     at: Date,
   ): { appliesFrom: LocalDate; todayKeepsCents: number | null } {
+    // One-time: the change applies to its one occurrence, open or not.
+    if (after.schedule.kind === "one-time") return { appliesFrom: after.schedule.deadline, todayKeepsCents: null };
     const today = localDateOf(at, timezone);
     const from = firstDayNotOpen(after.schedule, today);
     const eras = this.#erasOf(pact);
@@ -2962,6 +2987,7 @@ class Core implements PactCore {
    * left as they are.
    */
   #applyTerms(pact: PactRow, after: ChangeableTerms, at: Date, timezone: string): void {
+    if (after.schedule.kind === "one-time") return this.#applyOneTimeTerms(pact, after);
     const today = localDateOf(at, timezone);
     const from = firstDayNotOpen(after.schedule, today);
     // A change already made today put the terms today keeps there first.
@@ -2996,6 +3022,69 @@ class Core implements PactCore {
         firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate),
         pact.id,
       );
+  }
+
+  /**
+   * Puts `after` in force for a One-time pact's one occurrence, open or not:
+   * its evidence and any excuse for it move with the deadline's date. An
+   * occurrence already judged has Ended the pact, and keeps its terms.
+   */
+  #applyOneTimeTerms(pact: PactRow, after: ChangeableTerms): void {
+    if (after.schedule.kind !== "one-time" || pact.stage === "ended") return;
+    this.#db
+      .prepare(
+        `UPDATE pact SET description = ?, schedule = ?, due_by = ?, penalty_cents = ?, recipient_id = ?,
+                         first_occurrence = ?
+         WHERE id = ?`,
+      )
+      .run(
+        after.description,
+        JSON.stringify(after.schedule),
+        after.dueBy,
+        after.penaltyCents,
+        after.recipientId,
+        after.schedule.deadline,
+        pact.id,
+      );
+    this.#moveOneTimeOccurrence(pact.id, pact.first_occurrence, after.schedule.deadline);
+  }
+
+  /**
+   * Re-dates a One-time pact's occurrence, not judged yet, from `from` to
+   * `to`: its row, its evidence and the excuses that cover it.
+   */
+  #moveOneTimeOccurrence(pactId: string, from: LocalDate, to: LocalDate): void {
+    if (from === to) return;
+    this.#db
+      .prepare(
+        `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, miss_accepted_at)
+         SELECT pact_id, ?, outcome, judged_at, bedtime_start, miss_accepted_at FROM occurrence
+         WHERE pact_id = ? AND date = ?`,
+      )
+      .run(to, pactId, from);
+    this.#db
+      .prepare(`UPDATE evidence SET occurrence_date = ?, day = ? WHERE pact_id = ? AND occurrence_date = ?`)
+      .run(to, to, pactId, from);
+    this.#db.prepare(`UPDATE excuse_day SET date = ? WHERE pact_id = ? AND date = ?`).run(to, pactId, from);
+    this.#db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, from);
+  }
+
+  /**
+   * Whether a One-time pact changed to `after` at `at` is due at least an
+   * hour later, or keeps the deadline it has.
+   */
+  #deadlineFarEnough(
+    pact: PactRow,
+    timezone: string,
+    after: Pick<ChangeableTerms, "schedule" | "dueBy">,
+    at: Date,
+  ): boolean {
+    const current = this.#occurrencesOf(pact.id, timezone).first;
+    const changed = occurrences(
+      { schedule: after.schedule, firstOccurrence: current.date, dueBy: after.dueBy },
+      timezone,
+    ).first;
+    return changed.dueAt.getTime() === current.dueAt.getTime() || dueSoonEnough(changed, at);
   }
 
   /** The changed terms, old and new, with names for the recipient and reviewers. */
@@ -3064,7 +3153,12 @@ class Core implements PactCore {
         trimmed === "" ? null : trimmed,
         this.#clock.now().toISOString(),
       );
-    const what = after === null ? [] : termDiffs(before, after).map(({ term }) => TERM_LABELS[term]);
+    const what =
+      after === null
+        ? []
+        : termDiffs(before, after).map(({ term }) =>
+            term === "schedule" && after.schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term],
+          );
     const body = [...what, ...(trimmed === "" ? [] : [`“${trimmed}”`])].join(" · ");
     for (const reviewerId of this.#reviewersOf(pact.id)) {
       this.#enqueue({
@@ -3203,7 +3297,9 @@ class Core implements PactCore {
       // Every pact's owner has a timezone: creating one needs it.
       const { appliesFrom } = this.#startOfNewTerms(pact, row.timezone!, after, now);
       this.#applyTerms(pact, after, now, row.timezone!);
-      body = `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
+      // A One-time pact judged since it was sent has Ended: its terms stay as they were.
+      body =
+        pact.stage === "ended" ? `${pact.name} is Ended` : `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
     }
     this.#enqueue({
       recipient: row.owner_account_id,
@@ -3220,6 +3316,21 @@ class Core implements PactCore {
         url: APP_PATHS.pact(pact.id),
       },
     });
+  }
+
+  /**
+   * Whether approving the change request now leaves its One-time pact's new
+   * deadline at least an hour off, or keeps the deadline it has. Any other
+   * change can always be approved.
+   */
+  #approvableNow(changeRequestId: string): boolean {
+    const row = this.#changeRequestRow(changeRequestId)!;
+    if (row.after_terms === null) return true;
+    const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
+    const after = storedTerms(row.after_terms);
+    if (after.schedule.kind !== "one-time" || pact.stage === "ended") return true;
+    // Every pact's owner has a timezone: creating one needs it.
+    return this.#deadlineFarEnough(pact, row.timezone!, after, this.#clock.now());
   }
 
   /** As the pact page puts it: when the newest terms start, while their first occurrence hasn't opened. */
@@ -3276,14 +3387,21 @@ class Core implements PactCore {
         return { ok: false, reason: "invalid-schedule" };
       }
     }
+    const oneTime = pact.schedule.kind === "one-time";
+    if (pact.schedule.kind === "one-time" && (oura || !isLocalDate(pact.schedule.deadline))) {
+      return { ok: false, reason: "invalid-schedule" };
+    }
     // A due-by time is for evidence the owner submits; a ring's night has its in-bed-by time.
     if (pact.dueBy !== undefined && (oura || !isDueBy(pact.dueBy))) return { ok: false, reason: "invalid-due-by" };
-    if (pact.startDate !== undefined && !isLocalDate(pact.startDate)) {
+    // A One-time pact has just its deadline: Submit anytime sets when it opens.
+    if (pact.startDate !== undefined && (oneTime || !isLocalDate(pact.startDate))) {
       return { ok: false, reason: "invalid-start-date" };
     }
-    if (pact.endDate !== undefined && !isLocalDate(pact.endDate)) return { ok: false, reason: "invalid-end-date" };
+    if (pact.endDate !== undefined && (oneTime || !isLocalDate(pact.endDate))) {
+      return { ok: false, reason: "invalid-end-date" };
+    }
     const reminders = [...new Set(pact.reminders ?? [])];
-    if (reminders.length > MAX_REMINDERS || !reminders.every(isClockTime)) {
+    if (reminders.length > MAX_REMINDERS || !reminders.every(oneTime ? isDatedReminder : isClockTime)) {
       return { ok: false, reason: "invalid-reminders" };
     }
     // In the order they go off: a night's run from 18:00 to the morning after.
@@ -3301,8 +3419,10 @@ class Core implements PactCore {
     });
     if (!timing.ok) return timing;
     const dueBy = timing.terms.dueBy ?? null;
-    const goesOffInTime = (time: string) =>
-      oura ? nightOrder(time) < nightOrder(pact.inBedBy!) : dueBy === null || time < dueBy;
+    const goesOffInTime = (time: string) => {
+      if (oneTime) return oneTimeReminderAt(time, timezone).getTime() < timing.first.dueAt.getTime();
+      return oura ? nightOrder(time) < nightOrder(pact.inBedBy!) : dueBy === null || time < dueBy;
+    };
     if (!reminders.every(goesOffInTime)) return { ok: false, reason: "reminder-after-due-time" };
     const endDate = pact.endDate ?? null;
     // The first occurrence has to end by the end date: a whole week, for Weekly count.
@@ -3646,9 +3766,12 @@ class Core implements PactCore {
     if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
     const occurrences = this.#occurrencesOf(pactId, timezone);
     const occurrence = occurrences.openAt(at);
-    const day = localDateOf(at, timezone);
+    // One-time evidence is for its one occurrence, whichever day it comes.
+    const day = occurrence && isOneTime(row.schedule) ? occurrence.date : localDateOf(at, timezone);
     // Past its due-by time, the day takes no more evidence.
-    if (!occurrence || at.getTime() >= occurrences.dayDueAt(day)!.getTime()) return { ok: false, reason: "not-open" };
+    if (!occurrence || at.getTime() >= occurrences.dayDueAt(localDateOf(at, timezone))!.getTime()) {
+      return { ok: false, reason: "not-open" };
+    }
     const decision = this.#evidenceDecision(pactId, day, "day");
     if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
     if (decision === "approved") return { ok: false, reason: "already-approved" };
@@ -4155,29 +4278,37 @@ class Core implements PactCore {
       // A night's reminder can go off the morning after, so start a day early.
       const fromDate = addDays(localDateOf(from, timezone), -1);
       const toDate = localDateOf(t, timezone);
-      // Each day a reminder can go off on, with when that day's evidence is due:
-      // on Weekly count, every day of an open week.
-      const days: { date: LocalDate; dueAt: Date }[] = [];
-      if ((JSON.parse(pact.schedule) as Schedule).kind === "weekly-count") {
-        for (let date = fromDate; date <= toDate; date = addDays(date, 1)) {
-          const dueAt = occurrences.dayDueAt(date);
-          if (dueAt) days.push({ date, dueAt });
-        }
+      // Each reminder that could go off, with the day it's about and when that
+      // day's evidence is due: on Weekly count, every day of an open week. On
+      // One-time each reminder has its own date, and they're all about the one occurrence.
+      const due: { date: LocalDate; dueAt: Date; time: string; at: Date }[] = [];
+      const schedule = JSON.parse(pact.schedule) as Schedule;
+      if (schedule.kind === "one-time") {
+        const { date, dueAt } = occurrences.first;
+        due.push(...times.map((time) => ({ date, dueAt, time, at: oneTimeReminderAt(time, timezone) })));
       } else {
-        days.push(...occurrences.between(fromDate, toDate));
-      }
-      for (const day of days) {
-        for (const time of times) {
-          const at = reminderAt(day.date, time, timezone, night);
-          if (at.getTime() <= from.getTime() || at.getTime() > t.getTime()) continue;
-          if (at.getTime() >= day.dueAt.getTime() || !this.#worthReminding(pact, day.date)) continue;
-          const lateMs = t.getTime() - at.getTime();
-          if (lateMs > REMINDER_LATE_MS) {
-            dropped.push({ pactId: pact.id, date: day.date, time, lateMs });
-            continue;
+        const days: { date: LocalDate; dueAt: Date }[] = [];
+        if (schedule.kind === "weekly-count") {
+          for (let date = fromDate; date <= toDate; date = addDays(date, 1)) {
+            const dueAt = occurrences.dayDueAt(date);
+            if (dueAt) days.push({ date, dueAt });
           }
-          this.#enqueueReminder(pact, day.date);
+        } else {
+          days.push(...occurrences.between(fromDate, toDate));
         }
+        for (const { date, dueAt } of days) {
+          due.push(...times.map((time) => ({ date, dueAt, time, at: reminderAt(date, time, timezone, night) })));
+        }
+      }
+      for (const { date, dueAt, time, at } of due) {
+        if (at.getTime() <= from.getTime() || at.getTime() > t.getTime()) continue;
+        if (at.getTime() >= dueAt.getTime() || !this.#worthReminding(pact, date)) continue;
+        const lateMs = t.getTime() - at.getTime();
+        if (lateMs > REMINDER_LATE_MS) {
+          dropped.push({ pactId: pact.id, date, time, lateMs });
+          continue;
+        }
+        this.#enqueueReminder(pact, date);
       }
     }
     const operator = this.#db.prepare(`SELECT id FROM account WHERE is_operator = 1`).get() as
@@ -4227,6 +4358,7 @@ class Core implements PactCore {
     const due = terms.due_by === null ? "midnight" : clockText(terms.due_by);
     let body = `No photo yet today. Due at ${due}.`;
     if (pact.evidence_kind === "oura") body = `In bed by ${clockText(terms.in_bed_by!)} tonight.`;
+    if (isOneTime(pact.schedule)) body = `No photo yet. Due ${formatDate(date)} at ${due}.`;
     if (weekly) {
       const { sessions, target } = this.#weekProgress(pact.id, mondayOf(date));
       body = `${sessions} of ${target} this week. Today's photo is due at ${due}.`;
@@ -4488,6 +4620,12 @@ class Core implements PactCore {
          ON CONFLICT (pact_id, date) DO UPDATE SET outcome = excluded.outcome, judged_at = excluded.judged_at`,
       )
       .run(pactId, date, outcome, at.toISOString());
+    // A One-time pact has no occurrence left once its one is judged.
+    if (isOneTime(pact.schedule)) {
+      this.#db
+        .prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ? AND stage = 'active'`)
+        .run(at.toISOString(), pactId);
+    }
     if (outcome === "missed") {
       const schedule = JSON.parse(pact.schedule) as Schedule;
       const short = schedule.kind === "weekly-count" ? schedule.target - this.#weekProgress(pactId, date).sessions : 1;
@@ -4634,6 +4772,7 @@ function occurrenceTermsOf(
     in_bed_by?: string | null;
     due_by?: string | null;
     end_date?: string | null;
+    created_at?: string;
   },
 ): OccurrenceTerms {
   return {
@@ -4642,7 +4781,13 @@ function occurrenceTermsOf(
     inBedBy: row.in_bed_by ?? null,
     dueBy: row.due_by ?? null,
     endDate: row.end_date ?? null,
+    createdAt: row.created_at === undefined ? null : new Date(row.created_at),
   };
+}
+
+/** Whether a stored schedule is One-time. Its kind never changes once the edit window has closed. */
+function isOneTime(schedule: string): boolean {
+  return (JSON.parse(schedule) as Schedule).kind === "one-time";
 }
 
 /**
@@ -4673,6 +4818,12 @@ function nightOrder(time: string): string {
 /** "HH:MM" on a 24-hour clock. */
 function isClockTime(text: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
+}
+
+/** A One-time pact's reminder: a date and a clock time, "YYYY-MM-DDTHH:MM". */
+function isDatedReminder(text: string): boolean {
+  const [date = "", time = ""] = text.split("T");
+  return text.length === 16 && isLocalDate(date) && isClockTime(time);
 }
 
 /** A due-by time: a clock time after the day starts. Midnight ending the day is the due time without one. */
@@ -4800,6 +4951,7 @@ function firstOccurrenceAfterChange(
   from: LocalDate,
   startDate: LocalDate | null,
 ): LocalDate {
+  if (schedule.kind === "one-time") return schedule.deadline;
   if (firstOccurrence < from) return firstOccurrence;
   if (schedule.kind === "weekly-count") return firstWeekFrom(from, startDate);
   const start = startDate !== null && startDate > from ? startDate : from;

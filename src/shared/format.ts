@@ -44,9 +44,17 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
   sun: "Sun",
 };
 
-/** "Every day", the days in order ("Mon, Wed, Fri"), or a Weekly count's target ("3× per week"). */
+/**
+ * "Every day", the days in order ("Mon, Wed, Fri"), a Weekly count's target
+ * ("3× per week"), or a One-time deadline's date ("One-time, Thu Nov 12", or
+ * "Anytime until Thu Nov 12" with Submit anytime).
+ */
 export function scheduleText(schedule: Schedule): string {
   if (schedule.kind === "weekly-count") return `${schedule.target}× per week`;
+  if (schedule.kind === "one-time") {
+    const date = formatDate(schedule.deadline);
+    return schedule.submitAnytime ? `Anytime until ${date}` : `One-time, ${date}`;
+  }
   if (schedule.days.length === WEEKDAYS.length) return "Every day";
   return schedule.days.map((day) => WEEKDAY_LABELS[day]).join(", ");
 }

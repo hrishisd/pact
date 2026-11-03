@@ -1,6 +1,6 @@
 // How the client writes money, schedules, dates and time left.
 
-import { clockText, formatDay } from "../shared/format.ts";
+import { clockText, formatDate, formatDay } from "../shared/format.ts";
 
 export { clockText, formatDate, formatDay, inBedByName, money, scheduleText } from "../shared/format.ts";
 
@@ -11,9 +11,15 @@ export function parseCents(text: string): number | null {
   return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
 }
 
-/** A pact's reminders, in the order they go off: "6:00pm, 8:30pm", or "None". */
+/** A pact's reminders, in the order they go off: "6:00pm, 8:30pm", "Wed Jan 7, 9:00am" on One-time, or "None". */
 export function remindersText(reminders: string[]): string {
-  return reminders.length === 0 ? "None" : reminders.map(clockText).join(", ");
+  return reminders.length === 0 ? "None" : reminders.map(reminderText).join(", ");
+}
+
+/** A reminder: a time of day, "6:00pm", or a One-time pact's "YYYY-MM-DDTHH:MM", "Wed Jan 7, 9:00am". */
+function reminderText(reminder: string): string {
+  const [date, time] = reminder.split("T");
+  return time === undefined ? clockText(reminder) : `${formatDate(date!)}, ${clockText(time)}`;
 }
 
 /** Cents as an amount field starts out: "5" for whole dollars, "2.50" otherwise, with no "$". */

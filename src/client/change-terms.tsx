@@ -26,9 +26,10 @@ export const TERM_LABELS: Record<Term, string> = {
   reminders: "Reminders",
 };
 
-/** A term's label on a pact with `schedule`: a Weekly count pact's schedule is its Target. */
+/** A term's label on a pact with `schedule`: a Weekly count pact's schedule is its Target, a One-time pact's its Deadline. */
 export function termLabel(term: Term, schedule: Pick<Schedule, "kind">): string {
-  return term === "schedule" && schedule.kind === "weekly-count" ? "Target" : TERM_LABELS[term];
+  if (term === "schedule" && schedule.kind === "weekly-count") return "Target";
+  return term === "schedule" && schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term];
 }
 
 /** What a pact's open occurrence is called in "Today keeps $5 per miss": This week, for Weekly count. */
@@ -36,8 +37,11 @@ export function openOccurrenceText(schedule: Pick<Schedule, "kind">): string {
   return schedule.kind === "weekly-count" ? "This week" : "Today";
 }
 
-/** The terms a pact of this kind lists, in the Request change order. */
-export function termsOfKind(current: Pick<Current, "evidenceKind">): Term[] {
+/** The terms a pact of this kind lists, in the Request change order. A One-time pact has no start or end date. */
+export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">): Term[] {
+  if (current.schedule.kind === "one-time") {
+    return ["name", "description", "schedule", "due-by", "penalty", "recipient", "reviewers", "reminders"];
+  }
   return current.evidenceKind === "oura"
     ? ["name", "in-bed-by", "schedule", "start-date", "end-date", "penalty", "recipient", "reviewers", "reminders"]
     : [
@@ -135,7 +139,7 @@ export function effectText(change: Change): string {
     case "in-bed-by":
       return "Needs approval: a later time";
     case "schedule":
-      return change.before.kind === "weekly-count" ? "Needs approval: a lower target" : "Needs approval: fewer days";
+      return scheduleNeeds(change.before, change.after);
     case "due-by":
       return change.after === null ? "Needs approval: due at midnight instead" : "Needs approval: a later time";
     case "start-date":
@@ -150,6 +154,14 @@ export function effectText(change: Change): string {
     case "reminders":
       return "Applies now";
   }
+}
+
+/** Why a changed schedule needs approval, as its tag says after "Needs approval: ". */
+function scheduleNeeds(before: Schedule, after: Schedule): string {
+  if (before.kind === "weekly-count") return "Needs approval: a lower target";
+  if (before.kind !== "one-time" || after.kind !== "one-time") return "Needs approval: fewer days";
+  if (after.submitAnytime && !before.submitAnytime) return "Needs approval: Submit anytime";
+  return after.submitAnytime ? "Needs approval: a later deadline" : "Needs approval: any change of date";
 }
 
 /** A change request's changed terms: old struck out, new in bold. */
@@ -196,6 +208,8 @@ export function EverythingElse({ request }: { request: Json<ChangeRequestView> }
 export function startsText(request: Json<ChangeRequestView>, lead: string): string {
   if (request.appliesFrom === null) return "";
   const { schedule } = request.current;
+  // A One-time pact's one occurrence takes a change even once it's open.
+  if (schedule.kind === "one-time") return `${lead} at once, to its one deadline, even if it's open.`;
   const unit = request.current.evidenceKind === "oura" ? "night" : schedule.kind === "weekly-count" ? "week" : "day";
   const today =
     request.todayKeepsCents === null

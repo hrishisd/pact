@@ -1,5 +1,6 @@
-// The step-by-step pact form: evidence kind, goal, schedule (with the optional
-// due-by time, start date and end date), penalty, reviewers, reminders,
+// The step-by-step pact form: evidence kind, goal, schedule (Fixed days,
+// Weekly count or One-time, with the optional due-by time, and for recurring
+// pacts the start date and end date), penalty, reviewers, reminders,
 // then a check before Create pact. Picking Oura Ring with no connection adds
 // a Connect step, which leaves for Oura's page; Oura's callback brings the
 // browser back here (`?oura=connected`) at Goal. Editing a pact in its edit
@@ -73,6 +74,12 @@ export interface Form {
   weekly: boolean;
   days: Weekday[];
   target: number;
+  /** Camera only: One-time, due on `deadline`, rather than Fixed days or a Weekly count. */
+  oneTime: boolean;
+  /** "YYYY-MM-DD" as the date field gives it, or "" until picked. */
+  deadline: string;
+  /** One-time only: evidence counts from creation until the deadline, rather than on its date only. */
+  submitAnytime: boolean;
   /** Camera only: whether evidence is due by a set time instead of midnight. */
   dueByOn: boolean;
   /** "HH:MM" as the time field gives it, or "" until picked. */
@@ -84,7 +91,7 @@ export interface Form {
   penalty: string;
   recipientId: string | null;
   reviewerIds: string[];
-  /** "HH:MM" each as the time field gives it, or "" until picked. */
+  /** "HH:MM" each as the time field gives it (on One-time, "YYYY-MM-DDTHH:MM"), or "" until picked. */
   reminders: string[];
 }
 
@@ -97,6 +104,9 @@ const EMPTY_FORM: Form = {
   weekly: false,
   days: [],
   target: 3,
+  oneTime: false,
+  deadline: "",
+  submitAnytime: false,
   dueByOn: false,
   dueBy: "",
   startDate: "",
@@ -133,6 +143,9 @@ export function formOf(
     weekly: pact.schedule.kind === "weekly-count",
     days: pact.schedule.kind === "fixed-days" ? pact.schedule.days : [],
     target: pact.schedule.kind === "weekly-count" ? pact.schedule.target : EMPTY_FORM.target,
+    oneTime: pact.schedule.kind === "one-time",
+    deadline: pact.schedule.kind === "one-time" ? pact.schedule.deadline : "",
+    submitAnytime: pact.schedule.kind === "one-time" && pact.schedule.submitAnytime,
     dueByOn: pact.dueBy !== null,
     dueBy: pact.dueBy ?? "",
     startDate: pact.startDate ?? "",
@@ -148,7 +161,7 @@ export function formOf(
  * What's wrong, in the owner's words: the core's refusals at Create or Save,
  * and the steps' own checks that a field is filled in.
  */
-type Problem = EditPactRefusal | "no-amount" | "no-recipient" | "oura-failed";
+type Problem = EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "oura-failed";
 
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
@@ -156,6 +169,8 @@ export const PROBLEMS: Record<Problem, string> = {
   "blank-name": "Give it a name.",
   "blank-description": "Say what your photo will show.",
   "no-days": "Pick at least one day.",
+  "no-deadline": "Pick a deadline.",
+  "deadline-too-soon": "The deadline must be at least an hour after you create the pact. Pick a later one.",
   "invalid-schedule": `Pick from 1 to ${MAX_WEEKLY_TARGET} days a week.`,
   "invalid-due-by": "Pick a time before midnight, or turn off Due by a set time.",
   "invalid-start-date": "Pick a start date, or clear it.",
@@ -185,7 +200,8 @@ function stepProblem(step: Step, form: Form): Problem | null {
       if (form.description.trim() === "") return "blank-description";
       return null;
     case "schedule":
-      if (!isWeekly(form) && form.days.length === 0) return "no-days";
+      if (isOneTime(form) && form.deadline === "") return "no-deadline";
+      if (!isWeekly(form) && !isOneTime(form) && form.days.length === 0) return "no-days";
       return form.kind === "camera" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
     case "penalty": {
       const penaltyCents = parseCents(form.penalty);
@@ -568,22 +584,39 @@ export function GoalStep({ form, update }: { form: Form; update: (change: Partia
 }
 
 /** Whether the form makes a Weekly count pact: Camera only. */
-function isWeekly(form: Form): boolean {
-  return form.kind === "camera" && form.weekly;
+function isWeekly(form: Pick<Form, "kind" | "weekly" | "oneTime">): boolean {
+  return form.kind === "camera" && form.weekly && !form.oneTime;
+}
+
+/** Whether the form makes a One-time pact: Camera only. */
+export function isOneTime(form: Pick<Form, "kind" | "oneTime">): boolean {
+  return form.kind === "camera" && form.oneTime;
 }
 
 /** The form's schedule as the core takes it. */
 export function scheduleOf(form: Form): Schedule {
+  if (isOneTime(form)) return { kind: "one-time", deadline: form.deadline, submitAnytime: form.submitAnytime };
   return isWeekly(form) ? { kind: "weekly-count", target: form.target } : { kind: "fixed-days", days: form.days };
 }
 
-/** The form's optional times as the core takes them: each left out when it isn't set. */
+/** The form's optional times as the core takes them: each left out when it isn't set. One-time has no dates. */
 export function optionalTimes(form: Form): { dueBy?: string; startDate?: string; endDate?: string } {
+  const dated = !isOneTime(form);
   return {
     ...(form.kind === "camera" && form.dueByOn && { dueBy: form.dueBy }),
-    ...(form.startDate !== "" && { startDate: form.startDate }),
-    ...(form.endDate !== "" && { endDate: form.endDate }),
+    ...(dated && form.startDate !== "" && { startDate: form.startDate }),
+    ...(dated && form.endDate !== "" && { endDate: form.endDate }),
   };
+}
+
+/**
+ * The form's reminders as a schedule of the kind `oneTime` says takes them:
+ * a One-time pact's each have a date, the deadline's to start with.
+ */
+function remindersAs(form: Form, oneTime: boolean): string[] {
+  if (oneTime === isOneTime(form)) return form.reminders;
+  if (!oneTime) return form.reminders.map((reminder) => reminder.split("T")[1] ?? "");
+  return form.deadline === "" ? [] : form.reminders.map((time) => (time === "" ? "" : `${form.deadline}T${time}`));
 }
 
 export function ScheduleStep({
@@ -593,12 +626,19 @@ export function ScheduleStep({
 }: {
   form: Form;
   update: (change: Partial<Form>) => void;
-  /** After the edit window, Fixed days and Weekly count can't be swapped: only the chosen one shows. */
+  /** After the edit window, the kind of schedule can't change: only the chosen one shows. */
   kindFixed?: boolean;
 }) {
   const { days } = form;
   const oura = form.kind === "oura";
   const weekly = isWeekly(form);
+  const oneTime = isOneTime(form);
+  const pick = (kind: "fixed" | "weekly" | "one-time") =>
+    update({
+      weekly: kind === "weekly",
+      oneTime: kind === "one-time",
+      reminders: remindersAs(form, kind === "one-time"),
+    });
   const everyDay = days.length === WEEKDAYS.length;
   const onDays = (days: Weekday[]) => update({ days });
   // Kept in week order, Monday first.
@@ -610,15 +650,28 @@ export function ScheduleStep({
       <h2>Schedule</h2>
       {!oura && !kindFixed && (
         <div className="seg" role="group" aria-label="Schedule type">
-          <button aria-pressed={!weekly} onClick={() => update({ weekly: false })}>
+          <button aria-pressed={!weekly && !oneTime} onClick={() => pick("fixed")}>
             Fixed days
           </button>
-          <button aria-pressed={weekly} onClick={() => update({ weekly: true })}>
+          <button aria-pressed={weekly} onClick={() => pick("weekly")}>
             Weekly count
+          </button>
+          <button aria-pressed={oneTime} onClick={() => pick("one-time")}>
+            One-time
           </button>
         </div>
       )}
-      {weekly ? (
+      {oneTime ? (
+        <label className="field">
+          <span>Deadline</span>
+          <input
+            className="inp"
+            type="date"
+            value={form.deadline}
+            onChange={(e) => update({ deadline: e.target.value })}
+          />
+        </label>
+      ) : weekly ? (
         <>
           <div className="field">
             <span>Days a week</span>
@@ -676,9 +729,13 @@ export function ScheduleStep({
       <small className="muted">
         {oura
           ? "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed."
-          : weekly
-            ? `You can submit on any day of the week, until ${until}.`
-            : `You can submit on scheduled days only, until ${until}.`}
+          : oneTime
+            ? form.submitAnytime
+              ? `You can submit any day until the deadline, until ${until} on its date.`
+              : `You can submit on the deadline's date only, until ${until}.`
+            : weekly
+              ? `You can submit on any day of the week, until ${until}.`
+              : `You can submit on scheduled days only, until ${until}.`}
       </small>
       {!oura && (
         <>
@@ -710,6 +767,46 @@ export function ScheduleStep({
           )}
         </>
       )}
+      {oneTime ? (
+        <OneTimeWindow form={form} update={update} />
+      ) : (
+        <DateRange form={form} update={update} weekly={weekly} />
+      )}
+    </>
+  );
+}
+
+/** One-time's Submit anytime switch, under the deadline, and the hour the deadline needs. */
+function OneTimeWindow({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+  return (
+    <>
+      <div className="list">
+        <label className="switch-row">
+          <span className="rt">
+            <b>Submit anytime</b>
+            <small>Anytime from now until the selected deadline.</small>
+          </span>
+          <input
+            className="switch"
+            type="checkbox"
+            role="switch"
+            checked={form.submitAnytime}
+            onChange={(e) => update({ submitAnytime: e.target.checked })}
+          />
+        </label>
+      </div>
+      <small className="muted">
+        The deadline must be at least an hour after you create it. Then it's judged once, and Ended.
+      </small>
+    </>
+  );
+}
+
+/** A recurring pact's optional start and end dates. */
+function DateRange({ form, update, weekly }: { form: Form; update: (change: Partial<Form>) => void; weekly: boolean }) {
+  const oura = form.kind === "oura";
+  return (
+    <>
       <div className="dates">
         <label className="field">
           <span>Start (optional)</span>
@@ -1044,6 +1141,10 @@ function CheckStep({
                 <>
                   The first week starts <b>{formatDate(first.first.date)}</b>, due by the end of Sunday.
                 </>
+              ) : schedule.kind === "one-time" ? (
+                <>
+                  It's due <b>{oneTimeText(schedule.submitAnytime, first.first.date, dueBy)}</b>.
+                </>
               ) : (
                 <>
                   The first one is <b>{formatDate(first.first.date)}</b>, due {dueBy ? clockText(dueBy) : "midnight"}.
@@ -1055,12 +1156,21 @@ function CheckStep({
             <> Your 10 minutes end at {clockTime(editing.editWindowClosesAt)}. Saving doesn't add more.</>
           )}
         </p>
-        {first.kind === "failed" && (
-          <p className="muted small">
-            Couldn't load the first day. {failureText(first.error, "Check your connection.")}
-          </p>
-        )}
+        {first.kind === "failed" &&
+          (first.error === "deadline-too-soon" ? (
+            <p className="error">{PROBLEMS["deadline-too-soon"]}</p>
+          ) : (
+            <p className="muted small">
+              Couldn't load the first day. {failureText(first.error, "Check your connection.")}
+            </p>
+          ))}
       </div>
     </>
   );
+}
+
+/** A One-time pact's occurrence as the Check step names it: "Thu Nov 12, due midnight", or "Anytime until Thu Nov 12, midnight". */
+function oneTimeText(submitAnytime: boolean, date: string, dueBy: string | undefined): string {
+  const due = dueBy ? clockText(dueBy) : "midnight";
+  return submitAnytime ? `Anytime until ${formatDate(date)}, ${due}` : `${formatDate(date)}, due ${due}`;
 }

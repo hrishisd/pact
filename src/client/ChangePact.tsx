@@ -74,7 +74,7 @@ const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = 
   "change-request-waiting":
     "A change request is waiting. Until it's decided or you withdraw it, only the name, reminders and new reviewers can change.",
   "pact-started": "It has already started, so the start date can't change.",
-  "schedule-kind-fixed": "Fixed days and a weekly count can't be swapped now. Make a new pact for that.",
+  "schedule-kind-fixed": "The kind of schedule can't change now. Make a new pact for that.",
   "nothing-changed": "Nothing changed yet.",
 };
 
@@ -277,7 +277,12 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           );
         })}
       </dl>
-      <VerdictBox verdict={verdict} pactName={pact.name} open={openOccurrenceText(pact.schedule)} />
+      <VerdictBox
+        verdict={verdict}
+        pactName={pact.name}
+        open={openOccurrenceText(pact.schedule)}
+        oneTime={pact.schedule.kind === "one-time"}
+      />
       {verdict.kind === "loaded" && verdict.preview.outcome.kind === "needs-approval" && (
         <label className="field">
           <span>Why? (optional)</span>
@@ -316,8 +321,21 @@ function buttonText(verdict: Verdict): string {
 }
 
 /** The core's verdict on the whole change, in words. */
-/** `open` names the occurrence open now, which keeps its terms: "Today", or "This week". */
-function VerdictBox({ verdict, pactName, open }: { verdict: Verdict; pactName: string; open: string }) {
+/**
+ * `open` names the occurrence open now, which keeps its terms: "Today", or
+ * "This week". A `oneTime` pact's one occurrence takes the change at once.
+ */
+function VerdictBox({
+  verdict,
+  pactName,
+  open,
+  oneTime,
+}: {
+  verdict: Verdict;
+  pactName: string;
+  open: string;
+  oneTime: boolean;
+}) {
   switch (verdict.kind) {
     case "loading":
       return <div className="verdict nothing">Checking the change…</div>;
@@ -362,7 +380,11 @@ function VerdictBox({ verdict, pactName, open }: { verdict: Verdict; pactName: s
       return (
         <div className="verdict stricter">
           <p>
-            <b>Applies without approval from {formatDate(outcome.appliesFrom)}.</b>
+            <b>
+              {oneTime
+                ? "Applies now, without approval."
+                : `Applies without approval from ${formatDate(outcome.appliesFrom)}.`}
+            </b>
             {outcome.todayKeepsCents !== null && ` ${open} keeps ${money(outcome.todayKeepsCents)} per miss.`}
             {nowLine}
           </p>

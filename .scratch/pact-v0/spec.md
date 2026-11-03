@@ -348,6 +348,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
   - Excuses cover one pact and open from a day or a pact (see File excuse). The prototype's excuse sheet picked several pacts and a date range. A held penalty in the ledger history reads "Held while an excuse waits for approval", and its amount is grey with no "+".
   - The excuse page and the Excuse review item are titled with the pact's name, with the dates beside it; the prototype titled them with the dates. A review item's days use the short Missed chip, with "$5 held" under the date.
   - Reminders push only (v0 has no email), so the Reminders step has no channel picker. A pact starts with none; "+ Add reminder" suggests half an hour before the due time. A reminder at or after the due time (for a bedtime, the in-bed-by time, a night running from 6pm) is refused, since it would never go off. After the edit window the pact page's Reminders row has its own Change, which saves at once and works while a change request waits; Request change lists them too. Reviewers don't see reminders on a change request.
+  - On a One-time pact each reminder is one date-and-time field, where the prototype had a date field and a time field. Its History is a single square for the deadline's date with how it went beside it, rather than a grid.
 
 ## Testing Decisions
 
