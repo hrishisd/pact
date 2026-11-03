@@ -184,6 +184,16 @@ function fixedDaysOccurrence(
   };
 }
 
+/**
+ * When a reminder set for `time` ("HH:MM") goes off for the occurrence dated
+ * `date`: that time on its day, or for a bedtime night (`night`), that
+ * evening from 18:00, else the morning after, as an in-bed-by time is read.
+ */
+export function reminderAt(date: LocalDate, time: string, timezone: string, night: boolean): Date {
+  const [hour, minute] = clockOf(time);
+  return wallTime(night && hour < NIGHT_STARTS_HOUR ? addDays(date, 1) : date, hour, minute, timezone);
+}
+
 /** 18:00 on `date` in `timezone`: when the night of `date` starts, and the night before closes. */
 export function nightStartsAt(date: LocalDate, timezone: string): Date {
   return wallTime(date, NIGHT_STARTS_HOUR, 0, timezone);

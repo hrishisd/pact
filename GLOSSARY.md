@@ -110,6 +110,9 @@ A change that only makes a pact stricter, such as a higher penalty or more days.
 **Push subscription**:
 One device's permission to get an account's notifications, as its browser reports it. An account can have several. Turning notifications on is per device.
 
+**Reminder**:
+A push to a pact's owner at a time of day they set on the pact, before an occurrence's due time, while it's still useful: on a scheduled day with no evidence yet, or every scheduled night for a bedtime pact. Changing reminders applies at once, with no review. They aren't terms.
+
 **Notification setting**:
 An account's on/off for one kind of notification, on all its devices. Every kind starts on.
 

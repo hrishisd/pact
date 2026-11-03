@@ -247,7 +247,7 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
             ))}
           </div>
           {error && <p className="error">{error}</p>}
-          <p className="muted small">These apply to all your devices.</p>
+          <p className="muted small">These apply to all your devices. Reminders are set on each pact.</p>
         </>
       )}
     </section>

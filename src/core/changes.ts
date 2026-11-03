@@ -1,7 +1,8 @@
 // What a change to a pact after its edit window does, term by term: relaxes
 // it (a change request, waiting for a reviewer), only makes it stricter
 // (applies without approval to occurrences not open yet), or doesn't change
-// what counts (applies at once). Tickets 13–15 add their terms here.
+// what counts (applies at once), like the name and the reminders. Tickets 14
+// and 15 add their terms here.
 
 import type { AccountId, ChangeEffect, Schedule } from "../shared/types.ts";
 
@@ -22,6 +23,8 @@ export interface ChangeableTerms {
   recipientId: string;
   /** Sorted, no repeats. */
   reviewerIds: AccountId[];
+  /** "HH:MM" each, in the order they go off, no repeats. */
+  reminders: string[];
 }
 
 /** One changed term, with its effect, in the Request change form's order. */
@@ -36,7 +39,8 @@ export interface TermDiff {
     | "end-date"
     | "penalty"
     | "recipient"
-    | "reviewers";
+    | "reviewers"
+    | "reminders";
   effect: ChangeEffect;
 }
 
@@ -75,6 +79,8 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms): Term
   const added = after.reviewerIds.filter((id) => !before.reviewerIds.includes(id));
   if (removed.length > 0) add("reviewers", "needs-approval");
   else if (added.length > 0) add("reviewers", "at-once");
+  // Reminders only nudge the owner; they don't change what counts.
+  if (after.reminders.join() !== before.reminders.join()) add("reminders", "at-once");
   return diffs;
 }
 

@@ -771,14 +771,22 @@ function parseOptionalStrings<Key extends string>(
 /** A pact's optional times: the in-bed-by and due-by times, and the start and end dates. */
 const PACT_TIMES = ["inBedBy", "dueBy", "startDate", "endDate"] as const;
 
+/** A pact's reminders, if sent: a list of strings, or undefined for none. False when malformed. */
+function parseReminders(value: Record<string, unknown>): { reminders?: string[] } | false {
+  if (value.reminders === undefined) return {};
+  return isStringArray(value.reminders) ? { reminders: value.reminders } : false;
+}
+
 function parseNewPact(value: unknown): CreatePactRequest | null {
   if (!isRecord(value)) return null;
   const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
   const schedule = parseSchedule(value.schedule);
   const times = parseOptionalStrings(value, PACT_TIMES);
+  const reminders = parseReminders(value);
   if (
     (evidenceKind !== "camera" && evidenceKind !== "oura") ||
     !times ||
+    !reminders ||
     typeof name !== "string" ||
     typeof description !== "string" ||
     !schedule ||
@@ -789,7 +797,7 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
   ) {
     return null;
   }
-  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times };
+  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times, ...reminders };
 }
 
 function parsePactChange(value: unknown): ChangePactRequest | null {
@@ -797,8 +805,10 @@ function parsePactChange(value: unknown): ChangePactRequest | null {
   const { name, description, penaltyCents, recipientId, reviewerIds, note } = value;
   const schedule = parseSchedule(value.schedule);
   const times = parseOptionalStrings(value, PACT_TIMES);
+  const reminders = parseReminders(value);
   if (
     !times ||
+    !reminders ||
     (note !== undefined && typeof note !== "string") ||
     typeof name !== "string" ||
     typeof description !== "string" ||
@@ -818,6 +828,7 @@ function parsePactChange(value: unknown): ChangePactRequest | null {
     recipientId,
     reviewerIds,
     ...times,
+    ...reminders,
     ...(note !== undefined && { note }),
   };
 }

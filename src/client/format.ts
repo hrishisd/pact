@@ -11,6 +11,11 @@ export function parseCents(text: string): number | null {
   return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
 }
 
+/** A pact's reminders, in the order they go off: "6:00pm, 8:30pm", or "None". */
+export function remindersText(reminders: string[]): string {
+  return reminders.length === 0 ? "None" : reminders.map(clockText).join(", ");
+}
+
 /** Cents as an amount field starts out: "5" for whole dollars, "2.50" otherwise, with no "$". */
 export function centsInputText(cents: number): string {
   return (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);

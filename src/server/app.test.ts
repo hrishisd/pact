@@ -693,6 +693,7 @@ describe("pacts", () => {
         penaltyCents: 500,
         recipient: { id: pact.recipientId, name: "Sam" },
         reviewers: [{ id: friendId, name: "friend" }],
+        reminders: [],
         stage: "active",
         endedAt: null,
         firstOccurrence,
@@ -778,6 +779,8 @@ describe("pacts", () => {
       { ...pact, dueBy: 900 },
       { ...pact, startDate: null },
       { ...pact, endDate: ["2026-01-09"] },
+      { ...pact, reminders: "18:00" },
+      { ...pact, reminders: [1800] },
     ];
 
     for (const sent of malformedPacts) {
@@ -847,6 +850,47 @@ describe("pacts", () => {
         ],
         outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: true },
       },
+    });
+  });
+
+  test("reminders go through to the core when creating and changing a pact, and its refusals come back as data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+
+    const refused = await s.api(API_PATHS.pacts, { cookie, method: "POST", body: { ...pact, reminders: ["6pm"] } });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-reminders" } });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...pact, reminders: ["18:00", "07:00"] },
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { reminders: ["07:00", "18:00"] },
+    });
+
+    s.clock.set(s.at("Tue 10:00"));
+    const changed = { ...pact, reminders: ["19:30"] };
+    const preview = await s.api(API_PATHS.changePreview(pactId), { cookie, method: "POST", body: changed });
+    expect(preview.body).toEqual({
+      ok: true,
+      preview: {
+        changes: [{ term: "reminders", before: ["07:00", "18:00"], after: ["19:30"], effect: "at-once" }],
+        outcome: { kind: "at-once" },
+      },
+    });
+    const sent = await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: changed });
+    expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" }, changeRequestId: null });
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { reminders: ["19:30"] },
+    });
+    const malformed = { ...pact, reminders: [7] };
+    expect(await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: malformed })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
     });
   });
 

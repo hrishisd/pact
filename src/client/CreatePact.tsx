@@ -1,5 +1,5 @@
 // The step-by-step pact form: evidence kind, goal, schedule (with the optional
-// due-by time, start date and end date), penalty, reviewers,
+// due-by time, start date and end date), penalty, reviewers, reminders,
 // then a check before Create pact. Picking Oura Ring with no connection adds
 // a Connect step, which leaves for Oura's page; Oura's callback brings the
 // browser back here (`?oura=connected`) at Goal. Editing a pact in its edit
@@ -31,10 +31,11 @@ import {
 } from "./format.ts";
 import { CameraIcon, RingIcon } from "./icons.tsx";
 import { TermsList } from "./PactPage.tsx";
+import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { Empty, useLoad, useNow } from "./ui.tsx";
 
-type Step = "kind" | "connect" | "goal" | "schedule" | "penalty" | "reviewers" | "check";
-const AFTER_KIND: Step[] = ["goal", "schedule", "penalty", "reviewers", "check"];
+type Step = "kind" | "connect" | "goal" | "schedule" | "penalty" | "reviewers" | "reminders" | "check";
+const AFTER_KIND: Step[] = ["goal", "schedule", "penalty", "reviewers", "reminders", "check"];
 
 /** The form's steps. A pact's evidence kind never changes, so editing skips that step. */
 function stepsFor(
@@ -78,6 +79,8 @@ export interface Form {
   penalty: string;
   recipientId: string | null;
   reviewerIds: string[];
+  /** "HH:MM" each as the time field gives it, or "" until picked. */
+  reminders: string[];
 }
 
 const EMPTY_FORM: Form = {
@@ -94,6 +97,7 @@ const EMPTY_FORM: Form = {
   penalty: "",
   recipientId: null,
   reviewerIds: [],
+  reminders: [],
 };
 
 export function formOf(
@@ -110,6 +114,7 @@ export function formOf(
     | "penaltyCents"
     | "recipient"
     | "reviewers"
+    | "reminders"
   >,
 ): Form {
   return {
@@ -126,6 +131,7 @@ export function formOf(
     penalty: centsInputText(pact.penaltyCents),
     recipientId: pact.recipient.id,
     reviewerIds: pact.reviewers.map((reviewer) => reviewer.id),
+    reminders: pact.reminders,
   };
 }
 
@@ -145,6 +151,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "invalid-start-date": "Pick a start date, or clear it.",
   "invalid-end-date": "Pick an end date, or clear it.",
   "end-date-too-early": "The end date is before the first day. Pick a later one.",
+  ...REMINDER_PROBLEMS,
   "no-amount": "Enter an amount, like 5 or 2.50.",
   "invalid-penalty": "Set a penalty above $0.",
   "no-recipient": "Pick a recipient.",
@@ -178,6 +185,8 @@ function stepProblem(step: Step, form: Form): Problem | null {
     }
     case "reviewers":
       return form.reviewerIds.length === 0 ? "no-reviewers" : null;
+    case "reminders":
+      return form.reminders.includes("") ? "invalid-reminders" : null;
     default:
       return null;
   }
@@ -291,6 +300,7 @@ export function CreatePact({
         penaltyCents,
         recipientId,
         reviewerIds: form.reviewerIds,
+        reminders: form.reminders,
       } as const;
       if (editing) {
         const result = await api.editPact(editing.id, pact);
@@ -354,6 +364,9 @@ export function CreatePact({
           onCheckAgain={() => void loadFriends()}
         />
       );
+      break;
+    case "reminders":
+      body = <RemindersStep form={form} onReminders={(reminders) => update({ reminders })} />;
       break;
     case "check":
       body = <CheckStep form={form} friends={friends ?? []} recipients={recipients ?? []} editing={editing} />;
@@ -935,6 +948,7 @@ function CheckStep({
               penaltyCents: parseCents(form.penalty) ?? 0,
               recipient,
               reviewers: friends.filter((f) => form.reviewerIds.includes(f.id)),
+              reminders: form.reminders,
             }}
           />
         )}

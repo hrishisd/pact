@@ -2,17 +2,20 @@
 // its edit window; after it File excuse, Request change and End pact (or,
 // while a change request waits, word of it); when new terms start; and
 // what's waiting on a reviewer; and its History, a heat map of its days.
+// After the edit window the reminders change right here, with no review,
+// even while a change request waits.
 
 import { useCallback, useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type { PactTerms, PactWaitingItem } from "../shared/types.ts";
+import type { PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
 import { listNames } from "./change-terms.tsx";
-import { clockText, formatDate, formatDay, minutesLeft, money, scheduleText } from "./format.ts";
+import { clockText, formatDate, formatDay, minutesLeft, money, remindersText, scheduleText } from "./format.ts";
 import { CameraIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
+import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { Empty, Sheet, useNow } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
@@ -86,7 +89,7 @@ export function PactPage({
             />
           )}
           <History pact={state.pact} />
-          <Terms pact={state.pact} />
+          <Terms pact={state.pact} onSaved={load} />
           <EndPact pact={state.pact} onSent={load} />
           {state.pact.endedAt !== null && (
             <p className="small muted">
@@ -363,25 +366,110 @@ function History({ pact }: { pact: Pact }) {
   return <HeatMap pact={pact} now={now} />;
 }
 
-function Terms({ pact }: { pact: Pact }) {
+function Terms({ pact, onSaved }: { pact: Pact; onSaved: () => void }) {
+  const now = useNow();
+  const [changing, setChanging] = useState(false);
+  // In the edit window, Edit covers them.
+  const changeable = pact.stage === "active" && minutesLeft(pact.editWindowClosesAt, now) === null;
   return (
     <section className="card">
       <h3>Terms</h3>
-      <TermsList terms={pact} />
+      <TermsList terms={pact} onChangeReminders={changeable ? () => setChanging(true) : undefined} />
+      {changing && (
+        <RemindersSheet
+          pact={pact}
+          onClose={() => setChanging(false)}
+          onSaved={() => {
+            setChanging(false);
+            onSaved();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/** The pact's terms as they stand, with `reminders` instead of its own: a change that applies at once. */
+function withReminders(pact: Pact, reminders: string[]): PactChange {
+  return {
+    name: pact.name,
+    description: pact.description,
+    ...(pact.inBedBy !== null && { inBedBy: pact.inBedBy }),
+    ...(pact.dueBy !== null && { dueBy: pact.dueBy }),
+    ...(pact.startDate !== null && { startDate: pact.startDate }),
+    ...(pact.endDate !== null && { endDate: pact.endDate }),
+    schedule: pact.schedule,
+    penaltyCents: pact.penaltyCents,
+    recipientId: pact.recipient.id,
+    reviewerIds: pact.reviewers.map((r) => r.id),
+    reminders,
+  };
+}
+
+function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void; onSaved: () => void }) {
+  const [reminders, setReminders] = useState(pact.reminders);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const form = {
+    kind: pact.evidenceKind,
+    inBedBy: pact.inBedBy ?? "",
+    dueByOn: pact.dueBy !== null,
+    dueBy: pact.dueBy ?? "",
+    reminders,
+  };
+
+  const save = async () => {
+    if (reminders.includes("")) return setError(REMINDER_PROBLEMS["invalid-reminders"]);
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await api.changePact(pact.id, withReminders(pact, reminders));
+      if (result.ok || result.reason === "nothing-changed") return onSaved();
+      setError(
+        result.reason in REMINDER_PROBLEMS
+          ? REMINDER_PROBLEMS[result.reason as keyof typeof REMINDER_PROBLEMS]
+          : "Couldn't save them. Reopen the pact and try again.",
+      );
+    } catch (cause) {
+      setError(`Couldn't save them. ${failureText(cause, "Check your connection and try again.")}`);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Sheet title="Reminders" closeLabel="Cancel" onClose={onClose}>
+      <div className="stack step-in-sheet">
+        <RemindersStep form={form} onReminders={setReminders} hint="Changes apply at once, with no approval." />
+      </div>
+      {error && <p className="error">{error}</p>}
+      <button className="btn primary block" disabled={saving} onClick={() => void save()}>
+        Save reminders
+      </button>
+    </Sheet>
   );
 }
 
 /** A pact's terms as a list. The create form's Check step shows the same list before the pact exists. */
 export function TermsList({
   terms,
+  onChangeReminders,
 }: {
   terms: Pick<
     Pact,
-    "evidenceKind" | "inBedBy" | "dueBy" | "startDate" | "endDate" | "schedule" | "penaltyCents" | "recipient"
+    | "evidenceKind"
+    | "inBedBy"
+    | "dueBy"
+    | "startDate"
+    | "endDate"
+    | "schedule"
+    | "penaltyCents"
+    | "recipient"
+    | "reminders"
   > & {
     reviewers: { name: string }[];
   };
+  /** Offers Change on the reminders, when they can change on their own. */
+  onChangeReminders?: () => void;
 }) {
   const { recipient, reviewers } = terms;
   return (
@@ -420,6 +508,18 @@ export function TermsList({
       <dd>{recipient.name}</dd>
       <dt>{reviewers.length === 1 ? "Reviewer" : "Reviewers"}</dt>
       <dd>{reviewers.map((r) => r.name).join(", ")}</dd>
+      <dt>Reminders</dt>
+      <dd>
+        {remindersText(terms.reminders)}
+        {onChangeReminders && (
+          <>
+            {" "}
+            <button className="link" onClick={onChangeReminders}>
+              Change
+            </button>
+          </>
+        )}
+      </dd>
     </dl>
   );
 }

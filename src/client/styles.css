@@ -1413,3 +1413,9 @@ details.folded .kv {
   border-radius: 10px;
   background: var(--sunk);
 }
+/* A reminder on the Reminders step: its time field and Remove. */
+.remrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

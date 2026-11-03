@@ -48,6 +48,7 @@ describe("creating a pact", () => {
         penaltyCents: 500,
         recipient: { id: recipient.id, name: "Sam" },
         reviewers: [{ id: reviewer.id, name: "reviewer" }],
+        reminders: [],
         stage: "active",
         endedAt: null,
         firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },

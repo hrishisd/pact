@@ -449,4 +449,15 @@ export const migrations: readonly string[] = [
   ALTER TABLE pact ADD COLUMN start_date TEXT;
   ALTER TABLE pact ADD COLUMN end_date TEXT;
   `,
+  // 18: reminders
+  `
+  -- The owner's reminders: a JSON array of "HH:MM" in the owner's timezone,
+  -- in the order they go off. They aren't terms an occurrence keeps: a change
+  -- applies at once, so earlier terms don't carry them.
+  ALTER TABLE pact ADD COLUMN reminders TEXT NOT NULL DEFAULT '[]';
+  -- How far the scheduler has looked for the pact's reminders, an ISO
+  -- instant: each one going off by then was sent or dropped. NULL until the
+  -- first tick looks, which starts from its own time.
+  ALTER TABLE pact ADD COLUMN reminded_through TEXT;
+  `,
 ];

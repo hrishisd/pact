@@ -36,10 +36,11 @@ import {
   type Form,
 } from "./CreatePact.tsx";
 import { formatDate, money, parseCents } from "./format.ts";
+import { RemindersStep } from "./reminders-step.tsx";
 import { Empty, Sheet, useLoad } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
-type Step = "goal" | "schedule" | "penalty" | "reviewers";
+type Step = "goal" | "schedule" | "penalty" | "reviewers" | "reminders";
 
 /** The create form's step each term is changed on. */
 const STEP_OF: Record<Term, Step> = {
@@ -53,6 +54,7 @@ const STEP_OF: Record<Term, Step> = {
   penalty: "penalty",
   recipient: "penalty",
   reviewers: "reviewers",
+  reminders: "reminders",
 };
 
 const STEP_TITLES: Record<Step, string> = {
@@ -60,6 +62,7 @@ const STEP_TITLES: Record<Step, string> = {
   schedule: "Schedule",
   penalty: "Penalty",
   reviewers: "Reviewers",
+  reminders: "Reminders",
 };
 
 const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = {
@@ -67,7 +70,7 @@ const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = 
   "edit-window-open": "It's still in its first 10 minutes. Edit it instead.",
   "pact-ended": "This pact has Ended.",
   "change-request-waiting":
-    "A change request is waiting. Until it's decided or you withdraw it, only the name and new reviewers can change.",
+    "A change request is waiting. Until it's decided or you withdraw it, only the name, reminders and new reviewers can change.",
   "pact-started": "It has already started, so the start date can't change.",
   "nothing-changed": "Nothing changed yet.",
 };
@@ -116,6 +119,7 @@ function changeOf(form: Form, note: string): PactChange | { problem: "no-amount"
     penaltyCents,
     recipientId: form.recipientId,
     reviewerIds: form.reviewerIds,
+    reminders: form.reminders,
     ...(note.trim() !== "" && { note }),
   };
 }
@@ -224,6 +228,11 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           />
         );
         break;
+      case "reminders":
+        body = (
+          <RemindersStep form={form} onReminders={(reminders) => update({ reminders })} hint="Changes apply at once." />
+        );
+        break;
     }
     sheet = (
       <Sheet title={STEP_TITLES[step]} onClose={() => setStep(null)}>
@@ -320,9 +329,10 @@ function VerdictBox({ verdict, pactName }: { verdict: Verdict; pactName: string 
       break;
   }
   const { outcome, changes } = verdict.preview;
-  // What applies now even inside a change that waits: the name, and reviewers added.
+  // What applies now even inside a change that waits: the name, the reminders, and reviewers added.
   const now = [
     ...(changes.some((c) => c.term === "name") ? ["the name"] : []),
+    ...(changes.some((c) => c.term === "reminders") ? ["the reminders"] : []),
     ...changes.flatMap((c) =>
       c.term === "reviewers" && c.added.length > 0
         ? [c.added.length === 1 ? "the new reviewer" : "the new reviewers"]
@@ -330,7 +340,9 @@ function VerdictBox({ verdict, pactName }: { verdict: Verdict; pactName: string 
     ),
   ];
   const nowLine =
-    now.length > 0 ? ` ${capitalize(listNames(now))} ${now.length === 1 ? "changes" : "change"} now.` : "";
+    now.length > 0
+      ? ` ${capitalize(listNames(now))} ${now.length === 1 && !now[0]!.endsWith("s") ? "changes" : "change"} now.`
+      : "";
   switch (outcome.kind) {
     case "nothing":
       return <div className="verdict nothing">Nothing changed yet.</div>;

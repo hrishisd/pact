@@ -6,7 +6,7 @@
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
 import type { ChangeRequestView, CurrentTerms, TermChange } from "../shared/types.ts";
-import { clockText, formatDate, money, scheduleText } from "./format.ts";
+import { clockText, formatDate, money, remindersText, scheduleText } from "./format.ts";
 
 export type Term = TermChange["term"];
 type Change = Json<TermChange>;
@@ -23,13 +23,25 @@ export const TERM_LABELS: Record<Term, string> = {
   penalty: "Penalty",
   recipient: "Recipient",
   reviewers: "Reviewers",
+  reminders: "Reminders",
 };
 
 /** The terms a pact of this kind lists, in the Request change order. */
 export function termsOfKind(current: Pick<Current, "evidenceKind">): Term[] {
   return current.evidenceKind === "oura"
-    ? ["name", "in-bed-by", "schedule", "start-date", "end-date", "penalty", "recipient", "reviewers"]
-    : ["name", "description", "schedule", "due-by", "start-date", "end-date", "penalty", "recipient", "reviewers"];
+    ? ["name", "in-bed-by", "schedule", "start-date", "end-date", "penalty", "recipient", "reviewers", "reminders"]
+    : [
+        "name",
+        "description",
+        "schedule",
+        "due-by",
+        "start-date",
+        "end-date",
+        "penalty",
+        "recipient",
+        "reviewers",
+        "reminders",
+      ];
 }
 
 /** A term's value in the pact as it stands. */
@@ -55,6 +67,8 @@ export function currentValue(term: Term, current: Current): string {
       return current.recipient.name;
     case "reviewers":
       return names(current.reviewers);
+    case "reminders":
+      return remindersText(current.reminders);
   }
 }
 
@@ -89,6 +103,8 @@ export function changeValue(change: Change, side: "before" | "after"): string {
       return change[side].name;
     case "reviewers":
       return names(change[side]);
+    case "reminders":
+      return remindersText(change[side]);
   }
 }
 
@@ -121,6 +137,7 @@ export function effectText(change: Change): string {
     case "recipient":
       return "Needs approval: any change of recipient";
     case "name":
+    case "reminders":
       return "Applies now";
   }
 }
@@ -142,10 +159,10 @@ export function DiffList({ changes }: { changes: Change[] }) {
   );
 }
 
-/** The terms a change request leaves alone, folded away. */
+/** The terms a change request leaves alone, folded away. Reminders are the owner's own, so reviewers don't see them. */
 export function EverythingElse({ request }: { request: Json<ChangeRequestView> }) {
   const changed = new Set(request.changes.map((change) => change.term));
-  const rest = termsOfKind(request.current).filter((term) => !changed.has(term));
+  const rest = termsOfKind(request.current).filter((term) => !changed.has(term) && term !== "reminders");
   return (
     <details className="folded">
       <summary className="small">Everything else stays</summary>

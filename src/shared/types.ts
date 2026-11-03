@@ -75,6 +75,8 @@ export interface NewPact {
   startDate?: string;
   /** Optional, "YYYY-MM-DD": the pact's last day. Once it passes, the pact makes no more occurrences and is Ended. */
   endDate?: string;
+  /** Optional: when to remind the owner, each "HH:MM" in their timezone. See `PactTerms.reminders`. */
+  reminders?: string[];
   schedule: Schedule;
   /** The Penalty per missed occurrence, in US cents: a positive whole number. */
   penaltyCents: number;
@@ -97,6 +99,10 @@ export type CreatePactRefusal =
   | "invalid-end-date"
   /** An end date before the first occurrence (or, for a change, before today): the pact would have no days left. */
   | "end-date-too-early"
+  /** A reminder that isn't "HH:MM", or more than `MAX_REMINDERS`. */
+  | "invalid-reminders"
+  /** A reminder at or after the due time (a bedtime's in-bed-by time), which would never go off. */
+  | "reminder-after-due-time"
   | "blank-name"
   | "blank-description"
   | "no-days"
@@ -108,6 +114,9 @@ export type CreatePactRefusal =
   | "not-a-friend"
   /** Days are counted in the owner's timezone, so one must be confirmed first. */
   | "no-timezone";
+
+/** The most reminders a pact can have. */
+export const MAX_REMINDERS = 5;
 
 export type CreatePactResult = { ok: true; pactId: string } | { ok: false; reason: CreatePactRefusal };
 
@@ -180,6 +189,15 @@ export interface PactTerms {
   recipient: Recipient;
   /** Sorted by name. */
   reviewers: { id: AccountId; name: string }[];
+  /**
+   * When the owner is reminded, each "HH:MM" in their timezone, in the order
+   * they go off. On a Camera pact: that time on each scheduled day, before
+   * the day's due time, while it has no evidence. On an Oura Ring pact: each
+   * scheduled night (from 18:00 that evening, else the morning after), before
+   * the in-bed-by time, even if the owner is already in bed. Neither fires on
+   * an occurrence an approved excuse covers.
+   */
+  reminders: string[];
   stage: PactStage;
   /**
    * When it Ended: when an approved change request ended it, or when its end
@@ -1020,6 +1038,8 @@ export interface PactChange {
   startDate?: string;
   /** See `NewPact.endDate`. Left out to have none. */
   endDate?: string;
+  /** See `PactTerms.reminders`. Left out to have none. They apply at once, even while a change request waits. */
+  reminders?: string[];
   schedule: Schedule;
   /** In US cents: a positive whole number. */
   penaltyCents: number;
@@ -1034,7 +1054,7 @@ export interface PactChange {
  * What changing one term does: it relaxes the pact, so it waits for a
  * reviewer's approval; it only makes it stricter, so it applies without
  * approval to occurrences not open yet; or it doesn't change what counts (the
- * name, an added reviewer), so it applies at once.
+ * name, the reminders, an added reviewer), so it applies at once.
  */
 export type ChangeEffect = "needs-approval" | "stricter" | "at-once";
 
@@ -1054,6 +1074,8 @@ export type TermChange =
   /** In US cents. */
   | { term: "penalty"; before: number; after: number; effect: ChangeEffect }
   | { term: "recipient"; before: Recipient; after: Recipient; effect: ChangeEffect }
+  /** "HH:MM" each, in the order they go off. Changing them always applies at once. */
+  | { term: "reminders"; before: string[]; after: string[]; effect: ChangeEffect }
   /** Each list sorted by name. Removing anyone needs approval; adding applies at once. */
   | {
       term: "reviewers";
@@ -1068,7 +1090,7 @@ export type TermChange =
 export type ChangeOutcome =
   /** Nothing differs from the terms as they stand. */
   | { kind: "nothing" }
-  /** Only the name or added reviewers: done now. */
+  /** Only the name, the reminders or added reviewers: done now. */
   | { kind: "at-once" }
   /**
    * Only stricter (and maybe at-once) changes: they apply without approval
@@ -1078,8 +1100,8 @@ export type ChangeOutcome =
   | { kind: "stricter"; appliesFrom: string; todayKeepsCents: number | null }
   /**
    * Something relaxes the pact, so it's a change request, reviewed as a whole
-   * (`bundlesStricter`: with stricter changes in it, which wait too). Name
-   * and added reviewers still apply at once. `reviewerNames`: who may decide
+   * (`bundlesStricter`: with stricter changes in it, which wait too). The name,
+   * the reminders and added reviewers still apply at once. `reviewerNames`: who may decide
    * it, the added reviewers included, sorted by name.
    */
   | { kind: "needs-approval"; reviewerNames: string[]; bundlesStricter: boolean };
@@ -1097,7 +1119,7 @@ export type ChangePactRefusal =
   /** In the edit window the pact is edited instead. */
   | "edit-window-open"
   | "pact-ended"
-  /** A change request waits: until it's decided or withdrawn, only the name and added reviewers change. */
+  /** A change request waits: until it's decided or withdrawn, only the name, the reminders and added reviewers change. */
   | "change-request-waiting"
   /** The start date can't change once the first occurrence has opened. */
   | "pact-started"
@@ -1127,6 +1149,7 @@ export type CurrentTerms = Pick<
   | "penaltyCents"
   | "recipient"
   | "reviewers"
+  | "reminders"
 >;
 
 /** A change request, as its reviewers and its owner see it. */

@@ -14,6 +14,7 @@ import {
   nightStartsAt,
   occurrences,
   occurrencesOverTime,
+  reminderAt,
   type Occurrence,
   type Occurrences,
   type OccurrenceTerms,
@@ -35,6 +36,7 @@ import {
   MAX_EVIDENCE_PHOTOS,
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
+  MAX_REMINDERS,
   NOTIFICATION_SETTINGS,
   WEEKDAYS,
   type AcceptExcuseRejectionResult,
@@ -391,7 +393,10 @@ export function createPactCore(options: PactCoreOptions): PactCore {
   return new Core(db, options);
 }
 
-/** Which setting turns a kind of notification off. Operator alerts can't be. */
+/**
+ * Which setting turns a kind of notification off. Operator alerts can't be,
+ * and reminders are set on each pact instead.
+ */
 const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "operator-alert": null,
   "picked-as-reviewer": "picked-as-reviewer",
@@ -405,6 +410,7 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "owner-replied": "comment",
   "new-bill": "new-bill",
   "overdue-bill": "overdue-bill",
+  reminder: null,
 };
 /** The push services browsers use, as domains; a saved endpoint must be on one of them. */
 const PUSH_SERVICE_DOMAINS = [
@@ -431,6 +437,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** How often an Overdue owner is reminded, and how often their reviewers are told. */
 const OVERDUE_REMINDER_MS = DAY_MS;
 const OVERDUE_REVIEWER_NOTICE_MS = 7 * DAY_MS;
+/** A reminder the scheduler reaches later than this after its time, as after downtime, is dropped, not sent. */
+const REMINDER_LATE_MS = 15 * 60 * 1000;
 /** How long after creation the owner can edit or delete a pact freely. */
 const EDIT_WINDOW_MS = 10 * 60 * 1000;
 /**
@@ -738,8 +746,8 @@ class Core implements PactCore {
             .prepare(
               `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, in_bed_by,
                                  due_by, start_date, end_date, penalty_cents, recipient_id, stage,
-                                 first_occurrence, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+                                 first_occurrence, created_at, reminders, reminded_through)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
             )
             .run(
               id,
@@ -755,6 +763,8 @@ class Core implements PactCore {
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
+              now.toISOString(),
+              JSON.stringify(checked.reminders),
               now.toISOString(),
             );
           this.#setReviewers(id, checked.reviewerIds);
@@ -773,7 +783,7 @@ class Core implements PactCore {
           this.#db
             .prepare(
               `UPDATE pact SET name = ?, description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?,
-                               end_date = ?, penalty_cents = ?, recipient_id = ?, first_occurrence = ?
+                               end_date = ?, penalty_cents = ?, recipient_id = ?, first_occurrence = ?, reminders = ?
                WHERE id = ?`,
             )
             .run(
@@ -787,6 +797,7 @@ class Core implements PactCore {
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
+              JSON.stringify(checked.reminders),
               pactId,
             );
           this.#db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
@@ -897,9 +908,10 @@ class Core implements PactCore {
           if (!checked.ok) return checked;
           const { pact, before, after, outcome } = checked;
           if (outcome.kind === "nothing") return { ok: false, reason: "nothing-changed" };
-          // The name and added reviewers apply at once, even inside a change that waits.
+          // The name, the reminders and added reviewers apply at once, even inside a change that waits.
           if (after.name !== before.name)
             this.#db.prepare(`UPDATE pact SET name = ? WHERE id = ?`).run(after.name, pactId);
+          this.#db.prepare(`UPDATE pact SET reminders = ? WHERE id = ?`).run(JSON.stringify(after.reminders), pactId);
           const added = after.reviewerIds.filter((id) => !before.reviewerIds.includes(id));
           this.#setReviewers(pactId, added);
           for (const reviewerId of added) {
@@ -916,7 +928,12 @@ class Core implements PactCore {
             });
           }
           if (outcome.kind === "needs-approval") {
-            const sent = { ...before, name: after.name, reviewerIds: [...before.reviewerIds, ...added].sort() };
+            const sent = {
+              ...before,
+              name: after.name,
+              reviewerIds: [...before.reviewerIds, ...added].sort(),
+              reminders: after.reminders,
+            };
             const id = this.#sendChangeRequest({ ...pact, name: after.name }, ownerName, sent, after, change.note);
             return { ok: true, outcome, changeRequestId: id };
           }
@@ -2655,6 +2672,7 @@ class Core implements PactCore {
       penaltyCents: pact.penalty_cents,
       recipientId: pact.recipient_id,
       reviewerIds: this.#reviewersOf(pact.id),
+      reminders: JSON.parse(pact.reminders) as string[],
     };
   }
 
@@ -2674,6 +2692,7 @@ class Core implements PactCore {
       penaltyCents: pact.penalty_cents,
       recipient,
       reviewers: this.#friendsSortedByName(this.#reviewersOf(pact.id)),
+      reminders: JSON.parse(pact.reminders) as string[],
     };
   }
 
@@ -2740,6 +2759,7 @@ class Core implements PactCore {
       penaltyCents: change.penaltyCents,
       recipientId: change.recipientId,
       reviewerIds: [...checked.reviewerIds].sort(),
+      reminders: checked.reminders,
     };
     const diffs = termDiffs(before, after);
     if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
@@ -2910,6 +2930,8 @@ class Core implements PactCore {
             removed: this.#friendsSortedByName(before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))),
             effect,
           };
+        case "reminders":
+          return { term, before: before.reminders, after: after.reminders, effect };
       }
     });
   }
@@ -3134,6 +3156,7 @@ class Core implements PactCore {
         terms: OccurrenceTerms;
         startDate: LocalDate | null;
         reviewerIds: AccountId[];
+        reminders: string[];
       }
     | { ok: false; reason: CreatePactRefusal } {
     const oura = pact.evidenceKind === "oura";
@@ -3147,6 +3170,12 @@ class Core implements PactCore {
       return { ok: false, reason: "invalid-start-date" };
     }
     if (pact.endDate !== undefined && !isLocalDate(pact.endDate)) return { ok: false, reason: "invalid-end-date" };
+    const reminders = [...new Set(pact.reminders ?? [])];
+    if (reminders.length > MAX_REMINDERS || !reminders.every(isClockTime)) {
+      return { ok: false, reason: "invalid-reminders" };
+    }
+    // In the order they go off: a night's run from 18:00 to the morning after.
+    reminders.sort((a, b) => (oura ? nightOrder(a).localeCompare(nightOrder(b)) : a.localeCompare(b)));
     const name = pact.name.trim();
     // An Oura Ring pact has no photo to describe.
     const description = oura ? "" : pact.description.trim();
@@ -3159,6 +3188,10 @@ class Core implements PactCore {
       startDate: pact.startDate ?? null,
     });
     if (!timing.ok) return timing;
+    const dueBy = timing.terms.dueBy ?? null;
+    const goesOffInTime = (time: string) =>
+      oura ? nightOrder(time) < nightOrder(pact.inBedBy!) : dueBy === null || time < dueBy;
+    if (!reminders.every(goesOffInTime)) return { ok: false, reason: "reminder-after-due-time" };
     const endDate = pact.endDate ?? null;
     if (endDate !== null && endDate < timing.terms.firstOccurrence) return { ok: false, reason: "end-date-too-early" };
     if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
@@ -3178,6 +3211,7 @@ class Core implements PactCore {
       terms: endDate === null ? timing.terms : { ...timing.terms, endDate },
       startDate: pact.startDate ?? null,
       reviewerIds,
+      reminders,
     };
   }
 
@@ -3839,21 +3873,131 @@ class Core implements PactCore {
     // Before the transaction, never in it: a slow Oura can't hold up other writes.
     // A call that throws fails the whole tick, which writes nothing; the next one retries.
     const sleep = await this.#fetchSleep(t);
-    await this.#command(() => {
-      this.#closeEditWindows(t);
-      this.#judgeDueBy(t);
-      this.#judgeNights(t, sleep);
-      this.#endPastEndDate(t);
-      this.#makeBills(t);
-      this.#remindOverdue(t);
-      this.#db
-        .prepare(
-          `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)
-           ON CONFLICT (id) DO UPDATE SET last_tick_at = excluded.last_tick_at`,
-        )
-        .run(t.toISOString());
-    });
+    await this.#command(
+      () => {
+        this.#closeEditWindows(t);
+        this.#judgeDueBy(t);
+        this.#judgeNights(t, sleep);
+        const dropped = this.#remind(t);
+        this.#endPastEndDate(t);
+        this.#makeBills(t);
+        this.#remindOverdue(t);
+        this.#db
+          .prepare(
+            `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)
+             ON CONFLICT (id) DO UPDATE SET last_tick_at = excluded.last_tick_at`,
+          )
+          .run(t.toISOString());
+        return dropped;
+      },
+      // Logged once committed, like any operator alert: the log line never depends on delivery.
+      (dropped) => {
+        for (const drop of dropped) {
+          this.#log(
+            `reminder dropped: pact ${drop.pactId}, ${drop.time} for ${drop.date}, ` +
+              `${Math.floor(drop.lateMs / 60_000)} min late at ${t.toISOString()}`,
+          );
+        }
+        if (dropped.length > 0) this.#log(`OPERATOR_ALERT ${droppedText(dropped.length)} after downtime`);
+      },
+    );
     await this.#delivery;
+  }
+
+  /**
+   * Sends each Active pact's reminders whose time has come since the
+   * scheduler last looked (the pact's `reminded_through`), so a stopped
+   * scheduler catches up, but drops those more than 15 minutes late and
+   * tells the operator. A reminder goes off before its occurrence's due time
+   * and only while it's useful: a Camera day with no evidence and not judged,
+   * any scheduled bedtime night (the app can't know the owner is in bed until
+   * the ring syncs), never one an approved excuse covers.
+   */
+  #remind(t: Date): DroppedReminder[] {
+    const pacts = this.#db
+      .prepare(
+        `SELECT pact.id, pact.name, pact.evidence_kind, pact.reminders, pact.reminded_through,
+                pact.owner_account_id, account.timezone
+         FROM pact JOIN account ON account.id = pact.owner_account_id
+         WHERE pact.stage = 'active'`,
+      )
+      .all() as (Pick<PactRow, "id" | "name" | "evidence_kind" | "reminders" | "reminded_through"> & {
+      owner_account_id: AccountId;
+      timezone: string | null;
+    })[];
+    const dropped: DroppedReminder[] = [];
+    for (const pact of pacts) {
+      const from = pact.reminded_through === null ? t : new Date(pact.reminded_through);
+      if (from.getTime() >= t.getTime()) continue;
+      this.#db.prepare(`UPDATE pact SET reminded_through = ? WHERE id = ?`).run(t.toISOString(), pact.id);
+      const times = JSON.parse(pact.reminders) as string[];
+      // Every pact's owner has a timezone: creating one needs it.
+      if (times.length === 0 || pact.timezone === null) continue;
+      const timezone = pact.timezone;
+      const night = pact.evidence_kind === "oura";
+      // A night's reminder can go off the morning after, so start a day early.
+      const days = this.#occurrencesOf(pact.id, timezone).between(
+        addDays(localDateOf(from, timezone), -1),
+        localDateOf(t, timezone),
+      );
+      for (const occurrence of days) {
+        for (const time of times) {
+          const at = reminderAt(occurrence.date, time, timezone, night);
+          if (at.getTime() <= from.getTime() || at.getTime() > t.getTime()) continue;
+          if (at.getTime() >= occurrence.dueAt.getTime() || !this.#worthReminding(pact, occurrence.date)) continue;
+          const lateMs = t.getTime() - at.getTime();
+          if (lateMs > REMINDER_LATE_MS) {
+            dropped.push({ pactId: pact.id, date: occurrence.date, time, lateMs });
+            continue;
+          }
+          this.#enqueueReminder(pact, occurrence.date);
+        }
+      }
+    }
+    const operator = this.#db.prepare(`SELECT id FROM account WHERE is_operator = 1`).get() as
+      { id: AccountId } | undefined;
+    if (dropped.length > 0 && operator) {
+      this.#enqueue({
+        recipient: operator.id,
+        kind: "operator-alert",
+        channel: "push",
+        payload: {
+          alert: "reminders-dropped",
+          dropped: dropped.length,
+          title: "Operator alert",
+          body: `${capitalized(droppedText(dropped.length))} after downtime.`,
+          url: APP_PATHS.today,
+        },
+      });
+    }
+    return dropped;
+  }
+
+  /** Whether the occurrence still needs a nudge: a bedtime night always, a Camera day with nothing submitted or judged. */
+  #worthReminding(pact: Pick<PactRow, "id" | "evidence_kind">, date: LocalDate): boolean {
+    if (this.#excuseOn(pact.id, date) === "approved") return false;
+    if (pact.evidence_kind === "oura") return true;
+    const submitted = this.#db
+      .prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND occurrence_date = ?`)
+      .get(pact.id, date);
+    return submitted === undefined && !this.#isJudged(pact.id, date);
+  }
+
+  #enqueueReminder(
+    pact: Pick<PactRow, "id" | "name" | "evidence_kind"> & { owner_account_id: AccountId },
+    date: LocalDate,
+  ): void {
+    const terms = this.#termsOn(pact.id, date);
+    const body =
+      pact.evidence_kind === "oura"
+        ? `In bed by ${clockText(terms.in_bed_by!)} tonight.`
+        : `No photo yet today. Due at ${terms.due_by === null ? "midnight" : clockText(terms.due_by)}.`;
+    this.#enqueue({
+      recipient: pact.owner_account_id,
+      kind: "reminder",
+      channel: "push",
+      payload: { pactId: pact.id, occurrenceDate: date, title: pact.name, body, url: APP_PATHS.today },
+    });
   }
 
   /**
@@ -4240,6 +4384,11 @@ function deadlineWallClock(date: LocalDate, inBedBy: string): string {
   return `${Number(inBedBy.slice(0, 2)) >= 18 ? date : addDays(date, 1)}T${inBedBy}`;
 }
 
+/** A clock time "HH:MM" as it sorts in a night, which runs from 18:00 to 17:59 the next day. */
+function nightOrder(time: string): string {
+  return `${Number(time.slice(0, 2)) < 18 ? 1 : 0}${time}`;
+}
+
 /** "HH:MM" on a 24-hour clock. */
 function isClockTime(text: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
@@ -4267,6 +4416,9 @@ interface PactRow {
   created_at: string;
   reviewers_notified_at: string | null;
   ended_at: string | null;
+  /** JSON: "HH:MM" each, in the order they go off. */
+  reminders: string;
+  reminded_through: string | null;
 }
 
 /** The terms an occurrence follows: the pact's, as they stood when it opened. */
@@ -4352,6 +4504,7 @@ const TERM_LABELS: Record<TermDiff["term"], string> = {
   penalty: "Penalty",
   recipient: "Recipient",
   reviewers: "Reviewers",
+  reminders: "Reminders",
 };
 
 /**
@@ -4374,14 +4527,38 @@ function firstOccurrenceAfterChange(
   throw new Error("unreachable: a schedule has at least one day");
 }
 
-/** A change request's stored terms. Those sent before due-by times and dates existed have none. */
+/**
+ * A change request's stored terms. Those sent before due-by times, dates and
+ * reminders existed have none. Reminders apply at once, so a request's before
+ * and after always have the same ones.
+ */
 function storedTerms(json: string): ChangeableTerms {
   return {
     dueBy: null,
     startDate: null,
     endDate: null,
+    reminders: [],
     ...(JSON.parse(json) as Partial<ChangeableTerms>),
   } as ChangeableTerms;
+}
+
+/** A reminder the scheduler reached too late to send. */
+interface DroppedReminder {
+  pactId: string;
+  /** The occurrence it was for. */
+  date: LocalDate;
+  /** Its time, "HH:MM". */
+  time: string;
+  lateMs: number;
+}
+
+/** "dropped 1 reminder more than 15 minutes late", or "dropped 2 reminders …". */
+function droppedText(count: number): string {
+  return `dropped ${count} reminder${count === 1 ? "" : "s"} more than ${REMINDER_LATE_MS / 60_000} minutes late`;
+}
+
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** A pact as judging reads it. */

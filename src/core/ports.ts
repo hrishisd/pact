@@ -63,6 +63,8 @@ export type NotificationKind =
   | "missed-occurrence"
   /** To the owner: a Wednesday bill to one recipient. */
   | "new-bill"
+  /** To the owner: one of a pact's reminders, at its time. Set per pact, so no setting turns it off. */
+  | "reminder"
   /** To the owner, daily while Overdue; to the reviewers of pacts with that recipient, at first and weekly. */
   | "overdue-bill";
 export type NotificationChannel = "push";
