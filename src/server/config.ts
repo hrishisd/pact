@@ -40,6 +40,15 @@ export interface Config {
    * the public one, so changing it needs every device to subscribe again.
    */
   vapid: { publicKey: string; privateKey: string };
+  /**
+   * The Oura OAuth app, and the key that encrypts its tokens in the database.
+   * Optional: without OURA_CLIENT_ID it is null; with it, the secret and the key
+   * are required too (in production; development has a default key). Null in
+   * production means Oura isn't set up: connecting is refused and there is no
+   * sleep. Null in development: connecting skips Oura, and sleep comes from a
+   * file (see devOura).
+   */
+  oura: { clientId: string; clientSecret: string; tokenKey: string } | null;
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
   restored: boolean;
   /** The commit CI built the image from, reported by /health. Null when built without one; never required. */
@@ -50,6 +59,7 @@ const REPO_ROOT = join(import.meta.dirname, "..", "..");
 // Development only, like the session secret's default: production must set its own.
 const DEV_VAPID_PUBLIC_KEY = "BB1FrNQz4WK8C55DsNs9-4Uzw6_MBaV8x4WiAgnLnCW89DQFUhkLHm2Jsk1q-5G_OLqx2aVVZUTKKRh9AePO53A";
 const DEV_VAPID_PRIVATE_KEY = "UQoUbfmAj8ZaiwNCrCw_cblSFYDxAk9uLNBh148hPZM";
+const DEV_OURA_TOKEN_KEY = "ZGV2LW9ubHktb3VyYS10b2tlbi1rZXktMzItYnl0ZXM=";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const production = env.NODE_ENV === "production";
@@ -94,6 +104,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       publicKey: read("VAPID_PUBLIC_KEY", DEV_VAPID_PUBLIC_KEY),
       privateKey: read("VAPID_PRIVATE_KEY", DEV_VAPID_PRIVATE_KEY),
     },
+    oura: env.OURA_CLIENT_ID?.trim()
+      ? {
+          clientId: read("OURA_CLIENT_ID", ""),
+          clientSecret: read("OURA_CLIENT_SECRET", ""),
+          tokenKey: read("OURA_TOKEN_KEY", DEV_OURA_TOKEN_KEY),
+        }
+      : null,
     restored: env.PACT_RESTORED === "1",
     commit: env.PACT_COMMIT?.trim() || null,
   };
@@ -103,6 +120,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   if (production) config.canonicalOrigin = new URL(config.auth.url).origin;
   if (!Number.isInteger(port) || port <= 0) throw new Error(`PORT is not a port number: ${env.PORT}`);
+  if (config.oura && Buffer.from(config.oura.tokenKey, "base64").length !== 32) {
+    throw new Error("OURA_TOKEN_KEY must be 32 bytes, base64");
+  }
   if (production && config.auth.secret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");
   }

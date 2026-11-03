@@ -1,14 +1,25 @@
 // How the client writes money, schedules, dates and time left.
 
-import { formatDay } from "../shared/format.ts";
+import { clockText, formatDate, formatDay } from "../shared/format.ts";
 
-export { formatDate, formatDay, money, scheduleText } from "../shared/format.ts";
+export { clockText, formatDate, formatDay, inBedByName, money, scheduleText } from "../shared/format.ts";
 
 /** Dollars as typed ("5", "$2.50", "0.5", ".50") in whole cents, or null when it isn't an amount. */
 export function parseCents(text: string): number | null {
   const match = /^\$?\s*(\d*)(?:\.(\d{1,2}))?$/.exec(text.trim());
   if (!match || (match[1] === "" && match[2] === undefined)) return null;
   return Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+}
+
+/** A pact's reminders, in the order they go off: "6:00pm, 8:30pm", "Wed Jan 7, 9:00am" on One-time, or "None". */
+export function remindersText(reminders: string[]): string {
+  return reminders.length === 0 ? "None" : reminders.map(reminderText).join(", ");
+}
+
+/** A reminder: a time of day, "6:00pm", or a One-time pact's "YYYY-MM-DDTHH:MM", "Wed Jan 7, 9:00am". */
+function reminderText(reminder: string): string {
+  const [date, time] = reminder.split("T");
+  return time === undefined ? clockText(reminder) : `${formatDate(date!)}, ${clockText(time)}`;
 }
 
 /** Cents as an amount field starts out: "5" for whole dollars, "2.50" otherwise, with no "$". */
@@ -31,6 +42,23 @@ export function formatDayTime(instant: string, timeZone: string): string {
   );
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
   return `${formatDay(instant, timeZone)}, ${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
+}
+
+/**
+ * An instant, as an ISO string, as its day and time in `timeZone` (the
+ * profile's), the way bills are due: "Wed Jan 21 at 6pm", or "at 6:30pm"
+ * off the hour.
+ */
+export function formatDueAt(instant: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  const clock = clockText(`${part("hour")}:${part("minute")}`);
+  return `${formatDay(instant, timeZone)} at ${clock.replace(":00", "")}`;
 }
 
 /** Time left as "16h 19m", or "3d 4h" from 48 hours up. Never negative. */

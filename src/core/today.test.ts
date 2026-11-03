@@ -44,7 +44,13 @@ describe("Today", () => {
     await createPact("Gym", ["mon"]);
 
     s.setClockTo("Tue 10:00");
-    expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
+    expect(owner.today()).toEqual({
+      hasPacts: true,
+      alerts: [],
+      sections: [],
+      waiting: [],
+      yesterday: [expect.objectContaining({ name: "Gym", occurrenceDate: "2026-01-05" })],
+    });
   });
 
   test("lists an open pact as To do and a not-yet-open one as Coming up", async () => {
@@ -64,12 +70,14 @@ describe("Today", () => {
           kind: "to-do",
           cards: [
             {
+              kind: "evidence",
               pactId: gym,
               name: "Gym",
               penaltyCents: 500,
               editWindowClosesAt: null,
               occurrenceDate: "2026-01-05",
               dueAt: s.at("Tue 00:00"),
+              dueBy: null,
             },
           ],
         },
@@ -82,6 +90,7 @@ describe("Today", () => {
               penaltyCents: 300,
               editWindowClosesAt: s.at("Mon 23:40"),
               opensOn: "2026-01-06",
+              startDate: null,
             },
           ],
         },
@@ -104,12 +113,14 @@ describe("Today", () => {
         kind: "to-do",
         cards: [
           {
+            kind: "evidence",
             pactId: stretch,
             name: "Stretch",
             penaltyCents: 500,
             editWindowClosesAt: null,
             occurrenceDate: "2026-01-06",
             dueAt: s.at("Wed 00:00"),
+            dueBy: null,
           },
         ],
       },
@@ -121,20 +132,24 @@ describe("Today", () => {
         kind: "to-do",
         cards: [
           {
+            kind: "evidence",
             pactId: gym,
             name: "Gym",
             penaltyCents: 500,
             editWindowClosesAt: null,
             occurrenceDate: "2026-01-07",
             dueAt: s.at("Thu 00:00"),
+            dueBy: null,
           },
           {
+            kind: "evidence",
             pactId: stretch,
             name: "Stretch",
             penaltyCents: 500,
             editWindowClosesAt: null,
             occurrenceDate: "2026-01-07",
             dueAt: s.at("Thu 00:00"),
+            dueBy: null,
           },
         ],
       },
@@ -155,12 +170,14 @@ describe("Today", () => {
         // Midnight ending Tuesday in Auckland.
         cards: [
           {
+            kind: "evidence",
             pactId: tuesday,
             name: "Tuesday pact",
             penaltyCents: 500,
             editWindowClosesAt: s.at("Mon 09:10"),
             occurrenceDate: "2026-01-06",
             dueAt: new Date("2026-01-06T11:00:00Z"),
+            dueBy: null,
           },
         ],
       },
@@ -173,6 +190,7 @@ describe("Today", () => {
             penaltyCents: 500,
             editWindowClosesAt: s.at("Mon 09:10"),
             opensOn: "2026-01-12",
+            startDate: null,
           },
         ],
       },

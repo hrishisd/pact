@@ -46,10 +46,26 @@ export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as con
 /** A day of the week: "mon" … "sun". */
 export type Weekday = (typeof WEEKDAYS)[number];
 
-/** When a pact's occurrences fall due. Only Fixed days so far. */
+/** When a pact's occurrences fall due. */
 export type Schedule =
   /** Each listed weekday, in the owner's timezone, is its own occurrence. Listed Monday first, no repeats. */
-  { kind: "fixed-days"; days: Weekday[] };
+  | { kind: "fixed-days"; days: Weekday[] }
+  /**
+   * Camera only: each Mon–Sun week is one occurrence, Kept once `target` days
+   * of it have approved evidence (at most one counts per day): a whole number
+   * from 1 to `MAX_WEEKLY_TARGET`.
+   */
+  | { kind: "weekly-count"; target: number }
+  /**
+   * Camera only: one occurrence, due at the deadline: `deadline`, a
+   * "YYYY-MM-DD" day in the owner's timezone, at the pact's due-by time, or
+   * else the midnight ending it. With `submitAnytime` off, evidence counts
+   * only on that day; on, from the pact's creation until the deadline.
+   */
+  | { kind: "one-time"; deadline: string; submitAnytime: boolean };
+
+/** A Weekly count target can't be more than one day of evidence a day. */
+export const MAX_WEEKLY_TARGET = 7;
 
 /** How a pact's evidence is gathered. Picked at creation and never changes. */
 export type EvidenceKind = "camera" | "oura";
@@ -57,8 +73,35 @@ export type EvidenceKind = "camera" | "oura";
 export interface NewPact {
   evidenceKind: EvidenceKind;
   name: string;
-  /** For Camera: what the photo will show. */
+  /** For Camera: what the photo will show. Oura Ring pacts have none. */
   description: string;
+  /**
+   * Oura Ring only: the in-bed-by time, "HH:MM" on a 24-hour clock. An
+   * evening time (from 18:00) is due that evening; an earlier one, the
+   * morning after.
+   */
+  inBedBy?: string;
+  /**
+   * Camera only, optional: the due-by time, "HH:MM" on a 24-hour clock after
+   * 00:00. Evidence is due by it each day instead of midnight, and the day is
+   * judged then.
+   */
+  dueBy?: string;
+  /**
+   * Optional, "YYYY-MM-DD": the pact starts no earlier than this day. It can
+   * only push the first occurrence later. Recurring pacts only: One-time has none.
+   */
+  startDate?: string;
+  /**
+   * Optional, "YYYY-MM-DD": the pact's last day. Once it passes, the pact
+   * makes no more occurrences and is Ended. Recurring pacts only: One-time has none.
+   */
+  endDate?: string;
+  /**
+   * Optional: when to remind the owner, each "HH:MM" in their timezone, or on
+   * a One-time pact "YYYY-MM-DDTHH:MM". See `PactTerms.reminders`.
+   */
+  reminders?: string[];
   schedule: Schedule;
   /** The Penalty per missed occurrence, in US cents: a positive whole number. */
   penaltyCents: number;
@@ -69,11 +112,32 @@ export interface NewPact {
 }
 
 export type CreatePactRefusal =
-  /** Oura Ring pacts aren't available yet. */
-  | "evidence-kind-unavailable"
+  /** An Oura Ring pact needs the owner's Oura connection first. */
+  | "oura-not-connected"
+  /** An Oura Ring pact's in-bed-by time is missing or isn't "HH:MM". */
+  | "invalid-in-bed-by"
+  /** A due-by time on an Oura Ring pact, at midnight, or not "HH:MM". */
+  | "invalid-due-by"
+  /** A start date that isn't "YYYY-MM-DD", or one on a One-time pact. */
+  | "invalid-start-date"
+  /** An end date that isn't "YYYY-MM-DD", or one on a One-time pact. */
+  | "invalid-end-date"
+  /** An end date before the first occurrence (or, for a change, before today): the pact would have no days left. */
+  | "end-date-too-early"
+  /** A reminder that isn't "HH:MM" (on One-time, "YYYY-MM-DDTHH:MM"), or more than `MAX_REMINDERS`. */
+  | "invalid-reminders"
+  /** A reminder at or after the due time (a bedtime's in-bed-by time), which would never go off. */
+  | "reminder-after-due-time"
   | "blank-name"
   | "blank-description"
   | "no-days"
+  /**
+   * A Weekly count or One-time on an Oura Ring pact, a target that isn't a
+   * whole number from 1 to `MAX_WEEKLY_TARGET`, or a deadline that isn't "YYYY-MM-DD".
+   */
+  | "invalid-schedule"
+  /** A One-time deadline less than an hour after the pact's creation (for a change, after it takes effect). */
+  | "deadline-too-soon"
   | "invalid-penalty"
   /** Not one of this owner's saved recipients. */
   | "unknown-recipient"
@@ -82,6 +146,9 @@ export type CreatePactRefusal =
   | "not-a-friend"
   /** Days are counted in the owner's timezone, so one must be confirmed first. */
   | "no-timezone";
+
+/** The most reminders a pact can have. */
+export const MAX_REMINDERS = 5;
 
 export type CreatePactResult = { ok: true; pactId: string } | { ok: false; reason: CreatePactRefusal };
 
@@ -98,16 +165,31 @@ export type EditPactResult = { ok: true } | { ok: false; reason: EditPactRefusal
 
 export type DeletePactResult = { ok: true } | { ok: false; reason: "pact-not-found" | "edit-window-closed" };
 
+/** What a pact's occurrences follow from, as the create form has it so far. */
+export interface PactTiming {
+  schedule: Schedule;
+  /** Oura Ring only: see `NewPact.inBedBy`. */
+  inBedBy?: string;
+  /** Camera only: see `NewPact.dueBy`. */
+  dueBy?: string;
+  /** See `NewPact.startDate`. */
+  startDate?: string;
+}
+
 /** A pact's first occurrence, as the create form's Check step names it. */
 export interface FirstOccurrence {
-  /** The occurrence's day in the owner's timezone, "YYYY-MM-DD". */
+  /** The occurrence's day in the owner's timezone, "YYYY-MM-DD": for Weekly count, its week's Monday. */
   date: string;
-  /** Midnight at the end of that day, in the owner's timezone. */
+  /**
+   * Its due time: midnight at the end of that day, or the due-by or in-bed-by
+   * time, in the owner's timezone; for Weekly count, the end of its Sunday.
+   */
   dueAt: Date;
 }
 
 export type FirstOccurrenceResult =
-  { ok: true; firstOccurrence: FirstOccurrence } | { ok: false; reason: "no-days" | "no-timezone" | "pact-not-found" };
+  | { ok: true; firstOccurrence: FirstOccurrence }
+  | { ok: false; reason: "no-days" | "deadline-too-soon" | "no-timezone" | "pact-not-found" };
 
 /** A card in the Pacts tab. */
 export interface PactSummary {
@@ -115,9 +197,14 @@ export interface PactSummary {
   name: string;
   schedule: Schedule;
   penaltyCents: number;
+  /** Ended pacts come after every Active one. */
+  stage: PactStage;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
 }
+
+/** Active from creation; Ended once its end date passes, an approved change request ends it, or a One-time occurrence is judged. */
+export type PactStage = "active" | "ended";
 
 /** The pact page: the pact's terms. */
 export interface PactTerms {
@@ -125,22 +212,136 @@ export interface PactTerms {
   name: string;
   description: string;
   evidenceKind: EvidenceKind;
+  /** Oura Ring only: the in-bed-by time, "HH:MM". Null for Camera. */
+  inBedBy: string | null;
+  /** Camera only: the due-by time, "HH:MM", or null for midnight. */
+  dueBy: string | null;
+  /** "YYYY-MM-DD", or null: see `NewPact.startDate`. */
+  startDate: string | null;
+  /** "YYYY-MM-DD", or null: see `NewPact.endDate`. */
+  endDate: string | null;
   schedule: Schedule;
   penaltyCents: number;
   recipient: Recipient;
   /** Sorted by name. */
   reviewers: { id: AccountId; name: string }[];
-  /** Ended comes with end dates and change requests. */
-  stage: "active";
+  /**
+   * When the owner is reminded, each "HH:MM" in their timezone, in the order
+   * they go off. On a Camera pact: that time on each scheduled day, before
+   * the day's due time, while it has no evidence. On an Oura Ring pact: each
+   * scheduled night (from 18:00 that evening, else the morning after), before
+   * the in-bed-by time, even if the owner is already in bed. Neither fires on
+   * an occurrence an approved excuse covers. On a One-time pact each is
+   * "YYYY-MM-DDTHH:MM" and goes off once, before the deadline, unless
+   * evidence was already submitted.
+   */
+  reminders: string[];
+  stage: PactStage;
+  /**
+   * When it Ended: when an approved change request ended it, when its end
+   * date passed (once its last occurrence closed), or for One-time when its
+   * occurrence was judged; null while Active.
+   */
+  endedAt: Date | null;
   firstOccurrence: FirstOccurrence;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The pact's evidence and excuses waiting for a reviewer's decision, newest first. */
+  /**
+   * A change in force whose first occurrence hasn't opened yet: the terms
+   * above are the new ones. `todayKeepsCents` is today's penalty when today
+   * is an occurrence on the old terms with another penalty.
+   */
+  newTerms: { startsOn: string; todayKeepsCents: number | null } | null;
+  /** The pact's evidence, excuses and change request waiting for a reviewer's decision, newest first. */
   waiting: PactWaitingItem[];
+  /** What its heat map shows. */
+  history: PactHistory;
 }
 
+/**
+ * A pact's heat map: one square per occurrence period. Fixed days has one
+ * per day; Weekly count, one per Mon–Sun week with the days that counted.
+ */
+export type PactHistory =
+  | {
+      kind: "fixed-days";
+      /**
+       * Every day from the first occurrence through the Sunday ending this week
+       * (or the week the pact Ended, or the first occurrence's week while it's
+       * coming up), oldest first.
+       */
+      days: HeatMapDay[];
+    }
+  | {
+      kind: "weekly-count";
+      /** Every week from the first occurrence through this week (or the week it Ended, or the first while it's coming up), oldest first. */
+      weeks: HeatMapWeek[];
+    }
+  | {
+      kind: "one-time";
+      /** Its one occurrence, dated by the deadline's date. */
+      day: HeatMapDay;
+    };
+
+/** One week on a Weekly count pact's heat map. */
+export interface HeatMapWeek {
+  /** Its Monday, "YYYY-MM-DD" in the owner's timezone. */
+  date: string;
+  /** How its occurrence went, or null for a week from the one the pact Ended that was never judged. */
+  occurrence: OccurrenceRecord | null;
+  /** How far it got: see `WeekProgress`. */
+  progress: WeekProgress;
+}
+
+/**
+ * How far a Weekly count week has got: `sessions` days with approved evidence
+ * (at most one counts per day), `waiting` more with evidence waiting for a
+ * reviewer, toward the `target` its terms set.
+ */
+export interface WeekProgress {
+  sessions: number;
+  waiting: number;
+  target: number;
+}
+
+/** One day on a heat map. */
+export interface HeatMapDay {
+  /** "YYYY-MM-DD" in the owner's timezone. */
+  date: string;
+  /**
+   * How its occurrence went, or null on a day the pact has none: one its
+   * schedule skips, or one from the day it Ended that was never judged.
+   */
+  occurrence: OccurrenceRecord | null;
+}
+
+/** How one occurrence went, as a heat map's tapped square and a Yesterday row tell it. */
+export interface OccurrenceRecord {
+  status: OccurrenceStatus;
+  /**
+   * The reviewer's decision that settled it: approved evidence (Kept), rejected
+   * evidence (Missed), or an approved excuse (Excused, or a day ahead it already
+   * covers). Null for anything else, such as a day Missed with no evidence.
+   */
+  decidedBy: OccurrenceDecision | null;
+  /** Missed only: the recipient its penalty went to. */
+  recipientName: string | null;
+  /**
+   * Bedtime pacts only, once judged Kept or Missed: when the owner got into
+   * bed, "HH:MM" on Oura's clock, or null when Oura reported no sleep by
+   * 18:00 the next day.
+   */
+  night?: { inBedAt: string | null };
+}
+
+/** A reviewer's decision that settled an occurrence. `reason` is the rejection's, or the excuse's. */
+export type OccurrenceDecision =
+  | { kind: "evidence-approved"; reviewerName: string }
+  | { kind: "evidence-rejected"; reviewerName: string; reason: string }
+  | { kind: "excuse-approved"; reviewerName: string; reason: string };
+
 /** What the pact page's "Waiting on" list holds: never payments, which belong to a recipient. */
-export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" }>;
+export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" | "change-request" }>;
 
 export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "pact-not-found" };
 
@@ -155,11 +356,15 @@ export type SubmitEvidenceRefusal =
   | "too-many-photos"
   /** No occurrence is open when the server receives the photos: a day the schedule skips, before the first occurrence, or past the due time. */
   | "not-open"
-  /** Evidence for this occurrence is already waiting for a reviewer. */
+  /** Evidence for this occurrence (on Weekly count, for today) is already waiting for a reviewer. */
   | "evidence-waiting"
-  /** Evidence for this occurrence was already approved. */
+  /** Evidence for this occurrence (on Weekly count, for today) was already approved. */
   | "already-approved"
-  /** This occurrence is already judged: its evidence was rejected, which is final. */
+  /**
+   * This occurrence is already judged: its evidence was rejected, which is
+   * final. On Weekly count, today's evidence was rejected: the week can be
+   * made up on another day.
+   */
   | "already-judged";
 
 export type SubmitEvidenceResult = { ok: true; evidenceId: string } | { ok: false; reason: SubmitEvidenceRefusal };
@@ -173,11 +378,13 @@ export type AcceptMissRefusal =
 export type AcceptMissResult = { ok: true } | { ok: false; reason: AcceptMissRefusal };
 
 /**
- * An item in a reviewer's Review Queue, oldest first (by when evidence was
- * submitted or a payment recorded). Items never expire. Change requests and
- * excuses join as other kinds.
+ * An item in a reviewer's Review Queue: change requests first, then the
+ * rest oldest first (by when evidence was submitted, an excuse filed or a
+ * payment recorded). Items never expire.
  */
 export type ReviewItem =
+  /** A change request: the reviewer compares the old terms with the new, or decides on ending the pact. */
+  | ({ kind: "change-request"; ownerName: string; thread: QuestionThread } & ChangeRequestView)
   /** Photo evidence: the reviewer checks the photos against what counts. */
   | {
       kind: "evidence";
@@ -192,11 +399,14 @@ export type ReviewItem =
       photoIds: string[];
       /** When the server received its last photo. */
       submittedAt: Date;
-      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it counts for. */
       occurrenceDate: string;
       /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
       penaltyCents: number;
       recipientName: string;
+      /** Weekly count only: its week so far. Rejecting costs nothing then: the day just doesn't count. */
+      week?: WeekProgress;
+      thread: QuestionThread;
     }
   /**
    * An excuse: the reviewer reads the reason and photos and decides all of
@@ -218,6 +428,7 @@ export type ReviewItem =
       /** The penalties held while it waits: approving removes them, rejecting makes them owed. */
       heldCents: number;
       recipientName: string;
+      thread: QuestionThread;
     }
   /**
    * A payment the owner recorded: the reviewer checks the screenshot. Any
@@ -239,7 +450,98 @@ export type ReviewItem =
       owedCents: number;
       /** What the owner would owe the recipient once this payment is approved, never below zero. */
       owedAfterApprovalCents: number;
+      thread: QuestionThread;
     };
+
+/**
+ * A review item's questions and replies, oldest first. A reviewer's question
+ * leaves the item waiting on the owner's reply; the owner's reply sends it
+ * back to every reviewer's Review Queue.
+ */
+export interface QuestionThread {
+  comments: ThreadComment[];
+  /**
+   * The latest comment is a reviewer's question and the item is still waiting
+   * for a decision: it's out of every reviewer's queue until the owner replies.
+   */
+  waitingOnReply: boolean;
+}
+
+/** A reviewer's question or the owner's reply. Text only. */
+export interface ThreadComment {
+  /** The owner's reply, rather than a reviewer's question. */
+  fromOwner: boolean;
+  authorName: string;
+  text: string;
+  sentAt: Date;
+}
+
+export type AskOwnerResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        /** Not an item this account may decide, or none. */
+        "item-not-found" | "already-decided" | "blank-question";
+    };
+
+export type ReplyResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        /** Not one of this owner's items, or none. */
+        | "item-not-found"
+        /** Decided already, or a change request withdrawn: there's nothing left to answer. */
+        | "not-waiting"
+        /** Its latest comment isn't a reviewer's question. */
+        | "no-question"
+        | "blank-reply";
+    };
+
+/** Where a review item of the owner's stands. */
+export type ReviewState =
+  | { kind: "waiting" }
+  | { kind: "approved"; reviewerName: string; decidedAt: Date }
+  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+
+/** Evidence's page, for its owner: what was sent, where it stands, and its questions. */
+export interface EvidenceDetail {
+  id: string;
+  pactId: string;
+  pactName: string;
+  /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it counts for. */
+  occurrenceDate: string;
+  /** What counts, as the occurrence's terms say. */
+  description: string;
+  /** In the order taken; each is served at the photo path. */
+  photoIds: string[];
+  submittedAt: Date;
+  state: ReviewState;
+  /** The pact's reviewers, sorted by name: who may decide it. */
+  reviewerNames: string[];
+  thread: QuestionThread;
+}
+
+export type EvidenceResult = { ok: true; evidence: EvidenceDetail } | { ok: false; reason: "evidence-not-found" };
+
+/** A payment's page, for its owner: what was sent, where it stands, and its questions. */
+export interface PaymentDetail {
+  id: string;
+  recipientId: string;
+  recipientName: string;
+  amountCents: number;
+  note: string | null;
+  /** The screenshot, served at the photo path. */
+  photoId: string;
+  recordedAt: Date;
+  state: ReviewState;
+  /** The reviewers of the owner's pacts with the recipient, sorted by name: who may decide it. */
+  reviewerNames: string[];
+  thread: QuestionThread;
+}
+
+export type PaymentResult = { ok: true; payment: PaymentDetail } | { ok: false; reason: "payment-not-found" };
 
 /** A reviewer's decision on a Review Queue item. */
 export type ReviewDecision =
@@ -252,7 +554,9 @@ export type DecideRefusal =
   | "item-not-found"
   /** A reviewer of the pact has already decided it; the first decision is final. */
   | "already-decided"
-  | "blank-reason";
+  | "blank-reason"
+  /** Approving a change to a One-time pact whose new deadline is less than an hour away: it can only be rejected. */
+  | "deadline-too-soon";
 
 export type DecideResult = { ok: true } | { ok: false; reason: DecideRefusal };
 
@@ -264,7 +568,15 @@ export type SetTimezoneResult =
  * The kinds of notification an account can turn off, on all its devices. Every
  * kind starts on. Later tickets add theirs (story 88).
  */
-export const NOTIFICATION_SETTINGS = ["picked-as-reviewer", "review-item", "decision", "missed-occurrence"] as const;
+export const NOTIFICATION_SETTINGS = [
+  "picked-as-reviewer",
+  "review-item",
+  "decision",
+  "comment",
+  "missed-occurrence",
+  "new-bill",
+  "overdue-bill",
+] as const;
 export type NotificationSetting = (typeof NOTIFICATION_SETTINGS)[number];
 
 export interface NotificationSettingState {
@@ -286,6 +598,16 @@ export interface Profile {
   name: string;
   /** IANA zone, e.g. "America/New_York". Null until the user confirms one. */
   timezone: string | null;
+  /** The connections the account has made, if any. */
+  connections: Connection[];
+}
+
+/** A link to an outside service that supplies evidence. Oura only, in v0. */
+export interface Connection {
+  service: "oura";
+  /** Needs reconnecting once the service refuses its tokens; until then, connected. */
+  status: "connected" | "needs-reconnecting";
+  connectedAt: Date;
 }
 
 /**
@@ -293,8 +615,8 @@ export interface Profile {
  * then Waiting for approval, then Yesterday. When alerts and sections are all
  * empty, the UI shows the "Nothing to do right now" card.
  *
- * Sections come in display order and an empty one is left out. Yesterday is
- * `never` until the ticket that fills it.
+ * Sections come in display order and an empty one is left out. Yesterday
+ * lists the pacts due yesterday, by name.
  */
 export interface Today {
   /** False until the account has made a pact: a new account's Today says what to do first. */
@@ -308,10 +630,27 @@ export interface Today {
 /** Something that needs the owner, shown first. */
 export type TodayAlert =
   /**
+   * A reviewer asked about one of the owner's items still waiting for a
+   * decision, and the owner hasn't replied yet. One per item, with its latest
+   * question. It goes once the owner replies, or the item is decided (or a
+   * change request withdrawn).
+   */
+  | {
+      kind: "reviewer-question";
+      item: TodayWaitingItem;
+      reviewerName: string;
+      question: string;
+      askedAt: Date;
+    }
+  /**
    * A reviewer rejected the evidence for an occurrence, which judged it
    * Missed and added `penaltyCents` to the ledger for `recipientName`. Newest
    * rejection first. It stays until the owner accepts the miss (Take the L,
    * `acceptMiss`), which changes nothing else, or files an excuse for the day.
+   *
+   * On Weekly count (`week` set) the day just doesn't count: nothing is Missed
+   * or owed yet, and the owner can make it up another day before `week.dueAt`.
+   * The alert goes once the week is judged too.
    */
   | {
       kind: "evidence-rejected";
@@ -319,12 +658,14 @@ export type TodayAlert =
       name: string;
       reviewerName: string;
       reason: string;
-      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it was for. */
       occurrenceDate: string;
       penaltyCents: number;
       recipientName: string;
-      /** Until when an excuse for the day is accepted: 48 hours after the rejection. */
+      /** Until when an excuse for the day is accepted: 48 hours after the rejection (on Weekly count, after the week's due time). */
       excusableUntil: Date;
+      /** Weekly count only: the week's due time, the end of its Sunday. */
+      week?: { dueAt: Date };
     }
   /**
    * A reviewer rejected an excuse: its held penalties are owed again, and its
@@ -352,15 +693,34 @@ export type TodayAlert =
        * whose window hasn't started.
        */
       refile: { closesAt: Date | null } | null;
+    }
+  /**
+   * Bills to one recipient are past their due time and not all paid, and
+   * payments awaiting approval don't cover the rest. One per recipient. It
+   * goes once paid, or once a payment awaiting approval covers it.
+   */
+  | {
+      kind: "bill-overdue";
+      recipientId: string;
+      recipientName: string;
+      /** The unpaid part of the overdue bills that payments awaiting approval don't cover. */
+      overdueCents: number;
+      /** The oldest overdue bill: the Wednesday it was made, "YYYY-MM-DD", and when it was due. */
+      billedOn: string;
+      dueAt: Date;
+      /** Who has been told: the reviewers of the owner's pacts with this recipient. */
+      reviewerNames: string[];
     };
 export type TodaySection =
-  /** Pacts whose occurrence is open today, soonest due first. */
-  | { kind: "to-do"; cards: TodayToDoCard[] }
+  /** Pacts whose occurrence is open today, and bills to pay, soonest due first. */
+  | { kind: "to-do"; cards: (TodayToDoCard | TodayBillCard)[] }
   /**
    * Occurrences judged Missed in the last 48 hours, latest first, except
    * those Missed through a rejection (alerts) and accepted misses.
    */
   | { kind: "missed"; cards: TodayMissedCard[] }
+  /** Bedtime pacts whose night runs now, soonest deadline first. Nothing to do: Oura reports it. */
+  | { kind: "automatic"; cards: TodayAutomaticCard[] }
   /** Pacts whose first occurrence hasn't opened yet, soonest first. */
   | { kind: "coming-up"; cards: TodayComingUpCard[] };
 
@@ -371,14 +731,41 @@ interface TodayPactCard {
   penaltyCents: number;
 }
 
-/** A Fixed-days pact whose occurrence is open today. */
+/**
+ * A Camera pact whose occurrence is open today and still takes evidence
+ * today. A Weekly count week (`week` set) shows while today has none and the
+ * week's target isn't met or waiting for approval.
+ */
 export interface TodayToDoCard extends TodayPactCard {
+  kind: "evidence";
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+  /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone: for Weekly count, its week's Monday. */
   occurrenceDate: string;
-  /** Midnight ending today, in the owner's timezone. */
+  /**
+   * Its due-by time today, or midnight ending today, in the owner's timezone;
+   * for Weekly count, the end of its Sunday, so it sorts below things due today.
+   */
   dueAt: Date;
+  /** Its due-by time, "HH:MM", or null when it's due at midnight. On Weekly count it limits each day's evidence. */
+  dueBy: string | null;
+  /** Weekly count only: the week so far. */
+  week?: WeekProgress;
+}
+
+/**
+ * Bills to one recipient not due yet, with an unpaid part that payments
+ * awaiting approval don't cover. One per recipient.
+ */
+export interface TodayBillCard {
+  kind: "bill";
+  recipientId: string;
+  recipientName: string;
+  /** What's left to pay on those bills, less payments awaiting approval. */
+  amountCents: number;
+  /** The soonest due of them, and the Wednesday it was made, "YYYY-MM-DD". */
+  dueAt: Date;
+  billedOn: string;
 }
 
 /** Who rejected some evidence, and why. */
@@ -395,6 +782,30 @@ export interface TodayMissedCard extends TodayPactCard {
   missedAt: Date;
   /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
   excusableUntil: Date;
+  /**
+   * Bedtime pacts only: when Oura says the owner got into bed, "HH:MM" on
+   * Oura's clock, or null when Oura reported no sleep by 18:00 the next day.
+   */
+  night?: { inBedAt: string | null };
+  /**
+   * Today's occurrence of a Camera pact, Missed at its due-by time ("HH:MM")
+   * with no evidence: it shows as Closed.
+   */
+  closed?: { dueBy: string };
+  /** Weekly count only: how far the week got. `penaltyCents` is one penalty per day short. */
+  week?: WeekProgress;
+}
+
+/** A bedtime pact's night that runs now. */
+export interface TodayAutomaticCard extends TodayPactCard {
+  /** When its edit window closes; null once it has. */
+  editWindowClosesAt: Date | null;
+  /** The night's day, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  /** Tonight's in-bed-by deadline. */
+  dueAt: Date;
+  /** "HH:MM". */
+  inBedBy: string;
 }
 
 export interface TodayComingUpCard extends TodayPactCard {
@@ -402,6 +813,8 @@ export interface TodayComingUpCard extends TodayPactCard {
   editWindowClosesAt: Date | null;
   /** The first occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
   opensOn: string;
+  /** The pact's start date, "YYYY-MM-DD", when the owner set one: it starts rather than opens. */
+  startDate: string | null;
 }
 
 /** Something of the owner's waiting for a reviewer's decision, newest first. */
@@ -439,8 +852,28 @@ export type TodayWaitingItem =
       recipientName: string;
       amountCents: number;
       recordedAt: Date;
+    }
+  /** The pact's change request, until a reviewer decides it or the owner withdraws it. */
+  | {
+      kind: "change-request";
+      /** The change request's id. */
+      id: string;
+      pactId: string;
+      name: string;
+      /** It asks to end the pact, rather than change its terms. */
+      endsPact: boolean;
+      requestedAt: Date;
     };
-export type TodayYesterdayEntry = never;
+/** One pact due yesterday, and how it did. Weekly count pacts are never in it. */
+export interface TodayYesterdayEntry {
+  pactId: string;
+  name: string;
+  /** A bedtime night not judged yet is waiting on Oura, not a reviewer. */
+  evidenceKind: EvidenceKind;
+  /** Yesterday, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  occurrence: OccurrenceRecord;
+}
 
 /** What the owner owes one recipient, across every pact naming it. */
 export interface LedgerSummary {
@@ -459,6 +892,16 @@ export interface LedgerSummary {
   awaitingCount: number;
   /** Approved payments, lifetime. */
   paidCents: number;
+  /**
+   * The unpaid part of bills past their due time that payments awaiting
+   * approval don't cover. Above zero, the owner is Overdue to this recipient.
+   */
+  overdueCents: number;
+  /**
+   * Bills not due yet with an unpaid part payments awaiting approval don't
+   * cover: that part, and the soonest due time. Null when there's none.
+   */
+  billDue: { amountCents: number; dueAt: Date } | null;
 }
 
 /** A payment the owner made to a recipient outside the app, to record with its screenshot. */
@@ -497,6 +940,8 @@ export interface LedgerPenalty {
   amountCents: number;
   /** When it was added: when the occurrence was judged Missed. */
   addedAt: Date;
+  /** Weekly count only: how far its week got. `amountCents` is one penalty per day short of the target. */
+  week?: WeekProgress;
   /**
    * How much of it approved payments have paid: none, part or all of
    * `amountCents`. Approved payments to the recipient pay off its penalties
@@ -507,6 +952,11 @@ export interface LedgerPenalty {
   rejection?: EvidenceRejection;
   /** Held while an excuse for the occurrence waits for approval: it doesn't count toward owed, and payments don't pay it. */
   held: boolean;
+  /**
+   * The bill it's on, or the Wednesday bill it goes on once it can't be
+   * excused (dates "YYYY-MM-DD"). Null while it's held.
+   */
+  bill: { kind: "on-bill"; billedOn: string; dueAt: Date } | { kind: "next-bill"; billedOn: string } | null;
 }
 
 /** A payment to the recipient the owner recorded, and where its review stands. */
@@ -583,8 +1033,10 @@ export type OccurrenceStatus =
 
 /** One of a pact's days on an excuse, and where it stands. */
 export interface ExcuseDay {
-  /** "YYYY-MM-DD" in the owner's timezone. */
+  /** "YYYY-MM-DD" in the owner's timezone: for Weekly count, its week's Monday. */
   date: string;
+  /** Weekly count only: its week's Sunday. A day in the week excuses the whole week. */
+  through?: string;
   status: OccurrenceStatus;
 }
 
@@ -639,10 +1091,7 @@ export type FileExcuseRefusal =
 export type FileExcuseResult = { ok: true; excuseId: string } | { ok: false; reason: FileExcuseRefusal };
 
 /** Where an excuse's review stands. */
-export type ExcuseState =
-  | { kind: "waiting" }
-  | { kind: "approved"; reviewerName: string; decidedAt: Date }
-  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+export type ExcuseState = ReviewState;
 
 /** The excuse page. */
 export interface ExcuseDetail {
@@ -657,6 +1106,7 @@ export interface ExcuseDetail {
   state: ExcuseState;
   /** The pact's reviewers, sorted by name: who it was sent to. */
   reviewerNames: string[];
+  thread: QuestionThread;
 }
 
 export type ExcuseResult = { ok: true; excuse: ExcuseDetail } | { ok: false; reason: "excuse-not-found" };
@@ -669,3 +1119,183 @@ export interface Health {
   ok: boolean;
   lastTick: Date | null;
 }
+
+/**
+ * The terms an owner sends to change a pact after its edit window: all of
+ * them, changed or not, as the Request change form holds them. The evidence
+ * kind never changes.
+ */
+export interface PactChange {
+  name: string;
+  /** For Camera: what the photo will show. Oura Ring pacts have none. */
+  description: string;
+  /** Oura Ring only: see `NewPact.inBedBy`. */
+  inBedBy?: string;
+  /** Camera only: see `NewPact.dueBy`. Left out to have none. */
+  dueBy?: string;
+  /** See `NewPact.startDate`. It can change only before the first occurrence opens. Left out to have none. */
+  startDate?: string;
+  /** See `NewPact.endDate`. Left out to have none. */
+  endDate?: string;
+  /** See `PactTerms.reminders`. Left out to have none. They apply at once, even while a change request waits. */
+  reminders?: string[];
+  schedule: Schedule;
+  /** In US cents: a positive whole number. */
+  penaltyCents: number;
+  recipientId: string;
+  /** One or more of the owner's friends. */
+  reviewerIds: AccountId[];
+  /** Why, for the reviewers, when part of it needs approval. Optional; trimmed, and a blank note is none. */
+  note?: string;
+}
+
+/**
+ * What changing one term does: it relaxes the pact, so it waits for a
+ * reviewer's approval; it only makes it stricter, so it applies without
+ * approval to occurrences not open yet; or it doesn't change what counts (the
+ * name, the reminders, an added reviewer), so it applies at once.
+ */
+export type ChangeEffect = "needs-approval" | "stricter" | "at-once";
+
+/** One term a change changes, before and after. */
+export type TermChange =
+  | { term: "name"; before: string; after: string; effect: ChangeEffect }
+  | { term: "description"; before: string; after: string; effect: ChangeEffect }
+  /** "HH:MM". */
+  | { term: "in-bed-by"; before: string; after: string; effect: ChangeEffect }
+  /** "HH:MM", or null for midnight. */
+  | { term: "due-by"; before: string | null; after: string | null; effect: ChangeEffect }
+  /** "YYYY-MM-DD", or null for none. */
+  | { term: "start-date"; before: string | null; after: string | null; effect: ChangeEffect }
+  /** "YYYY-MM-DD", or null for none. */
+  | { term: "end-date"; before: string | null; after: string | null; effect: ChangeEffect }
+  | { term: "schedule"; before: Schedule; after: Schedule; effect: ChangeEffect }
+  /** In US cents. */
+  | { term: "penalty"; before: number; after: number; effect: ChangeEffect }
+  | { term: "recipient"; before: Recipient; after: Recipient; effect: ChangeEffect }
+  /** "HH:MM" each, in the order they go off. Changing them always applies at once. */
+  | { term: "reminders"; before: string[]; after: string[]; effect: ChangeEffect }
+  /** Each list sorted by name. Removing anyone needs approval; adding applies at once. */
+  | {
+      term: "reviewers";
+      before: Friend[];
+      after: Friend[];
+      added: Friend[];
+      removed: Friend[];
+      effect: ChangeEffect;
+    };
+
+/** What sending a change does, taken as a whole. */
+export type ChangeOutcome =
+  /** Nothing differs from the terms as they stand. */
+  | { kind: "nothing" }
+  /** Only the name, the reminders or added reviewers: done now. */
+  | { kind: "at-once" }
+  /**
+   * Only stricter (and maybe at-once) changes: they apply without approval
+   * from `appliesFrom`, the first occurrence not open yet. `todayKeepsCents`
+   * is today's penalty when today is an occurrence and the penalty changes.
+   */
+  | { kind: "stricter"; appliesFrom: string; todayKeepsCents: number | null }
+  /**
+   * Something relaxes the pact, so it's a change request, reviewed as a whole
+   * (`bundlesStricter`: with stricter changes in it, which wait too). The name,
+   * the reminders and added reviewers still apply at once. `reviewerNames`: who may decide
+   * it, the added reviewers included, sorted by name.
+   */
+  | { kind: "needs-approval"; reviewerNames: string[]; bundlesStricter: boolean };
+
+/** The Request change form's verdict: each term that differs, in the form's order, and what sending would do. */
+export interface ChangePreview {
+  changes: TermChange[];
+  outcome: ChangeOutcome;
+}
+
+export type ChangePactRefusal =
+  | CreatePactRefusal
+  /** Not this owner's pact, or no pact. */
+  | "pact-not-found"
+  /** In the edit window the pact is edited instead. */
+  | "edit-window-open"
+  | "pact-ended"
+  /** A change request waits: until it's decided or withdrawn, only the name, the reminders and added reviewers change. */
+  | "change-request-waiting"
+  /** The start date can't change once the first occurrence has opened. */
+  | "pact-started"
+  /** Fixed days and Weekly count can't be swapped after the edit window: a new pact is needed. */
+  | "schedule-kind-fixed"
+  | "nothing-changed";
+
+export type ChangePreviewResult = { ok: true; preview: ChangePreview } | { ok: false; reason: ChangePactRefusal };
+
+export type ChangePactResult =
+  | { ok: true; outcome: Exclude<ChangeOutcome, { kind: "nothing" }>; changeRequestId: string | null }
+  | { ok: false; reason: ChangePactRefusal };
+
+export type RequestEndResult =
+  | { ok: true; changeRequestId: string }
+  | { ok: false; reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" };
+
+/** A pact's terms as they stand, as a change request shows those it leaves alone. */
+export type CurrentTerms = Pick<
+  PactTerms,
+  | "name"
+  | "description"
+  | "evidenceKind"
+  | "inBedBy"
+  | "dueBy"
+  | "startDate"
+  | "endDate"
+  | "schedule"
+  | "penaltyCents"
+  | "recipient"
+  | "reviewers"
+  | "reminders"
+>;
+
+/** A change request, as its reviewers and its owner see it. */
+export interface ChangeRequestView {
+  /** The change request's id. */
+  id: string;
+  pactId: string;
+  pactName: string;
+  /** It asks to end the pact; `changes` is empty then. */
+  endsPact: boolean;
+  /** The owner's "Why?", or null. */
+  note: string | null;
+  requestedAt: Date;
+  /** The terms it changes, old and new, each `needs-approval` or `stricter`. */
+  changes: TermChange[];
+  /** The pact's terms as they stand: what it leaves alone stays as here. */
+  current: CurrentTerms;
+  /**
+   * While it waits: the first occurrence the new terms would apply to if it
+   * were approved now, "YYYY-MM-DD". Null when it ends the pact, or once decided.
+   */
+  appliesFrom: string | null;
+  /** While it waits: today's penalty, when today is an occurrence and the penalty changes. */
+  todayKeepsCents: number | null;
+}
+
+/** Where a change request stands. */
+export type ChangeRequestState =
+  | { kind: "waiting" }
+  | { kind: "approved"; reviewerName: string; decidedAt: Date }
+  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string }
+  | { kind: "withdrawn"; withdrawnAt: Date };
+
+/** The change request's page, for its owner. */
+export interface ChangeRequestDetail extends ChangeRequestView {
+  state: ChangeRequestState;
+  /** The pact's reviewers, sorted by name: who may decide it. */
+  reviewerNames: string[];
+  thread: QuestionThread;
+}
+
+export type ChangeRequestResult =
+  { ok: true; changeRequest: ChangeRequestDetail } | { ok: false; reason: "change-request-not-found" };
+
+export type WithdrawChangeRequestResult =
+  | { ok: true }
+  /** Not this owner's, or decided or withdrawn already. */
+  | { ok: false; reason: "change-request-not-found" | "not-waiting" };

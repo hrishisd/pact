@@ -1,7 +1,9 @@
-// The Today tab: alerts, then what's open now, then recent misses, then
-// what's coming up, then what's waiting for approval. Evidence is submitted
-// inline on a To do card; an excuse is filed in the File excuse sheet, opened
-// from a To do or Missed card or an alert.
+// The Today tab: alerts, then what's open now (evidence to submit and bills
+// to pay), then recent misses, then what's coming up, then what's waiting for
+// approval. Evidence is submitted inline on a To do card; an excuse is filed
+// in the File excuse sheet, opened from a To do or Missed card or an alert; a
+// payment is recorded in the Record a payment sheet, opened from a bill's To
+// do card or an overdue alert. Last, Yesterday: how each pact due yesterday did.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
@@ -9,17 +11,24 @@ import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptExcuseRejectionResult,
   type AcceptMissRefusal,
+  type LedgerSummary,
   type SubmitEvidenceRefusal,
   type TodayAlert,
+  type TodayBillCard,
+  type TodayMissedCard,
   type TodaySection,
+  type TodayToDoCard,
   type TodayWaitingItem,
+  type WeekProgress,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
-import { formatDate, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
+import { clockText, formatDate, formatDay, formatDueAt, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
-import { CameraIcon, DollarIcon, ExcuseIcon } from "./icons.tsx";
+import { Yesterday } from "./history.tsx";
+import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
+import { RecordPaymentSheet } from "./RecordPayment.tsx";
 import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
 
 /** What the File excuse sheet is open on: a pact, and the day it was opened from (none for the pact-page form). */
@@ -33,21 +42,43 @@ interface ExcuseTarget {
 type OnFileExcuse = (target: ExcuseTarget) => void;
 
 export function Today({
+  timezone,
   onOpenPact,
   onOpenLedger,
   onOpenExcuse,
+  onOpenChangeRequest,
+  onOpenEvidence,
+  onOpenPayment,
   onCreate,
   onInvite,
 }: {
+  /** The profile's timezone, for when bills are due. */
+  timezone: string;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onOpenExcuse: (excuseId: string) => void;
+  onOpenChangeRequest: (changeRequestId: string) => void;
+  onOpenEvidence: (evidenceId: string) => void;
+  onOpenPayment: (paymentId: string) => void;
   onCreate: () => void;
   onInvite: () => void;
 }) {
   const { data: today, failed, reload } = useLoad(api.today);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
+  // A reviewer's question opens the page of the item it's about.
+  const openItem = (item: Json<TodayWaitingItem>) => {
+    switch (item.kind) {
+      case "evidence":
+        return onOpenEvidence(item.id);
+      case "excuse":
+        return onOpenExcuse(item.id);
+      case "payment":
+        return onOpenPayment(item.id);
+      case "change-request":
+        return onOpenChangeRequest(item.id);
+    }
+  };
 
   if (failed)
     return (
@@ -80,10 +111,12 @@ export function Today({
       )}
       {today.alerts.map((alert) => (
         <Alert
-          key={alert.kind === "evidence-rejected" ? `${alert.pactId}:${alert.occurrenceDate}` : alert.excuseId}
+          key={alertKey(alert)}
           alert={alert}
+          timezone={timezone}
           now={now}
           onFileExcuse={setExcusing}
+          onOpenItem={openItem}
           onChanged={reload}
         />
       ))}
@@ -91,8 +124,10 @@ export function Today({
         <Section
           key={section.kind}
           section={section}
+          timezone={timezone}
           now={now}
           onOpenPact={onOpenPact}
+          onOpenLedger={onOpenLedger}
           onFileExcuse={setExcusing}
           onChanged={reload}
         />
@@ -103,8 +138,10 @@ export function Today({
           onOpenPact={onOpenPact}
           onOpenLedger={onOpenLedger}
           onOpenExcuse={onOpenExcuse}
+          onOpenChangeRequest={onOpenChangeRequest}
         />
       )}
+      <Yesterday entries={today.yesterday} now={now} onOpenPact={onOpenPact} />
       {excusing && (
         <ExcuseSheet
           pactId={excusing.pactId}
@@ -121,50 +158,87 @@ export function Today({
   );
 }
 
+/** Each alert's React key: one per rejected occurrence, rejected excuse, or recipient overdue. */
+function alertKey(alert: Json<TodayAlert>): string {
+  switch (alert.kind) {
+    case "evidence-rejected":
+      return `evidence:${alert.pactId}:${alert.occurrenceDate}`;
+    case "excuse-rejected":
+      return `excuse:${alert.excuseId}`;
+    case "bill-overdue":
+      return `overdue:${alert.recipientId}`;
+    case "reviewer-question":
+      return `question:${alert.item.id}`;
+  }
+}
+
 function Section({
   section,
+  timezone,
   now,
   onOpenPact,
+  onOpenLedger,
   onFileExcuse,
   onChanged,
 }: {
   section: Json<TodaySection>;
+  timezone: string;
   now: number;
   onOpenPact: (id: string, name: string) => void;
+  onOpenLedger: (recipientId: string, name: string) => void;
   onFileExcuse: OnFileExcuse;
-  /** After evidence is submitted or a miss is taken: Today reloads. */
+  /** After evidence is submitted, a miss is taken or a payment recorded: Today reloads. */
   onChanged: () => void;
 }) {
   switch (section.kind) {
     case "to-do":
-      return section.cards.map((card) => (
-        <PactCard
-          key={card.pactId}
-          name={card.name}
-          penaltyCents={card.penaltyCents}
-          editWindowClosesAt={card.editWindowClosesAt}
-          now={now}
-          chip={<span className="chip c-todo">To do</span>}
-          onOpen={() => onOpenPact(card.pactId, card.name)}
-        >
-          <div className="meta due">Due at midnight · {timeLeft(Date.parse(card.dueAt) - now)}</div>
-          <EvidenceForm
-            pactId={card.pactId}
-            onSubmitted={onChanged}
-            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+      return section.cards.map((card) =>
+        card.kind === "bill" ? (
+          <BillCard
+            key={`bill:${card.recipientId}`}
+            card={card}
+            timezone={timezone}
+            now={now}
+            onOpenLedger={onOpenLedger}
+            onPaid={onChanged}
           />
-        </PactCard>
-      ));
+        ) : (
+          <PactCard
+            key={`evidence:${card.pactId}`}
+            name={card.name}
+            penaltyCents={card.penaltyCents}
+            editWindowClosesAt={card.editWindowClosesAt}
+            now={now}
+            chip={<span className="chip c-todo">To do</span>}
+            onOpen={() => onOpenPact(card.pactId, card.name)}
+          >
+            {card.week ? (
+              <WeekToDo card={card} week={card.week} timezone={timezone} />
+            ) : (
+              <div className="meta due">
+                Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
+                {timeLeft(Date.parse(card.dueAt) - now)}
+              </div>
+            )}
+            <EvidenceForm
+              pactId={card.pactId}
+              weekly={card.week !== undefined}
+              onSubmitted={onChanged}
+              onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+            />
+          </PactCard>
+        ),
+      );
     case "missed":
       return section.cards.map((card) => (
         <PactCard
           key={`${card.pactId}:${card.occurrenceDate}`}
           name={card.name}
           penaltyCents={card.penaltyCents}
-          chip={<span className="chip c-missed">Missed</span>}
+          chip={<span className="chip c-missed">{card.closed ? "Closed" : "Missed"}</span>}
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
-          <div className="meta">{formatDate(card.occurrenceDate)}</div>
+          <div className="meta">{missedLine(card)}</div>
           <MissedActions
             pactId={card.pactId}
             occurrenceDate={card.occurrenceDate}
@@ -173,6 +247,22 @@ function Section({
             onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
             onTaken={onChanged}
           />
+        </PactCard>
+      ));
+    case "automatic":
+      return section.cards.map((card) => (
+        <PactCard
+          key={card.pactId}
+          name={card.name}
+          penaltyCents={card.penaltyCents}
+          editWindowClosesAt={card.editWindowClosesAt}
+          now={now}
+          chip={<span className="chip c-soon">Automatic</span>}
+          onOpen={() => onOpenPact(card.pactId, card.name)}
+        >
+          <div className="meta">
+            Tonight, in bed by {clockText(card.inBedBy)} · {timeLeft(Date.parse(card.dueAt) - now)}
+          </div>
         </PactCard>
       ));
     case "coming-up":
@@ -186,7 +276,11 @@ function Section({
               penaltyCents={card.penaltyCents}
               editWindowClosesAt={card.editWindowClosesAt}
               now={now}
-              chip={<span className="chip c-soon">Opens {formatDate(card.opensOn)}</span>}
+              chip={
+                <span className="chip c-soon">
+                  {card.startDate === null ? "Opens" : "Starts"} {formatDate(card.opensOn)}
+                </span>
+              }
               onOpen={() => onOpenPact(card.pactId, card.name)}
             />
           ))}
@@ -195,23 +289,243 @@ function Section({
   }
 }
 
+/**
+ * A To do card's due day, when it isn't today: a One-time pact with Submit
+ * anytime is due on the deadline's date ("Thu Nov 12 "). Empty for today.
+ */
+function dueDayText(card: Json<TodayToDoCard>, timezone: string, now: number): string {
+  const today = formatDay(new Date(now).toISOString(), timezone);
+  const due = formatDate(card.occurrenceDate);
+  return due === today ? "" : `${due} `;
+}
+
+/**
+ * A Weekly count week on its To do card: a dot per day of the target, filled
+ * once a day counts (or shaded while it waits for approval), "1 of 3 this
+ * week", and when the week is due; with a due-by time, when today's photo is.
+ */
+function WeekToDo({ card, week, timezone }: { card: Json<TodayToDoCard>; week: Json<WeekProgress>; timezone: string }) {
+  const { sessions, waiting, target } = week;
+  // The week is due at the midnight ending its Sunday: name the Sunday.
+  const sunday = new Date(Date.parse(card.dueAt) - 1).toISOString();
+  return (
+    <>
+      <div className="spread">
+        <div className="dots" aria-hidden="true">
+          {Array.from({ length: target }, (_, i) => (
+            <i key={i} className={i < sessions ? "on" : i < sessions + waiting ? "wait" : undefined} />
+          ))}
+        </div>
+        <span className="num meta">
+          {sessions} of {target} this week
+        </span>
+      </div>
+      <div className="meta due">
+        Due by {formatDay(sunday, timezone)}
+        {card.dueBy !== null && ` · today's photo by ${clockText(card.dueBy)}`}
+      </div>
+    </>
+  );
+}
+
+/**
+ * A Missed card's day, and for a bedtime night when Oura saw the owner get
+ * into bed. Today's day past its due-by time says when evidence was due. A
+ * Weekly count week says how far it got.
+ */
+function missedLine(card: Json<TodayMissedCard>): string {
+  if (card.closed) return `Evidence was due by ${clockText(card.closed.dueBy)}.`;
+  if (card.week) {
+    const { sessions, target } = card.week;
+    return `Week of ${formatDate(card.occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
+  }
+  if (!card.night) return formatDate(card.occurrenceDate);
+  const { inBedAt } = card.night;
+  return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;
+}
+
+/**
+ * A bill to pay, in To do: "Pay Sam", the amount in red, when it's due, and
+ * Record payment. Tapping it opens the recipient's ledger.
+ */
+function BillCard({
+  card,
+  timezone,
+  now,
+  onOpenLedger,
+  onPaid,
+}: {
+  card: Json<TodayBillCard>;
+  timezone: string;
+  now: number;
+  onOpenLedger: (recipientId: string, name: string) => void;
+  onPaid: () => void;
+}) {
+  return (
+    <PactCard
+      name={`Pay ${card.recipientName}`}
+      penaltyCents={card.amountCents}
+      chip={<span className="chip c-todo">To do</span>}
+      onOpen={() => onOpenLedger(card.recipientId, card.recipientName)}
+    >
+      <div className="meta due">
+        Due {formatDueAt(card.dueAt, timezone)} · {timeLeft(Date.parse(card.dueAt) - now)}
+      </div>
+      <div className="meta">Your bill from {formatDate(card.billedOn)}</div>
+      <RecordPaymentAction recipientId={card.recipientId} primary onSent={onPaid} />
+    </PactCard>
+  );
+}
+
+/**
+ * Record payment from Today: it loads the recipient's ledger, then opens the
+ * Record a payment sheet on it, starting at the open bills' amount. Clicks
+ * stay here rather than opening what's behind.
+ */
+function RecordPaymentAction({
+  recipientId,
+  primary = false,
+  onSent,
+}: {
+  recipientId: string;
+  /** The card's main action, full size; on an alert it's small. */
+  primary?: boolean;
+  /** After the payment was recorded: Today reloads. */
+  onSent: () => void;
+}) {
+  const [ledger, setLedger] = useState<Json<LedgerSummary> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const open = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.ledger(recipientId);
+      if (result.ok) setLedger(result.ledger.summary);
+      else setError("This ledger wasn't found.");
+    } catch (failure) {
+      setError(failureText(failure, "Couldn't open it. Check your connection and try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <div className="row2">
+        <button className={primary ? "btn primary" : "btn sm"} disabled={busy} onClick={() => void open()}>
+          {busy ? "Opening…" : "Record payment"}
+        </button>
+      </div>
+      {error && <p className="error small">{error}</p>}
+      {ledger && (
+        <RecordPaymentSheet
+          ledger={ledger}
+          onClose={() => setLedger(null)}
+          onSent={() => {
+            setLedger(null);
+            onSent();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Bills to a recipient past their due time and not covered: how much, the
+ * oldest bill and when it was due, who has been told, and Record payment.
+ */
+function OverdueAlert({
+  alert,
+  timezone,
+  onPaid,
+}: {
+  alert: Extract<Json<TodayAlert>, { kind: "bill-overdue" }>;
+  timezone: string;
+  onPaid: () => void;
+}) {
+  const { reviewerNames } = alert;
+  return (
+    <div className="alert bad" role="status">
+      <b>
+        {money(alert.overdueCents)} overdue to {alert.recipientName}.
+      </b>
+      <span className="small">
+        Your {formatDate(alert.billedOn)} bill was due {formatDay(alert.dueAt, timezone)}.
+        {reviewerNames.length > 0 &&
+          ` ${reviewerNames.join(" and ")} ${reviewerNames.length === 1 ? "has" : "have"} been told.`}
+      </span>
+      <RecordPaymentAction recipientId={alert.recipientId} onSent={onPaid} />
+    </div>
+  );
+}
+
 /** Something that needs the owner, first on Today. */
 function Alert({
   alert,
+  timezone,
   now,
   onFileExcuse,
+  onOpenItem,
   onChanged,
 }: {
   alert: Json<TodayAlert>;
+  timezone: string;
   now: number;
   onFileExcuse: OnFileExcuse;
+  onOpenItem: (item: Json<TodayWaitingItem>) => void;
   onChanged: () => void;
 }) {
   switch (alert.kind) {
+    case "reviewer-question":
+      return <ReviewerQuestionAlert alert={alert} onReply={() => onOpenItem(alert.item)} />;
     case "evidence-rejected":
       return <RejectedEvidenceAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "excuse-rejected":
       return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
+    case "bill-overdue":
+      return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
+  }
+}
+
+/**
+ * A reviewer's question waiting on the owner's reply. Reply opens the item's
+ * page, with what was asked about, the thread and the reply box.
+ */
+function ReviewerQuestionAlert({
+  alert,
+  onReply,
+}: {
+  alert: Extract<Json<TodayAlert>, { kind: "reviewer-question" }>;
+  onReply: () => void;
+}) {
+  return (
+    <div className="alert info" role="status">
+      <b>
+        {alert.reviewerName} asked about {questionSubject(alert.item)}
+      </b>
+      <span>“{alert.question}”</span>
+      <span className="small muted">It's waiting on your reply. {alert.reviewerName} can still decide it.</span>
+      <div className="row2">
+        <button className="btn sm primary" onClick={onReply}>
+          Reply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What a question is about, after "asked about": "your evidence for Gym, Mon Nov 2". */
+function questionSubject(item: Json<TodayWaitingItem>): string {
+  switch (item.kind) {
+    case "evidence":
+      return `your evidence for ${item.name}, ${formatDate(item.occurrenceDate)}`;
+    case "excuse":
+      return `your excuse for ${item.name}, ${datesText(item.firstDate, item.lastDate)}`;
+    case "payment":
+      return `your ${money(item.amountCents)} payment to ${item.recipientName}`;
+    case "change-request":
+      return item.endsPact ? `your request to end ${item.name}` : `your change to ${item.name}`;
   }
 }
 
@@ -310,7 +624,8 @@ function RejectedEvidenceAlert({
     ACCEPT_MISS_REFUSAL_TEXT,
     onTaken,
   );
-  const fileLabel = fileExcuseLabel("File excuse", alert.excusableUntil, now);
+  // A Weekly count week isn't judged yet, so filing has no 48 hours running.
+  const fileLabel = alert.week ? "File excuse" : fileExcuseLabel("File excuse", alert.excusableUntil, now);
 
   return (
     <div className="alert bad" role="status">
@@ -318,12 +633,16 @@ function RejectedEvidenceAlert({
         {alert.reviewerName} rejected your evidence for {alert.name}
       </b>
       <span>“{alert.reason}”</span>
-      <span className="small">
-        {formatDate(alert.occurrenceDate)} is Missed ·{" "}
-        <b className="pen">
-          {money(alert.penaltyCents)} to {alert.recipientName}
-        </b>
-      </span>
+      {alert.week ? (
+        <span className="small">Doesn't count toward this week · make it up by Sunday</span>
+      ) : (
+        <span className="small">
+          {formatDate(alert.occurrenceDate)} is Missed ·{" "}
+          <b className="pen">
+            {money(alert.penaltyCents)} to {alert.recipientName}
+          </b>
+        </span>
+      )}
       <div className="row2">
         {fileLabel && (
           <button
@@ -427,26 +746,38 @@ const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<
 
 /**
  * Waiting for approval, last on Today: each item with its kind's icon in a
- * coloured square. Evidence opens its pact; an excuse, its excuse page; a
- * payment, its recipient's ledger.
+ * coloured square. Evidence opens its pact; an excuse or a change request,
+ * its page; a payment, its recipient's ledger.
  */
 function Waiting({
   items,
   onOpenPact,
   onOpenLedger,
   onOpenExcuse,
+  onOpenChangeRequest,
 }: {
   items: Json<TodayWaitingItem>[];
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onOpenExcuse: (excuseId: string) => void;
+  onOpenChangeRequest: (changeRequestId: string) => void;
 }) {
   return (
     <section className="stack">
       <div className="label">Waiting for approval</div>
       <div className="cards">
         {items.map((item) =>
-          item.kind === "excuse" ? (
+          item.kind === "change-request" ? (
+            <button key={item.id} className="rowbtn" onClick={() => onOpenChangeRequest(item.id)}>
+              <span className="kico k-change">
+                <PencilIcon />
+              </span>
+              <span className="rt">
+                <b>{item.name}</b>
+                <small>{item.endsPact ? "Change · End this pact" : "Change"}</small>
+              </span>
+            </button>
+          ) : item.kind === "excuse" ? (
             <button key={item.id} className="rowbtn" onClick={() => onOpenExcuse(item.id)}>
               <span className="kico k-excuse">
                 <ExcuseIcon />
@@ -493,10 +824,13 @@ function Waiting({
  */
 function EvidenceForm({
   pactId,
+  weekly,
   onSubmitted,
   onFileExcuse,
 }: {
   pactId: string;
+  /** A Weekly count week: a refused day can be made up on another. */
+  weekly: boolean;
   onSubmitted: () => void;
   onFileExcuse: () => void;
 }) {
@@ -531,7 +865,9 @@ function EvidenceForm({
         photos.map((photo) => photo.blob),
       );
       if (result.ok) return onSubmitted();
-      setError(REFUSAL_TEXT[result.reason]);
+      setError(
+        weekly && result.reason === "already-judged" ? WEEKLY_ALREADY_REJECTED_TEXT : REFUSAL_TEXT[result.reason],
+      );
     } catch (failure) {
       setError(
         uploadFailureText(
@@ -596,6 +932,8 @@ function EvidenceForm({
   );
 }
 
+const WEEKLY_ALREADY_REJECTED_TEXT = "Today's photo was rejected. Make it up another day this week.";
+
 const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",
   "no-photos": "Take a photo first.",
@@ -606,7 +944,11 @@ const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "already-judged": "Today is already Missed, so new photos can't count.",
 };
 
-/** A Today card: the pact's name, a chip, its penalty in red, then whatever the section adds. Tapping it opens the pact. */
+/**
+ * A Today card: the pact's name (or for a bill, "Pay Sam"), a chip, its
+ * penalty (or the bill's amount) in red, then whatever the section adds.
+ * Tapping it opens the pact (or the ledger).
+ */
 function PactCard({
   name,
   penaltyCents,

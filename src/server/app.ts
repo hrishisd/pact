@@ -2,13 +2,15 @@
 // Better Auth under /api/auth, the JSON API under /api, two plain sign-in error
 // pages, and the built SPA with a fallback to index.html for client-side routes.
 
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
-import type { AccountId, NewPayment, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import type { AccountId, NewPayment, OuraConnector, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
 import { MAX_EVIDENCE_PHOTOS, MAX_EXCUSE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
@@ -21,7 +23,10 @@ import {
   EXCUSE_TO_FIELD,
   INVITE_REQUIRED_PATH,
   invitePath,
+  APP_PATHS,
   MAX_PHOTO_BYTES,
+  OURA_RESULT_PARAM,
+  type OuraResult,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   PHOTO_CONTENT_TYPES,
@@ -30,6 +35,13 @@ import {
   type AcceptMissResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
+  type ChangePactRequest,
+  type ChangePactResponse,
+  type ChangePreviewResponse,
+  type ChangeRequestResponse,
+  type EndPactRequest,
+  type EndPactResponse,
+  type WithdrawChangeRequestResponse,
   type ApiErrorResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
@@ -42,6 +54,11 @@ import {
   type FileExcuseResponse,
   type DecideRequest,
   type DecideResponse,
+  type AskOwnerResponse,
+  type EvidenceResponse,
+  type PaymentResponse,
+  type ReplyResponse,
+  type WaitingOnReplyResponse,
   type FirstOccurrenceRequest,
   type FirstOccurrenceResponse,
   type FriendsResponse,
@@ -88,6 +105,12 @@ export interface AppOptions {
   operatorEmail: string;
   /** The key browsers subscribe to push with. See Config. */
   vapidPublicKey: string;
+  /**
+   * Oura's OAuth steps: the real adapter, or in development without Oura
+   * credentials a stand-in. Null in production without them: Oura isn't set
+   * up, so connecting returns to the form as `unavailable`.
+   */
+  oura: OuraConnector | null;
   /** Where the app writes log lines. Default: console.log. */
   log?: (line: string) => void;
 }
@@ -97,6 +120,9 @@ type UploadForm = Record<string, string | File | (string | File)[]>;
 
 /** What a photo upload is for, as its log line names it. */
 type Upload = "evidence" | "excuse" | "payment";
+
+/** The OAuth state for connecting Oura, between the connect route and Oura's callback. */
+const OURA_STATE_COOKIE = "pact_oura_state";
 
 /** Room for the multipart boundaries and headers around the photos. */
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
@@ -121,6 +147,7 @@ export function createApp({
   production,
   operatorEmail,
   vapidPublicKey,
+  oura,
   log = (line) => console.log(line),
 }: AppOptions) {
   const app = new Hono<Env>();
@@ -291,8 +318,42 @@ export function createApp({
     await next();
   });
 
+  // Connecting Oura: to Oura's authorize page with a random state, kept in a
+  // short-lived cookie this browser brings back to the callback, where it
+  // must match. Lax, so Oura's redirect back (a top-level GET) carries it.
+  app.get(API_PATHS.ouraConnect, (c) => {
+    if (!oura) return c.redirect(`${APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${"unavailable" satisfies OuraResult}`);
+    const state = randomBytes(16).toString("base64url");
+    setCookie(c, OURA_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: production,
+      sameSite: "Lax",
+      path: API_PATHS.ouraCallback,
+      maxAge: 10 * 60,
+    });
+    return c.redirect(oura.authorizeUrl(state));
+  });
+  app.get(API_PATHS.ouraCallback, async (c) => {
+    const back = (result: OuraResult) => c.redirect(`${APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${result}`);
+    if (!oura) return back("unavailable");
+    const expected = getCookie(c, OURA_STATE_COOKIE);
+    deleteCookie(c, OURA_STATE_COOKIE, { path: API_PATHS.ouraCallback });
+    const { state, code, error } = c.req.query();
+    if (expected === undefined || state !== expected) return back("failed");
+    // Oura's page sends the browser back with an error when the owner says no.
+    if (error !== undefined || code === undefined) return back(error === "access_denied" ? "cancelled" : "failed");
+    const accountId = c.get("accountId");
+    const connected = await oura.connect(accountId, code).catch((failure: unknown) => {
+      log(`oura connect failed: ${failure instanceof Error ? failure.message : String(failure)}`);
+      return { ok: false as const };
+    });
+    if (!connected.ok) return back("failed");
+    await core.as(accountId).connectOura();
+    return back("connected");
+  });
+
   app.get(API_PATHS.me, (c) => {
-    const body: MeResponse = core.as(c.get("accountId")).profile();
+    const body: MeResponse = json(core.as(c.get("accountId")).profile());
     return c.json(body);
   });
 
@@ -356,7 +417,11 @@ export function createApp({
     if (!schedule) return apiError(c, 400, "invalid-request");
     const editing = request?.editing;
     if (editing !== undefined && typeof editing !== "string") return apiError(c, 400, "invalid-request");
-    const body: FirstOccurrenceResponse = json(core.as(c.get("accountId")).firstOccurrence(schedule, editing));
+    const timing = parseOptionalStrings(request ?? {}, ["inBedBy", "dueBy", "startDate"]);
+    if (!timing) return apiError(c, 400, "invalid-request");
+    const body: FirstOccurrenceResponse = json(
+      core.as(c.get("accountId")).firstOccurrence({ schedule, ...timing }, editing),
+    );
     return c.json(body);
   });
 
@@ -369,6 +434,41 @@ export function createApp({
     const pact = parseNewPact(await c.req.json().catch(() => null));
     if (!pact) return apiError(c, 400, "invalid-request");
     const body: EditPactResponse = await core.as(c.get("accountId")).editPact(c.req.param("id"), pact);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.changePreview(":id"), async (c) => {
+    const change = parsePactChange(await c.req.json().catch(() => null));
+    if (!change) return apiError(c, 400, "invalid-request");
+    const body: ChangePreviewResponse = core.as(c.get("accountId")).changePreview(c.req.param("id"), change);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.changePact(":id"), async (c) => {
+    const change = parsePactChange(await c.req.json().catch(() => null));
+    if (!change) return apiError(c, 400, "invalid-request");
+    const body: ChangePactResponse = await core.as(c.get("accountId")).changePact(c.req.param("id"), change);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.endPact(":id"), async (c) => {
+    const request = (await c.req.json().catch(() => null)) as Partial<Record<keyof EndPactRequest, unknown>> | null;
+    if (!isRecord(request) || (request.note !== undefined && typeof request.note !== "string")) {
+      return apiError(c, 400, "invalid-request");
+    }
+    const body: EndPactResponse = await core.as(c.get("accountId")).requestEnd(c.req.param("id"), request.note);
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.changeRequest(":id"), (c) => {
+    const body: ChangeRequestResponse = json(core.as(c.get("accountId")).changeRequest(c.req.param("id")));
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.withdrawChangeRequest(":id"), async (c) => {
+    const body: WithdrawChangeRequestResponse = await core
+      .as(c.get("accountId"))
+      .withdrawChangeRequest(c.req.param("id"));
     return c.json(body);
   });
 
@@ -503,8 +603,37 @@ export function createApp({
     return c.json(body);
   });
 
+  app.get(API_PATHS.waitingOnReply, (c) => {
+    const body: WaitingOnReplyResponse = json(core.as(c.get("accountId")).waitingOnReply());
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.askOwner(":id"), async (c) => {
+    const request = (await c.req.json().catch(() => null)) as unknown;
+    if (!isRecord(request) || typeof request.question !== "string") return apiError(c, 400, "invalid-request");
+    const body: AskOwnerResponse = await core.as(c.get("accountId")).askOwner(c.req.param("id"), request.question);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.reply(":id"), async (c) => {
+    const request = (await c.req.json().catch(() => null)) as unknown;
+    if (!isRecord(request) || typeof request.reply !== "string") return apiError(c, 400, "invalid-request");
+    const body: ReplyResponse = await core.as(c.get("accountId")).reply(c.req.param("id"), request.reply);
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.evidenceItem(":id"), (c) => {
+    const body: EvidenceResponse = json(core.as(c.get("accountId")).evidence(c.req.param("id")));
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.paymentItem(":id"), (c) => {
+    const body: PaymentResponse = json(core.as(c.get("accountId")).payment(c.req.param("id")));
+    return c.json(body);
+  });
+
   app.get(API_PATHS.ledgers, (c) => {
-    const body: LedgersResponse = core.as(c.get("accountId")).ledgers();
+    const body: LedgersResponse = json(core.as(c.get("accountId")).ledgers());
     return c.json(body);
   });
 
@@ -619,7 +748,18 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function parseSchedule(value: unknown): Schedule | null {
-  if (!isRecord(value) || value.kind !== "fixed-days") return null;
+  if (!isRecord(value)) return null;
+  if (value.kind === "weekly-count") {
+    const { target } = value;
+    return typeof target === "number" ? { kind: "weekly-count", target } : null;
+  }
+  if (value.kind === "one-time") {
+    const { deadline, submitAnytime } = value;
+    return typeof deadline === "string" && typeof submitAnytime === "boolean"
+      ? { kind: "one-time", deadline, submitAnytime }
+      : null;
+  }
+  if (value.kind !== "fixed-days") return null;
   const { days } = value;
   if (!isStringArray(days) || !days.every(isWeekday)) return null;
   return { kind: "fixed-days", days };
@@ -630,12 +770,40 @@ function parseNewRecipient(value: unknown): AddRecipientRequest | null {
   return { name: value.name };
 }
 
+/** The optional string fields `keys` of `value`, those it has; null if any isn't a string. */
+function parseOptionalStrings<Key extends string>(
+  value: Record<string, unknown>,
+  keys: readonly Key[],
+): Partial<Record<Key, string>> | null {
+  const found: Partial<Record<Key, string>> = {};
+  for (const key of keys) {
+    const field = value[key];
+    if (field === undefined) continue;
+    if (typeof field !== "string") return null;
+    found[key] = field;
+  }
+  return found;
+}
+
+/** A pact's optional times: the in-bed-by and due-by times, and the start and end dates. */
+const PACT_TIMES = ["inBedBy", "dueBy", "startDate", "endDate"] as const;
+
+/** A pact's reminders, if sent: a list of strings, or undefined for none. False when malformed. */
+function parseReminders(value: Record<string, unknown>): { reminders?: string[] } | false {
+  if (value.reminders === undefined) return {};
+  return isStringArray(value.reminders) ? { reminders: value.reminders } : false;
+}
+
 function parseNewPact(value: unknown): CreatePactRequest | null {
   if (!isRecord(value)) return null;
   const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
   const schedule = parseSchedule(value.schedule);
+  const times = parseOptionalStrings(value, PACT_TIMES);
+  const reminders = parseReminders(value);
   if (
     (evidenceKind !== "camera" && evidenceKind !== "oura") ||
+    !times ||
+    !reminders ||
     typeof name !== "string" ||
     typeof description !== "string" ||
     !schedule ||
@@ -646,7 +814,40 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
   ) {
     return null;
   }
-  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds };
+  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times, ...reminders };
+}
+
+function parsePactChange(value: unknown): ChangePactRequest | null {
+  if (!isRecord(value)) return null;
+  const { name, description, penaltyCents, recipientId, reviewerIds, note } = value;
+  const schedule = parseSchedule(value.schedule);
+  const times = parseOptionalStrings(value, PACT_TIMES);
+  const reminders = parseReminders(value);
+  if (
+    !times ||
+    !reminders ||
+    (note !== undefined && typeof note !== "string") ||
+    typeof name !== "string" ||
+    typeof description !== "string" ||
+    !schedule ||
+    typeof penaltyCents !== "number" ||
+    !Number.isSafeInteger(penaltyCents) ||
+    typeof recipientId !== "string" ||
+    !isStringArray(reviewerIds)
+  ) {
+    return null;
+  }
+  return {
+    name,
+    description,
+    schedule,
+    penaltyCents,
+    recipientId,
+    reviewerIds,
+    ...times,
+    ...reminders,
+    ...(note !== undefined && { note }),
+  };
 }
 
 function parseDecision(value: unknown): DecideRequest | null {

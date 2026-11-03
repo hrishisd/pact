@@ -20,8 +20,11 @@
   --fresh-bg: #ddeafb;
   --excused: #8f5c0c;
   --excused-bg: #f4e8cf;
+  --excused-cell: #c99a3d; /* a heat map's Excused square: lighter than --excused, as the prototype has it */
   --slate: #4f5675;
   --slate-bg: #e4e6ef;
+  --amber: #8a5300;
+  --amber-bg: #fbebcc;
   --scrim: rgba(14, 22, 18, 0.45);
   --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -431,6 +434,11 @@ p {
   background: var(--slate-bg);
   color: var(--slate);
 }
+/* A review item of the owner's that a reviewer's question waits on: blue, as its Today alert. */
+.c-reply {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 
 /* A pact in its edit window: a blue chip next to its name, a blue left edge, a blue bar on its page. */
 .c-new {
@@ -823,6 +831,63 @@ textarea.inp {
   width: 24px;
   height: 24px;
 }
+/* Fixed days or Weekly count, on the Schedule step. */
+.seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.seg button {
+  flex: 1;
+  border: 0;
+  background: none;
+  padding: 9px 6px;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--muted);
+  touch-action: manipulation;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+/* A Weekly count's target: − 3× per week (Mon–Sun) +. */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stepper .num {
+  font-size: 20px;
+}
+.stepper .iconbtn {
+  font-size: 18px;
+  touch-action: manipulation;
+}
+.stepper .iconbtn:disabled {
+  opacity: 0.4;
+}
+/* A Weekly count week's progress on Today: a dot per day, filled once it counts. */
+.dots {
+  display: flex;
+  gap: 6px;
+}
+.dots i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--kept);
+  display: block;
+}
+.dots i.on {
+  background: var(--kept);
+}
+.dots i.wait {
+  border-color: var(--slate);
+  background: var(--slate-bg);
+}
 /* Weekday picker, Monday first. */
 .days {
   display: flex;
@@ -993,6 +1058,11 @@ textarea.inp {
   background: var(--slate-bg);
   color: var(--slate);
 }
+/* An Oura connection: grey, like the Automatic section, since it needs nothing. */
+.k-ring {
+  background: var(--sunk);
+  color: var(--muted);
+}
 
 /* A review item kind as a coloured badge with its icon, on Review. */
 .kind {
@@ -1039,6 +1109,38 @@ textarea.inp {
   gap: 8px;
   padding-block: 10px 4px;
   background: linear-gradient(to bottom, transparent, var(--paper) 25%);
+}
+.decide.with-ask {
+  grid-template-columns: 1fr 1fr 1.3fr;
+}
+/* A review item's questions and replies: one's own on the right. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px 14px 14px 4px;
+  padding: 8px 11px;
+  max-width: 88%;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.msg.mine {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  border-radius: 14px 14px 4px 14px;
+}
+.msg small {
+  color: var(--muted);
+  font-size: 11.5px;
 }
 .btn.ok {
   background: var(--kept);
@@ -1129,3 +1231,299 @@ textarea.inp {
 }
 
 /* Excuses: Today's excuse rows and alerts (slice B adds its rules here). */
+
+/* The in-bed-by time: the phone's own time field, no wider than it needs. */
+.time-inp {
+  max-width: 170px;
+}
+/* Connect Oura is a link to the server's redirect, styled as the step's button. */
+a.btn {
+  text-decoration: none;
+  color: inherit;
+}
+a.btn.primary {
+  color: var(--accent-ink);
+}
+
+/* Change requests: the amber pencil kind, the Request change list, its verdict, and before/after diffs. */
+.k-change {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.c-change {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.c-ended {
+  background: var(--sunk);
+  color: var(--muted);
+}
+.alert.amber {
+  background: var(--amber-bg);
+  border-color: var(--amber);
+}
+.termrow {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+}
+.termrow dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.termrow dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.termrow.changed {
+  background: var(--amber-bg);
+}
+.termrow.changed.stricter {
+  background: var(--kept-bg);
+}
+.termrow.changed.at-once {
+  background: var(--sunk);
+}
+.termrow s,
+.diff s {
+  color: var(--muted);
+  font-size: 13px;
+  display: block;
+}
+.tagline {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.t-needs-approval {
+  color: var(--amber);
+}
+.t-stricter {
+  color: var(--kept);
+}
+.t-at-once {
+  color: var(--muted);
+}
+.diff {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.diff > div {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  align-items: start;
+}
+.diff > div + div {
+  border-top: 1px solid var(--line);
+}
+.diff dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.diff dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.verdict {
+  border-radius: 14px;
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  border: 1px solid;
+}
+.verdict.needs-approval {
+  background: var(--amber-bg);
+  border-color: var(--amber);
+}
+.verdict.stricter,
+.verdict.at-once {
+  background: var(--kept-bg);
+  border-color: var(--kept);
+}
+.verdict.nothing {
+  background: var(--sunk);
+  border-color: var(--line);
+  color: var(--muted);
+}
+details.folded summary,
+details.ended summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 2px;
+}
+details.folded .kv {
+  margin-top: 8px;
+}
+.term-list {
+  margin: 0;
+  flex-shrink: 0; /* the scrolling page is a flex column: keep every row */
+}
+/* A create-form step opened from Request change: the sheet's title names it. */
+.step-in-sheet > h2 {
+  display: none;
+}
+
+/* History: the pact page's heat map (ticket 17 prototype, option A). */
+.hm-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.hm {
+  display: flex;
+  gap: 3px;
+  width: max-content;
+}
+.hm-col {
+  display: grid;
+  grid-template-rows: 14px repeat(7, 15px);
+  gap: 3px;
+  width: 15px;
+}
+.hm-lbl {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 15px;
+  height: 15px;
+  white-space: nowrap;
+}
+.hm-lbl.mo {
+  line-height: 14px;
+  height: 14px;
+  overflow: visible;
+}
+.cell {
+  display: block;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background: var(--sunk);
+  border: 0;
+  padding: 0;
+}
+.cell.none {
+  background: transparent;
+  outline: 1px solid var(--sunk);
+  outline-offset: -1px;
+}
+.cell.kept {
+  background: var(--kept);
+}
+.cell.missed {
+  background: var(--missed);
+}
+.cell.excused {
+  background: var(--excused-cell);
+}
+.cell.not-judged {
+  background: var(--slate-bg);
+  outline: 1.5px solid var(--slate);
+  outline-offset: -1.5px;
+}
+.cell.open {
+  background: var(--accent-soft);
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+.cell.ahead {
+  background: transparent;
+  outline: 1px dashed var(--line);
+  outline-offset: -1px;
+}
+.cell.sel {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+/* A Weekly count pact's heat map: one square per week, with the days that counted. */
+.hm-weeks {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  align-items: flex-end;
+}
+.hm-wcol {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+}
+.cell.wk {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+.cell.wk.open {
+  color: var(--accent);
+}
+.cell.wk.not-judged {
+  color: var(--slate);
+}
+.legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legend .cell {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+.hmdetail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13.5px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: var(--sunk);
+}
+/* A One-time pact's History: its one square beside how it went. */
+.hmdetail.one {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+.hmdetail.one > .cell {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+.hmdetail.one > .cell.none {
+  outline-color: var(--line);
+}
+.hmdetail.one > .rt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+/* A reminder on the Reminders step: its time field and Remove. */
+.remrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

@@ -15,7 +15,7 @@ The person who made a pact and is held to it.
 _Avoid_: Creator, user (when the role matters)
 
 **Active / Ended**:
-The stages a pact goes through. A pact is Active from the moment it's created; nobody approves it first. An Ended pact is past its end date or was ended through an approved change request.
+The stages a pact goes through. A pact is Active from the moment it's created; nobody approves it first. An Ended pact is past its end date, was ended through an approved change request, or is a One-time pact whose occurrence has been judged.
 _Avoid_: Draft, pending, live, archived
 
 **Edit window**:
@@ -25,6 +25,9 @@ _Avoid_: Draft, grace period
 **Schedule**:
 When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. Mon, Wed, Fri, each day its own occurrence), **Weekly count** (e.g. 3× per week, the week being one occurrence), and **One-time** (one occurrence by a deadline).
 _Avoid_: Frequency, recurrence, cadence
+
+**Target**:
+How many days of a Weekly count week need approved evidence for the week to be Kept, e.g. 3 for "3× per week". At most one day of evidence counts per calendar day, and a week adds one penalty for each day it falls short.
 
 **Deadline**:
 When a One-time pact is due: a date, plus its due-by time if one is set, or else midnight.
@@ -40,8 +43,20 @@ _Avoid_: Instance, check-in, day, session
 **Due time**:
 When an occurrence is due and judged: on Fixed days, the due-by time or in-bed-by time, or else midnight; for Weekly count, the end of Sunday; for One-time, the deadline.
 
+**In-bed-by time**:
+The time an Oura Ring pact's owner must be in bed by each scheduled night, such as 12:00am. An evening time (from 6pm) is that evening; an earlier one is the morning after. It's the night's due time.
+
+**Night**:
+A bedtime pact's occurrence: the night of Tue Oct 21 runs from 6pm Tuesday to 6pm Wednesday. Oura's first main sleep starting in it decides it; with none by 6pm Wednesday, it's Missed.
+
 **Due-by time**:
 An optional time of day, such as 9:00am, that a Camera pact's evidence is due by instead of midnight. On a recurring pact it applies each day; on a One-time pact it's the time of the deadline.
+
+**Start date / End date**:
+Optional days that bound a recurring pact. The start date can only push its first occurrence later. The end date is its last day: once that day's occurrence closes, the pact has no more and is Ended.
+
+**Closed**:
+How Today shows a Camera pact's day once its due-by time has passed: Missed, and no evidence counts for it any more.
 
 **Kept / Missed / Excused**:
 The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**.
@@ -77,14 +92,29 @@ _Avoid_: Contact, connection, follower, buddy
 The list of items waiting for a reviewer's decision.
 _Avoid_: Inbox, to-do list
 
+**Question**:
+A reviewer's comment on a review item (evidence, an excuse, a payment or a change request), asking its owner about it instead of deciding it. The item is then **waiting on the owner's reply**: it leaves every reviewer's Review Queue until the owner replies, though any reviewer can still decide it.
+
+**Reply**:
+The owner's answer to a question, in text only. It sends the item back to every reviewer's Review Queue.
+
+**Terms**:
+What a pact holds its owner to: its schedule, its due-by time, start date and end date, what its photo must show or its in-bed-by time, its penalty, recipient and reviewers. Each occurrence follows the terms in force when it opened, so a change applies only to occurrences not open yet.
+
 **Change Request**:
-An owner's proposed edit to a pact that makes it less strict, such as deleting it, lowering the penalty or changing the recipient. The pact stays as it is until a reviewer approves the change.
+An owner's proposed change to a pact after its edit window that makes it less strict, such as ending it, lowering the penalty, removing a day or a reviewer, or changing the recipient or description. The pact keeps its terms until a reviewer approves it; a change that relaxes anything is reviewed as a whole. A pact has at most one waiting, and the owner can withdraw it. It may carry a note saying why.
 _Avoid_: Edit, amendment
+
+**Stricter change**:
+A change that only makes a pact stricter, such as a higher penalty or more days. It needs no approval and applies from the first occurrence not open yet. Renaming a pact or adding a reviewer applies at once, even inside a change request.
 
 ### Notifications
 
 **Push subscription**:
 One device's permission to get an account's notifications, as its browser reports it. An account can have several. Turning notifications on is per device.
+
+**Reminder**:
+A push to a pact's owner at a time of day they set on the pact, before an occurrence's due time, while it's still useful: on a scheduled day with no evidence yet, or every scheduled night for a bedtime pact. On a One-time pact each reminder has its own date too, and goes off once. Changing reminders applies at once, with no review. They aren't terms.
 
 **Notification setting**:
 An account's on/off for one kind of notification, on all its devices. Every kind starts on.

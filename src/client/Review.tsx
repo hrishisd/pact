@@ -1,15 +1,18 @@
-// The Review tab: the account's Review Queue (evidence, excuses and
-// payments), one item at a time, with Reject (a reason is required, and for
-// evidence and excuses the form says what rejecting costs), Approve, and
-// Prev/Skip.
+// The Review tab: the account's Review Queue (change requests first, then
+// evidence, excuses and payments), one item at a time, with Reject (a reason
+// is required, and the form says what rejecting does), Ask, Approve, and
+// Prev/Skip. Below it, the items waiting on their owner's reply, which a
+// reviewer can still open and decide.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { formatDate, formatDayTime, money, weekdayName } from "./format.ts";
-import { DayChip, dayNote, excuseDatesText } from "./excuse-days.tsx";
-import { CameraIcon, DollarIcon, ExcuseIcon } from "./icons.tsx";
+import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
+import { DiffList, EverythingElse, startsText } from "./change-terms.tsx";
+import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
+import { AskSheet, Thread } from "./questions.tsx";
 import { Empty, useLoad, useNow } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
@@ -22,9 +25,13 @@ export function Review({
   onQueue: (length: number) => void;
 }) {
   const { data: queue, failed, reload } = useLoad(api.reviewQueue);
+  const { data: waiting, reload: reloadWaiting } = useLoad(api.waitingOnReply);
   const [index, setIndex] = useState(0);
   // Says why the last decision didn't go through, above the next item.
   const [notice, setNotice] = useState<string | null>(null);
+  // An item waiting on its owner's reply, opened from the list below the queue.
+  const [openedId, setOpenedId] = useState<string | null>(null);
+  const [asking, setAsking] = useState<Json<ReviewItem> | null>(null);
 
   useEffect(() => {
     if (queue) onQueue(queue.length);
@@ -35,14 +42,67 @@ export function Review({
       <Empty title="Review couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
     );
   if (queue === null) return null;
+
+  const refresh = () => {
+    setOpenedId(null);
+    reload();
+    reloadWaiting();
+  };
+  const decided = (refusal: DecideRefusal | null) => {
+    setNotice(refusal === null ? null : REFUSAL_TEXT[refusal]);
+    // The decided item leaves the queue, so the next one takes its place.
+    refresh();
+  };
+  const askSheet = asking && (
+    <AskSheet
+      itemId={asking.id}
+      ownerName={asking.ownerName}
+      placeholder={ASK_PLACEHOLDER[asking.kind]}
+      onClose={() => setAsking(null)}
+      onAsked={() => {
+        setAsking(null);
+        setNotice(null);
+        refresh();
+      }}
+    />
+  );
+  const waitingList = waiting && waiting.length > 0 && (
+    <WaitingOnReply
+      items={waiting}
+      timezone={timezone}
+      onOpen={(id) => {
+        setNotice(null);
+        setOpenedId(id);
+      }}
+    />
+  );
+
+  const opened = waiting?.find((item) => item.id === openedId);
+  if (opened) {
+    return (
+      <>
+        <button className="link self-start" onClick={() => setOpenedId(null)}>
+          ‹ Back to your queue
+        </button>
+        <ItemView item={opened} timezone={timezone} onDecided={decided} onAsk={() => setAsking(opened)} />
+        {askSheet}
+      </>
+    );
+  }
+
   if (queue.length === 0)
     return (
       <>
         {notice && <p className="error small">{notice}</p>}
         <Empty
           title="Nothing to review"
-          body="When a friend picks you as a reviewer, their submitted evidence, excuses and payments show up here."
+          body={
+            waitingList
+              ? "What's left is waiting on a reply, below."
+              : "When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here."
+          }
         />
+        {waitingList}
       </>
     );
 
@@ -51,11 +111,6 @@ export function Review({
   const step = (by: number) => {
     setNotice(null);
     setIndex((at + by + queue.length) % queue.length);
-  };
-  const decided = (refusal: DecideRefusal | null) => {
-    setNotice(refusal === null ? null : REFUSAL_TEXT[refusal]);
-    // The decided item leaves the queue, so the next one takes its place.
-    reload();
   };
 
   return (
@@ -76,13 +131,109 @@ export function Review({
         )}
       </div>
       {notice && <p className="error small">{notice}</p>}
-      {item.kind === "evidence" ? (
-        <EvidenceItem key={item.id} item={item} onDecided={decided} />
-      ) : item.kind === "excuse" ? (
-        <ExcuseItem key={item.id} item={item} onDecided={decided} />
-      ) : (
-        <PaymentItem key={item.id} item={item} timezone={timezone} onDecided={decided} />
-      )}
+      <ItemView item={item} timezone={timezone} onDecided={decided} onAsk={() => setAsking(item)} />
+      {waitingList}
+      {askSheet}
+    </>
+  );
+}
+
+/** One item: what it's about, its questions so far, and Reject, Ask and Approve. */
+function ItemView({
+  item,
+  timezone,
+  onDecided,
+  onAsk,
+}: {
+  item: Json<ReviewItem>;
+  timezone: string;
+  onDecided: OnDecided;
+  onAsk: () => void;
+}) {
+  const props = { timezone, onDecided, onAsk };
+  switch (item.kind) {
+    case "evidence":
+      return <EvidenceItem key={item.id} item={item} {...props} />;
+    case "excuse":
+      return <ExcuseItem key={item.id} item={item} {...props} />;
+    case "change-request":
+      return <ChangeRequestItem key={item.id} item={item} {...props} />;
+    case "payment":
+      return <PaymentItem key={item.id} item={item} {...props} />;
+  }
+}
+
+const ASK_PLACEHOLDER: Record<ReviewItem["kind"], string> = {
+  evidence: "e.g. Is this from today?",
+  excuse: "e.g. Did you see a doctor?",
+  payment: "e.g. Can you send the whole screenshot?",
+  "change-request": "e.g. What changed?",
+};
+
+/** What a review item is about, in a row: the pact's name, or the payment. */
+function itemTitle(item: Json<ReviewItem>): string {
+  switch (item.kind) {
+    case "evidence":
+    case "excuse":
+      return item.pactName;
+    case "change-request":
+      return item.endsPact ? `End ${item.pactName}` : item.pactName;
+    case "payment":
+      return `${money(item.amountCents)} to ${item.recipientName}`;
+  }
+}
+
+const KIND_ROW: Record<ReviewItem["kind"], { label: string; className: string; Icon: typeof CameraIcon }> = {
+  evidence: { label: "Evidence", className: "k-evidence", Icon: CameraIcon },
+  excuse: { label: "Excuse", className: "k-excuse", Icon: ExcuseIcon },
+  payment: { label: "Payment", className: "k-payment", Icon: DollarIcon },
+  "change-request": { label: "Change", className: "k-change", Icon: PencilIcon },
+};
+
+/**
+ * Items out of the queue until their owner replies, under one label per
+ * owner. Each opens on its own, to read and decide.
+ */
+function WaitingOnReply({
+  items,
+  timezone,
+  onOpen,
+}: {
+  items: Json<ReviewItem>[];
+  timezone: string;
+  onOpen: (itemId: string) => void;
+}) {
+  const owners = [...new Set(items.map((item) => item.ownerName))];
+  return (
+    <>
+      {owners.map((owner) => (
+        <section key={owner} className="stack">
+          <div className="label">Waiting on {owner}'s reply</div>
+          <div className="cards">
+            {items
+              .filter((item) => item.ownerName === owner)
+              .map((item) => {
+                const { label, className, Icon } = KIND_ROW[item.kind];
+                const asked = item.thread.comments.at(-1);
+                return (
+                  <button key={item.id} className="rowbtn" onClick={() => onOpen(item.id)}>
+                    <span className={`kico ${className}`}>
+                      <Icon />
+                    </span>
+                    <span className="rt">
+                      <b>{itemTitle(item)}</b>
+                      <small>
+                        {label}
+                        {asked && ` · asked ${formatDayTime(asked.sentAt, timezone)}`}
+                      </small>
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+        </section>
+      ))}
+      <p className="small muted">Out of your queue until they reply. You can still open one and decide it.</p>
     </>
   );
 }
@@ -91,17 +242,26 @@ const REFUSAL_TEXT: Record<DecideRefusal, string> = {
   "item-not-found": "That item isn't in your queue any more.",
   "already-decided": "Another reviewer already decided that one.",
   "blank-reason": "Say why you're rejecting it.",
+  "deadline-too-soon": "The new deadline is less than an hour away now, so it can only be rejected.",
 };
 
 type EvidenceReviewItem = Extract<Json<ReviewItem>, { kind: "evidence" }>;
 type ExcuseReviewItem = Extract<Json<ReviewItem>, { kind: "excuse" }>;
 type PaymentReviewItem = Extract<Json<ReviewItem>, { kind: "payment" }>;
+type ChangeReviewItem = Extract<Json<ReviewItem>, { kind: "change-request" }>;
 
 /** After the core answered: null when the decision went through. */
 type OnDecided = (refusal: DecideRefusal | null) => void;
 
+/** What every item gets: the timezone for its thread, and what its buttons do. */
+interface ItemProps {
+  timezone: string;
+  onDecided: OnDecided;
+  onAsk: () => void;
+}
+
 /** An Evidence item: the pact's description of what counts and the photos. */
-function EvidenceItem({ item, onDecided }: { item: EvidenceReviewItem; onDecided: OnDecided }) {
+function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: EvidenceReviewItem }) {
   return (
     <>
       <div className="row2">
@@ -116,6 +276,11 @@ function EvidenceItem({ item, onDecided }: { item: EvidenceReviewItem; onDecided
           <h3>{item.pactName}</h3>
           <span className="meta">{formatDate(item.occurrenceDate)}</span>
         </div>
+        {item.week && (
+          <span className="meta">
+            Counts toward this week · {item.week.sessions} of {item.week.target} so far
+          </span>
+        )}
         <div className="stack-sm">
           <span className="label">What counts</span>
           <span>{item.description}</span>
@@ -130,14 +295,23 @@ function EvidenceItem({ item, onDecided }: { item: EvidenceReviewItem; onDecided
           );
         })}
       </article>
+      <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
         itemId={item.id}
+        onAsk={onAsk}
         placeholder="e.g. This looks like it's from last week"
         cost={
-          <p className="small">
-            Rejecting makes {weekdayName(item.occurrenceDate)} Missed and adds {money(item.penaltyCents)} to{" "}
-            {item.ownerName}'s {item.recipientName} ledger.
-          </p>
+          item.week ? (
+            <p className="small">
+              Rejecting means {weekdayName(item.occurrenceDate)} doesn't count toward {item.ownerName}'s{" "}
+              {item.week.target}× this week. They can make it up another day.
+            </p>
+          ) : (
+            <p className="small">
+              Rejecting makes {weekdayName(item.occurrenceDate)} Missed and adds {money(item.penaltyCents)} to{" "}
+              {item.ownerName}'s {item.recipientName} ledger.
+            </p>
+          )
         }
         onDecided={onDecided}
       />
@@ -149,7 +323,7 @@ function EvidenceItem({ item, onDecided }: { item: EvidenceReviewItem; onDecided
  * An Excuse item: the reason, the photos, the days it covers as they stand,
  * and what approving or rejecting does to them, all at once.
  */
-function ExcuseItem({ item, onDecided }: { item: ExcuseReviewItem; onDecided: OnDecided }) {
+function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: ExcuseReviewItem }) {
   const now = useNow();
   const held = item.heldCents > 0 ? money(item.heldCents) : null;
   const notJudged = item.days.some(({ status }) => status.kind === "not-judged");
@@ -188,12 +362,13 @@ function ExcuseItem({ item, onDecided }: { item: ExcuseReviewItem; onDecided: On
         })}
         <span className="label">Covers</span>
         <div className="list">
-          {item.days.map(({ date, status }) => {
-            const note = dayNote(status, now);
+          {item.days.map((day) => {
+            const { date, status } = day;
+            const note = dayNote(status, now, day.through !== undefined);
             return (
               <div key={date} className="covrow">
                 <span className="rt">
-                  <b>{formatDate(date)}</b>
+                  <b>{excuseDayText(day)}</b>
                   {note && <small>{note}</small>}
                 </span>
                 <DayChip status={status} now={now} compact />
@@ -206,8 +381,10 @@ function ExcuseItem({ item, onDecided }: { item: ExcuseReviewItem; onDecided: On
           {notJudged && " Days not judged yet are Excused when they end."}
         </p>
       </article>
+      <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
         itemId={item.id}
+        onAsk={onAsk}
         placeholder="e.g. You were at the party, not sick"
         cost={rejectCost.length > 0 && <p className="small">Rejecting {rejectCost.join(" and ")}.</p>}
         onDecided={onDecided}
@@ -216,16 +393,50 @@ function ExcuseItem({ item, onDecided }: { item: ExcuseReviewItem; onDecided: On
   );
 }
 
+/**
+ * A Change request item: the note, the changed terms old and new, when they'd
+ * start, and the rest folded away; or, for an end, what approving does.
+ */
+function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: ChangeReviewItem }) {
+  return (
+    <>
+      <div className="row2">
+        <span className="kind k-change">
+          <PencilIcon />
+          Change
+        </span>
+        <span className="muted">from {item.ownerName}</span>
+      </div>
+      <article className="card">
+        <h3>{item.endsPact ? `End ${item.pactName}` : item.pactName}</h3>
+        {item.note !== null && <span className="quote">“{item.note}”</span>}
+        {item.endsPact ? (
+          <p className="small">
+            Approving makes {item.pactName} Ended at once: no more days. Penalties already judged stay on{" "}
+            {item.ownerName}'s ledger.
+          </p>
+        ) : (
+          <>
+            <DiffList changes={item.changes} />
+            <p className="small">{startsText(item, "Approving applies")}</p>
+            <EverythingElse request={item} />
+          </>
+        )}
+      </article>
+      <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
+      <Decision
+        itemId={item.id}
+        onAsk={onAsk}
+        placeholder={item.endsPact ? "e.g. Give it another month" : "e.g. $5 is what makes it stick"}
+        cost={<p className="small">Rejecting keeps {item.pactName} as it is.</p>}
+        onDecided={onDecided}
+      />
+    </>
+  );
+}
+
 /** A Payment item: the screenshot, the owner's note, and what approving does to what they owe. */
-function PaymentItem({
-  item,
-  timezone,
-  onDecided,
-}: {
-  item: PaymentReviewItem;
-  timezone: string;
-  onDecided: OnDecided;
-}) {
+function PaymentItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: PaymentReviewItem }) {
   const src = API_PATHS.photo(encodeURIComponent(item.photoId));
   return (
     <>
@@ -256,22 +467,31 @@ function PaymentItem({
           Approving lowers what {item.ownerName} owes {item.recipientName} to {money(item.owedAfterApprovalCents)}.
         </p>
       </article>
-      <Decision itemId={item.id} placeholder="e.g. The screenshot shows a different amount" onDecided={onDecided} />
+      <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
+      <Decision
+        itemId={item.id}
+        onAsk={onAsk}
+        placeholder="e.g. The screenshot shows a different amount"
+        onDecided={onDecided}
+      />
     </>
   );
 }
 
 /**
- * Reject and Approve, kept in reach below an item. Reject opens a form that
- * needs a reason, with `cost` under it when rejecting costs the owner.
+ * Reject, Ask and Approve, kept in reach below an item. Reject opens a form
+ * that needs a reason, with `cost` under it when rejecting costs the owner.
+ * Ask opens a sheet for a question to the owner.
  */
 function Decision({
   itemId,
   placeholder,
   cost,
   onDecided,
+  onAsk,
 }: {
   itemId: string;
+  onAsk: () => void;
   /** An example reason for the reason box. */
   placeholder: string;
   cost?: ReactNode;
@@ -334,9 +554,12 @@ function Decision({
           </div>
         </div>
       ) : (
-        <div className="decide">
+        <div className="decide with-ask">
           <button className="btn danger" disabled={busy} onClick={() => setRejecting(true)}>
             Reject
+          </button>
+          <button className="btn" disabled={busy} onClick={onAsk}>
+            Ask
           </button>
           <button className="btn ok" disabled={busy} onClick={() => void decide({ kind: "approve" })}>
             Approve

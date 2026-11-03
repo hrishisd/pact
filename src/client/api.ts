@@ -18,7 +18,21 @@ import {
   type AcceptMissResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
+  type AskOwnerRequest,
+  type AskOwnerResponse,
+  type EvidenceResponse,
+  type PaymentResponse,
+  type ReplyRequest,
+  type ReplyResponse,
+  type WaitingOnReplyResponse,
   type ApiErrorResponse,
+  type ChangePactRequest,
+  type ChangePactResponse,
+  type ChangePreviewResponse,
+  type ChangeRequestResponse,
+  type EndPactRequest,
+  type EndPactResponse,
+  type WithdrawChangeRequestResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
@@ -149,6 +163,16 @@ export const api = {
   firstOccurrence: (request: FirstOccurrenceRequest) =>
     post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
   pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),
+  changePreview: (pactId: string, change: ChangePactRequest) =>
+    post<ChangePreviewResponse>(API_PATHS.changePreview(encodeURIComponent(pactId)), change),
+  changePact: (pactId: string, change: ChangePactRequest) =>
+    post<ChangePactResponse>(API_PATHS.changePact(encodeURIComponent(pactId)), change),
+  endPact: (pactId: string, request: EndPactRequest) =>
+    post<EndPactResponse>(API_PATHS.endPact(encodeURIComponent(pactId)), request),
+  changeRequest: (changeRequestId: string) =>
+    call<ChangeRequestResponse>(API_PATHS.changeRequest(encodeURIComponent(changeRequestId))),
+  withdrawChangeRequest: (changeRequestId: string) =>
+    post<WithdrawChangeRequestResponse>(API_PATHS.withdrawChangeRequest(encodeURIComponent(changeRequestId))),
   /** `photos` are already shrunk (photos.ts), in the order taken. */
   submitEvidence: (pactId: string, photos: Blob[]) => {
     const form = new FormData();
@@ -177,6 +201,13 @@ export const api = {
   reviewQueue: () => call<ReviewQueueResponse>(API_PATHS.reviewQueue),
   decide: (itemId: string, decision: DecideRequest) =>
     post<DecideResponse>(API_PATHS.decide(encodeURIComponent(itemId)), decision),
+  waitingOnReply: () => call<WaitingOnReplyResponse>(API_PATHS.waitingOnReply),
+  askOwner: (itemId: string, question: string) =>
+    post<AskOwnerResponse>(API_PATHS.askOwner(encodeURIComponent(itemId)), { question } satisfies AskOwnerRequest),
+  reply: (itemId: string, reply: string) =>
+    post<ReplyResponse>(API_PATHS.reply(encodeURIComponent(itemId)), { reply } satisfies ReplyRequest),
+  evidence: (evidenceId: string) => call<EvidenceResponse>(API_PATHS.evidenceItem(encodeURIComponent(evidenceId))),
+  payment: (paymentId: string) => call<PaymentResponse>(API_PATHS.paymentItem(encodeURIComponent(paymentId))),
   ledgers: () => call<LedgersResponse>(API_PATHS.ledgers),
   ledger: (recipientId: string) => call<LedgerResponse>(API_PATHS.ledger(encodeURIComponent(recipientId))),
   /** `screenshot` is already shrunk (photos.ts). */

@@ -25,7 +25,19 @@ import {
   PAYMENT_NOTE_FIELD,
   type AcceptInviteResponse,
   type AcceptMissResponse,
+  type AskOwnerRequest,
+  type AskOwnerResponse,
+  type EvidenceResponse,
+  type PaymentResponse,
+  type ReplyRequest,
+  type ReplyResponse,
+  type WaitingOnReplyResponse,
   type AddRecipientResponse,
+  type ChangePactRequest,
+  type ChangePactResponse,
+  type ChangePreviewResponse,
+  type ChangeRequestResponse,
+  type EndPactResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
@@ -64,24 +76,29 @@ const ORIGIN = "http://localhost:5173";
 const OPERATOR = "owner@example.test";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const VAPID_PUBLIC_KEY = "test-vapid-public-key";
+const OURA_AUTHORIZE = "https://cloud.oura.test/oauth/authorize";
 
 /**
  * `canonicalOrigin` is the config's: null unless the server is in production.
  * `commit` is the config's: null unless the image was built with one.
  * `diskUsedFraction` stands in for the volume's disk use: half full unless a test says otherwise.
+ * `ouraSetUp: false` is production without Oura credentials: no connector.
  */
 async function server({
   canonicalOrigin = null,
   commit = null,
   diskUsedFraction = () => 0.5,
   production = false,
+  ouraSetUp = true,
 }: {
   canonicalOrigin?: string | null;
   commit?: string | null;
   diskUsedFraction?: () => number;
   production?: boolean;
+  ouraSetUp?: boolean;
 } = {}) {
   const s = scenario();
+  const ouraConnects: { account: string; code: string }[] = [];
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Pact</title><div id=root></div>");
@@ -103,6 +120,15 @@ async function server({
     production,
     operatorEmail: OPERATOR,
     vapidPublicKey: VAPID_PUBLIC_KEY,
+    oura: ouraSetUp
+      ? {
+          authorizeUrl: (state) => `${OURA_AUTHORIZE}?state=${state}`,
+          async connect(account, code) {
+            ouraConnects.push({ account, code });
+            return code === "good-code" ? { ok: true } : { ok: false, reason: "exchange-failed" };
+          },
+        }
+      : null,
     log: (line) => s.logs.push(line),
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
@@ -122,6 +148,7 @@ async function server({
   return {
     at: s.at,
     clock: s.clock,
+    ouraConnects,
     core: s.core,
     logs: s.logs,
     photoStore: s.photoStore,
@@ -290,7 +317,12 @@ describe("sign-in", () => {
     expect(s.authRows()).toEqual({ user: 1, account: 1, session: 1 });
 
     const me = await s.request(API_PATHS.me, { cookie });
-    expect(await me.json()).toEqual({ email: OPERATOR, name: "owner", timezone: null } satisfies MeResponse);
+    expect(await me.json()).toEqual({
+      email: OPERATOR,
+      name: "owner",
+      timezone: null,
+      connections: [],
+    } satisfies MeResponse);
 
     const set = await s.setTimezone(cookie, "America/Los_Angeles");
     expect(set.status).toBe(200);
@@ -471,7 +503,7 @@ describe("dev sign-in", () => {
     expect(response.headers.get("Location")).toBe("/");
     expect(s.authRows()).toEqual({ user: 1, account: 0, session: 1 });
     const me = await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(response) });
-    expect(me).toEqual({ status: 200, body: { email: OPERATOR, name: "owner", timezone: null } });
+    expect(me).toEqual({ status: 200, body: { email: OPERATOR, name: "owner", timezone: null, connections: [] } });
   });
 
   test("in production the route doesn't exist: it answers as any unknown API route, and signs no one in", async () => {
@@ -633,12 +665,14 @@ describe("pacts", () => {
           kind: "to-do",
           cards: [
             {
+              kind: "evidence",
               pactId,
               name: "Gym",
               penaltyCents: 500,
               editWindowClosesAt,
               occurrenceDate: firstOccurrence.date,
               dueAt: firstOccurrence.dueAt,
+              dueBy: null,
             },
           ],
         },
@@ -647,7 +681,7 @@ describe("pacts", () => {
       yesterday: [],
     } satisfies TodayResponse);
     expect((await s.api(API_PATHS.pacts, { cookie })).body).toEqual([
-      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500, editWindowClosesAt },
+      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500, stage: "active", editWindowClosesAt },
     ] satisfies PactsResponse);
     expect((await s.api(API_PATHS.pact(pactId), { cookie })).body).toEqual({
       ok: true,
@@ -656,16 +690,68 @@ describe("pacts", () => {
         name: "Gym",
         description: "Me at the gym",
         evidenceKind: "camera",
+        inBedBy: null,
+        dueBy: null,
+        startDate: null,
+        endDate: null,
         schedule: pact.schedule,
         penaltyCents: 500,
         recipient: { id: pact.recipientId, name: "Sam" },
         reviewers: [{ id: friendId, name: "friend" }],
+        reminders: [],
         stage: "active",
+        endedAt: null,
         firstOccurrence,
         editWindowClosesAt,
+        newTerms: null,
         waiting: [],
+        history: {
+          kind: "fixed-days",
+          days: ["05", "06", "07", "08", "09", "10", "11"].map((day) => ({
+            date: `2026-01-${day}`,
+            occurrence: ["05", "07", "09"].includes(day)
+              ? {
+                  status: {
+                    kind: "not-judged",
+                    opensAt: `2026-01-${day}T05:00:00.000Z`,
+                    dueAt: `2026-01-${String(Number(day) + 1).padStart(2, "0")}T05:00:00.000Z`,
+                    evidenceWaiting: false,
+                    excuse: null,
+                  },
+                  decidedBy: null,
+                  recipientName: null,
+                }
+              : null,
+          })),
+        },
       },
     } satisfies PactResponse);
+  });
+
+  test("Today's Yesterday says how each pact due yesterday did", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: pact,
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    s.clock.set(s.at("Tue 10:00"));
+    await s.core.advanceTo(s.at("Tue 10:00"));
+
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie })).body.yesterday).toEqual([
+      {
+        pactId: created.body.pactId,
+        name: "Gym",
+        evidenceKind: "camera",
+        occurrenceDate: "2026-01-05",
+        occurrence: {
+          status: { kind: "missed", penaltyCents: 500, held: false, excusableUntil: "2026-01-08T05:00:00.000Z" },
+          decidedBy: null,
+          recipientName: "Sam",
+        },
+      },
+    ] satisfies TodayResponse["yesterday"]);
   });
 
   test("a reviewer who isn't a friend is refused as data", async () => {
@@ -691,10 +777,18 @@ describe("pacts", () => {
       { ...pact, name: null },
       { ...pact, schedule: { kind: "fixed-days", days: ["monday"] } },
       { ...pact, schedule: { kind: "weekly-count", days: ["mon"] } },
+      { ...pact, schedule: { kind: "weekly-count", target: "3" } },
+      { ...pact, schedule: { kind: "one-time", deadline: "2026-01-08" } },
+      { ...pact, schedule: { kind: "one-time", deadline: 20260108, submitAnytime: false } },
       { ...pact, penaltyCents: "500" },
       { ...pact, penaltyCents: 5.5 },
       { ...pact, reviewerIds: "someone" },
       { ...pact, reviewerIds: [1] },
+      { ...pact, dueBy: 900 },
+      { ...pact, startDate: null },
+      { ...pact, endDate: ["2026-01-09"] },
+      { ...pact, reminders: "18:00" },
+      { ...pact, reminders: [1800] },
     ];
 
     for (const sent of malformedPacts) {
@@ -705,6 +799,251 @@ describe("pacts", () => {
     expect(recipient).toEqual({ status: 400, body: { error: "invalid-request" } });
     const check = await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: {} });
     expect(check).toEqual({ status: 400, body: { error: "invalid-request" } });
+    const timing = { schedule: pact.schedule, dueBy: 9 };
+    expect(await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: timing })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
+    });
+  });
+
+  test("a due-by time, start date and end date go through to the core, and its refusals come back as data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    const times = { dueBy: "21:00", startDate: "2026-01-12", endDate: "2026-01-31" };
+
+    const check = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: pact.schedule, dueBy: times.dueBy, startDate: times.startDate },
+    });
+    expect(check.body).toEqual({
+      ok: true,
+      firstOccurrence: { date: "2026-01-12", dueAt: "2026-01-13T02:00:00.000Z" },
+    } satisfies FirstOccurrenceResponse);
+    const refused = await s.api(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...pact, ...times, endDate: "2026-01-09" },
+    });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "end-date-too-early" } });
+
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...pact, ...times },
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { ...times, firstOccurrence: { date: "2026-01-12" } },
+    });
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie })).body.sections).toEqual([
+      { kind: "coming-up", cards: [expect.objectContaining({ opensOn: "2026-01-12", startDate: "2026-01-12" })] },
+    ]);
+
+    s.clock.set(s.at("Tue 10:00"));
+    const { endDate: _endDate, ...rest } = times;
+    const preview = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...pact, ...rest, dueBy: "22:00" },
+    });
+    expect(preview.body).toEqual({
+      ok: true,
+      preview: {
+        changes: [
+          { term: "due-by", before: "21:00", after: "22:00", effect: "needs-approval" },
+          { term: "end-date", before: "2026-01-31", after: null, effect: "stricter" },
+        ],
+        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: true },
+      },
+    });
+  });
+
+  test("a Weekly count pact goes through to the core: Today shows its week, the pact page its weeks, and its refusals are data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    const weekly = {
+      ...pact,
+      name: "Piano",
+      schedule: { kind: "weekly-count", target: 3 },
+    } satisfies CreatePactRequest;
+
+    const check = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: weekly.schedule },
+    });
+    expect(check.body).toEqual({
+      ok: true,
+      firstOccurrence: { date: "2026-01-12", dueAt: "2026-01-19T05:00:00.000Z" },
+    } satisfies FirstOccurrenceResponse);
+    const refused = await s.api(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...weekly, schedule: { kind: "weekly-count", target: 8 } },
+    });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-schedule" } });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: weekly });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+
+    s.clock.set(s.at("Tue+1 10:00"));
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie })).body.sections).toEqual([
+      {
+        kind: "to-do",
+        cards: [
+          {
+            kind: "evidence",
+            pactId,
+            name: "Piano",
+            penaltyCents: 500,
+            editWindowClosesAt: null,
+            occurrenceDate: "2026-01-12",
+            dueAt: "2026-01-19T05:00:00.000Z",
+            dueBy: null,
+            week: { sessions: 0, waiting: 0, target: 3 },
+          },
+        ],
+      },
+    ] satisfies TodayResponse["sections"]);
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: {
+        schedule: { kind: "weekly-count", target: 3 },
+        history: { kind: "weekly-count", weeks: [{ date: "2026-01-12", progress: { sessions: 0, target: 3 } }] },
+      },
+    });
+    const swapped = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...weekly, schedule: pact.schedule },
+    });
+    expect(swapped).toEqual({ status: 200, body: { ok: false, reason: "schedule-kind-fixed" } });
+    const lowered = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...weekly, schedule: { kind: "weekly-count", target: 2 } },
+    });
+    expect(lowered.body).toMatchObject({
+      ok: true,
+      preview: { changes: [{ term: "schedule", effect: "needs-approval" }] },
+    });
+  });
+
+  test("a One-time pact goes through to the core: Today shows it, the pact page its one occurrence, and its refusals are data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    const taxes = {
+      ...pact,
+      name: "Taxes",
+      schedule: { kind: "one-time", deadline: "2026-01-08", submitAnytime: true },
+      dueBy: "17:00",
+      reminders: ["2026-01-07T09:00"],
+    } satisfies CreatePactRequest;
+
+    const check = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: taxes.schedule, dueBy: "17:00" },
+    });
+    expect(check.body).toEqual({
+      ok: true,
+      firstOccurrence: { date: "2026-01-08", dueAt: "2026-01-08T22:00:00.000Z" },
+    } satisfies FirstOccurrenceResponse);
+    const tooSoon = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: { ...taxes.schedule, deadline: "2026-01-05" }, dueBy: "09:30" },
+    });
+    expect(tooSoon.body).toEqual({ ok: false, reason: "deadline-too-soon" } satisfies FirstOccurrenceResponse);
+    const refused = await s.api(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...taxes, startDate: "2026-01-06" },
+    });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-start-date" } });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: taxes });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+
+    s.clock.set(s.at("Tue 10:00"));
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie })).body.sections).toEqual([
+      {
+        kind: "to-do",
+        cards: [
+          {
+            kind: "evidence",
+            pactId,
+            name: "Taxes",
+            penaltyCents: 500,
+            editWindowClosesAt: null,
+            occurrenceDate: "2026-01-08",
+            dueAt: "2026-01-08T22:00:00.000Z",
+            dueBy: "17:00",
+          },
+        ],
+      },
+    ] satisfies TodayResponse["sections"]);
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: {
+        schedule: taxes.schedule,
+        reminders: ["2026-01-07T09:00"],
+        history: { kind: "one-time", day: { date: "2026-01-08", occurrence: { status: { kind: "not-judged" } } } },
+      },
+    });
+    const later = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...taxes, schedule: { ...taxes.schedule, deadline: "2026-01-09" } },
+    });
+    expect(later.body).toMatchObject({
+      ok: true,
+      preview: { changes: [{ term: "schedule", effect: "needs-approval" }] },
+    });
+  });
+
+  test("reminders go through to the core when creating and changing a pact, and its refusals come back as data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+
+    const refused = await s.api(API_PATHS.pacts, { cookie, method: "POST", body: { ...pact, reminders: ["6pm"] } });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-reminders" } });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...pact, reminders: ["18:00", "07:00"] },
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { reminders: ["07:00", "18:00"] },
+    });
+
+    s.clock.set(s.at("Tue 10:00"));
+    const changed = { ...pact, reminders: ["19:30"] };
+    const preview = await s.api(API_PATHS.changePreview(pactId), { cookie, method: "POST", body: changed });
+    expect(preview.body).toEqual({
+      ok: true,
+      preview: {
+        changes: [{ term: "reminders", before: ["07:00", "18:00"], after: ["19:30"], effect: "at-once" }],
+        outcome: { kind: "at-once" },
+      },
+    });
+    const sent = await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: changed });
+    expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" }, changeRequestId: null });
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { reminders: ["19:30"] },
+    });
+    const malformed = { ...pact, reminders: [7] };
+    expect(await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: malformed })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
+    });
   });
 
   test("someone else's pact, or one that doesn't exist, is not found, as data", async () => {
@@ -918,6 +1257,7 @@ describe("evidence", () => {
             occurrenceDate: "2026-01-05",
             penaltyCents: 500,
             recipientName: "Sam",
+            thread: { comments: [], waitingOnReply: false },
           },
         ] satisfies ReviewQueueResponse,
       });
@@ -1162,6 +1502,191 @@ describe("excuses", () => {
   });
 });
 
+describe("change requests", () => {
+  test("the owner previews and sends a change, sees it waiting, withdraws it, then asks to end the pact; the reviewer approves", async () => {
+    const { s, owner, friend, pact, pactId } = await ownerWithPact();
+    const { cookie } = owner;
+    const lower: ChangePactRequest = { ...pact, penaltyCents: 200, note: "Tight month" };
+
+    const preview = await s.api<ChangePreviewResponse>(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: lower,
+    });
+    expect(preview.body).toEqual({
+      ok: true,
+      preview: {
+        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
+        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: false },
+      },
+    } satisfies ChangePreviewResponse);
+    const sent = await s.api<ChangePactResponse>(API_PATHS.changePact(pactId), { cookie, method: "POST", body: lower });
+    if (!sent.body.ok) throw new Error(sent.body.reason);
+    const id = sent.body.changeRequestId!;
+    const page = await s.api<ChangeRequestResponse>(API_PATHS.changeRequest(id), { cookie });
+    expect(page.body).toMatchObject({ ok: true, changeRequest: { note: "Tight month", state: { kind: "waiting" } } });
+    expect((await s.api(API_PATHS.changeRequest(id), { cookie: friend.cookie })).body).toEqual({
+      ok: false,
+      reason: "change-request-not-found",
+    });
+    expect((await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, { cookie: friend.cookie })).body).toEqual([
+      expect.objectContaining({ kind: "change-request", id }),
+    ]);
+    const withdraw = () => s.api(API_PATHS.withdrawChangeRequest(id), { cookie, method: "POST" });
+    expect(await withdraw()).toEqual({ status: 200, body: { ok: true } });
+    expect(await withdraw()).toEqual({ status: 200, body: { ok: false, reason: "not-waiting" } });
+
+    const end = await s.api<EndPactResponse>(API_PATHS.endPact(pactId), {
+      cookie,
+      method: "POST",
+      body: { note: "Moved away" },
+    });
+    if (!end.body.ok) throw new Error(end.body.reason);
+    await s.api(API_PATHS.decide(end.body.changeRequestId), {
+      cookie: friend.cookie,
+      method: "POST",
+      body: { kind: "approve" } satisfies DecideRequest,
+    });
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { stage: "ended" },
+    });
+  });
+
+  test("the core's refusals are 200s; a body of another shape is a 400", async () => {
+    const { s, owner, pact, pactId } = await ownerWithPact();
+    const { cookie } = owner;
+
+    expect(
+      await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: { ...pact, reviewerIds: [] } }),
+    ).toEqual({ status: 200, body: { ok: false, reason: "no-reviewers" } });
+    expect(await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: pact })).toEqual({
+      status: 200,
+      body: { ok: false, reason: "nothing-changed" },
+    });
+    for (const path of [API_PATHS.changePact(pactId), API_PATHS.changePreview(pactId)]) {
+      expect(await s.api(path, { cookie, method: "POST", body: { ...pact, penaltyCents: "5" } })).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+    expect(await s.api(API_PATHS.endPact(pactId), { cookie, method: "POST", body: { note: 5 } })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
+    });
+  });
+});
+
+describe("reviewer questions", () => {
+  /** Submits a photo of Monday's Gym as the owner; returns the evidence's id. */
+  async function evidenceWaiting() {
+    const setup = await ownerWithPact();
+    const form = new FormData();
+    form.append(EVIDENCE_PHOTO_FIELD, jpeg());
+    const response = await setup.s.request(API_PATHS.evidence(setup.pactId), {
+      method: "POST",
+      cookie: setup.owner.cookie,
+      body: form,
+    });
+    const submitted = (await response.json()) as SubmitEvidenceResponse;
+    if (!submitted.ok) throw new Error(submitted.reason);
+    return { ...setup, evidenceId: submitted.evidenceId };
+  }
+
+  test("the reviewer asks, the item waits on the owner's reply; the owner sees it on Today and its page, and replies", async () => {
+    const { s, owner, friend, evidenceId } = await evidenceWaiting();
+    const reviewer = { cookie: friend.cookie };
+
+    const asked = await s.api<AskOwnerResponse>(API_PATHS.askOwner(evidenceId), {
+      ...reviewer,
+      method: "POST",
+      body: { question: "Which gym is this?" } satisfies AskOwnerRequest,
+    });
+
+    expect(asked).toEqual({ status: 200, body: { ok: true } });
+    expect((await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, reviewer)).body).toEqual([]);
+    const waiting = await s.api<WaitingOnReplyResponse>(API_PATHS.waitingOnReply, reviewer);
+    const question = {
+      fromOwner: false,
+      authorName: "friend",
+      text: "Which gym is this?",
+      sentAt: s.clock.now().toISOString(),
+    };
+    expect(waiting.body).toEqual([
+      expect.objectContaining({ id: evidenceId, thread: { comments: [question], waitingOnReply: true } }),
+    ]);
+    const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+    expect(today.body.alerts).toEqual([
+      expect.objectContaining({ kind: "reviewer-question", reviewerName: "friend", question: "Which gym is this?" }),
+    ]);
+    const page = await s.api<EvidenceResponse>(API_PATHS.evidenceItem(evidenceId), { cookie: owner.cookie });
+    expect(page.body).toMatchObject({ ok: true, evidence: { id: evidenceId, thread: { waitingOnReply: true } } });
+    expect((await s.api(API_PATHS.evidenceItem(evidenceId), reviewer)).body).toEqual({
+      ok: false,
+      reason: "evidence-not-found",
+    });
+
+    const replied = await s.api<ReplyResponse>(API_PATHS.reply(evidenceId), {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { reply: "The one on 5th" } satisfies ReplyRequest,
+    });
+
+    expect(replied).toEqual({ status: 200, body: { ok: true } });
+    expect((await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, reviewer)).body).toEqual([
+      expect.objectContaining({ id: evidenceId, thread: expect.objectContaining({ waitingOnReply: false }) }),
+    ]);
+    expect((await s.api(API_PATHS.waitingOnReply, reviewer)).body).toEqual([]);
+  });
+
+  test("a payment's page is its owner's; anyone else gets a 200 refusal", async () => {
+    const { s, owner, friend, pact } = await ownerWithPact();
+    s.clock.set(s.at("Sat 00:00"));
+    await s.core.advanceTo(s.clock.now());
+    const form = new FormData();
+    form.append(PAYMENT_AMOUNT_FIELD, "500");
+    form.append(EVIDENCE_PHOTO_FIELD, jpeg());
+    const response = await s.request(API_PATHS.payments(pact.recipientId), {
+      method: "POST",
+      cookie: owner.cookie,
+      body: form,
+    });
+    const recorded = (await response.json()) as RecordPaymentResponse;
+    if (!recorded.ok) throw new Error(recorded.reason);
+
+    const page = await s.api<PaymentResponse>(API_PATHS.paymentItem(recorded.paymentId), { cookie: owner.cookie });
+    expect(page.body).toMatchObject({
+      ok: true,
+      payment: { amountCents: 500, recipientName: "Sam", state: { kind: "waiting" }, reviewerNames: ["friend"] },
+    });
+    expect((await s.api(API_PATHS.paymentItem(recorded.paymentId), { cookie: friend.cookie })).body).toEqual({
+      ok: false,
+      reason: "payment-not-found",
+    });
+  });
+
+  test("the core's refusals are 200s; a body of another shape is a 400", async () => {
+    const { s, owner, friend, evidenceId } = await evidenceWaiting();
+
+    expect(
+      await s.api(API_PATHS.askOwner(evidenceId), { cookie: friend.cookie, method: "POST", body: { question: " " } }),
+    ).toEqual({ status: 200, body: { ok: false, reason: "blank-question" } });
+    expect(
+      await s.api(API_PATHS.reply(evidenceId), { cookie: owner.cookie, method: "POST", body: { reply: "Hm" } }),
+    ).toEqual({ status: 200, body: { ok: false, reason: "no-question" } });
+    for (const [path, cookie, body] of [
+      [API_PATHS.askOwner(evidenceId), friend.cookie, { question: 5 }],
+      [API_PATHS.askOwner(evidenceId), friend.cookie, {}],
+      [API_PATHS.reply(evidenceId), owner.cookie, { reply: null }],
+    ] as const) {
+      expect(await s.api(path, { cookie, method: "POST", body })).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+  });
+});
+
 describe("ledgers", () => {
   test("a Missed occurrence's penalty shows on the recipient's ledger, and its history", async () => {
     const { s, owner, pact } = await ownerWithFriend();
@@ -1184,6 +1709,8 @@ describe("ledgers", () => {
       awaitingCents: 0,
       awaitingCount: 0,
       paidCents: 0,
+      overdueCents: 0,
+      billDue: null,
     };
     expect(ledgers).toEqual({ status: 200, body: [summary] satisfies LedgersResponse });
     const ledger = await s.api(API_PATHS.ledger(pact.recipientId), { cookie: owner.cookie });
@@ -1204,6 +1731,7 @@ describe("ledgers", () => {
               addedAt: "2026-01-06T05:00:00.000Z",
               paidCents: 0,
               held: false,
+              bill: { kind: "next-bill", billedOn: "2026-01-14" },
             },
           ],
         },
@@ -1273,6 +1801,8 @@ describe("payments", () => {
         awaitingCents: 1000,
         awaitingCount: 1,
         paidCents: 0,
+        overdueCents: 0,
+        billDue: null,
       },
     ] satisfies LedgersResponse);
 
@@ -1306,6 +1836,7 @@ describe("payments", () => {
         recordedAt: s.at("Sat 00:00").toISOString(),
         owedCents: 1500,
         owedAfterApprovalCents: 500,
+        thread: { comments: [], waitingOnReply: false },
       },
     ] satisfies ReviewQueueResponse);
 
@@ -1326,6 +1857,8 @@ describe("payments", () => {
         awaitingCents: 0,
         awaitingCount: 0,
         paidCents: 1000,
+        overdueCents: 0,
+        billDue: null,
       },
     ] satisfies LedgersResponse);
   });
@@ -1421,6 +1954,9 @@ describe("api", () => {
       API_PATHS.pact("some-pact"),
       API_PATHS.photo("some-photo"),
       API_PATHS.reviewQueue,
+      API_PATHS.waitingOnReply,
+      API_PATHS.evidenceItem("some-evidence"),
+      API_PATHS.paymentItem("some-payment"),
     ];
     for (const path of reads) {
       const response = await s.request(path);
@@ -1435,6 +1971,8 @@ describe("api", () => {
       API_PATHS.firstOccurrence,
       API_PATHS.evidence("some-pact"),
       API_PATHS.decide("some-item"),
+      API_PATHS.askOwner("some-item"),
+      API_PATHS.reply("some-item"),
       API_PATHS.acceptMiss("some-pact", "2026-01-05"),
       API_PATHS.payments("some-recipient"),
     ];
@@ -1588,6 +2126,9 @@ describe("canonical host", () => {
         PHOTOS_SECRET_ACCESS_KEY: "test-secret-access-key",
         VAPID_PUBLIC_KEY: "vapid-public",
         VAPID_PRIVATE_KEY: "vapid-private",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        OURA_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
       }).canonicalOrigin,
     });
 
@@ -1673,7 +2214,10 @@ describe("notifications", () => {
         { setting: "picked-as-reviewer", enabled: true },
         { setting: "review-item", enabled: true },
         { setting: "decision", enabled: false },
+        { setting: "comment", enabled: true },
         { setting: "missed-occurrence", enabled: true },
+        { setting: "new-bill", enabled: true },
+        { setting: "overdue-bill", enabled: true },
       ],
     });
   });
@@ -1733,5 +2277,83 @@ describe("notifications", () => {
     const response = await s.api(API_PATHS.pushSubscriptions, { cookie, method: "POST", body });
 
     expect(response).toMatchObject({ status: 400, body: { error: "invalid-request" } });
+  });
+});
+
+describe("connecting Oura", () => {
+  /** Starts connecting as the browser would; returns the state Oura was sent and the cookies to bring back. */
+  async function startConnecting(s: Awaited<ReturnType<typeof server>>, cookie: string) {
+    const response = await s.request(API_PATHS.ouraConnect, { cookie });
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("Location")!);
+    expect(location.origin + location.pathname).toBe(OURA_AUTHORIZE);
+    return { state: location.searchParams.get("state")!, cookie: `${cookie}; ${cookieFrom(response)}` };
+  }
+
+  test("Oura's callback with this browser's state stores the tokens, makes the connection and returns to the form", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const started = await startConnecting(s, cookie);
+
+    const back = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=${started.state}`, {
+      cookie: started.cookie,
+    });
+
+    expect(back.status).toBe(302);
+    expect(back.headers.get("Location")).toBe("/pacts/new?oura=connected");
+    expect(s.ouraConnects).toEqual([{ account: s.core.accountIdForEmail(OPERATOR), code: "good-code" }]);
+    const me = await s.api<MeResponse>(API_PATHS.me, { cookie });
+    expect(me.body.connections).toEqual([{ service: "oura", status: "connected", connectedAt: expect.any(String) }]);
+  });
+
+  test("a state that isn't this browser's connects nothing", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const started = await startConnecting(s, cookie);
+
+    const forged = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=someone-else`, {
+      cookie: started.cookie,
+    });
+    const noCookie = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=${started.state}`, { cookie });
+
+    for (const response of [forged, noCookie]) expect(response.headers.get("Location")).toBe("/pacts/new?oura=failed");
+    expect(s.ouraConnects).toEqual([]);
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+  });
+
+  test("saying no on Oura's page returns to the form as cancelled; a code Oura refuses, as failed", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    let started = await startConnecting(s, cookie);
+    const cancelled = await s.request(`${API_PATHS.ouraCallback}?error=access_denied&state=${started.state}`, {
+      cookie: started.cookie,
+    });
+    started = await startConnecting(s, cookie);
+    const refused = await s.request(`${API_PATHS.ouraCallback}?code=bad-code&state=${started.state}`, {
+      cookie: started.cookie,
+    });
+
+    expect(cancelled.headers.get("Location")).toBe("/pacts/new?oura=cancelled");
+    expect(refused.headers.get("Location")).toBe("/pacts/new?oura=failed");
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+  });
+
+  test("with Oura not set up, connecting returns to the form as unavailable and connects nothing", async () => {
+    const s = await server({ production: true, ouraSetUp: false });
+    const { cookie } = await operatorWithInvite(s);
+
+    const started = await s.request(API_PATHS.ouraConnect, { cookie });
+    const callback = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=any`, { cookie });
+
+    for (const response of [started, callback]) {
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe("/pacts/new?oura=unavailable");
+    }
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+  });
+
+  test("connecting needs a session", async () => {
+    const s = await server();
+    expect((await s.request(API_PATHS.ouraConnect)).status).toBe(401);
   });
 });

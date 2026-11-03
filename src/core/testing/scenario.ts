@@ -8,8 +8,9 @@
 // TIME STRINGS. Wherever the harness takes a time, "Mon 18:00" means that
 // wall-clock time in America/New_York during the reference week
 // Mon 5 Jan – Sun 11 Jan 2026 (UTC−5 all week, no DST change), so
-// "Mon 18:00" is 2026-01-05T23:00:00Z. Any ISO 8601 string with an offset or
-// "Z" is accepted as is. The clock starts at "Mon 09:00".
+// "Mon 18:00" is 2026-01-05T23:00:00Z. A "+N" after the day moves N weeks on:
+// "Wed+1 18:00" is the next week's Wednesday (14 Jan). Any ISO 8601 string
+// with an offset or "Z" is accepted as is. The clock starts at "Mon 09:00".
 //
 // NAMES. `s.signIn("owner")` signs in as owner@example.test, display name
 // "owner". The operator (whose first sign-in may create an account without
@@ -162,9 +163,16 @@ function emailFor(name: string): string {
 /** Reads a time string as described under TIME STRINGS at the top of this file. */
 function at(when: string): Date {
   if (/^\d{4}-\d{2}-\d{2}T.*(Z|[+-]\d{2}:\d{2})$/.test(when)) return new Date(when);
-  const match = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{2}):(\d{2})$/.exec(when);
-  if (!match) throw new Error(`unreadable scenario time "${when}" (want e.g. "Mon 18:00")`);
-  const [, day, hh, mm] = match as unknown as [string, (typeof DAYS)[number], string, string];
+  const match = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:\+(\d+))? (\d{2}):(\d{2})$/.exec(when);
+  if (!match) throw new Error(`unreadable scenario time "${when}" (want e.g. "Mon 18:00" or "Wed+1 18:00")`);
+  const [, day, weeks, hh, mm] = match as unknown as [
+    string,
+    (typeof DAYS)[number],
+    string | undefined,
+    string,
+    string,
+  ];
   const { year, month, day: monday } = REFERENCE_WEEK_MONDAY;
-  return zonedWallTimeToInstant(year, month, monday + DAYS.indexOf(day), Number(hh), Number(mm), TIMEZONE);
+  const dayOfMonth = monday + 7 * Number(weeks ?? 0) + DAYS.indexOf(day);
+  return zonedWallTimeToInstant(year, month, dayOfMonth, Number(hh), Number(mm), TIMEZONE);
 }

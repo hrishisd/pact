@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
+import { ChangePact } from "./ChangePact.tsx";
+import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
 import { CreatePact, EditPact } from "./CreatePact.tsx";
+import { EvidencePage } from "./EvidencePage.tsx";
 import { ExcusePage } from "./ExcusePage.tsx";
-import { initial } from "./format.ts";
+import { formatDay, initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
-import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, TodayIcon } from "./icons.tsx";
+import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, RingIcon, TodayIcon } from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
 import { forgetThisDevice, usePush, type Push } from "./push.ts";
 import { LedgerPage, Ledgers } from "./Ledgers.tsx";
 import { useNavigation, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
+import { PaymentPage } from "./PaymentPage.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
@@ -238,6 +242,9 @@ function Shell({
   const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
   const openLedger = (recipientId: string, name: string) => nav.push({ kind: "ledger", recipientId, name });
   const openExcuse = (id: string) => nav.push({ kind: "excuse", id });
+  const openChangeRequest = (id: string) => nav.push({ kind: "change-request", id });
+  const openEvidence = (id: string) => nav.push({ kind: "evidence", id });
+  const openPayment = (id: string) => nav.push({ kind: "payment", id });
   const create = () => nav.push({ kind: "create" });
   const openNotifications = () => {
     setProfileOpen(false);
@@ -249,8 +256,12 @@ function Shell({
   if (page?.kind === "pact") title = pactNames[page.id] ?? page.name ?? "";
   else if (page?.kind === "create") title = "New pact";
   else if (page?.kind === "edit-pact") title = "Edit pact";
+  else if (page?.kind === "change-pact") title = "Request change";
+  else if (page?.kind === "change-request") title = "Change request";
   else if (page?.kind === "ledger") title = ledgerNames[page.recipientId] ?? page.name ?? "";
   else if (page?.kind === "excuse") title = "Excuse";
+  else if (page?.kind === "evidence") title = "Evidence";
+  else if (page?.kind === "payment") title = "Payment";
   else if (page?.kind === "notifications") title = "Notifications";
   else {
     title = TABS.find((t) => t.id === tab)!.label;
@@ -285,10 +296,24 @@ function Shell({
           <PactPage
             key={page.id}
             pactId={page.id}
+            timezone={profile.timezone}
             onLoaded={pactLoaded}
             onEdit={() => nav.push({ kind: "edit-pact", id: page.id })}
             onDeleted={nav.back}
+            onRequestChange={() => nav.push({ kind: "change-pact", id: page.id })}
             onOpenExcuse={openExcuse}
+            onOpenChangeRequest={openChangeRequest}
+          />
+        )}
+        {page?.kind === "change-pact" && (
+          <ChangePact key={page.id} pactId={page.id} onDone={nav.back} onInvite={() => setProfileOpen(true)} />
+        )}
+        {page?.kind === "change-request" && (
+          <ChangeRequestPage
+            key={page.id}
+            changeRequestId={page.id}
+            timezone={profile.timezone}
+            onOpenPact={openPact}
           />
         )}
         {page?.kind === "edit-pact" && (
@@ -296,6 +321,7 @@ function Shell({
         )}
         {page?.kind === "create" && (
           <CreatePact
+            ouraConnected={profile.connections.some((connection) => connection.service === "oura")}
             onCancel={nav.back}
             onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
             onInvite={() => setProfileOpen(true)}
@@ -305,9 +331,13 @@ function Shell({
         {!page && tab === "today" && <NotificationsAlert push={push} onSetUp={openNotifications} />}
         {!page && tab === "today" && (
           <Today
+            timezone={profile.timezone}
             onOpenPact={openPact}
             onOpenLedger={openLedger}
             onOpenExcuse={openExcuse}
+            onOpenChangeRequest={openChangeRequest}
+            onOpenEvidence={openEvidence}
+            onOpenPayment={openPayment}
             onCreate={create}
             onInvite={() => setProfileOpen(true)}
           />
@@ -326,7 +356,13 @@ function Shell({
         {page?.kind === "excuse" && (
           <ExcusePage key={page.id} excuseId={page.id} timezone={profile.timezone} onOpenPact={openPact} />
         )}
-        {!page && tab === "ledgers" && <Ledgers onOpenLedger={openLedger} />}
+        {page?.kind === "evidence" && (
+          <EvidencePage key={page.id} evidenceId={page.id} timezone={profile.timezone} onOpenPact={openPact} />
+        )}
+        {page?.kind === "payment" && (
+          <PaymentPage key={page.id} paymentId={page.id} timezone={profile.timezone} onOpenLedger={openLedger} />
+        )}
+        {!page && tab === "ledgers" && <Ledgers timezone={profile.timezone} onOpenLedger={openLedger} />}
       </main>
       <nav className="tabbar" aria-label="Main">
         {TABS.map(({ id, label, Icon }) => (
@@ -427,6 +463,30 @@ function ProfileSheet({
       <FriendsSection />
 
       <NotificationsSection push={push} onSetUp={onSetUpNotifications} />
+
+      {profile.connections.length > 0 && (
+        <section className="stack">
+          <div className="label">Connections</div>
+          <div className="list">
+            {profile.connections.map((connection) => (
+              <div key={connection.service} className="rowbtn">
+                <span className="kico k-ring" aria-hidden="true">
+                  <RingIcon />
+                </span>
+                <span className="rt">
+                  <b>Oura Ring</b>
+                  <small>Connected {formatDay(connection.connectedAt, profile.timezone)}</small>
+                </span>
+                {connection.status === "connected" ? (
+                  <span className="chip c-kept">Connected</span>
+                ) : (
+                  <span className="chip c-missed">Needs reconnecting</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="stack">
         <div className="label">Timezone</div>

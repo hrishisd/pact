@@ -44,8 +44,31 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
   sun: "Sun",
 };
 
-/** "Every day", or the days in order: "Mon, Wed, Fri". */
+/**
+ * "Every day", the days in order ("Mon, Wed, Fri"), a Weekly count's target
+ * ("3× per week"), or a One-time deadline's date ("One-time, Thu Nov 12", or
+ * "Anytime until Thu Nov 12" with Submit anytime).
+ */
 export function scheduleText(schedule: Schedule): string {
+  if (schedule.kind === "weekly-count") return `${schedule.target}× per week`;
+  if (schedule.kind === "one-time") {
+    const date = formatDate(schedule.deadline);
+    return schedule.submitAnytime ? `Anytime until ${date}` : `One-time, ${date}`;
+  }
   if (schedule.days.length === WEEKDAYS.length) return "Every day";
   return schedule.days.map((day) => WEEKDAY_LABELS[day]).join(", ");
+}
+
+/** A clock time, "HH:MM" on a 24-hour clock, as "12:00am" or "11:30pm". */
+export function clockText(time: string): string {
+  const [hour, minute] = time.split(":").map(Number) as [number, number];
+  return `${hour % 12 || 12}:${String(minute).padStart(2, "0")}${hour < 12 ? "am" : "pm"}`;
+}
+
+/** The name a bedtime pact fills in from its in-bed-by time: "In bed by midnight", "In bed by 11:30pm", "In bed by 1am". */
+export function inBedByName(time: string): string {
+  const [hour, minute] = time.split(":").map(Number) as [number, number];
+  if (hour === 0 && minute === 0) return "In bed by midnight";
+  const clock = clockText(time);
+  return `In bed by ${minute === 0 ? clock.replace(":00", "") : clock}`;
 }

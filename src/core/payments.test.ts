@@ -35,6 +35,8 @@ describe("recording a payment", () => {
         awaitingCents: 1000,
         awaitingCount: 1,
         paidCents: 0,
+        overdueCents: 0,
+        billDue: null,
         payableCents: 500,
       },
     ]);
@@ -56,6 +58,8 @@ describe("recording a payment", () => {
         awaitingCents: 1500,
         awaitingCount: 2,
         paidCents: 0,
+        overdueCents: 0,
+        billDue: null,
         payableCents: 0,
       },
     ]);
@@ -250,6 +254,8 @@ describe("deciding a payment", () => {
         awaitingCents: 0,
         awaitingCount: 0,
         paidCents: 1000,
+        overdueCents: 0,
+        billDue: null,
         payableCents: 500,
       },
     ]);
@@ -271,6 +277,8 @@ describe("deciding a payment", () => {
         awaitingCents: 0,
         awaitingCount: 0,
         paidCents: 0,
+        overdueCents: 0,
+        billDue: null,
         payableCents: 1500,
       },
     ]);
@@ -418,6 +426,7 @@ describe("a payment in the Review Queue", () => {
       recordedAt: s.at("Sat 09:00"),
       owedCents: 1500,
       owedAfterApprovalCents: 500,
+      thread: { comments: [], waitingOnReply: false },
     };
     expect(reviewer.reviewQueue()).toEqual([item]);
     expect(second.reviewQueue()).toEqual([item]);

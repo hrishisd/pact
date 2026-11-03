@@ -1,7 +1,7 @@
 // Set-up shared by the scenarios about Camera pacts: their evidence, its
 // review, and judging.
 
-import type { NewPact, NewPayment, Weekday } from "../../shared/types.ts";
+import type { NewPact, NewPayment, Schedule, Weekday } from "../../shared/types.ts";
 import type { Photo } from "../ports.ts";
 import type { AccountHandle, Scenario } from "./scenario.ts";
 
@@ -14,8 +14,11 @@ export function photo(n = 1): Photo {
 
 /**
  * An owner in New York with friends "reviewer" and "second", and a recipient
- * "Sam". `createPact` makes a Camera pact with Sam (or `recipientId`) that
- * both friends review (or just `reviewers`), described as "A photo of <name>".
+ * "Sam". `createPact` makes a Camera pact on the weekdays `days` (or on any
+ * schedule) with Sam (or `recipientId`) that
+ * both friends review (or just `reviewers`), described as "A photo of <name>",
+ * with the optional due-by time, start date and end date in `dates`, and the
+ * reminders in `reminders` ("HH:MM" each).
  */
 export async function ownerWithReviewers(s: Scenario) {
   const owner = await s.signIn("owner");
@@ -26,21 +29,31 @@ export async function ownerWithReviewers(s: Scenario) {
   if (!added.ok) throw new Error(added.reason);
   const createPact = async (
     name: string,
-    days: Weekday[],
+    days: Weekday[] | Schedule,
     {
       by = owner,
       reviewers = [reviewer, second],
       recipientId = added.recipient.id,
-    }: { by?: AccountHandle; reviewers?: AccountHandle[]; recipientId?: string } = {},
+      dates = {},
+      reminders,
+    }: {
+      by?: AccountHandle;
+      reviewers?: AccountHandle[];
+      recipientId?: string;
+      dates?: Pick<NewPact, "dueBy" | "startDate" | "endDate">;
+      reminders?: string[];
+    } = {},
   ) => {
     const pact: NewPact = {
       evidenceKind: "camera",
       name,
       description: `A photo of ${name}`,
-      schedule: { kind: "fixed-days", days },
+      schedule: Array.isArray(days) ? { kind: "fixed-days", days } : days,
       penaltyCents: 500,
       recipientId,
       reviewerIds: reviewers.map((r) => r.id),
+      ...dates,
+      ...(reminders && { reminders }),
     };
     const created = await by.createPact(pact);
     if (!created.ok) throw new Error(created.reason);

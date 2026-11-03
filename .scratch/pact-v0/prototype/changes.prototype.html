@@ -1,0 +1,960 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pact Changes, Questions and History</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  PROTOTYPE, throwaway. Tickets 11 (change requests), 12 (reviewer questions), 17 (heat map, Yesterday), and 14's weekly heat map.
+  Answers: how should requesting a change look (A, B, C), where does the owner answer a reviewer's question (A, B),
+  and what shape should the heat map take (A, B, C)? Everything is in memory; Reset or reload to start over.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: the app at phone width on a desk surface, with the prototype panel beside it (behind a button on phones).
+   Palette and components copy src/client/styles.css. v0 is light-only, so this page commits to the light look. */
+:root{
+  --paper:#f1f4f0; --surface:#ffffff; --sunk:#e5eae5; --desk:#d9e0da;
+  --ink:#17221d; --muted:#56645c; --line:#d2dad4;
+  --accent:#22457a; --accent-ink:#ffffff; --accent-soft:#e1e8f3;
+  --kept:#2b7347; --kept-bg:#dceee2;
+  --missed:#ad3227; --missed-bg:#f6dfda;
+  --excused:#8f5c0c; --excused-bg:#f4e8cf;
+  --slate:#4f5675; --slate-bg:#e4e6ef;
+  --due:#b0520a;
+  --scrim:rgba(14,22,18,.45);
+  --proto:#2a2140; --proto-soft:#efeafb; --proto-line:#8c7bc4;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
+  --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--desk);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--f-display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:-.01em}
+p{margin:0}
+.muted{color:var(--muted)} .small{font-size:13px} .error{color:var(--missed);font-weight:600}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+#stage{height:100%;display:flex;gap:24px;justify-content:center;align-items:stretch;padding-block:20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+#phone{position:relative;width:400px;max-width:100%;height:100%;max-height:880px;background:var(--paper);border:1px solid var(--line);border-radius:30px;overflow:hidden;box-shadow:0 18px 50px -24px rgba(10,20,15,.45);flex:none}
+#side{width:380px;min-width:0;height:100%;max-height:880px;overflow:auto;background:var(--surface);border:1.5px dashed var(--proto-line);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:18px}
+#protoBtn{display:none}
+@media (max-width:840px){
+  #stage{padding:0}
+  #phone{width:100%;max-height:none;border:0;border-radius:0;box-shadow:none}
+  #side{display:none;position:fixed;inset:0;z-index:60;width:auto;max-height:none;border-radius:0;border:0;padding-block:18px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  #side.open{display:flex}
+  #protoBtn{display:block;position:fixed;right:max(62px,calc(env(safe-area-inset-right,0px) + 62px));top:calc(17px + env(safe-area-inset-top,0px));z-index:50;background:var(--proto);color:#fff;border:0;border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;box-shadow:0 6px 20px -8px rgba(0,0,0,.5)}
+}
+.gut{padding-left:16px;padding-right:16px}
+
+/* app shell */
+#app{height:100%;display:flex;flex-direction:column}
+.hdr{display:flex;align-items:center;gap:10px;padding-block:14px 10px;border-bottom:1px solid var(--line);background:var(--paper)}
+.hdr h1{font-size:22px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iconbtn{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;flex:none}
+.avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;border:0;flex:none}
+.scroll{flex:1;overflow:auto;padding-block:14px 24px;display:flex;flex-direction:column;gap:14px}
+.tabbar{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface);padding:6px 6px 10px}
+.tab{background:none;border:0;padding:0;display:flex;justify-content:center;color:var(--muted)}
+.tab .tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:68px;padding:6px 10px 5px;border-radius:12px;font-size:11.5px}
+.tab svg{width:22px;height:22px}
+.tab[aria-current]{color:var(--accent)} .tab[aria-current] .tile{background:var(--accent-soft);font-weight:700}
+.badge{position:absolute;top:1px;left:calc(50% + 6px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--missed);color:var(--surface);font-size:11px;font-weight:700;display:grid;place-items:center}
+
+/* components */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card h3{font-size:17px}
+.row2{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.spread{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.stack{display:flex;flex-direction:column;gap:8px}
+.stack-sm{display:flex;flex-direction:column;gap:2px;min-width:0}
+.label{font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:11px 14px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--missed);border-color:var(--missed)}
+.btn.ok{background:var(--kept);border-color:var(--kept);color:var(--surface)}
+.btn.sm{padding:6px 10px;font-size:13px;border-radius:10px}
+.btn.block{width:100%} .btn.grow{flex:1}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg{width:18px;height:18px}
+.link{background:none;border:0;padding:0;color:var(--accent);font-weight:600;text-align:left}
+.self-start{align-self:flex-start}
+.field{display:flex;flex-direction:column;gap:6px}
+.field > span{font-size:13px;font-weight:600}
+.field small{color:var(--muted);font-size:13px}
+.inp{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:16px}
+textarea.inp{min-height:76px;resize:vertical}
+.tcard{cursor:pointer}
+.meta{font-size:12.5px;color:var(--muted)}
+.pen,.meta.pen{color:var(--missed);font-weight:700}
+.due,.meta.due{color:var(--due);font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.c-kept{background:var(--kept-bg);color:var(--kept)}
+.c-missed{background:var(--missed-bg);color:var(--missed)}
+.c-excused{background:var(--excused-bg);color:var(--excused)}
+.c-todo{background:var(--kept);color:var(--paper)}
+.c-soon{background:var(--sunk);color:var(--muted)}
+.c-wait{background:var(--slate-bg);color:var(--slate)}
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.list > * + *{border-top:1px solid var(--line)}
+.rowbtn{display:flex;gap:10px;align-items:center;padding:12px 14px;background:none;border:0;text-align:left;width:100%}
+.rowbtn .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.rowbtn .rt small{color:var(--muted);font-size:12.5px}
+.cards{display:flex;flex-direction:column;gap:8px}
+.cards > .rowbtn{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.cards > .rowbtn::after{content:"\203A";color:var(--muted);font-size:22px;line-height:1;margin-left:2px}
+.bigmoney{font-family:var(--f-mono);font-size:30px;font-weight:500;letter-spacing:-.02em;line-height:1.15}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;min-width:0}
+.alert{border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:8px;border:1px solid}
+.alert.bad{background:var(--missed-bg);border-color:var(--missed)}
+.kico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none}
+.kico svg{width:20px;height:20px}
+.k-excuse{background:var(--slate-bg);color:var(--slate)}
+.k-evidence{background:var(--kept-bg);color:var(--kept)}
+.kind{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;padding:3px 7px;white-space:nowrap}
+.kind svg{width:14px;height:14px}
+.counter{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
+.decide{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 1.3fr;gap:8px;padding-block:10px 4px;background:linear-gradient(to bottom,transparent,var(--paper) 25%)}
+.quote{font-size:16px}
+.big-photo{display:block;width:100%;max-height:340px;object-fit:contain;border-radius:14px;border:1px solid var(--line);background:var(--sunk)}
+
+/* sheets */
+.overlay{position:absolute;inset:0;background:var(--scrim);display:flex;align-items:flex-end;z-index:30}
+.sheet{background:var(--paper);width:100%;max-height:92%;overflow:auto;border-radius:22px 22px 0 0;padding-block:10px 24px;display:flex;flex-direction:column;gap:16px}
+.sheet > *{flex-shrink:0}
+.grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.sheet h2{font-size:20px}
+@media (prefers-reduced-motion:no-preference){.sheet.anim{animation:up .22s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+.steps{display:flex;gap:4px} .steps i{flex:1;height:4px;border-radius:2px;background:var(--line)} .steps i.on{background:var(--accent)}
+.footbar{position:sticky;bottom:-24px;display:flex;flex-direction:column;gap:6px;padding-block:12px 4px;background:linear-gradient(to bottom,transparent,var(--paper) 22%)}
+.opt{display:flex;gap:12px;align-items:center;text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:14px;padding:10px 12px;width:100%;cursor:pointer}
+.opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.opt .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.opt small{color:var(--muted);font-size:12.5px}
+.opt input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.opt.off{opacity:.6;cursor:default;background:var(--paper)}
+.opt input[type=radio]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.wkrow{display:flex;flex-direction:column;gap:4px}
+.wk{font-size:12px;color:var(--muted);font-weight:600}
+.dtiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.dtile{display:flex;flex-direction:column;align-items:center;gap:0;border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:6px 2px;font-size:13px;line-height:1.25}
+.dtile b{font-size:12px;color:var(--muted)}
+.dtile small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.dtile.miss small{color:var(--missed);font-weight:600}
+.dtile[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
+.dtile[aria-pressed=true] b{color:var(--accent)}
+.dtile:disabled{background:var(--paper);opacity:.55;cursor:not-allowed}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600}
+.pill[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.thumb{position:relative}
+.thumb img,.ph-add{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--sunk)}
+.ph-add{display:grid;place-items:center;border-style:dashed;font-size:26px;color:var(--muted)}
+.thumb .remove{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;border:0;background:var(--scrim);color:var(--surface);display:grid;place-items:center;font-size:17px;line-height:1}
+.covrow{display:flex;gap:10px;align-items:flex-start;padding:10px 14px}
+.covrow .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.covrow .rt small{color:var(--muted);font-size:12.5px}
+.covrow.skip b{color:var(--muted);font-weight:600}
+.toast{position:absolute;left:16px;right:16px;top:70px;z-index:40;background:var(--ink);color:var(--paper);border-radius:12px;padding:10px 14px;font-weight:600;font-size:14px}
+.note{border-left:3px solid var(--proto-line);padding-left:10px;font-size:13px;color:var(--muted)}
+
+/* prototype panel */
+#side h2{font-size:19px}
+#side section{display:flex;flex-direction:column;gap:8px}
+.tag{display:inline-block;border:0;cursor:pointer;background:var(--proto);color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.08em;border-radius:5px;padding:2px 6px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--proto-line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:var(--surface);padding:7px 6px;font-size:12.5px;font-weight:600;color:var(--proto)}
+.seg button + button{border-left:1px solid var(--proto-line)}
+.seg button[aria-pressed=true]{background:var(--proto);color:#fff}
+.protobar{display:flex;flex-direction:column;gap:6px;padding:8px;border:1.5px dashed var(--proto-line);border-radius:12px}
+.protobar .tag{align-self:flex-start}
+.beh{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:12px;background:var(--proto-soft)}
+.beh b{font-size:13.5px}
+.beh p{font-size:12.5px;color:var(--muted)}
+.log{font-size:12.5px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto}
+.log div{border-left:2px solid var(--line);padding-left:8px}
+.log .t{font-family:var(--f-mono);color:var(--muted);font-size:11.5px}
+.qs{margin:0;padding-left:18px;font-size:13px;display:flex;flex-direction:column;gap:6px}
+
+/* Added for this prototype: Change kind (amber pencil), diffs, threads, heat maps. */
+:root{--amber:#8a5300;--amber-bg:#fbebcc;--open:#22457a}
+.k-change{background:var(--amber-bg);color:var(--amber)}
+.k-payment{background:var(--missed-bg);color:var(--missed)}
+.alert.info{background:var(--accent-soft);border-color:var(--accent)}
+.alert.amber{background:var(--amber-bg);border-color:var(--amber)}
+.alert.ok{background:var(--kept-bg);border-color:var(--kept)}
+.c-ended{background:var(--sunk);color:var(--muted)}
+.c-change{background:var(--amber-bg);color:var(--amber)}
+.c-open{background:var(--accent-soft);color:var(--accent)}
+.diff{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.diff > div{display:grid;grid-template-columns:96px 1fr;gap:4px 10px;padding:10px 12px;align-items:start}
+.diff > div + div{border-top:1px solid var(--line)}
+.diff dt{color:var(--muted);font-size:13px;margin:0}
+.diff dd{margin:0;min-width:0;display:flex;flex-direction:column;gap:4px}
+.diff s{color:var(--muted)}
+.diff .tagline{font-size:12px;font-weight:600}
+.t-relax{color:var(--amber)} .t-strict{color:var(--kept)} .t-free{color:var(--muted)}
+.steps-nav{display:flex;gap:8px}
+.termrow{display:grid;grid-template-columns:96px 1fr auto;gap:10px;align-items:center;padding:11px 12px}
+.termrow + .termrow{border-top:1px solid var(--line)}
+.termrow dt{color:var(--muted);font-size:13px}
+.termrow dd{margin:0;min-width:0}
+.termrow.changed{background:var(--amber-bg)}
+.termrow.changed.strict{background:var(--kept-bg)}
+.termrow s{color:var(--muted);font-size:13px;display:block}
+.fieldc{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:14px;background:var(--surface);border:1px solid var(--line)}
+.fieldc.changed{border-left:4px solid var(--amber)}
+.fieldc.changed.strict{border-left-color:var(--kept)}
+.fieldc.changed.free{border-left-color:var(--muted)}
+.fieldc .was{font-size:12.5px}
+.daypills{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.daypills .pill{padding:7px 0;text-align:center}
+.remrow{display:flex;gap:8px;align-items:center}
+.thread{display:flex;flex-direction:column;gap:8px}
+.msg{background:var(--surface);border:1px solid var(--line);border-radius:14px 14px 14px 4px;padding:8px 11px;max-width:88%;align-self:flex-start;display:flex;flex-direction:column;gap:2px}
+.msg.mine{align-self:flex-end;background:var(--accent-soft);border-color:var(--accent-soft);border-radius:14px 14px 4px 14px}
+.msg small{color:var(--muted);font-size:11.5px}
+.verdict{border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:4px;font-size:14px;border:1px solid}
+.verdict.relax{background:var(--amber-bg);border-color:var(--amber)}
+.verdict.strict{background:var(--kept-bg);border-color:var(--kept)}
+.verdict.none{background:var(--sunk);border-color:var(--line);color:var(--muted)}
+.decide3{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:8px;padding-block:10px 4px;background:linear-gradient(to bottom,transparent,var(--paper) 25%)}
+details.ended summary{cursor:pointer;font-weight:600;color:var(--muted);padding:6px 2px}
+/* heat maps */
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.hm-scroll{overflow-x:auto;padding-bottom:4px}
+.hm-a{display:grid;grid-auto-flow:column;grid-template-rows:14px repeat(7,15px);gap:3px;width:max-content}
+.cell{width:15px;height:15px;border-radius:4px;background:var(--sunk);border:0;padding:0}
+.cell.none{background:transparent;outline:1px solid var(--sunk);outline-offset:-1px}
+.cell.kept{background:var(--kept)} .cell.missed{background:var(--missed)} .cell.excused{background:#c99a3d}
+.cell.pending{background:var(--slate-bg);outline:1.5px solid var(--slate);outline-offset:-1.5px}
+.cell.open{background:var(--accent-soft);outline:1.5px solid var(--accent);outline-offset:-1.5px}
+.cell.future{background:transparent;outline:1px dashed var(--line);outline-offset:-1px}
+.cell.sel{box-shadow:0 0 0 2px var(--ink)}
+.hm-lbl{font-size:10px;color:var(--muted);line-height:15px;height:15px;white-space:nowrap}
+.hm-a .hm-lbl.mo{line-height:14px;height:14px;width:15px;overflow:visible}
+.hm-a .wk{width:22px;height:22px;border-radius:5px;font-size:9.5px;font-weight:700;color:#fff;display:grid;place-items:center}
+.hm-wrow{display:flex;gap:4px;width:max-content;align-items:flex-end}
+.hm-wcol{display:flex;flex-direction:column;gap:3px;align-items:center}
+.cal{display:flex;flex-direction:column;gap:14px}
+.calm{display:flex;flex-direction:column;gap:6px}
+.calm h4{margin:0;font-family:var(--f-display);font-size:15px}
+.calg{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.calg.wk8{grid-template-columns:repeat(7,1fr) 44px}
+.cald{aspect-ratio:1;max-width:100%;border-radius:8px;border:0;padding:0;font-size:12px;display:grid;place-items:center;background:transparent;color:var(--muted);font-family:var(--f-mono)}
+.cald.kept{background:var(--kept);color:#fff} .cald.missed{background:var(--missed);color:#fff} .cald.excused{background:#c99a3d;color:#fff}
+.cald.pending{background:var(--slate-bg);color:var(--slate);outline:1.5px solid var(--slate);outline-offset:-1.5px}
+.cald.open{background:var(--accent-soft);color:var(--accent);outline:1.5px solid var(--accent);outline-offset:-1.5px}
+.cald.future{outline:1px dashed var(--line);outline-offset:-1px;color:var(--ink)}
+.cald.dot{position:relative;color:var(--ink)}
+.cald.dot::after{content:"";position:absolute;bottom:4px;width:6px;height:6px;border-radius:50%;background:var(--kept)}
+.cald.dot.rej::after{background:var(--missed)}
+.cald.sel{box-shadow:0 0 0 2px var(--ink)}
+.calh{font-size:10.5px;color:var(--muted);text-align:center;font-weight:600}
+.wkbadge{align-self:center;justify-self:stretch;border-radius:8px;font-size:10.5px;font-weight:700;text-align:center;padding:4px 0;color:#fff;border:0}
+.wkbadge.kept{background:var(--kept)} .wkbadge.missed{background:var(--missed)} .wkbadge.excused{background:#c99a3d} .wkbadge.open{background:var(--accent-soft);color:var(--accent)}
+.strip{display:flex;flex-direction:column;gap:5px}
+.srow{display:grid;grid-template-columns:52px 1fr;gap:8px;align-items:center}
+.srow .cells{display:flex;gap:4px;flex-wrap:wrap}
+.srow .cell{width:22px;height:22px;border-radius:6px}
+.srow .wl{font-size:11.5px;color:var(--muted);font-family:var(--f-mono)}
+.wkline{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:9px 12px;background:none;border:0;width:100%;text-align:left}
+.wkline + .wkline{border-top:1px solid var(--line)}
+.dots7{display:flex;gap:3px}
+.dots7 i{width:8px;height:8px;border-radius:50%;background:var(--sunk)}
+.dots7 i.k{background:var(--kept)} .dots7 i.r{background:var(--missed)}
+.hmdetail{font-size:13.5px;padding:8px 11px;border-radius:10px;background:var(--sunk)}
+.qtabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.qtabs button{border:1.5px solid var(--proto-line);background:var(--surface);border-radius:10px;padding:8px 6px;font-size:12.5px;font-weight:700;color:var(--proto);text-align:left;display:flex;flex-direction:column;gap:1px}
+.qtabs button small{font-weight:500;color:var(--muted);font-size:11px}
+.qtabs button[aria-pressed=true]{background:var(--proto);color:#fff}
+.qtabs button[aria-pressed=true] small{color:#ddd5f5}
+.jump{display:flex;flex-wrap:wrap;gap:6px}
+.scroll > *{flex-shrink:0}
+</style>
+
+<div id="stage">
+  <div id="phone"><div id="app"></div></div>
+  <aside id="side" aria-label="Prototype controls"></aside>
+</div>
+<button id="protoBtn" data-act="side">Prototype</button>
+
+<script>
+"use strict";
+// PROTOTYPE, throwaway. Tickets 11 (change requests), 12 (reviewer questions), 17 (heat map, Yesterday)
+// and the Weekly count heat map for 14. Everything lives in memory; Reset or reload to start over.
+
+// ---------- dates and formatting ----------
+const HOUR = 36e5;
+const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MO = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const at = (y, m, d, h = 0, mi = 0) => new Date(y, m - 1, d, h, mi).getTime();
+const pad = n => String(n).padStart(2, "0");
+const key = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const parts = k => k.split("-").map(Number);
+const startOf = k => { const [y, m, d] = parts(k); return new Date(y, m - 1, d).getTime(); };
+const addDays = (k, n) => { const [y, m, d] = parts(k); return key(new Date(y, m - 1, d + n).getTime()); };
+const wday = k => new Date(startOf(k)).getDay();
+const monday = k => addDays(k, -((wday(k) + 6) % 7));
+const fmtDate = k => { const d = new Date(startOf(k)); return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; };
+const fmtShort = k => { const d = new Date(startOf(k)); return `${MO[d.getMonth()]} ${d.getDate()}`; };
+const fmtTime = t => { const d = new Date(t); const h = d.getHours(); return `${h % 12 || 12}:${pad(d.getMinutes())}${h < 12 ? "am" : "pm"}`; };
+const fmtHM = s => { const [h, m] = s.split(":").map(Number); return `${h % 12 || 12}:${pad(m)}${h < 12 ? "am" : "pm"}`; };
+const fmtWhen = t => `${fmtDate(key(t))}, ${fmtTime(t)}`;
+const money = c => "$" + (c % 100 ? (c / 100).toFixed(2) : c / 100);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uniq = a => [...new Set(a)];
+const listNames = a => a.length <= 1 ? (a[0] || "") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
+const clone = o => JSON.parse(JSON.stringify(o));
+const today = () => key(S.now);
+
+// ---------- icons ----------
+const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${d}</svg>`;
+const IC = {
+  today: svg('<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><circle cx="12" cy="15" r="1.6" fill="currentColor"/>'),
+  pacts: svg('<path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M9 11h6M9 14.5h6M9 18h3.5"/>'),
+  review: svg('<rect x="3.5" y="6" width="17" height="13.5" rx="3"/><path d="M8 3.5h8M8.5 12.5l2.5 2.5 4.5-5"/>'),
+  ledgers: svg('<path d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H19M9 8.5h6"/>'),
+  back: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>',
+  camera: svg('<path d="M4 8.5A2 2 0 0 1 6 6.5h2l1.5-2h5l1.5 2h2a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/>'),
+  excuse: svg('<rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4M9.5 12.5l5 5M14.5 12.5l-5 5"/>'),
+  change: svg('<path d="M15.5 4.5l4 4L9 19l-5 1 1-5z"/><path d="M13.5 6.5l4 4"/>'),
+  payment: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M15.5 8.2c-.6-1.2-1.9-1.9-3.6-1.9-2 0-3.4 1-3.4 2.5 0 3.5 7.3 1.9 7.3 5.5 0 1.6-1.6 2.7-3.9 2.7-1.8 0-3.2-.8-3.8-2.1M12 4v16"/></svg>',
+};
+const KIND = { change: "Change", evidence: "Evidence", payment: "Payment", excuse: "Excuse" };
+
+function sample(lines, tint) {
+  const t = lines.map((l, i) => `<text x="24" y="${90 + i * 44}" font-family="system-ui" font-size="${i ? 26 : 34}" font-weight="${i ? 400 : 700}" fill="#17221d">${esc(l)}</text>`).join("");
+  const s = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="480"><rect width="360" height="480" fill="${tint}"/><rect x="0" y="0" width="360" height="40" fill="#00000014"/>${t}</svg>`;
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s);
+}
+
+// ---------- the world ----------
+const PEOPLE = { jordan: "Jordan", sam: "Sam", alex: "Alex" };
+const RECIPIENTS = ["Red Cross", "Doctors Without Borders", "Rival Org"];
+const OWNER = "jordan";
+
+function seedPacts() {
+  return [
+    { id: "gym", name: "Gym", kind: "camera", desc: "A photo of me at the gym, with the date on the screen", sched: { kind: "fixed", days: [1, 3, 5] }, pen: 500, rcp: "Red Cross", rev: ["sam"], rem: ["18:00"], start: "2026-08-03", stage: "active", next: null },
+    { id: "read", name: "Read 20 pages", kind: "camera", desc: "A photo of the page I finished on", sched: { kind: "fixed", days: [0, 1, 2, 3, 4, 5, 6] }, pen: 200, rcp: "Doctors Without Borders", rev: ["alex"], rem: ["21:00"], start: "2026-08-17", stage: "active", next: null },
+    { id: "piano", name: "Piano", kind: "camera", desc: "A photo of the practice log", sched: { kind: "weekly", target: 3 }, pen: 300, rcp: "Red Cross", rev: ["sam", "alex"], rem: [], start: "2026-08-03", stage: "active", next: null },
+    { id: "bed", name: "In bed by midnight", kind: "oura", desc: "", inBedBy: "00:00", sched: { kind: "fixed", days: [0, 1, 2, 3, 4, 5, 6] }, pen: 300, rcp: "Rival Org", rev: ["sam"], rem: ["23:30"], start: "2026-09-07", stage: "active", next: null },
+  ];
+}
+const pact = id => S.pacts.find(p => p.id === id);
+const scheduled = (p, k) => k >= p.start && p.sched.kind === "fixed" && p.sched.days.includes(wday(k));
+const dayText = ds => ds.length === 7 ? "Every day" : [1, 2, 3, 4, 5, 6, 0].filter(d => ds.includes(d)).map(d => WD[d]).join(", ");
+const schedText = p => p.sched.kind === "weekly" ? `${p.sched.target}× per week` : p.kind === "oura" && p.sched.days.length === 7 ? "Every night" : dayText(p.sched.days);
+
+// ---------- history (deterministic pseudo-random outcomes) ----------
+function hash(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+const TRIP = ["2026-10-09", "2026-10-10", "2026-10-11", "2026-10-12", "2026-10-13"];
+// The outcome of a Fixed-days pact on a day: null (not scheduled), future, open, pending, kept, missed, excused.
+function dayOutcome(p, k) {
+  if (!scheduled(p, k)) return null;
+  const t = today();
+  if (k > t) return "future";
+  if (k === t) return p.kind === "oura" ? "future" : "open";
+  if (p.id === "gym" && k === "2026-11-02") return "pending";
+  if (p.id === "bed" && k === addDays(t, -1)) return "kept";
+  if (TRIP.includes(k) && p.id !== "bed") return "excused";
+  if (p.id === "gym" && k === "2026-10-28") return "missed";
+  const r = hash(p.id + k);
+  return r < (p.id === "bed" ? 0.2 : 0.12) ? "missed" : r > 0.985 ? "excused" : "kept";
+}
+const DETAIL = {
+  "gym|2026-10-28": "Sam rejected the photo: “That's the screen from Monday.” $5 to Red Cross.",
+  "gym|2026-11-02": "Photo waiting for Sam.",
+};
+function dayDetail(p, k) {
+  const o = dayOutcome(p, k);
+  const d = DETAIL[`${p.id}|${k}`];
+  const label = { kept: "Kept", missed: "Missed", excused: "Excused", pending: "Not judged yet", open: "Due today", future: "Not open yet" }[o];
+  let extra = d || "";
+  if (!d && o === "missed") extra = p.kind === "oura" ? `In bed at 1:${pad(Math.floor(hash(k) * 50) + 5)}am. ${money(p.pen)} to ${p.rcp}.` : `No photo. ${money(p.pen)} to ${p.rcp}.`;
+  if (!d && o === "excused") extra = TRIP.includes(k) ? "Excuse approved by " + PEOPLE[p.rev[0]] + ": “Away at a wedding.”" : "Excuse approved: “Sick with the flu.”";
+  if (!d && o === "kept" && p.kind === "oura") extra = `In bed at 11:${pad(Math.floor(hash(k + "x") * 50) + 5)}pm.`;
+  return `<b>${fmtDate(k)}${p.kind === "oura" ? " night" : ""}</b> · ${label}${extra ? `<br><span class="muted">${esc(extra)}</span>` : ""}`;
+}
+// Weekly count: sessions per day and the week's outcome.
+function weekSessions(p, wk) {
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const k = addDays(wk, i);
+    if (k >= today()) { out.push(""); continue; }
+    const r = hash(p.id + k);
+    out.push(r < 0.4 ? (r < 0.05 ? "r" : "k") : "");
+  }
+  return out;
+}
+function weekOutcome(p, wk) {
+  const t = today();
+  if (wk > t) return { o: "future" };
+  if (wk < p.start) return { o: null };
+  if (wk === monday("2026-10-09")) return { o: "excused", n: 1 };
+  const s = weekSessions(p, wk), n = s.filter(x => x === "k").length;
+  if (wk === monday(t)) return { o: "open", n };
+  return { o: n >= p.sched.target ? "kept" : "missed", n, short: Math.max(0, p.sched.target - n) };
+}
+function weekDetail(p, wk) {
+  const w = weekOutcome(p, wk);
+  const range = `${fmtShort(wk)} – ${fmtShort(addDays(wk, 6))}`;
+  if (w.o === "open") return `<b>This week, ${range}</b> · ${w.n} of ${p.sched.target} so far`;
+  if (w.o === "excused") return `<b>${range}</b> · Excused<br><span class="muted">Excuse approved by Sam: “Away at a wedding.” Covers the whole week.</span>`;
+  if (w.o === "kept") return `<b>${range}</b> · Kept · ${w.n} of ${p.sched.target}`;
+  return `<b>${range}</b> · Missed · ${w.n} of ${p.sched.target}<br><span class="muted">${w.short} short: ${money(w.short * p.pen)} to ${p.rcp}.</span>`;
+}
+
+// ---------- review items ----------
+let nextId = 1;
+const nid = p => `${p}${nextId++}`;
+function seedItems() {
+  return [
+    { id: "ev1", kind: "evidence", pactId: "gym", owner: OWNER, at: at(2026, 11, 2, 19, 12), status: "pending", thread: [], date: "2026-11-02",
+      photos: [sample(["Planet Fitness", "Check-in", "Mon Nov 2", "7:08pm"], "#e8f0fb")] },
+    { id: "pay1", kind: "payment", rcp: "Red Cross", owner: OWNER, at: at(2026, 11, 1, 10, 5), status: "pending", amount: 1000, note: "Bill from Oct 28",
+      photos: [sample(["Venmo", "Paid @redcross-dc", "$10.00", "Nov 1, 10:04am"], "#e7f3ec")],
+      thread: [{ by: "sam", at: at(2026, 11, 2, 8, 30), text: "Is @redcross-dc really the Red Cross? Their site lists a different handle." }] },
+    { id: "ev2", kind: "evidence", pactId: "read", owner: OWNER, at: at(2026, 11, 3, 7, 40), status: "pending", thread: [], date: "2026-11-03",
+      photos: [sample(["The Power Broker", "p. 412", "…the Triborough Bridge", "Authority…"], "#fdf3e1")] },
+  ];
+}
+function reviewersOf(i) {
+  if (i.kind === "payment") return uniq(S.pacts.filter(p => p.rcp === i.rcp).flatMap(p => p.rev));
+  return pact(i.pactId).rev;
+}
+const awaitingOwner = i => i.thread.length > 0 && i.thread[i.thread.length - 1].by !== i.owner;
+const prio = i => i.kind === "change" ? 0 : 1;
+const reviewable = me => S.items.filter(i => i.status === "pending" && i.owner !== me && reviewersOf(i).includes(me));
+const queueFor = me => reviewable(me).filter(i => !awaitingOwner(i)).sort((a, b) => prio(a) - prio(b) || a.at - b.at);
+const waitingOwnerFor = me => reviewable(me).filter(awaitingOwner).sort((a, b) => a.at - b.at);
+function itemTitle(i) { return i.kind === "payment" ? `${money(i.amount)} to ${i.rcp}` : pact(i.pactId).name; }
+function itemSub(i) {
+  if (i.kind === "evidence") return fmtDate(i.date);
+  if (i.kind === "payment") return i.note || "Payment";
+  return i.end ? "End this pact" : i.changes.map(c => `${c.label} ${c.short}`).join(" · ");
+}
+const KIC = { change: "change", evidence: "camera", payment: "payment", excuse: "excuse" };
+const kicon = k => `<span class="kico k-${k}">${IC[KIC[k]]}</span>`;
+const kbadge = k => `<span class="kind k-${k}">${IC[KIC[k]]}${KIND[k]}</span>`;
+
+// ---------- change classification ----------
+const FIELDS = [
+  ["name", "Name"], ["desc", "Photo shows"], ["days", "Days"], ["pen", "Penalty"], ["rcp", "Recipient"], ["rev", "Reviewers"], ["rem", "Reminders"],
+];
+function termsOf(p) { return { name: p.name, desc: p.desc, days: [...p.sched.days], pen: p.pen, rcp: p.rcp, rev: [...p.rev], rem: [...p.rem] }; }
+function fmtVal(f, v) {
+  if (f === "days") return dayText(v);
+  if (f === "pen") return `${money(v)} per miss`;
+  if (f === "rev") return v.map(r => PEOPLE[r]).join(", ");
+  if (f === "rem") return v.length ? v.map(fmtHM).join(", ") : "None";
+  return v;
+}
+// Each changed field: relax (needs approval), strict (applies from the next day not open yet), free (applies now).
+function classify(before, after) {
+  const out = [];
+  for (const [f, label] of FIELDS) {
+    const a = before[f], b = after[f];
+    if (JSON.stringify(a) === JSON.stringify(b)) continue;
+    let kind, why;
+    if (f === "name") { kind = "free"; why = "Applies now"; }
+    else if (f === "rem") { kind = "free"; why = "Applies now"; }
+    else if (f === "desc") { kind = "relax"; why = "Needs approval: it defines what a photo must show"; }
+    else if (f === "rcp") { kind = "relax"; why = "Needs approval: any change of recipient"; }
+    else if (f === "pen") { kind = b < a ? "relax" : "strict"; why = b < a ? "Needs approval: a lower penalty" : "Stricter"; }
+    else if (f === "days") { const removed = a.some(d => !b.includes(d)); kind = removed ? "relax" : "strict"; why = removed ? "Needs approval: fewer days" : "Stricter"; }
+    else if (f === "rev") {
+      const removed = a.filter(r => !b.includes(r)), added = b.filter(r => !a.includes(r));
+      if (removed.length) { kind = "relax"; why = `Needs approval: removing ${listNames(removed.map(r => PEOPLE[r]))}`; }
+      else { kind = "free"; why = `Applies now. ${listNames(added.map(r => PEOPLE[r]))} hear${added.length === 1 ? "s" : ""} about it`; }
+    }
+    out.push({ f, label, before: a, after: b, kind, why, short: `${short(f, a)} → ${short(f, b)}` });
+  }
+  return out;
+}
+function short(f, v) { return f === "pen" ? money(v) : f === "days" ? dayText(v) : f === "rev" ? v.map(r => PEOPLE[r]).join(", ") : f === "rem" ? (v.map(fmtHM).join(", ") || "none") : `“${String(v).slice(0, 18)}${String(v).length > 18 ? "…" : ""}”`; }
+// The first day of the pact (under the new days) that hasn't opened yet: tomorrow or later.
+function firstNotOpen(days) { let k = addDays(today(), 1); for (let i = 0; i < 8; i++, k = addDays(k, 1)) if (days.includes(wday(k))) return k; return k; }
+function verdict(p, changes) {
+  const relax = changes.filter(c => c.kind === "relax"), strict = changes.filter(c => c.kind === "strict"), free = changes.filter(c => c.kind === "free");
+  const draftRev = S.form?.draft.rev || p.rev;
+  const approvers = uniq([...p.rev, ...draftRev.filter(r => !p.rev.includes(r))]).filter(r => draftRev.includes(r) || p.rev.includes(r));
+  if (!changes.length) return { cls: "none", html: "Nothing changed yet.", button: "Nothing to send", disabled: true };
+  if (relax.length) {
+    const names = listNames(approvers.map(r => PEOPLE[r]));
+    return { cls: "relax", relax: true, names, html: `<b>Needs ${names}'s approval.</b> Until then ${esc(p.name)} keeps its current terms${strict.length ? `, including the ${strict.map(c => c.label.toLowerCase()).join(" and ")} change, since a change that relaxes anything is reviewed as a whole` : ""}.${free.length ? `<br>${listNames(free.map(c => c.f === "rev" ? "the new reviewer" : c.label.toLowerCase()))} change${free.length === 1 ? "s" : ""} now.` : ""}`, button: `Send to ${names}` };
+  }
+  if (strict.length) {
+    const from = firstNotOpen(S.form ? S.form.draft.days : p.sched.days);
+    const todayOpen = scheduled(p, today());
+    return { cls: "strict", html: `<b>Applies without approval from ${fmtDate(from)}.</b>${todayOpen ? ` Today keeps ${money(p.pen)} per miss.` : ""}${free.length ? ` ${listNames(free.map(c => c.f === "rev" ? "The new reviewer" : c.label))} change${free.length === 1 ? "s" : ""} now.` : ""}`, button: "Apply change" };
+  }
+  return { cls: "strict", html: "<b>Applies now.</b> It doesn't change what counts, so no approval.", button: "Apply change" };
+}
+function applyTerms(p, t) { p.name = t.name; p.desc = t.desc; p.sched = { kind: "fixed", days: [...t.days] }; p.pen = t.pen; p.rcp = t.rcp; p.rev = [...t.rev]; p.rem = [...t.rem]; }
+function sendChange() {
+  const p = pact(S.form.pactId), changes = classify(termsOf(p), S.form.draft), v = verdict(p, changes);
+  if (v.disabled) return;
+  const d = S.form.draft;
+  // Name, reminders and added reviewers apply at once, even inside a change that waits.
+  const added = d.rev.filter(r => !p.rev.includes(r));
+  for (const c of changes.filter(c => c.kind === "free")) {
+    if (c.f === "rev") { p.rev = uniq([...p.rev, ...added]); added.forEach(r => notify(r, `Jordan added you as a reviewer of ${p.name}.`)); }
+    else p[c.f] = clone(c.after);
+  }
+  if (v.relax) {
+    const rest = changes.filter(c => c.kind !== "free");
+    const it = { id: nid("cr"), kind: "change", pactId: p.id, owner: OWNER, at: S.now, status: "pending", thread: [], changes: rest, terms: clone(d), note: S.form.note.trim() };
+    S.items.push(it);
+    reviewersOf(it).forEach(r => notify(r, `New change request from Jordan: ${p.name}, ${itemSub(it)}.`));
+    toast(`Sent to ${v.names}`);
+  } else if (changes.some(c => c.kind === "strict")) {
+    p.next = { from: firstNotOpen(d.days), terms: clone({ ...termsOf(p), days: d.days, pen: d.pen }), changes: changes.filter(c => c.kind === "strict") };
+    toast("Change applied");
+  } else toast("Change applied");
+  S.form = null; S.sheet = null; S.stack[S.tab].pop();
+}
+function sendEnd(note) {
+  const p = pact(S.endFor);
+  const it = { id: nid("cr"), kind: "change", pactId: p.id, owner: OWNER, at: S.now, status: "pending", thread: [], changes: [], end: true, note };
+  S.items.push(it);
+  reviewersOf(it).forEach(r => notify(r, `Jordan asked to end ${p.name}.`));
+  S.sheet = null; S.endFor = null;
+  toast(`Sent to ${listNames(p.rev.map(r => PEOPLE[r]))}`);
+}
+function decide(i, approve, reason) {
+  i.status = approve ? "approved" : "rejected"; i.decidedBy = S.me; i.reason = reason;
+  const who = PEOPLE[S.me];
+  if (i.kind === "change") {
+    const p = pact(i.pactId);
+    if (approve && i.end) { p.stage = "ended"; p.endedOn = today(); notify(OWNER, `${who} approved ending ${p.name}. It's Ended.`); }
+    else if (approve) {
+      const from = firstNotOpen(i.terms.days);
+      p.next = { from, terms: clone({ ...termsOf(p), ...pick(i.terms, i.changes.map(c => c.f)) }), changes: i.changes };
+      notify(OWNER, `${who} approved your change to ${p.name}. New terms start ${fmtDate(from)}.`);
+    } else notify(OWNER, `${who} rejected your change to ${p.name}: “${reason}” The terms stay as they are.`);
+  } else notify(OWNER, `${who} ${approve ? "approved" : "rejected"} your ${KIND[i.kind].toLowerCase()} (${itemTitle(i)})${reason ? `: “${reason}”` : ""}.`);
+}
+const pick = (o, ks) => Object.fromEntries(ks.map(k => [k, o[k]]));
+function ask(i, text) {
+  i.thread.push({ by: S.me, at: S.now, text });
+  notify(OWNER, `${PEOPLE[S.me]} asked about your ${KIND[i.kind].toLowerCase()} (${itemTitle(i)}): “${text}”`);
+}
+function reply(i, text) {
+  i.thread.push({ by: OWNER, at: S.now, text });
+  reviewersOf(i).forEach(r => notify(r, `Jordan replied about ${itemTitle(i)}: “${text}” It's back in your queue.`));
+}
+function notify(who, text) { S.log.unshift({ t: S.now, who, text }); }
+function advance(hours) {
+  S.now += hours * HOUR;
+  for (const p of S.pacts) if (p.next && p.next.from <= today()) { applyTerms(p, p.next.terms); p.next = null; }
+}
+
+// ---------- state ----------
+let S;
+function reset(keepView) {
+  const view = keepView && S ? { q: S.q, opt: S.opt, sideOpen: S.sideOpen } : { q: "cr", opt: { cr: "A", ask: "A", heat: "A" }, sideOpen: false };
+  S = { ...view, now: at(2026, 11, 3, 17, 0), me: OWNER, tab: "pacts", stack: { today: [], pacts: [], review: [], ledgers: [] },
+    pacts: seedPacts(), items: seedItems(), log: [], sheet: null, form: null, toast: null, reviewAt: 0, rejecting: null, sel: null };
+  goto(S.q);
+}
+function goto(q) {
+  S.q = q; S.sheet = null; S.form = null; S.rejecting = null; S.sel = null;
+  S.stack = { today: [], pacts: [], review: [], ledgers: [] };
+  if (q === "cr") { S.me = OWNER; S.tab = "pacts"; S.stack.pacts = [{ kind: "pact", id: "gym" }]; }
+  if (q === "ask") { S.me = "sam"; S.tab = "review"; }
+  if (q === "heat") { S.me = OWNER; S.tab = "pacts"; S.stack.pacts = [{ kind: "pact", id: "gym" }]; }
+}
+
+// ---------- screens ----------
+function header(title, back) {
+  return `<header class="hdr gut">${back ? `<button class="iconbtn" data-act="back" aria-label="Back">${IC.back}</button>` : ""}<h1>${esc(title)}</h1><span class="avatar" title="Signed in as ${PEOPLE[S.me]}">${PEOPLE[S.me][0]}</span></header>`;
+}
+function occChip(o) {
+  return { kept: `<span class="chip c-kept">Kept</span>`, missed: `<span class="chip c-missed">Missed</span>`, excused: `<span class="chip c-excused">Excused</span>`, pending: `<span class="chip c-wait">Waiting for approval</span>` }[o] || "";
+}
+
+function todayScreen() {
+  if (S.me !== OWNER) return `<div class="card"><h3>Nothing to do right now</h3><p class="muted">${PEOPLE[S.me]} has no pacts in this prototype. Jordan's items are on the Review tab.</p></div>`;
+  const out = [], t = today();
+  // Alerts: a reviewer's question waiting on Jordan's reply.
+  for (const i of S.items.filter(i => i.status === "pending" && i.owner === OWNER && awaitingOwner(i))) {
+    const q = i.thread[i.thread.length - 1];
+    const what = i.kind === "payment" ? `your ${money(i.amount)} payment to ${i.rcp}` : `your ${KIND[i.kind].toLowerCase()} for ${itemTitle(i)}${i.kind === "evidence" ? `, ${fmtDate(i.date)}` : ""}`;
+    const inline = S.opt.ask === "A";
+    out.push(`<div class="alert info"><b>${PEOPLE[q.by]} asked about ${esc(what)}</b><span>“${esc(q.text)}”</span>
+      <span class="small muted">It's waiting on your reply. ${PEOPLE[q.by]} can still decide it.</span>
+      ${inline ? `<textarea class="inp" id="reply-${i.id}" data-reply="${i.id}" placeholder="Your reply" rows="2"></textarea><div class="row2"><button class="btn sm primary" data-act="sendReply" data-arg="${i.id}" data-live="reply-${i.id}" disabled>Send reply</button><button class="btn sm" data-act="openItem" data-arg="${i.id}">See ${i.kind === "payment" ? "payment" : KIND[i.kind].toLowerCase()}</button></div>`
+        : `<div class="row2"><button class="btn sm primary" data-act="openItem" data-arg="${i.id}">Reply</button></div>`}</div>`);
+  }
+  // To do: Piano this week (Weekly count, ticket 14's card), and today's reading if no photo yet.
+  const piano = pact("piano"), w = weekOutcome(piano, monday(t));
+  out.push(`<section class="stack"><div class="label">To do</div><article class="card tcard" data-act="openPact" data-arg="piano"><div class="spread"><h3>Piano</h3><span class="chip c-todo">To do</span></div><div class="meta pen">${money(piano.pen)}</div><div class="meta">${w.n} of 3 this week · due Sun Nov 8</div><div class="row2"><button class="btn primary" data-act="noop">${IC.camera}Take photo</button></div></article></section>`);
+  out.push(`<section class="stack"><div class="label">Automatic</div><article class="card tcard" data-act="openPact" data-arg="bed"><div class="spread"><h3>In bed by midnight</h3><span class="chip c-soon">Automatic</span></div><div class="meta pen">${money(pact("bed").pen)}</div><div class="meta">Tonight, in bed by 12:00am · 7h 0m</div></article></section>`);
+  const waiting = S.items.filter(i => i.status === "pending" && i.owner === OWNER);
+  if (waiting.length) out.push(`<section class="stack"><div class="label">Waiting for approval</div><div class="cards">${waiting.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${i.id}">${kicon(i.kind)}<span class="rt"><b>${esc(itemTitle(i))}</b><small>${KIND[i.kind]} · ${esc(itemSub(i))}${awaitingOwner(i) ? " · question for you" : ""}</small></span></button>`).join("")}</div></section>`);
+  // Yesterday (ticket 17): how each pact due yesterday did. Weekly count isn't due on a single day.
+  const y = addDays(t, -1);
+  const rows = S.pacts.filter(p => p.stage === "active" && scheduled(p, y)).map(p => {
+    const o = dayOutcome(p, y);
+    const sub = p.kind === "oura" ? `In bed at 11:41pm` : o === "pending" ? "Photo waiting for Sam" : o === "kept" ? "Photo approved" : "";
+    return `<button class="rowbtn" data-act="openPact" data-arg="${p.id}"><span class="rt"><b>${esc(p.name)}</b><small>${esc(sub)}</small></span>${occChip(o)}</button>`;
+  });
+  if (rows.length) out.push(`<section class="stack"><div class="label">Yesterday · ${fmtDate(y)}</div><div class="cards">${rows.join("")}</div></section>`);
+  return out.join("");
+}
+
+function pactsScreen() {
+  const act = S.pacts.filter(p => p.stage === "active"), ended = S.pacts.filter(p => p.stage === "ended");
+  const row = p => `<button class="rowbtn" data-act="openPact" data-arg="${p.id}"><span class="rt"><b>${esc(p.name)}</b><small>${schedText(p)}</small></span><span class="pen">${money(p.pen)}</span></button>`;
+  return `<div class="cards">${act.map(row).join("")}</div><button class="btn self-start" data-act="noop">New pact</button>
+    ${ended.length ? `<details class="ended"><summary>Ended (${ended.length})</summary><div class="cards">${ended.map(row).join("")}</div></details>` : ""}`;
+}
+
+function pactPage(id) {
+  const p = pact(id), mine = S.me === OWNER;
+  const pendingCR = S.items.find(i => i.kind === "change" && i.pactId === p.id && i.status === "pending");
+  const waiting = S.items.filter(i => i.status === "pending" && i.pactId === p.id);
+  const out = [];
+  out.push(`<div class="row2">${p.stage === "ended" ? `<span class="chip c-ended">Ended</span>` : `<span class="chip c-kept">Active</span>`}<span class="muted">${p.kind === "oura" ? "In bed by 12:00am, judged from your ring" : esc(p.desc)}</span></div>`);
+  if (p.next) {
+    const todayOpen = scheduled(p, today()) && today() < p.next.from;
+    out.push(`<div class="alert ok"><b>New terms start ${fmtDate(p.next.from)}.</b>${todayOpen ? `<span>Today keeps ${money(p.pen)} per miss.</span>` : ""}<span class="small">${p.next.changes.map(c => `${c.label}: ${esc(c.short)}`).join(" · ")}</span></div>`);
+  }
+  if (mine && p.stage === "active") {
+    if (pendingCR) out.push(`<p class="small muted">Request change is back once ${listNames(p.rev.map(r => PEOPLE[r]))} decides the change below, or you withdraw it.</p><div class="row2"><button class="btn" data-act="noop">File excuse</button></div>`);
+    else out.push(`<div class="row2"><button class="btn" data-act="noop">File excuse</button><button class="btn" data-act="reqChange" data-arg="${p.id}">Request change</button></div>`);
+  }
+  if (waiting.length) out.push(`<section class="stack"><div class="label">Waiting on</div><div class="cards">${waiting.sort((a, b) => prio(a) - prio(b)).map(i => `<button class="rowbtn" data-act="openItem" data-arg="${i.id}">${kicon(i.kind)}<span class="rt"><b>${esc(itemTitle(i))}</b><small>${KIND[i.kind]} · ${esc(itemSub(i))}</small></span></button>`).join("")}</div></section>`);
+  out.push(`<section class="card"><h3>History</h3>${heatmap(p)}</section>`);
+  out.push(`<section class="card"><h3>Terms</h3><dl class="kv">${p.kind === "oura" ? `<dt>In bed by</dt><dd>12:00am</dd>` : `<dt>Photo shows</dt><dd>${esc(p.desc)}</dd>`}<dt>Schedule</dt><dd>${schedText(p)}</dd><dt>Penalty</dt><dd>${money(p.pen)} per miss</dd><dt>Recipient</dt><dd>${esc(p.rcp)}</dd><dt>${p.rev.length > 1 ? "Reviewers" : "Reviewer"}</dt><dd>${p.rev.map(r => PEOPLE[r]).join(", ")}</dd><dt>Reminders</dt><dd>${fmtVal("rem", p.rem)}</dd></dl></section>`);
+  if (mine && p.stage === "active" && !pendingCR) out.push(`<button class="btn danger self-start" data-act="endPact" data-arg="${p.id}">End pact</button>`);
+  if (p.stage === "ended") out.push(`<p class="small muted">Ended ${fmtDate(p.endedOn)}. It makes no more days. Penalties already judged stay on the ledger.</p>`);
+  return out.join("");
+}
+
+// ---------- heat map (ticket 17; Weekly count for ticket 14) ----------
+const LEGEND = `<div class="legend"><span><i style="background:var(--kept)"></i>Kept</span><span><i style="background:var(--missed)"></i>Missed</span><span><i style="background:#c99a3d"></i>Excused</span><span><i style="background:var(--slate-bg);outline:1.5px solid var(--slate);outline-offset:-1.5px"></i>Not judged yet</span></div>`;
+function selDetail(p) {
+  if (!S.sel || S.sel.p !== p.id) return `<p class="small muted">Tap a ${p.sched.kind === "weekly" ? "week" : "day"} to see what happened.</p>`;
+  return `<div class="hmdetail">${S.sel.week ? weekDetail(p, S.sel.k) : dayDetail(p, S.sel.k)}</div>`;
+}
+function weeksSince(p) { const ws = []; for (let w = monday(p.start); w <= monday(today()); w = addDays(w, 7)) ws.push(w); return ws; }
+function heatmap(p) {
+  const v = S.opt.heat;
+  const body = p.sched.kind === "weekly" ? { A: weeklyA, B: weeklyB, C: weeklyC }[v](p) : { A: gridA, B: calB, C: stripC }[v](p);
+  return `${body}${LEGEND}${selDetail(p)}`;
+}
+const cellBtn = (p, k, o, cls = "cell") => `<button class="${cls} ${o || "none"}${S.sel && S.sel.p === p.id && S.sel.k === k ? " sel" : ""}" data-act="sel" data-arg="${p.id},${k}" title="${fmtDate(k)}" ${o ? "" : "disabled"}></button>`;
+// A: GitHub grid, a column per week, Mon–Sun rows, every week since the pact started. Scrolls sideways.
+function gridA(p) {
+  const ws = weeksSince(p);
+  const lbl = ["", "M", "", "W", "", "F", "", "S"].map((l, i) => `<div class="hm-lbl">${i === 0 ? "" : l}</div>`).join("");
+  const cols = ws.map((w, ci) => {
+    const mo = new Date(startOf(w)).getDate() <= 7 || ci === 0 ? MO[new Date(startOf(w)).getMonth()] : "";
+    return `<div class="hm-lbl mo">${mo}</div>` + [0, 1, 2, 3, 4, 5, 6].map(i => { const k = addDays(w, i); return k < p.start ? `<div></div>` : cellBtn(p, k, dayOutcome(p, k)); }).join("");
+  }).join("");
+  return `<div class="hm-scroll" data-end><div class="hm-a"><div class="hm-lbl"></div>${lbl.slice(lbl.indexOf("</div>") + 6)}${cols}</div></div>`;
+}
+// B: month calendars, newest first, with the pact's days coloured and other days plain.
+function calB(p) {
+  const months = [];
+  let m = today().slice(0, 7);
+  for (let i = 0; i < 3; i++) { months.push(m); const [y, mm] = m.split("-").map(Number); m = mm === 1 ? `${y - 1}-12` : `${y}-${pad(mm - 1)}`; }
+  return `<div class="cal">${months.filter(mm => mm >= p.start.slice(0, 7)).map(mm => {
+    const first = `${mm}-01`, lead = (wday(first) + 6) % 7;
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push(`<div></div>`);
+    for (let k = first; k.slice(0, 7) === mm; k = addDays(k, 1)) {
+      const o = dayOutcome(p, k), d = Number(k.slice(8));
+      cells.push(o ? `<button class="cald ${o}${S.sel && S.sel.p === p.id && S.sel.k === k ? " sel" : ""}" data-act="sel" data-arg="${p.id},${k}">${d}</button>` : `<div class="cald">${d}</div>`);
+    }
+    const [y, mo] = mm.split("-").map(Number);
+    return `<div class="calm"><h4>${["January","February","March","April","May","June","July","August","September","October","November","December"][mo - 1]} ${y}</h4><div class="calg">${["M","T","W","T","F","S","S"].map(x => `<div class="calh">${x}</div>`).join("")}${cells.join("")}</div></div>`;
+  }).join("")}</div><button class="link small" data-act="noop">Earlier months</button>`;
+}
+// C: only the pact's own days, one row per week, newest week on top.
+function stripC(p) {
+  const ws = weeksSince(p).reverse().slice(0, 12);
+  return `<div class="strip">${ws.map(w => `<div class="srow"><span class="wl">${fmtShort(w)}</span><div class="cells">${[0, 1, 2, 3, 4, 5, 6].map(i => addDays(w, i)).filter(k => scheduled(p, k)).map(k => cellBtn(p, k, dayOutcome(p, k))).join("")}</div></div>`).join("")}</div><button class="link small" data-act="noop">Earlier weeks</button>`;
+}
+const wkColor = o => ({ kept: "var(--kept)", missed: "var(--missed)", excused: "#c99a3d", open: "var(--accent)" }[o] || "var(--sunk)");
+function weeklyA(p) {
+  const ws = weeksSince(p);
+  return `<div class="hm-scroll" data-end><div class="hm-wrow">${ws.map(w => { const x = weekOutcome(p, w); return `<div class="hm-wcol"><span class="hm-lbl">${new Date(startOf(w)).getDate() <= 7 ? MO[new Date(startOf(w)).getMonth()] : ""}</span><button class="wk cell ${x.o}${S.sel && S.sel.p === p.id && S.sel.k === w ? " sel" : ""}" style="width:24px;height:24px;color:${x.o === "open" ? "var(--accent)" : "#fff"};font-size:10px;font-weight:700" data-act="selw" data-arg="${p.id},${w}">${x.o === "excused" ? "" : x.n}</button></div>`; }).join("")}</div></div><p class="small muted">One square per week, with how many sessions counted.</p>`;
+}
+function weeklyB(p) {
+  const ws = weeksSince(p).slice(-9);
+  return `<div class="calg wk8">${["M","T","W","T","F","S","S"].map(x => `<div class="calh">${x}</div>`).join("")}<div class="calh">Week</div>${ws.map(w => {
+    const s = w === monday(today()) ? weekSessions(p, w) : weekSessions(p, w), x = weekOutcome(p, w);
+    return [0, 1, 2, 3, 4, 5, 6].map(i => { const k = addDays(w, i); const v = s[i]; return `<div class="cald${v ? " dot" : ""}${v === "r" ? " rej" : ""}" ${k > today() ? 'style="opacity:.35"' : ""}>${Number(k.slice(8))}</div>`; }).join("") +
+      `<button class="wkbadge ${x.o}${S.sel && S.sel.p === p.id && S.sel.k === w ? " sel" : ""}" data-act="selw" data-arg="${p.id},${w}">${x.o === "excused" ? "Exc" : `${x.n}/${p.sched.target}`}</button>`;
+  }).join("")}</div><p class="small muted">A green dot is a counted photo, a red one a rejected photo. The last column is the week.</p>`;
+}
+function weeklyC(p) {
+  const ws = weeksSince(p).reverse().slice(0, 10);
+  return `<div class="list">${ws.map(w => { const x = weekOutcome(p, w), s = weekSessions(p, w);
+    return `<button class="wkline" data-act="selw" data-arg="${p.id},${w}"><span class="stack-sm"><b class="small">${fmtShort(w)} – ${fmtShort(addDays(w, 6))}</b><span class="dots7">${[0, 1, 2, 3, 4, 5, 6].map(i => `<i class="${s[i] || ""}"></i>`).join("")}</span></span>${x.o === "open" ? `<span class="chip c-open">${x.n} of 3 so far</span>` : x.o === "excused" ? `<span class="chip c-excused">Excused</span>` : x.o === "kept" ? `<span class="chip c-kept">Kept · ${x.n} of 3</span>` : `<span class="chip c-missed">Missed · ${x.n} of 3</span>`}</button>`; }).join("")}</div>`;
+}
+
+// ---------- change request form (ticket 11): options A, B, C ----------
+const STEPS = [["goal", "Goal"], ["schedule", "Schedule"], ["penalty", "Penalty"], ["reviewers", "Reviewers"], ["reminders", "Reminders"], ["check", "Check"]];
+function fieldHtml(step, d, p, hints) {
+  const ch = classify(termsOf(p), d), byF = Object.fromEntries(ch.map(c => [c.f, c]));
+  const wrap = (fs, inner) => {
+    if (!hints) return `<div class="stack">${inner}</div>`;
+    const c = fs.map(f => byF[f]).filter(Boolean);
+    const k = c.some(x => x.kind === "relax") ? "" : c.some(x => x.kind === "strict") ? " strict" : " free";
+    return `<div class="fieldc${c.length ? " changed" + k : ""}">${inner}${c.map(x => `<span class="was ${"t-" + x.kind}">Was ${esc(fmtVal(x.f, x.before))} · ${esc(x.why)}</span>`).join("")}</div>`;
+  };
+  if (step === "goal") return wrap(["name"], `<label class="field"><span>Name</span><input class="inp" id="f-name" data-f="name" value="${esc(d.name)}"></label>`) + wrap(["desc"], `<label class="field"><span>What will your photo show?</span><textarea class="inp" id="f-desc" data-f="desc" rows="2">${esc(d.desc)}</textarea></label>`);
+  if (step === "schedule") return wrap(["days"], `<div class="field"><span>Fixed days</span><div class="daypills">${[1, 2, 3, 4, 5, 6, 0].map(x => `<button class="pill" data-act="day" data-arg="${x}" aria-pressed="${d.days.includes(x)}">${WD[x]}</button>`).join("")}</div></div>`);
+  if (step === "penalty") return wrap(["pen"], `<label class="field"><span>Penalty per miss ($)</span><input class="inp" id="f-pen" data-f="pen" inputmode="decimal" value="${d.pen / 100}"></label>`) + wrap(["rcp"], `<label class="field"><span>Recipient</span><select class="inp" id="f-rcp" data-f="rcp">${RECIPIENTS.map(r => `<option ${r === d.rcp ? "selected" : ""}>${r}</option>`).join("")}</select></label>`);
+  if (step === "reviewers") return wrap(["rev"], `<div class="field"><span>Reviewers</span>${["sam", "alex"].map(r => `<label class="opt"><input type="checkbox" data-rev="${r}" ${d.rev.includes(r) ? "checked" : ""}><span class="rt"><b>${PEOPLE[r]}</b><small>${p.rev.includes(r) ? "Reviews this pact now" : "Friend"}</small></span></label>`).join("")}<small>Adding a reviewer applies at once. Removing one needs approval. There's always at least one.</small></div>`);
+  if (step === "reminders") return wrap(["rem"], `<div class="field"><span>Reminders</span>${d.rem.map((r, ix) => `<div class="remrow"><input class="inp" type="time" id="f-rem-${ix}" data-rem="${ix}" value="${r}"><button class="btn sm" data-act="remDel" data-arg="${ix}">Remove</button></div>`).join("")}<button class="btn sm self-start" data-act="remAdd">+ Add reminder</button><small>Sent on Gym days that have no photo yet. Changes apply at once.</small></div>`);
+  return "";
+}
+function diffHtml(changes, terms) {
+  if (!changes.length) return "";
+  return `<dl class="diff">${changes.map(c => `<div><dt>${c.label}</dt><dd><s>${esc(fmtVal(c.f, c.before))}</s><b>${esc(fmtVal(c.f, c.after))}</b>${terms ? "" : `<span class="tagline t-${c.kind}">${esc(c.why)}</span>`}</dd></div>`).join("")}</dl>`;
+}
+function checkFooter(p, changes) {
+  const v = verdict(p, changes);
+  return `<div class="verdict ${v.cls}">${v.html}</div>
+    ${v.relax ? `<label class="field"><span>Why? (optional)</span><textarea class="inp" id="f-note" data-f="note" rows="2" placeholder="e.g. Money is tight this month">${esc(S.form.note)}</textarea></label>` : ""}
+    <button class="btn primary block" data-act="sendChange" ${v.disabled ? "disabled" : ""}>${esc(v.button)}</button>`;
+}
+function changePage() {
+  const f = S.form, p = pact(f.pactId), d = f.draft, changes = classify(termsOf(p), d);
+  const proto = `<div class="protobar"><span class="tag">PROTOTYPE · OPTION ${S.opt.cr}</span><span class="small muted">${{ A: "Walk the steps from Goal, like editing in the edit window. Check shows what changes.", B: "Opens on Check. Change any row; changed rows show the old value.", C: "Every field on one page. Changed fields are marked with what they need." }[S.opt.cr]}</span></div>`;
+  if (S.opt.cr === "A") {
+    const si = STEPS.findIndex(s => s[0] === f.step), [step, label] = STEPS[si];
+    const bar = `<div class="steps">${STEPS.map((s, i) => `<i class="${i <= si ? "on" : ""}"></i>`).join("")}</div><div class="spread"><span class="label">${si + 1} of ${STEPS.length} · ${label}</span></div>`;
+    const body = step === "check"
+      ? `<h2>Check the change</h2>${changes.length ? diffHtml(changes) : ""}${checkFooter(p, changes)}`
+      : `${fieldHtml(step, d, p, false)}`;
+    return `${proto}${bar}${body}<div class="steps-nav">${si > 0 ? `<button class="btn grow" data-act="step" data-arg="${si - 1}">Back</button>` : ""}${step !== "check" ? `<button class="btn primary grow" data-act="step" data-arg="${si + 1}">Next</button>` : ""}</div>`;
+  }
+  if (S.opt.cr === "B") {
+    const byF = Object.fromEntries(changes.map(c => [c.f, c]));
+    const rows = [["goal", ["name", "desc"]], ["schedule", ["days"]], ["penalty", ["pen", "rcp"]], ["reviewers", ["rev"]], ["reminders", ["rem"]]];
+    const list = rows.flatMap(([step, fs]) => fs.map(fl => { const c = byF[fl], lab = FIELDS.find(x => x[0] === fl)[1];
+      return `<div class="termrow${c ? " changed" + (c.kind === "relax" ? "" : " strict") : ""}"><dt>${lab}</dt><dd>${c ? `<s>${esc(fmtVal(fl, c.before))}</s>` : ""}${esc(fmtVal(fl, d[fl]))}${c ? `<span class="tagline t-${c.kind} small" style="display:block">${esc(c.why)}</span>` : ""}</dd><button class="btn sm" data-act="editStep" data-arg="${step}">Change</button></div>`; })).join("");
+    return `${proto}<p class="muted small">Change what you need, then send. Stricter changes apply on their own; anything looser goes to ${listNames(p.rev.map(r => PEOPLE[r]))}.</p><dl class="list" style="margin:0">${list}</dl>${checkFooter(p, changes)}`;
+  }
+  return `${proto}${["goal", "schedule", "penalty", "reviewers", "reminders"].map(s => fieldHtml(s, d, p, true)).join("")}<div class="footbar">${checkFooter(p, changes)}</div>`;
+}
+function stepSheet() {
+  const f = S.form, p = pact(f.pactId);
+  return `<h2>${STEPS.find(s => s[0] === f.editing)[1]}</h2>${fieldHtml(f.editing, f.draft, p, false)}<button class="btn primary block" data-act="doneStep">Done</button>`;
+}
+function endSheet() {
+  const p = pact(S.endFor);
+  return `<h2>End ${esc(p.name)}?</h2><p>Ending needs ${listNames(p.rev.map(r => PEOPLE[r]))}'s approval. Until then ${esc(p.name)} keeps running. Days already judged stay on your ledger.</p>
+    <label class="field"><span>Why? (optional)</span><textarea class="inp" id="f-endnote" rows="2" placeholder="e.g. I've moved and the gym is too far"></textarea></label>
+    <button class="btn danger block" data-act="sendEnd">Send to ${listNames(p.rev.map(r => PEOPLE[r]))}</button><button class="btn block" data-act="closeSheet">Keep it</button>`;
+}
+
+// ---------- items: review (reviewer) and item page (owner) ----------
+function itemBody(i, forReviewer) {
+  const out = [];
+  if (i.kind === "evidence") {
+    const p = pact(i.pactId);
+    out.push(`<article class="card"><div class="spread"><h3>${esc(p.name)}</h3><span class="meta">${fmtDate(i.date)}</span></div><div class="stack-sm"><span class="label">What counts</span><span>${esc(p.desc)}</span></div>${i.photos.map(s => `<img class="big-photo" src="${s}" alt="Photo">`).join("")}</article>`);
+  } else if (i.kind === "payment") {
+    out.push(`<article class="card"><div class="spread"><h3>${money(i.amount)} to ${esc(i.rcp)}</h3><span class="meta">${fmtWhen(i.at)}</span></div>${i.note ? `<span class="quote">“${esc(i.note)}”</span>` : ""}${i.photos.map(s => `<img class="big-photo" src="${s}" alt="Screenshot">`).join("")}</article>`);
+  } else {
+    const p = pact(i.pactId);
+    if (i.end) out.push(`<article class="card"><h3>End ${esc(p.name)}</h3>${i.note ? `<span class="quote">“${esc(i.note)}”</span>` : ""}<p class="small muted">Approving makes ${esc(p.name)} Ended at once: no more days. Penalties already judged stay on ${PEOPLE[OWNER]}'s ledger.</p></article>`);
+    else {
+      const from = firstNotOpen(i.terms.days), todayOpen = scheduled(p, today());
+      out.push(`<article class="card"><div class="spread"><h3>${esc(p.name)}</h3><span class="meta">${fmtWhen(i.at)}</span></div>${i.note ? `<span class="quote">“${esc(i.note)}”</span>` : ""}${diffHtml(i.changes, true)}
+        <p class="small${forReviewer ? "" : " muted"}">${forReviewer ? "Approving" : "If approved, it"} applies from ${fmtDate(from)}, the first ${esc(p.name)} day not open yet.${todayOpen ? ` Today keeps ${money(p.pen)} per miss.` : ""}</p>
+        <details><summary class="small muted">Everything else stays</summary><dl class="kv" style="margin-top:8px">${FIELDS.filter(([f]) => !i.changes.some(c => c.f === f)).map(([f, l]) => `<dt>${l}</dt><dd>${esc(fmtVal(f, termsOf(p)[f]))}</dd>`).join("")}</dl></details></article>`);
+    }
+  }
+  if (i.thread.length) out.push(`<section class="stack"><div class="label">Questions</div><div class="thread">${i.thread.map(m => `<div class="msg ${m.by === S.me ? "mine" : ""}"><small>${PEOPLE[m.by]} · ${fmtWhen(m.at)}</small>${esc(m.text)}</div>`).join("")}</div></section>`);
+  return out.join("");
+}
+function reviewScreen() {
+  const q = queueFor(S.me), w = waitingOwnerFor(S.me);
+  const waitList = w.length ? `<section class="stack"><div class="label">Waiting on Jordan's reply</div><div class="cards">${w.map(i => `<button class="rowbtn" data-act="openItem" data-arg="${i.id}">${kicon(i.kind)}<span class="rt"><b>${esc(itemTitle(i))}</b><small>${KIND[i.kind]} · asked ${fmtWhen(i.thread[i.thread.length - 1].at)}</small></span></button>`).join("")}</div><small class="muted">Out of your queue until Jordan replies. You can still open one and decide it.</small></section>` : "";
+  if (!q.length) return `<div class="card"><h3>Nothing to review</h3><p class="muted">When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here.</p></div>${waitList}`;
+  const ix = Math.min(S.reviewAt, q.length - 1), i = q[ix];
+  return `<div class="spread"><span class="counter">${ix + 1} of ${q.length} to review</span>${q.length > 1 ? `<div class="row2"><button class="btn sm" data-act="rprev">‹ Prev</button><button class="btn sm" data-act="rnext">Skip ›</button></div>` : ""}</div>
+    <div class="row2">${kbadge(i.kind)}<span class="muted">from Jordan</span></div>${itemBody(i, true)}${decideBar(i)}${waitList}`;
+}
+function decideBar(i) {
+  if (S.rejecting === i.id) return `<div class="card"><label class="field"><span>Why are you rejecting it?</span><textarea class="inp" id="rej" data-rej rows="2"></textarea></label>${i.kind === "change" ? `<p class="small">Rejecting keeps ${esc(pact(i.pactId).name)} as it is.</p>` : ""}<div class="row2"><button class="btn grow" data-act="rejCancel">Cancel</button><button class="btn danger grow" data-act="rejSend" data-arg="${i.id}" data-live="rej" disabled>Reject</button></div></div>`;
+  return `<div class="decide3"><button class="btn danger" data-act="rejOpen" data-arg="${i.id}">Reject</button><button class="btn" data-act="askOpen" data-arg="${i.id}">Ask</button><button class="btn ok" data-act="approve" data-arg="${i.id}">Approve</button></div>`;
+}
+function askSheet() {
+  return `<h2>Ask Jordan</h2><p class="small muted">It leaves your queue until Jordan replies, and comes back to every reviewer then. You can still decide it while you wait.</p>
+    <label class="field"><span>Question</span><textarea class="inp" id="f-ask" data-ask rows="3" placeholder="e.g. Which gym is this?"></textarea></label>
+    <button class="btn primary block" data-act="sendAsk" data-live="ask" disabled>Send to Jordan</button>`;
+}
+function itemPage(id) {
+  const i = S.items.find(x => x.id === id);
+  if (!i) return "";
+  const owner = S.me === OWNER;
+  const out = [`<div class="row2">${kbadge(i.kind)}<span class="muted">${i.status === "pending" ? (awaitingOwner(i) ? (owner ? "Waiting on your reply" : "Waiting on Jordan's reply") : `Waiting for ${listNames(reviewersOf(i).map(r => PEOPLE[r]))}`) : i.status === "approved" ? `Approved by ${PEOPLE[i.decidedBy]}` : `Rejected by ${PEOPLE[i.decidedBy]}`}</span></div>`, itemBody(i, !owner)];
+  if (owner && i.status === "pending" && awaitingOwner(i)) out.push(`<div class="stack"><textarea class="inp" id="reply-${i.id}p" data-reply="${i.id}" rows="3" placeholder="Your reply"></textarea><button class="btn primary block" data-act="sendReply" data-arg="${i.id}" data-live="reply-${i.id}p" disabled>Send reply</button></div>`);
+  if (owner && i.status === "pending" && i.kind === "change") out.push(`<button class="btn danger self-start" data-act="withdraw" data-arg="${i.id}">Withdraw change</button><p class="small muted">Withdrawing keeps the terms as they are. Then you can request a different change.</p>`);
+  if (!owner && i.status === "pending" && reviewersOf(i).includes(S.me)) out.push(decideBar(i));
+  return out.join("");
+}
+
+// ---------- render ----------
+const TABS = [["today", "Today", IC.today], ["pacts", "Pacts", IC.pacts], ["review", "Review", IC.review], ["ledgers", "Ledgers", IC.ledgers]];
+function render() {
+  const app = document.getElementById("app");
+  const sc = app.querySelector(".scroll")?.scrollTop || 0;
+  const stack = S.stack[S.tab], page = stack[stack.length - 1];
+  let title = TABS.find(t => t[0] === S.tab)[1], body;
+  if (page?.kind === "pact") { title = pact(page.id).name; body = pactPage(page.id); }
+  else if (page?.kind === "change") { title = `Change ${pact(S.form.pactId).name}`; body = changePage(); }
+  else if (page?.kind === "item") { const i = S.items.find(x => x.id === page.id); title = i ? itemTitle(i) : ""; body = itemPage(page.id); }
+  else body = { today: todayScreen, pacts: pactsScreen, review: reviewScreen, ledgers: () => `<div class="card"><h3>Ledgers</h3><p class="muted">Not part of this prototype.</p></div>` }[S.tab]();
+  const qn = queueFor(S.me).length;
+  let sheet = "";
+  if (S.sheet === "step") sheet = stepSheet();
+  if (S.sheet === "end") sheet = endSheet();
+  if (S.sheet === "ask") sheet = askSheet();
+  app.innerHTML = `${header(title, !!page)}<main class="scroll gut">${body}</main>
+    <nav class="tabbar">${TABS.map(([id, label, ic]) => `<button class="tab" data-act="tab" data-arg="${id}" ${S.tab === id ? `aria-current="${page ? "true" : "page"}"` : ""}><span class="tile">${ic}${label}${id === "review" && qn ? `<span class="badge">${qn}</span>` : ""}</span></button>`).join("")}</nav>
+    ${sheet ? `<div class="overlay" data-act="overlay"><div class="sheet gut${S.sheetFresh ? " anim" : ""}" role="dialog"><div class="grab"></div>${sheet}</div></div>` : ""}
+    ${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}`;
+  app.querySelector(".scroll").scrollTop = S.keepTop ? 0 : sc;
+  S.keepTop = false;
+  app.querySelectorAll("[data-end]").forEach(el => el.scrollLeft = el.scrollWidth);
+  S.sheetFresh = false;
+  renderSide();
+}
+let toastTimer;
+function toast(t) { S.toast = t; clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = null; render(); }, 2600); }
+
+const Q = {
+  cr: { title: "Request change (ticket 11)", tab: "Change", sub: "Ticket 11",
+    intro: "Jordan wants to change Gym. Tap Request change, edit something, and see how the form says whether it needs Sam. Try lowering the penalty (needs approval), adding Thursday (applies Wed), or both. Then switch to Sam and decide it on Review. End pact is at the bottom of the pact page.",
+    opts: [["A", "A · Walk steps"], ["B", "B · Check first"], ["C", "C · One page"]],
+    desc: { A: "The create form, pre-filled, walked from Goal to Check like editing in the edit window. Only the Check step says what needs approval.", B: "Opens straight on Check: every term with a Change button. A changed row shows the old value struck out and what it needs. Faster for a one-field change.", C: "All fields on one scrolling page. Each changed field says what it was and what it needs as you type. The verdict and Send stay at the bottom." },
+    settled: ["One change request at a time per pact. While it waits, Request change is replaced by a line, and the change has Withdraw.", "No stricter changes while one waits: withdraw first.", "An optional “Why?” note, shown in quotes to the reviewer.", "Name, reminders and adding a reviewer apply at once, even inside a change that waits. A new reviewer can then decide it.", "End pact is its own button with a confirm sheet; it's a change request. There's no Delete after the edit window.", "Approving applies from the first day not open yet. The pact page then says “New terms start …”.", "The review item lists only what changed, old struck out, with the rest folded under “Everything else stays”.", "Ended pacts sit collapsed under “Ended” at the bottom of Pacts."] },
+  ask: { title: "Reviewer questions (ticket 12)", tab: "Ask", sub: "Ticket 12",
+    intro: "You're Sam. Sam already asked about Jordan's $10 payment, so it sits under “Waiting on Jordan's reply”. Tap Ask on the Gym photo, then switch to Jordan to reply from Today.",
+    opts: [["A", "A · Reply inline"], ["B", "B · Reply on item"]],
+    desc: { A: "The alert on Today has the question and a reply box right there. A link opens the item if Jordan needs to see what was asked about.", B: "The alert has a Reply button that opens the item: the photo, payment or change, the questions so far, and the reply box." },
+    settled: ["Text-only replies, no photos.", "The item leaves every reviewer's queue and the badge while it waits on Jordan, and is listed below the current item.", "A reviewer can still open it from that list and decide.", "Jordan's reply puts it back in every reviewer's queue and notifies them.", "The thread shows on the review item under “Questions”.", "Change requests come first in the queue, then everything else oldest first."] },
+  heat: { title: "Heat map and Yesterday (ticket 17)", tab: "History", sub: "17 and 14",
+    intro: "Each pact page now has History. Tap a day (or week) to see what happened. Gym is Mon, Wed, Fri; Read is every day; Piano is 3× per week (ticket 14). Yesterday is at the bottom of Today.",
+    opts: [["A", "A · Grid"], ["B", "B · Calendar"], ["C", "C · Rows"]],
+    desc: { A: "GitHub-style: a column per week, every week since the pact started, scrolled to now. Days the pact isn't due are empty squares. Weekly count: one square per week with the session count.", B: "Month calendars, newest first, with dates. The pact's days are coloured; other days are plain numbers. Weekly count: a week column beside each row, and dots for photos.", C: "Only the pact's own days, one row per week, newest on top. Weekly count: a list of weeks with their result." },
+    settled: ["Legend wording: Kept, Missed, Excused, Not judged yet.", "Today's open day is outlined in blue; days ahead are dashed.", "Yesterday lists the pacts due yesterday with their result, linking to the pact. Weekly count pacts aren't in it.", "Bedtime nights show on the day the night starts."] },
+};
+function renderSide() {
+  const side = document.getElementById("side");
+  const keep = side.scrollTop;
+  const seg = (field, opts, cur) => `<div class="seg">${opts.map(([v, l]) => `<button data-act="set" data-arg="${field},${v}" aria-pressed="${cur === v}">${l}</button>`).join("")}</div>`;
+  const q = Q[S.q];
+  side.className = S.sideOpen ? "open" : "";
+  side.innerHTML = `
+    <div class="spread"><span class="tag">PROTOTYPE · TICKETS 11, 12, 17</span><button class="btn sm" data-act="side" style="${innerWidth > 840 ? "display:none" : ""}">Close</button></div>
+    <section><div class="label">Question</div><div class="qtabs">${Object.entries(Q).map(([k, v]) => `<button data-act="q" data-arg="${k}" aria-pressed="${S.q === k}">${v.tab}<small>${v.sub}</small></button>`).join("")}</div></section>
+    <section><h2>${q.title}</h2><p class="muted small">${q.intro}</p></section>
+    <section><div class="label">Options</div>${seg("opt", q.opts, S.opt[S.q])}<p class="small muted">${q.desc[S.opt[S.q]]}</p></section>
+    <section><div class="label">Signed in as</div>${seg("me", [["jordan", "Jordan (owner)"], ["sam", "Sam"], ["alex", "Alex"]], S.me)}<p class="small muted">Sam reviews Gym, Piano and the bedtime pact. Alex reviews Read and Piano.</p></section>
+    ${S.q === "heat" ? `<section><div class="label">Open a pact</div><div class="jump">${S.pacts.map(p => `<button class="btn sm" data-act="jumpPact" data-arg="${p.id}">${esc(p.name)}</button>`).join("")}<button class="btn sm" data-act="jumpToday">Today</button></div></section>` : ""}
+    <section><div class="label">Clock · <span class="num">${fmtWhen(S.now)}</span></div><div class="row2"><button class="btn sm" data-act="adv" data-arg="24">+1 day</button><button class="btn sm" data-act="reset">Reset</button></div><p class="small muted">A day forward applies changes whose start date has come.</p></section>
+    <section><div class="label">Settled here (say if you disagree)</div><ol class="qs">${q.settled.map(s => `<li>${s}</li>`).join("")}</ol></section>
+    <section><div class="label">Notifications sent</div><div class="log">${S.log.map(l => `<div><span class="t">${fmtWhen(l.t)} → ${PEOPLE[l.who]}</span><br>${esc(l.text)}</div>`).join("") || "<span class='muted'>None yet</span>"}</div></section>`;
+  side.scrollTop = keep;
+}
+
+// ---------- events ----------
+function push(page) { S.stack[S.tab].push(page); S.keepTop = true; }
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]"); if (!el || el.disabled) return;
+  const a = el.dataset.act, arg = el.dataset.arg;
+  if (a === "overlay" && e.target !== el) return;
+  switch (a) {
+    case "overlay": case "closeSheet": S.sheet = null; S.endFor = null; if (S.form) S.form.editing = null; break;
+    case "tab": S.tab = arg; S.stack[arg] = []; S.rejecting = null; S.keepTop = true; break;
+    case "back": S.stack[S.tab].pop(); if (S.form && !S.stack[S.tab].some(p => p.kind === "change")) S.form = null; S.keepTop = true; break;
+    case "openPact": push({ kind: "pact", id: arg }); break;
+    case "openItem": push({ kind: "item", id: arg }); S.rejecting = null; break;
+    case "jumpPact": S.tab = "pacts"; S.stack.pacts = [{ kind: "pact", id: arg }]; S.me = OWNER; S.keepTop = true; break;
+    case "jumpToday": S.tab = "today"; S.stack.today = []; S.me = OWNER; S.keepTop = true; break;
+    case "reqChange": {
+      const p = pact(arg);
+      if (p.sched.kind !== "fixed" || p.kind !== "camera") { toast("Try Gym or Read in this prototype."); break; }
+      S.form = { pactId: p.id, draft: termsOf(p), step: "goal", editing: null, note: "" };
+      push({ kind: "change" });
+      break;
+    }
+    case "step": S.form.step = STEPS[+arg][0]; S.keepTop = true; break;
+    case "editStep": S.form.editing = arg; S.sheet = "step"; S.sheetFresh = true; break;
+    case "doneStep": S.sheet = null; S.form.editing = null; break;
+    case "day": { const d = +arg, ds = S.form.draft.days; S.form.draft.days = ds.includes(d) ? ds.filter(x => x !== d) : [...ds, d].sort(); if (!S.form.draft.days.length) S.form.draft.days = [d]; break; }
+    case "remAdd": S.form.draft.rem.push("08:00"); break;
+    case "remDel": S.form.draft.rem.splice(+arg, 1); break;
+    case "sendChange": sendChange(); break;
+    case "endPact": S.endFor = arg; S.sheet = "end"; S.sheetFresh = true; break;
+    case "sendEnd": sendEnd(document.getElementById("f-endnote").value.trim()); break;
+    case "withdraw": { const i = S.items.find(x => x.id === arg); i.status = "withdrawn"; reviewersOf(i).forEach(r => notify(r, `Jordan withdrew the change to ${pact(i.pactId).name}.`)); S.stack[S.tab].pop(); toast("Change withdrawn"); break; }
+    case "rprev": S.reviewAt = Math.max(0, S.reviewAt - 1); break;
+    case "rnext": S.reviewAt = (S.reviewAt + 1) % Math.max(1, queueFor(S.me).length); break;
+    case "approve": { const i = S.items.find(x => x.id === arg); decide(i, true); toast("Approved"); if (S.stack[S.tab].length) S.stack[S.tab].pop(); break; }
+    case "rejOpen": S.rejecting = arg; break;
+    case "rejCancel": S.rejecting = null; break;
+    case "rejSend": { const i = S.items.find(x => x.id === arg); decide(i, false, document.getElementById("rej").value.trim()); S.rejecting = null; toast("Rejected"); if (S.stack[S.tab].length) S.stack[S.tab].pop(); break; }
+    case "askOpen": S.asking = arg; S.sheet = "ask"; S.sheetFresh = true; break;
+    case "sendAsk": { const i = S.items.find(x => x.id === S.asking); ask(i, document.getElementById("f-ask").value.trim()); S.sheet = null; S.asking = null; toast("Sent to Jordan"); if (S.stack[S.tab].length) S.stack[S.tab].pop(); break; }
+    case "sendReply": { const i = S.items.find(x => x.id === arg); const ta = document.querySelector(`[data-reply="${arg}"]`); reply(i, ta.value.trim()); toast(`Sent to ${listNames(reviewersOf(i).map(r => PEOPLE[r]))}`); break; }
+    case "sel": { const [p, k] = arg.split(","); S.sel = S.sel && S.sel.p === p && S.sel.k === k ? null : { p, k }; break; }
+    case "selw": { const [p, k] = arg.split(","); S.sel = S.sel && S.sel.p === p && S.sel.k === k ? null : { p, k, week: true }; break; }
+    case "noop": toast("Not part of this prototype."); break;
+    case "q": goto(arg); break;
+    case "set": {
+      const [f, v] = arg.split(",");
+      if (f === "opt") { S.opt[S.q] = v; if (S.form) { S.form.step = "goal"; S.sheet = null; } }
+      else if (f === "me") { S.me = v; S.tab = v === OWNER ? "today" : "review"; S.stack = { today: [], pacts: [], review: [], ledgers: [] }; S.sheet = null; S.form = null; S.reviewAt = 0; S.rejecting = null; }
+      break;
+    }
+    case "adv": advance(+arg); break;
+    case "reset": reset(true); break;
+    case "side": S.sideOpen = !S.sideOpen; break;
+    default: return;
+  }
+  render();
+});
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (!S.form) return;
+  if (el.dataset.rev) { const set = new Set(S.form.draft.rev); el.checked ? set.add(el.dataset.rev) : set.delete(el.dataset.rev); if (!set.size) { el.checked = true; toast("A pact always keeps at least one reviewer."); return; } S.form.draft.rev = ["sam", "alex"].filter(r => set.has(r)); return render(); }
+  if (el.dataset.rem !== undefined) { S.form.draft.rem[+el.dataset.rem] = el.value; return render(); }
+  if (el.dataset.f === "rcp") { S.form.draft.rcp = el.value; return render(); }
+  if (el.dataset.f === "pen") { const c = Math.round(parseFloat(el.value) * 100); if (c > 0) S.form.draft.pen = c; return render(); }
+  if (el.dataset.f === "name" || el.dataset.f === "desc") { S.form.draft[el.dataset.f] = el.value; return render(); }
+});
+document.addEventListener("input", e => {
+  const el = e.target;
+  if (el.dataset.f === "note" && S.form) S.form.note = el.value;
+  if (el.dataset.reply) document.querySelectorAll(`[data-live="${el.id}"]`).forEach(b => b.disabled = !el.value.trim());
+  if ("rej" in el.dataset) document.querySelectorAll('[data-live="rej"]').forEach(b => b.disabled = !el.value.trim());
+  if ("ask" in el.dataset) document.querySelectorAll('[data-live="ask"]').forEach(b => b.disabled = !el.value.trim());
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && S.sheet) { S.sheet = null; render(); } });
+addEventListener("resize", () => renderSide());
+
+reset();
+render();
+</script>

@@ -17,12 +17,16 @@ Per-pact reminders, sent by push, only when they're useful.
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Mon/Wed/Fri pact, 18:00 reminder → fires Monday at 18:00 when there's no evidence; not when evidence was submitted at 17:00; never on Tuesday.
-- [ ] Bedtime pact, 23:30 reminder → fires every scheduled night.
-- [ ] Advancing from 17:50 to 18:20 in one step drops the 18:00 reminder and records one operator alert; 17:50 to 18:10 sends it.
-- [ ] A reminder fires once, also across a restart right after it fires.
-- [ ] Reminder times are in the owner's timezone.
+- [x] Mon/Wed/Fri pact, 18:00 reminder → fires Monday at 18:00 when there's no evidence; not when evidence was submitted at 17:00; never on Tuesday.
+- [x] Bedtime pact, 23:30 reminder → fires every scheduled night.
+- [x] Advancing from 17:50 to 18:20 in one step drops the 18:00 reminder and records one operator alert; 17:50 to 18:10 sends it.
+- [x] A reminder fires once, also across a restart right after it fires.
+- [x] Reminder times are in the owner's timezone.
 
 ## Out of this ticket
 
 Weekly count reminders (14), One-time dated reminders (15).
+
+## Comments
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/reminders.test.ts. A reminder is a time of day, refused if at or after the due time; on a bedtime pact a time before 18:00 means the morning after. Camera reminders skip a day with evidence; bedtime reminders always fire; neither fires on an excused occurrence. Each pact keeps a cursor, so a restart can't resend. Reminders more than 15 minutes late are dropped with one operator alert per tick. At most 5 per pact. The pact page has its own Change button for reminders, which also works while a change request waits.

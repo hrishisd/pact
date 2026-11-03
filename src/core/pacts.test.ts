@@ -40,31 +40,28 @@ describe("creating a pact", () => {
         name: "Gym",
         description: "Me at the gym, holding today's paper",
         evidenceKind: "camera",
+        inBedBy: null,
+        dueBy: null,
+        startDate: null,
+        endDate: null,
         schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
         penaltyCents: 500,
         recipient: { id: recipient.id, name: "Sam" },
         reviewers: [{ id: reviewer.id, name: "reviewer" }],
+        reminders: [],
         stage: "active",
+        endedAt: null,
         firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
         editWindowClosesAt: s.at("Mon 09:10"),
+        newTerms: null,
         waiting: [],
+        history: expect.objectContaining({ kind: "fixed-days" }),
       },
     });
   });
 });
 
 describe("what a pact needs", () => {
-  test("Oura Ring pacts aren't available yet", async () => {
-    const s = scenario();
-    const { owner, reviewer, recipient } = await ownerWithReviewer(s);
-
-    expect(await owner.createPact(gymPact(recipient.id, reviewer, { evidenceKind: "oura" }))).toEqual({
-      ok: false,
-      reason: "evidence-kind-unavailable",
-    });
-    expect(owner.pacts()).toEqual([]);
-  });
-
   test.each([
     [{ name: "  " }, "blank-name"],
     [{ description: "" }, "blank-description"],
@@ -89,7 +86,10 @@ describe("what a pact needs", () => {
     if (!added.ok) throw new Error(added.reason);
 
     expect(await owner.createPact(gymPact(added.recipient.id, reviewer))).toEqual({ ok: false, reason: "no-timezone" });
-    expect(owner.firstOccurrence({ kind: "fixed-days", days: ["mon"] })).toEqual({ ok: false, reason: "no-timezone" });
+    expect(owner.firstOccurrence({ schedule: { kind: "fixed-days", days: ["mon"] } })).toEqual({
+      ok: false,
+      reason: "no-timezone",
+    });
     expect(owner.pacts()).toEqual([]);
   });
 
@@ -179,6 +179,7 @@ describe("the Pacts tab", () => {
         name: "Gym",
         schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
         penaltyCents: 500,
+        stage: "active",
         editWindowClosesAt: s.at("Mon 09:10"),
       },
       {
@@ -186,6 +187,7 @@ describe("the Pacts tab", () => {
         name: "Reading",
         schedule: { kind: "fixed-days", days: ["sat", "sun"] },
         penaltyCents: 250,
+        stage: "active",
         editWindowClosesAt: s.at("Mon 09:10"),
       },
     ]);
@@ -211,7 +213,7 @@ describe("first occurrence", () => {
     const { owner, reviewer, recipient } = await ownerWithReviewer(s);
     s.setClockTo(createdAt);
 
-    const named = owner.firstOccurrence({ ...daily, days: [...daily.days] });
+    const named = owner.firstOccurrence({ schedule: { ...daily, days: [...daily.days] } });
     const created = await owner.createPact(
       gymPact(recipient.id, reviewer, { schedule: { ...daily, days: [...daily.days] } }),
     );
@@ -227,7 +229,7 @@ describe("first occurrence", () => {
     const { owner } = await ownerWithReviewer(s);
     s.setClockTo("Tue 12:00");
 
-    expect(owner.firstOccurrence({ kind: "fixed-days", days: ["mon", "wed", "fri"] })).toEqual({
+    expect(owner.firstOccurrence({ schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] } })).toEqual({
       ok: true,
       firstOccurrence: { date: "2026-01-07", dueAt: s.at("Thu 00:00") },
     });
@@ -237,7 +239,10 @@ describe("first occurrence", () => {
     const s = scenario();
     const { owner } = await ownerWithReviewer(s);
 
-    expect(owner.firstOccurrence({ kind: "fixed-days", days: [] })).toEqual({ ok: false, reason: "no-days" });
+    expect(owner.firstOccurrence({ schedule: { kind: "fixed-days", days: [] } })).toEqual({
+      ok: false,
+      reason: "no-days",
+    });
   });
 
   test("days are counted in the owner's timezone", async () => {
@@ -248,7 +253,7 @@ describe("first occurrence", () => {
 
     // Auckland's Monday is over, so a Monday-only pact starts next Monday,
     // due at midnight ending it in Auckland (Mon 12 Jan 11:00 UTC).
-    expect(owner.firstOccurrence({ kind: "fixed-days", days: ["mon"] })).toEqual({
+    expect(owner.firstOccurrence({ schedule: { kind: "fixed-days", days: ["mon"] } })).toEqual({
       ok: true,
       firstOccurrence: { date: "2026-01-12", dueAt: new Date("2026-01-12T11:00:00Z") },
     });

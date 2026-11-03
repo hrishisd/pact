@@ -7,7 +7,7 @@ describe("sign-in", () => {
 
     const owner = await s.signIn("owner");
 
-    expect(owner.profile()).toEqual({ email: "owner@example.test", name: "owner", timezone: null });
+    expect(owner.profile()).toEqual({ email: "owner@example.test", name: "owner", timezone: null, connections: [] });
   });
 
   test("signing in again returns the same account", async () => {

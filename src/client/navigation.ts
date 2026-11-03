@@ -24,8 +24,12 @@ export type Page =
   | { kind: "pact"; id: string; name?: string }
   | { kind: "create" }
   | { kind: "edit-pact"; id: string }
+  | { kind: "change-pact"; id: string }
+  | { kind: "change-request"; id: string }
   | { kind: "ledger"; recipientId: string; name?: string }
   | { kind: "excuse"; id: string }
+  | { kind: "evidence"; id: string }
+  | { kind: "payment"; id: string }
   | { kind: "notifications" };
 
 interface Route {
@@ -39,21 +43,28 @@ interface Entry {
   inApp: boolean;
 }
 
-const NEW_PACT_PATH = "/pacts/new";
 const NOTIFICATIONS_PATH = "/notifications";
 
 function pagePath(page: Page): string {
   switch (page.kind) {
     case "create":
-      return NEW_PACT_PATH;
+      return APP_PATHS.newPact;
     case "pact":
       return APP_PATHS.pact(page.id);
     case "edit-pact":
       return APP_PATHS.editPact(page.id);
+    case "change-pact":
+      return APP_PATHS.changePact(page.id);
+    case "change-request":
+      return APP_PATHS.changeRequest(page.id);
     case "ledger":
       return APP_PATHS.ledger(page.recipientId);
     case "excuse":
       return APP_PATHS.excuse(page.id);
+    case "evidence":
+      return APP_PATHS.evidence(page.id);
+    case "payment":
+      return APP_PATHS.payment(page.id);
     case "notifications":
       return NOTIFICATIONS_PATH;
   }
@@ -65,19 +76,22 @@ function routePath(route: Route): string {
 }
 
 function routeFromPath(pathname: string): Route {
-  if (pathname === NEW_PACT_PATH) return { tab: "pacts", stack: [{ kind: "create" }] };
+  if (pathname === APP_PATHS.newPact) return { tab: "pacts", stack: [{ kind: "create" }] };
   if (pathname === NOTIFICATIONS_PATH) return { tab: "today", stack: [{ kind: "notifications" }] };
-  const edit = /^\/pacts\/([^/]+)\/edit$/.exec(pathname);
+  const edit = /^\/pacts\/([^/]+)\/(edit|change)$/.exec(pathname);
   if (edit) {
     const id = decodeURIComponent(edit[1]!);
     return {
       tab: "pacts",
       stack: [
         { kind: "pact", id },
-        { kind: "edit-pact", id },
+        { kind: edit[2] === "edit" ? "edit-pact" : "change-pact", id },
       ],
     };
   }
+  // A change request opens from Today or its pact; a link to one lands on Today.
+  const change = /^\/changes\/([^/]+)$/.exec(pathname);
+  if (change) return { tab: "today", stack: [{ kind: "change-request", id: decodeURIComponent(change[1]!) }] };
   const pact = /^\/pacts\/([^/]+)$/.exec(pathname);
   if (pact) return { tab: "pacts", stack: [{ kind: "pact", id: decodeURIComponent(pact[1]!) }] };
   const ledger = /^\/ledgers\/([^/]+)$/.exec(pathname);
@@ -85,6 +99,12 @@ function routeFromPath(pathname: string): Route {
   // An excuse opens from Today or a pact; a link to one (an approved excuse's push) lands on Today.
   const excuse = /^\/excuses\/([^/]+)$/.exec(pathname);
   if (excuse) return { tab: "today", stack: [{ kind: "excuse", id: decodeURIComponent(excuse[1]!) }] };
+  // Evidence and payment pages open from a reviewer's question, on Today or in its push.
+  const item = /^\/(evidence|payments)\/([^/]+)$/.exec(pathname);
+  if (item) {
+    const id = decodeURIComponent(item[2]!);
+    return { tab: "today", stack: [item[1] === "evidence" ? { kind: "evidence", id } : { kind: "payment", id }] };
+  }
   const tab = (Object.keys(TAB_PATHS) as TabId[]).find((t) => TAB_PATHS[t] === pathname) ?? "today";
   return { tab, stack: [] };
 }

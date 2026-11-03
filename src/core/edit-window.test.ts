@@ -116,7 +116,7 @@ describe("editing a pact in its edit window", () => {
 
     // ...even when the edit, at 23:05, comes under an hour before it.
     s.setClockTo("Mon 23:05");
-    expect(owner.firstOccurrence(terms.schedule, gym)).toEqual({
+    expect(owner.firstOccurrence({ schedule: terms.schedule }, gym)).toEqual({
       ok: true,
       firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
     });
@@ -134,7 +134,7 @@ describe("the first occurrence of an edit", () => {
     const { reviewer, gym } = await newGym(s);
 
     for (const editing of [gym, "no-such-pact"]) {
-      expect(reviewer.firstOccurrence({ kind: "fixed-days", days: ["mon"] }, editing)).toEqual({
+      expect(reviewer.firstOccurrence({ schedule: { kind: "fixed-days", days: ["mon"] } }, editing)).toEqual({
         ok: false,
         reason: "pact-not-found",
       });

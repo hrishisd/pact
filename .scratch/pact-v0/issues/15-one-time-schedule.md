@@ -30,14 +30,22 @@ A Camera pact with a single occurrence by a deadline, e.g. a dentist appointment
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Deadline 30 minutes after creation is refused.
-- [ ] Submit anytime off, deadline Thu: evidence on Tue is refused; evidence on Thu at 15:00, approved → Kept, pact Ended.
-- [ ] Submit anytime off, deadline Thu with due-by 09:00: evidence at 08:59 Thu accepted, at 09:01 refused; no evidence → Missed at 09:00.
-- [ ] Submit anytime on: evidence three days before the deadline, approved → Kept, pact Ended.
-- [ ] No evidence by the deadline → Missed, penalty owed (both settings).
-- [ ] Evidence rejected before the deadline → Missed at once, penalty owed; new evidence is refused.
-- [ ] Today: Submit anytime off shows under Coming up before the date and under To do on it; Submit anytime on shows under To do from creation.
-- [ ] Reminder on Apr 10 at 09:00 fires once; doesn't fire if evidence was already submitted.
-- [ ] Turning Submit anytime on → change request; turning it off applies at once, and evidence already submitted still counts.
-- [ ] Submit anytime off: moving the date earlier or later → change request.
-- [ ] Approved later deadline applies to the open occurrence; an earlier deadline under an hour away is refused.
+- [x] Deadline 30 minutes after creation is refused.
+- [x] Submit anytime off, deadline Thu: evidence on Tue is refused; evidence on Thu at 15:00, approved → Kept, pact Ended.
+- [x] Submit anytime off, deadline Thu with due-by 09:00: evidence at 08:59 Thu accepted, at 09:01 refused; no evidence → Missed at 09:00.
+- [x] Submit anytime on: evidence three days before the deadline, approved → Kept, pact Ended.
+- [x] No evidence by the deadline → Missed, penalty owed (both settings).
+- [x] Evidence rejected before the deadline → Missed at once, penalty owed; new evidence is refused.
+- [x] Today: Submit anytime off shows under Coming up before the date and under To do on it; Submit anytime on shows under To do from creation.
+- [x] Reminder on Apr 10 at 09:00 fires once; doesn't fire if evidence was already submitted.
+- [x] Turning Submit anytime on → change request; turning it off applies at once, and evidence already submitted still counts.
+- [x] Submit anytime off: moving the date earlier or later → change request.
+- [x] Approved later deadline applies to the open occurrence; an earlier deadline under an hour away is refused.
+
+## Notes
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre. Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/one-time.test.ts. Choices the spec left open: the schedule is `{ kind: "one-time", deadline, submitAnytime }` with the time of day in the existing due-by time; the occurrence is dated by the deadline's date, and a change of date re-dates its row, evidence and excuse days; a start or end date on One-time is refused (`invalid-start-date`, `invalid-end-date`) and the form hides them; reminders are "YYYY-MM-DDTHH:MM" (one datetime field each); approved evidence is Kept at the deadline, not at approval; an approval whose new deadline is under an hour away by then is refused (`deadline-too-soon`, the reviewer can still reject); a change request decided after the occurrence was judged leaves the Ended pact as it was; Fixed days, Weekly count and One-time can't be swapped after the edit window; the heat map is one square for the deadline's date; Yesterday includes One-time pacts due yesterday; an excuse dated any day of the Submit anytime window covers the occurrence.
+
+## Comments
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/one-time.test.ts; the choices made where the spec was open are under Notes above. Start and end dates are refused on One-time. Reminders carry their own date. A change of deadline moves the one occurrence, with its evidence and excuse days.

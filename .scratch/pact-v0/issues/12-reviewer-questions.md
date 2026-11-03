@@ -18,6 +18,12 @@ A reviewer can ask the owner about any review item instead of deciding it; the i
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Reviewer asks about evidence → queue count drops to 0 for both reviewers, owner sees the alert → owner replies → back in both queues, alert resolved.
-- [ ] An occurrence whose evidence is waiting on the owner's reply at midnight stays not judged yet.
-- [ ] Queue order: a change request filed after two evidence items still comes first.
+- [x] Reviewer asks about evidence → queue count drops to 0 for both reviewers, owner sees the alert → owner replies → back in both queues, alert resolved.
+- [x] An occurrence whose evidence is waiting on the owner's reply at midnight stays not judged yet.
+- [x] Queue order: a change request filed after two evidence items still comes first.
+
+## Comments
+
+**Prototype round 1 (2026-11-03):** `.scratch/pact-v0/prototype/changes.prototype.html`, Ask tab. Option B was chosen: the Today alert's Reply opens the item's page with the thread and a reply box. Replies are text only. See the spec's Screens (Reviewer questions).
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/reviewer-questions.test.ts. Evidence and payments had no owner page, so this adds /evidence/:id and /payments/:id for the reply thread. Asking notifies only the owner; other reviewers just see the item leave their queue and appear under "Waiting on {owner}'s reply". A new "Comment" notification setting covers questions and replies.

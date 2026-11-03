@@ -1,0 +1,644 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pact Oura Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  PROTOTYPE, throwaway. Ticket 08 (connect Oura and judge a bedtime pact).
+  Answers: how connecting Oura fits the Create pact form, how the in-bed-by time is picked,
+  and what Today shows for a bedtime pact before and after a night is judged.
+  Everything is in memory; Reset or reload to start over.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: the app at phone width on a desk surface, with the prototype panel beside it (behind a button on phones).
+   Palette and components copy src/client/styles.css. v0 is light-only, so this page commits to the light look. */
+:root{
+  --paper:#f1f4f0; --surface:#ffffff; --sunk:#e5eae5; --desk:#d9e0da;
+  --ink:#17221d; --muted:#56645c; --line:#d2dad4;
+  --accent:#22457a; --accent-ink:#ffffff; --accent-soft:#e1e8f3;
+  --kept:#2b7347; --kept-bg:#dceee2;
+  --missed:#ad3227; --missed-bg:#f6dfda;
+  --excused:#8f5c0c; --excused-bg:#f4e8cf;
+  --slate:#4f5675; --slate-bg:#e4e6ef;
+  --due:#b0520a;
+  --scrim:rgba(14,22,18,.45);
+  --proto:#2a2140; --proto-soft:#efeafb; --proto-line:#8c7bc4;
+  --f-display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
+  --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--desk);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{font-family:var(--f-display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:-.01em}
+p{margin:0}
+.muted{color:var(--muted)} .small{font-size:13px} .error{color:var(--missed);font-weight:600}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+#stage{height:100%;display:flex;gap:24px;justify-content:center;align-items:stretch;padding-block:20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+#phone{position:relative;width:400px;max-width:100%;height:100%;max-height:880px;background:var(--paper);border:1px solid var(--line);border-radius:30px;overflow:hidden;box-shadow:0 18px 50px -24px rgba(10,20,15,.45);flex:none}
+#side{width:380px;min-width:0;height:100%;max-height:880px;overflow:auto;background:var(--surface);border:1.5px dashed var(--proto-line);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:18px}
+#protoBtn{display:none}
+@media (max-width:840px){
+  #stage{padding:0}
+  #phone{width:100%;max-height:none;border:0;border-radius:0;box-shadow:none}
+  #side{display:none;position:fixed;inset:0;z-index:60;width:auto;max-height:none;border-radius:0;border:0;padding-block:18px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  #side.open{display:flex}
+  #protoBtn{display:block;position:fixed;right:max(62px,calc(env(safe-area-inset-right,0px) + 62px));top:calc(17px + env(safe-area-inset-top,0px));z-index:50;background:var(--proto);color:#fff;border:0;border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;box-shadow:0 6px 20px -8px rgba(0,0,0,.5)}
+}
+.gut{padding-left:16px;padding-right:16px}
+
+/* app shell */
+#app{height:100%;display:flex;flex-direction:column}
+.hdr{display:flex;align-items:center;gap:10px;padding-block:14px 10px;border-bottom:1px solid var(--line);background:var(--paper)}
+.hdr h1{font-size:22px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iconbtn{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;flex:none}
+.avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;border:0;flex:none}
+.scroll{flex:1;overflow:auto;padding-block:14px 24px;display:flex;flex-direction:column;gap:14px}
+.tabbar{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface);padding:6px 6px 10px}
+.tab{background:none;border:0;padding:0;display:flex;justify-content:center;color:var(--muted)}
+.tab .tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:68px;padding:6px 10px 5px;border-radius:12px;font-size:11.5px}
+.tab svg{width:22px;height:22px}
+.tab[aria-current]{color:var(--accent)} .tab[aria-current] .tile{background:var(--accent-soft);font-weight:700}
+.badge{position:absolute;top:1px;left:calc(50% + 6px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--missed);color:var(--surface);font-size:11px;font-weight:700;display:grid;place-items:center}
+
+/* components */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card h3{font-size:17px}
+.row2{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.spread{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.stack{display:flex;flex-direction:column;gap:8px}
+.stack-sm{display:flex;flex-direction:column;gap:2px;min-width:0}
+.label{font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:11px 14px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.danger{color:var(--missed);border-color:var(--missed)}
+.btn.ok{background:var(--kept);border-color:var(--kept);color:var(--surface)}
+.btn.sm{padding:6px 10px;font-size:13px;border-radius:10px}
+.btn.block{width:100%} .btn.grow{flex:1}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg{width:18px;height:18px}
+.link{background:none;border:0;padding:0;color:var(--accent);font-weight:600;text-align:left}
+.self-start{align-self:flex-start}
+.field{display:flex;flex-direction:column;gap:6px}
+.field > span{font-size:13px;font-weight:600}
+.field small{color:var(--muted);font-size:13px}
+.inp{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px;font-size:16px}
+textarea.inp{min-height:76px;resize:vertical}
+.tcard{cursor:pointer}
+.meta{font-size:12.5px;color:var(--muted)}
+.pen,.meta.pen{color:var(--missed);font-weight:700}
+.due,.meta.due{color:var(--due);font-weight:600}
+.chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.c-kept{background:var(--kept-bg);color:var(--kept)}
+.c-missed{background:var(--missed-bg);color:var(--missed)}
+.c-excused{background:var(--excused-bg);color:var(--excused)}
+.c-todo{background:var(--kept);color:var(--paper)}
+.c-soon{background:var(--sunk);color:var(--muted)}
+.c-wait{background:var(--slate-bg);color:var(--slate)}
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.list > * + *{border-top:1px solid var(--line)}
+.rowbtn{display:flex;gap:10px;align-items:center;padding:12px 14px;background:none;border:0;text-align:left;width:100%}
+.rowbtn .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.rowbtn .rt small{color:var(--muted);font-size:12.5px}
+.cards{display:flex;flex-direction:column;gap:8px}
+.cards > .rowbtn{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.cards > .rowbtn::after{content:"\203A";color:var(--muted);font-size:22px;line-height:1;margin-left:2px}
+.bigmoney{font-family:var(--f-mono);font-size:30px;font-weight:500;letter-spacing:-.02em;line-height:1.15}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;min-width:0}
+.alert{border-radius:14px;padding:11px 13px;display:flex;flex-direction:column;gap:8px;border:1px solid}
+.alert.bad{background:var(--missed-bg);border-color:var(--missed)}
+.kico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none}
+.kico svg{width:20px;height:20px}
+.k-excuse{background:var(--slate-bg);color:var(--slate)}
+.k-evidence{background:var(--kept-bg);color:var(--kept)}
+.kind{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;padding:3px 7px;white-space:nowrap}
+.kind svg{width:14px;height:14px}
+.counter{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
+.decide{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 1.3fr;gap:8px;padding-block:10px 4px;background:linear-gradient(to bottom,transparent,var(--paper) 25%)}
+.quote{font-size:16px}
+.big-photo{display:block;width:100%;max-height:340px;object-fit:contain;border-radius:14px;border:1px solid var(--line);background:var(--sunk)}
+
+/* sheets */
+.overlay{position:absolute;inset:0;background:var(--scrim);display:flex;align-items:flex-end;z-index:30}
+.sheet{background:var(--paper);width:100%;max-height:92%;overflow:auto;border-radius:22px 22px 0 0;padding-block:10px 24px;display:flex;flex-direction:column;gap:16px}
+.sheet > *{flex-shrink:0}
+.grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.sheet h2{font-size:20px}
+@media (prefers-reduced-motion:no-preference){.sheet.anim{animation:up .22s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+.steps{display:flex;gap:4px} .steps i{flex:1;height:4px;border-radius:2px;background:var(--line)} .steps i.on{background:var(--accent)}
+.footbar{position:sticky;bottom:-24px;display:flex;flex-direction:column;gap:6px;padding-block:12px 4px;background:linear-gradient(to bottom,transparent,var(--paper) 22%)}
+.opt{display:flex;gap:12px;align-items:center;text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:14px;padding:10px 12px;width:100%;cursor:pointer}
+.opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.opt .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.opt small{color:var(--muted);font-size:12.5px}
+.opt input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.opt.off{opacity:.6;cursor:default;background:var(--paper)}
+.opt input[type=radio]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.wkrow{display:flex;flex-direction:column;gap:4px}
+.wk{font-size:12px;color:var(--muted);font-weight:600}
+.dtiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.dtile{display:flex;flex-direction:column;align-items:center;gap:0;border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:6px 2px;font-size:13px;line-height:1.25}
+.dtile b{font-size:12px;color:var(--muted)}
+.dtile small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.dtile.miss small{color:var(--missed);font-weight:600}
+.dtile[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
+.dtile[aria-pressed=true] b{color:var(--accent)}
+.dtile:disabled{background:var(--paper);opacity:.55;cursor:not-allowed}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600}
+.pill[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.thumb{position:relative}
+.thumb img,.ph-add{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--sunk)}
+.ph-add{display:grid;place-items:center;border-style:dashed;font-size:26px;color:var(--muted)}
+.thumb .remove{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;border:0;background:var(--scrim);color:var(--surface);display:grid;place-items:center;font-size:17px;line-height:1}
+.covrow{display:flex;gap:10px;align-items:flex-start;padding:10px 14px}
+.covrow .rt{flex:1;min-width:0;display:flex;flex-direction:column}
+.covrow .rt small{color:var(--muted);font-size:12.5px}
+.covrow.skip b{color:var(--muted);font-weight:600}
+.toast{position:absolute;left:16px;right:16px;top:70px;z-index:40;background:var(--ink);color:var(--paper);border-radius:12px;padding:10px 14px;font-weight:600;font-size:14px}
+.note{border-left:3px solid var(--proto-line);padding-left:10px;font-size:13px;color:var(--muted)}
+
+/* prototype panel */
+#side h2{font-size:19px}
+#side section{display:flex;flex-direction:column;gap:8px}
+.tag{display:inline-block;border:0;cursor:pointer;background:var(--proto);color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.08em;border-radius:5px;padding:2px 6px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--proto-line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:var(--surface);padding:7px 6px;font-size:12.5px;font-weight:600;color:var(--proto)}
+.seg button + button{border-left:1px solid var(--proto-line)}
+.seg button[aria-pressed=true]{background:var(--proto);color:#fff}
+.protobar{display:flex;flex-direction:column;gap:6px;padding:8px;border:1.5px dashed var(--proto-line);border-radius:12px}
+.protobar .tag{align-self:flex-start}
+.beh{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:12px;background:var(--proto-soft)}
+.beh b{font-size:13.5px}
+.beh p{font-size:12.5px;color:var(--muted)}
+.log{font-size:12.5px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto}
+.log div{border-left:2px solid var(--line);padding-left:8px}
+.log .t{font-family:var(--f-mono);color:var(--muted);font-size:11.5px}
+.qs{margin:0;padding-left:18px;font-size:13px;display:flex;flex-direction:column;gap:6px}
+</style>
+<style>
+/* Extras for ticket 08, copied from src/client/styles.css where the app has them. */
+.kind-tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kind-tile{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;border:1.5px solid var(--line);background:var(--surface);border-radius:16px;padding:14px 12px;min-height:150px}
+.kind-tile b{font-family:var(--f-display);font-size:17px}
+.kind-tile small{color:var(--muted);font-size:12.5px;line-height:1.35}
+.tico{width:44px;height:44px;border-radius:12px;background:var(--sunk);display:grid;place-items:center;margin-bottom:4px}
+.tico svg{width:24px;height:24px}
+.days{display:flex;gap:6px;flex-wrap:wrap}
+.days button{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-weight:600;font-size:13px}
+.days button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.money-inp{display:flex;align-items:center;gap:8px} .money-inp b{font-size:20px} .money-inp .inp{max-width:140px}
+.footbar{flex-direction:row}
+.alert.info{background:var(--accent-soft);border-color:var(--accent)}
+.k-ring{background:var(--sunk);color:var(--muted)}
+.tcard.auto{background:var(--paper)}
+.lastnight{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:9px;font-size:13px}
+.timechips{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.timechips .pill{padding:8px 4px;text-align:center}
+.time-inp{max-width:170px}
+/* The stand-in for Oura's own authorize page: deliberately not Pact's look. */
+.oura{position:absolute;inset:0;z-index:35;background:#101418;color:#e9edf1;display:flex;flex-direction:column}
+.oura .bar{display:flex;align-items:center;gap:8px;padding:12px 14px;background:#1b2128;font-size:12.5px;color:#9aa6b2}
+.oura .bar .url{flex:1;background:#262e37;border-radius:8px;padding:6px 10px;font-family:var(--f-mono);font-size:11.5px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.oura .body{flex:1;overflow:auto;padding:28px 22px;display:flex;flex-direction:column;gap:16px}
+.oura h2{font-family:system-ui,sans-serif;font-weight:600;font-size:22px;letter-spacing:0}
+.oura .scope{border:1px solid #2c353f;border-radius:12px;padding:12px;display:flex;gap:10px;font-size:14px}
+.oura .scope input{accent-color:#7fb3ff;width:18px;height:18px}
+.oura .btns{display:flex;gap:10px;margin-top:auto}
+.oura .btns button{flex:1;border-radius:999px;padding:12px;font-weight:600;border:1px solid #3a4652;background:none;color:#e9edf1}
+.oura .btns .yes{background:#e9edf1;color:#101418;border-color:#e9edf1}
+.ringmark{width:56px;height:56px;border-radius:50%;border:5px solid #e9edf1;box-shadow:inset 0 0 0 6px #101418,inset 0 0 0 9px #e9edf1}
+.clock{font-family:var(--f-mono);font-size:15px;font-weight:500}
+.btnrow{display:flex;gap:6px;flex-wrap:wrap}
+.btnrow .btn{padding:6px 9px;font-size:12.5px;border-radius:9px}
+</style>
+
+<div id="stage">
+  <div id="phone"><div id="app"></div></div>
+  <aside id="side" aria-label="Prototype controls"></aside>
+</div>
+<button id="protoBtn" data-act="side">Prototype</button>
+
+<script>
+"use strict";
+// ---------- dates and formatting (local time stands in for Oura's timezone) ----------
+const MIN = 6e4, HOUR = 36e5, WINDOW = 48 * HOUR;
+const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MO = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const WEEK = [1, 2, 3, 4, 5, 6, 0]; // Monday first, as in the app
+const DAYBTN = { 1: "Mo", 2: "Tu", 3: "We", 4: "Th", 5: "Fr", 6: "Sa", 0: "Su" };
+const at = (y, m, d, h = 0, mi = 0) => new Date(y, m - 1, d, h, mi).getTime();
+const pad = n => String(n).padStart(2, "0");
+const key = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const startOf = k => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d).getTime(); };
+const addDays = (k, n) => { const [y, m, d] = k.split("-").map(Number); return key(new Date(y, m - 1, d + n).getTime()); };
+const wday = k => new Date(startOf(k)).getDay();
+const fmtDate = k => { const d = new Date(startOf(k)); return `${WD[d.getDay()]} ${MO[d.getMonth()]} ${d.getDate()}`; };
+const clock = mins => { const h = Math.floor(mins / 60) % 24, m = mins % 60; return `${h % 12 || 12}:${pad(m)}${h < 12 ? "am" : "pm"}`; };
+const fmtTime = t => { const d = new Date(t); return clock(d.getHours() * 60 + d.getMinutes()); };
+const fmtWhen = t => `${WD[new Date(t).getDay()]} ${fmtTime(t)}`;
+const timeLeft = ms => { const m = Math.floor(Math.max(0, ms) / MIN), h = Math.floor(m / 60); return h >= 1 ? `${h}h` : `${m % 60}m`; };
+const timeLeftLong = ms => { const m = Math.floor(Math.max(0, ms) / MIN), h = Math.floor(m / 60); return `${h}h ${m % 60}m`; };
+const money = c => "$" + (c % 100 ? (c / 100).toFixed(2) : c / 100);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/** The name filled in from the in-bed-by time: "In bed by midnight", "In bed by 11:30pm", "In bed by 1am". */
+function bedName(mins) {
+  if (mins === 0) return "In bed by midnight";
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `In bed by ${h % 12 || 12}${m ? ":" + pad(m) : ""}${h < 12 ? "am" : "pm"}`;
+}
+
+// ---------- icons ----------
+const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${d}</svg>`;
+const IC = {
+  today: svg('<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><circle cx="12" cy="15" r="1.6" fill="currentColor"/>'),
+  pacts: svg('<path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M9 11h6M9 14.5h6M9 18h3.5"/>'),
+  review: svg('<rect x="3.5" y="6" width="17" height="13.5" rx="3"/><path d="M8 3.5h8M8.5 12.5l2.5 2.5 4.5-5"/>'),
+  ledgers: svg('<path d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H19M9 8.5h6"/>'),
+  back: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>',
+  camera: svg('<path d="M4 8.5A2 2 0 0 1 6 6.5h2l1.5-2h5l1.5 2h2a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/>'),
+  ring: svg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="5"/>'),
+};
+
+// ---------- the world ----------
+const GYM = { id: "gym", name: "Gym", kind: "camera", days: [1, 3, 5], pen: 500, rcp: "Red Cross" };
+const TIME_CHOICES = [22 * 60, 22 * 60 + 30, 23 * 60, 23 * 60 + 30, 0, 30, 60];
+
+let S;
+function reset() {
+  S = {
+    now: at(2026, 11, 2, 15, 0), // Mon Nov 2, 3:00pm
+    v: { connect: "A", time: "A", today: "B", missedLine: "yes" },
+    connected: null, // the time Oura was connected, or null
+    pacts: [],       // bedtime pacts
+    periods: [],     // what Oura has reported so far: { type, start, arrived }
+    tookL: {},       // "pactId|date" → true
+    tab: "today", page: null, sheet: null, create: null, oauth: null,
+    toast: null, log: [], sideOpen: false,
+  };
+}
+function log(text) { S.log.unshift({ t: S.now, text }); }
+function toast(text) { S.toast = text; clearTimeout(toast.h); toast.h = setTimeout(() => { S.toast = null; render(); }, 2600); }
+
+// ---------- judging (the rules from the ticket) ----------
+/** Night D's in-bed-by deadline: an evening time is on D, an after-midnight time is on D+1. */
+const deadline = (p, d) => p.bedBy >= 18 * 60 ? startOf(d) + p.bedBy * MIN : startOf(addDays(d, 1)) + p.bedBy * MIN;
+const windowOf = d => [startOf(d) + 18 * HOUR, startOf(addDays(d, 1)) + 18 * HOUR];
+const scheduled = (p, d) => p.days.includes(wday(d)) && d >= p.first;
+
+/** The first scheduled night whose in-bed-by time is at least 1 hour after creation. */
+function firstNight(days, bedBy, created) {
+  for (let d = key(created - 24 * HOUR), i = 0; i < 9; i++, d = addDays(d, 1))
+    if (days.includes(wday(d)) && deadline({ bedBy }, d) - created >= HOUR) return d;
+  return null;
+}
+
+/** Not judged yet, or Kept/Missed with when and why. Only periods Oura has reported by now count. */
+function judge(p, d) {
+  const [from, to] = windowOf(d);
+  const first = S.periods
+    .filter(x => x.type === "long_sleep" && x.start >= from && x.start < to && x.arrived <= S.now)
+    .sort((a, b) => a.arrived - b.arrived || a.start - b.start)[0];
+  if (first && first.arrived < to) return { outcome: first.start < deadline(p, d) ? "kept" : "missed", bedtime: first.start, judgedAt: first.arrived };
+  if (S.now >= to) return { outcome: "missed", bedtime: null, judgedAt: to };
+  return { outcome: null };
+}
+
+/** Nights from the pact's first up to the one whose window is open now. */
+function nights(p) {
+  const out = [];
+  for (let d = p.first; startOf(d) + 18 * HOUR <= S.now; d = addDays(d, 1)) if (scheduled(p, d)) out.push(d);
+  return out;
+}
+
+/** The night Today calls "tonight": the next scheduled night whose deadline hasn't passed, if it's today's or last night's. */
+function tonight(p) {
+  const today = key(S.now);
+  for (const d of [addDays(today, -1), today]) if (scheduled(p, d) && deadline(p, d) > S.now && judge(p, d).outcome === null) return d;
+  return null;
+}
+
+/** The night whose 6pm-to-6pm window is open now: the night Oura would report next. */
+const currentNight = () => { const t = key(S.now); return S.now >= startOf(t) + 18 * HOUR ? t : addDays(t, -1); };
+
+/** Polling: Oura is called each minute only while some night isn't judged yet. */
+function waitingOnOura() {
+  return S.pacts.flatMap(p => nights(p).filter(d => judge(p, d).outcome === null).map(d => ({ p, d })));
+}
+
+function advanceTo(t) {
+  const before = new Map(S.pacts.flatMap(p => nights(p).map(d => [`${p.id}|${d}`, judge(p, d).outcome])));
+  S.now = t;
+  for (const p of S.pacts) for (const d of nights(p)) {
+    const j = judge(p, d), was = before.get(`${p.id}|${d}`);
+    if (j.outcome && !was) log(`${p.name}, ${fmtDate(d)} night: ${j.outcome === "kept" ? "Kept" : "Missed"}${j.bedtime ? ` (in bed ${fmtTime(j.bedtime)})` : " (no long_sleep by 6pm)"}`);
+  }
+}
+
+/** The ring syncs: Oura now reports these periods (they arrive now). */
+function sync(kind) {
+  const d = currentNight(), base = startOf(d);
+  const add = (type, h, m) => ({ type, start: base + (h * 60 + m) * MIN, arrived: S.now });
+  const sets = {
+    early: [add("long_sleep", 23, 40)],
+    late: [add("long_sleep", 25, 0)],
+    nap: [add("sleep", 19, 0), add("long_sleep", 23, 30)],
+    twice: [add("long_sleep", 25, 10), add("long_sleep", 27, 0)],
+  };
+  const ps = sets[kind];
+  if (ps.some(x => x.start > S.now)) return toast(`Move the clock past ${fmtWhen(Math.max(...ps.map(x => x.start)))} first.`);
+  const before = new Map(S.pacts.map(p => [p.id, judge(p, d).outcome]));
+  S.periods.push(...ps);
+  log(`Ring synced ${fmtDate(d)} night: ${ps.map(x => `${x.type} ${fmtTime(x.start)}`).join(", ")}`);
+  for (const p of S.pacts) if (scheduled(p, d) && !before.get(p.id)) {
+    const j = judge(p, d);
+    if (j.outcome) log(`${p.name}, ${fmtDate(d)} night: ${j.outcome === "kept" ? "Kept" : "Missed"} (in bed ${fmtTime(j.bedtime)})`);
+  }
+}
+
+// ---------- rendering ----------
+const app = () => document.getElementById("app");
+
+function header(title, back) {
+  return `<header class="hdr gut">${back ? `<button class="iconbtn" data-act="back" aria-label="Back">${IC.back}</button>` : ""}<h1>${esc(title)}</h1><button class="avatar" data-act="profile" aria-label="Profile">J</button></header>`;
+}
+function pactCard(p, chip, body, cls = "") {
+  return `<article class="card tcard ${cls}" data-act="openPact" data-arg="${p.id}"><div class="spread"><h3>${esc(p.name)}</h3>${chip}</div><div class="meta pen">${money(p.pen)}</div>${body}</article>`;
+}
+
+function todayView() {
+  const out = [], t = key(S.now);
+  const head = `<div class="stack-sm"><span class="label">${fmtDate(t)}</span><span class="muted small">${fmtTime(S.now)}</span></div>`;
+  // To do: the Camera pact, unchanged from main.
+  if (GYM.days.includes(wday(t)))
+    out.push(pactCard(GYM, `<span class="chip c-todo">To do</span>`, `<div class="meta due">Due at midnight · ${timeLeftLong(startOf(addDays(t, 1)) - S.now)}</div><div class="row2"><button class="btn primary" data-act="noop">${IC.camera}Take photo</button><button class="btn" data-act="noop">File excuse</button></div>`));
+  // Missed: bedtime nights that can still be excused.
+  for (const p of S.pacts) for (const d of nights(p)) {
+    const j = judge(p, d);
+    if (j.outcome !== "missed" || S.tookL[`${p.id}|${d}`] || S.now - j.judgedAt >= WINDOW) continue;
+    const why = S.v.missedLine === "yes" ? (j.bedtime ? ` · in bed at ${fmtTime(j.bedtime)}` : " · no sleep data by 6pm") : "";
+    out.push(pactCard(p, `<span class="chip c-missed">Missed</span>`, `<div class="meta">${fmtDate(d)} night${why}</div><div class="row2"><button class="btn" data-act="noop">File excuse · ${timeLeft(j.judgedAt + WINDOW - S.now)} left</button><button class="btn" data-act="takeL" data-arg="${p.id}|${d}">Take the L</button></div>`));
+  }
+  // Automatic: bedtime pacts that run tonight.
+  const auto = S.pacts.map(p => ({ p, d: tonight(p) })).filter(x => x.d);
+  if (auto.length) {
+    if (S.v.today === "C") {
+      out.push(`<section class="stack"><div class="label">Automatic</div><div class="cards">${auto.map(({ p, d }) => `<button class="rowbtn" data-act="openPact" data-arg="${p.id}"><span class="kico k-ring">${IC.ring}</span><span class="rt"><b>${esc(p.name)}</b><small>Tonight by ${clock(p.bedBy)} · <span class="pen">${money(p.pen)}</span></small></span></button>`).join("")}</div></section>`);
+    } else {
+      for (const { p, d } of auto) {
+        const left = deadline(p, d) - S.now;
+        let body = `<div class="meta">Tonight, in bed by ${clock(p.bedBy)} · ${timeLeftLong(left)}</div>`;
+        if (S.v.today === "B") {
+          const prev = nights(p).filter(n => n < d).pop();
+          const j = prev && judge(p, prev);
+          if (j && j.outcome === "kept" && S.now - j.judgedAt < 24 * HOUR)
+            body += `<div class="lastnight"><span class="chip c-kept">Kept</span><span class="muted">Last night, in bed at ${fmtTime(j.bedtime)}</span></div>`;
+        }
+        out.push(pactCard(p, `<span class="chip c-soon">Automatic</span>`, body, "auto"));
+      }
+    }
+  }
+  const waiting = S.pacts.flatMap(p => nights(p).filter(d => judge(p, d).outcome === null && deadline(p, d) <= S.now).map(d => ({ p, d })));
+  const ghost = waiting.length ? `<div class="note">${waiting.map(({ p, d }) => `${esc(p.name)}, ${fmtDate(d)} night isn't judged yet. Ticket 09 adds the orange No Oura data card here; until then Today shows nothing for it.`).join("<br>")}</div>` : "";
+  if (!out.length) out.push(`<div class="card"><h3>Nothing to do right now</h3></div>`);
+  return header("Today") + `<div class="scroll gut">${head}${ghost}${out.join("")}</div>`;
+}
+
+function pactsView() {
+  const rows = [GYM, ...S.pacts].map(p => `<button class="rowbtn" data-act="openPact" data-arg="${p.id}"><span class="rt"><b>${esc(p.name)}</b><small>${p.days.length === 7 ? "Every day" : WEEK.filter(d => p.days.includes(d)).map(d => WD[d]).join(", ")} · <span class="pen">${money(p.pen)}</span></small></span></button>`).join("");
+  return header("Pacts") + `<div class="scroll gut"><div class="cards">${rows}</div><button class="btn primary block" data-act="newPact">New pact</button></div>`;
+}
+
+function pactPage(id) {
+  const p = id === "gym" ? GYM : S.pacts.find(x => x.id === id);
+  const oura = p.kind === "oura";
+  const terms = `<dl class="kv"><dt>Evidence</dt><dd>${oura ? "Oura Ring" : "Camera photo, checked by a reviewer"}</dd>${oura ? `<dt>In bed by</dt><dd>${clock(p.bedBy)}</dd>` : ""}<dt>Schedule</dt><dd>${p.days.length === 7 ? "Every day" : WEEK.filter(d => p.days.includes(d)).map(d => WD[d]).join(", ")}</dd><dt>Penalty</dt><dd>${money(p.pen)} per miss</dd><dt>Recipient</dt><dd>${esc(p.rcp)}</dd><dt>Reviewer</dt><dd>Sam</dd></dl>`;
+  const desc = oura ? `In bed by ${clock(p.bedBy)}, judged from your ring` : "A photo of me at the gym";
+  return header(p.name, true) + `<div class="scroll gut"><div class="row2"><span class="chip c-kept">Active</span><span class="muted">${desc}</span></div><div class="row2"><button class="btn" data-act="noop">File excuse</button></div><section class="card"><h3>Terms</h3>${terms}</section></div>`;
+}
+
+function placeholder(title) { return header(title) + `<div class="scroll gut"><p class="muted">Not part of this prototype.</p></div>`; }
+
+// ---------- create pact ----------
+function steps(c) { return ["kind", ...(S.v.connect === "B" && c.needsConnect ? ["connect"] : []), "goal", "schedule", "penalty", "reviewers", "check"]; }
+function createView() {
+  const c = S.create, list = steps(c), i = list.indexOf(c.step), f = c.form;
+  let body = "", problem = null;
+  switch (c.step) {
+    case "kind":
+      body = `<h2>How will you prove it?</h2><div class="kind-tiles">
+        <button class="kind-tile" data-act="pickCamera"><span class="tico">${IC.camera}</span><b>Camera</b><small>Take a photo each time. Your reviewer checks it.</small></button>
+        <button class="kind-tile" data-act="pickOura"><span class="tico">${IC.ring}</span><b>Oura Ring</b><small>Your ring reports when you got into bed. Nothing to submit.</small></button>
+      </div><small class="muted">You can't change this later.</small>`;
+      break;
+    case "connect":
+      body = `<h2>Connect your Oura Ring</h2>
+        <div class="card"><div class="row2"><span class="kico k-ring">${IC.ring}</span><b>Oura asks you to sign in and allow Pact.</b></div>
+        <p>Pact checks when your main sleep each night starts. Your reviewers see only Kept or Missed and that time.</p></div>
+        <small class="muted">You'll come back here to set your bedtime.</small>`;
+      break;
+    case "goal": {
+      const field = S.v.time === "A"
+        ? `<input class="inp time-inp" type="time" data-f="bedBy" value="${f.bedBy === null ? "" : pad(Math.floor(f.bedBy / 60)) + ":" + pad(f.bedBy % 60)}">`
+        : `<div class="timechips">${TIME_CHOICES.map(m => `<button class="pill" data-act="bedBy" data-arg="${m}" aria-pressed="${f.bedBy === m && !f.other}">${clock(m)}</button>`).join("")}<button class="pill" data-act="other" aria-pressed="${!!f.other}">Other</button></div>${f.other ? `<input class="inp time-inp" type="time" data-f="bedBy" value="${f.bedBy === null ? "" : pad(Math.floor(f.bedBy / 60)) + ":" + pad(f.bedBy % 60)}">` : ""}`;
+      body = `<h2>Goal</h2>
+        <div class="field"><span>In bed by</span>${field}<small>Late is when your ring says you got into bed after this.</small></div>
+        <label class="field"><span>Name</span><input class="inp" data-f="name" value="${esc(f.name)}" placeholder="e.g. In bed by midnight"><small>Shown on Today.</small></label>`;
+      break;
+    }
+    case "schedule":
+      body = `<h2>Schedule</h2><div class="field"><span>Nights</span><div class="days">${WEEK.map(d => `<button data-act="day" data-arg="${d}" aria-pressed="${f.days.includes(d)}">${DAYBTN[d]}</button>`).join("")}</div></div>
+        <button class="btn sm self-start" data-act="everyDay" aria-pressed="${f.days.length === 7}">Every night</button>
+        <small class="muted">Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed.</small>`;
+      break;
+    case "penalty":
+      body = `<h2>Penalty</h2><label class="field"><span>Penalty per miss</span><span class="money-inp"><b>$</b><input class="inp" data-f="pen" inputmode="decimal" value="${esc(f.pen)}"></span></label>
+        <div class="field"><span>Recipient</span><div class="opt" style="border-color:var(--accent);background:var(--accent-soft)"><span class="rt"><b>Red Cross</b></span></div><small>Who you pay when you miss.</small></div>`;
+      break;
+    case "reviewers":
+      body = `<h2>Reviewers</h2><label class="opt"><input type="checkbox" data-f="sam" ${f.sam ? "checked" : ""}><span class="rt"><b>Sam</b></span></label>
+        <small class="muted">Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses.</small>`;
+      break;
+    case "check": {
+      const first = firstNight(f.days, f.bedBy, S.now);
+      body = `<h2>Check it over</h2><div class="card"><h3>${esc(f.name.trim())}</h3>
+        <dl class="kv"><dt>Evidence</dt><dd>Oura Ring</dd><dt>In bed by</dt><dd>${clock(f.bedBy)}</dd><dt>Schedule</dt><dd>${f.days.length === 7 ? "Every day" : WEEK.filter(d => f.days.includes(d)).map(d => WD[d]).join(", ")}</dd><dt>Penalty</dt><dd>${money(Math.round(+f.pen * 100))} per miss</dd><dt>Recipient</dt><dd>Red Cross</dd><dt>Reviewer</dt><dd>Sam</dd></dl></div>
+        <div class="alert info"><p>It's Active as soon as you create it. The first night is <b>${fmtDate(first)}</b>, in bed by ${clock(f.bedBy)}.</p></div>`;
+      break;
+    }
+  }
+  problem = problemOf(c);
+  const left = i === 0 ? `<button class="btn" data-act="cancelCreate">Cancel</button>` : `<button class="btn" data-act="stepBack">Back</button>`;
+  const right = c.step === "kind" ? "" : c.step === "connect" ? `<button class="btn primary grow" data-act="goOura">Connect Oura</button>` : c.step === "check" ? `<button class="btn primary grow" data-act="createPact">Create pact</button>` : `<button class="btn primary grow" data-act="next">Next</button>`;
+  return header("New pact", true) + `<div class="scroll gut"><div class="stack"><div class="steps">${list.map((s, j) => `<i class="${j <= i ? "on" : ""}"></i>`).join("")}</div><small class="muted">Step ${i + 1} of ${list.length}</small></div>${body}${c.tried && problem ? `<p class="error">${problem}</p>` : ""}<div class="footbar">${left}${right}</div></div>`;
+}
+
+function ouraView() {
+  return `<div class="oura"><div class="bar"><span>🔒</span><span class="url">cloud.ouraring.com/oauth/authorize?client_id=pact&amp;scope=daily</span></div>
+    <div class="body"><div class="ringmark"></div><h2>Pact wants to access your Oura account</h2><p style="color:#9aa6b2;font-size:14px">Stand-in for Oura's page. The real one asks you to sign in first.</p>
+    <label class="scope"><input type="checkbox" checked disabled><span><b>Daily summaries</b><br><span style="color:#9aa6b2">Sleep, activity and readiness</span></span></label>
+    <div class="btns"><button data-act="ouraDeny">Cancel</button><button class="yes" data-act="ouraAllow">Allow</button></div></div></div>`;
+}
+
+function profileSheet() {
+  const conn = S.connected === null ? "" : `<section class="stack"><div class="label">Connections</div><div class="list"><div class="rowbtn"><span class="kico k-ring">${IC.ring}</span><span class="rt"><b>Oura Ring</b><small>Connected ${fmtDate(key(S.connected))}</small></span><span class="chip c-kept">Connected</span></div></div></section>`;
+  return `<div class="overlay" data-act="closeSheet"><div class="sheet gut anim" data-stop><div class="grab"></div><div class="spread"><h2>Profile</h2><button class="link" data-act="closeSheet">Done</button></div>
+    <div class="row2"><span class="avatar">J</span><span class="stack-sm"><b>Jordan Lee</b><span class="muted small">jordan@example.com</span></span></div>
+    <section class="stack"><div class="label">Friends</div><div class="list"><div class="rowbtn"><span class="rt"><b>Sam</b></span></div></div></section>
+    ${conn}
+    <section class="stack"><div class="label">Timezone</div><div class="spread"><span>New York (America)</span><button class="link" data-act="noop">Change</button></div></section>
+    <button class="btn block danger" data-act="noop">Sign out</button></div></div>`;
+}
+
+function render() {
+  let main;
+  if (S.create) main = createView();
+  else if (S.page) main = pactPage(S.page);
+  else main = { today: todayView, pacts: pactsView, review: () => placeholder("Review"), ledgers: () => placeholder("Ledgers") }[S.tab]();
+  const tabs = [["today", "Today"], ["pacts", "Pacts"], ["review", "Review"], ["ledgers", "Ledgers"]];
+  app().innerHTML = `${main}<nav class="tabbar">${tabs.map(([id, l]) => `<button class="tab" data-act="tab" data-arg="${id}" ${S.tab === id ? 'aria-current="page"' : ""}><span class="tile">${IC[id]}${l}</span></button>`).join("")}</nav>
+    ${S.sheet === "profile" ? profileSheet() : ""}${S.oauth ? ouraView() : ""}${S.toast ? `<div class="toast">${esc(S.toast)}</div>` : ""}`;
+  renderSide();
+}
+
+function seg(field, opts) {
+  return `<div class="seg">${opts.map(([v, l]) => `<button data-act="set" data-arg="${field},${v}" aria-pressed="${S.v[field] === v}">${l}</button>`).join("")}</div>`;
+}
+
+function renderSide() {
+  const side = document.getElementById("side");
+  side.classList.toggle("open", S.sideOpen);
+  const wait = waitingOnOura();
+  side.innerHTML = `
+    <div class="spread"><h2>Ticket 08 prototype</h2><button class="btn sm" data-act="side" style="${matchMedia("(max-width:840px)").matches ? "" : "display:none"}">Close</button></div>
+    <p class="small muted">Connect Oura, create an in-bed-by pact, and watch nights get judged. Start on Pacts → New pact, or skip ahead. Everything is in memory.</p>
+    <section><span class="tag">DESIGN CHOICES</span>
+      <div class="beh"><b>1. Tapping Oura Ring with no connection</b>${seg("connect", [["A", "A · Straight to Oura"], ["B", "B · Connect step first"]])}<p>A goes to Oura's page at once. B shows one step that says what Pact reads, then goes.</p></div>
+      <div class="beh"><b>2. Picking the in-bed-by time</b>${seg("time", [["A", "A · Time field"], ["B", "B · Common times"]])}<p>A is the phone's own time picker. B is buttons from 10pm to 1am, plus Other.</p></div>
+      <div class="beh"><b>3. The Automatic card on Today</b>${seg("today", [["A", "A · Tonight"], ["B", "B · + last night"], ["C", "C · Quiet row"]])}<p>B adds a Kept line for last night the day after it syncs (Today has no other sign it worked). C makes it a row under an Automatic label, since there's nothing to do.</p></div>
+      <div class="beh"><b>4. Missed card says why</b>${seg("missedLine", [["yes", "Shows bedtime"], ["no", "Date only"]])}<p>"Tue Nov 3 night · in bed at 1:00am" or "· no sleep data by 6pm".</p></div>
+    </section>
+    <section><span class="tag">CLOCK</span><div class="clock">${fmtDate(key(S.now))}, ${fmtTime(S.now)}</div>
+      <div class="btnrow"><button class="btn" data-act="adv" data-arg="1">+1h</button><button class="btn" data-act="adv" data-arg="3">+3h</button><button class="btn" data-act="to" data-arg="23.5">11:30pm</button><button class="btn" data-act="to" data-arg="8">Next 8am</button><button class="btn" data-act="to" data-arg="18">Next 6pm</button></div></section>
+    <section><span class="tag">OURA</span>
+      <p class="small">${S.connected === null ? "Not connected." : `Connected. ${wait.length ? `<b>Polling every minute</b>: ${wait.map(w => fmtDate(w.d) + " night").join(", ")} not judged yet.` : "No calls: nothing waiting on Oura."}`}</p>
+      <p class="small muted">The ring syncs ${fmtDate(currentNight())} night now, reporting:</p>
+      <div class="btnrow"><button class="btn" data-act="sync" data-arg="early">long_sleep 11:40pm</button><button class="btn" data-act="sync" data-arg="late">long_sleep 1:00am</button><button class="btn" data-act="sync" data-arg="nap">nap 7pm + long_sleep 11:30pm</button><button class="btn" data-act="sync" data-arg="twice">long_sleep 1:10am + 3:00am</button></div></section>
+    <section><span class="tag">SHORTCUTS</span><div class="btnrow"><button class="btn" data-act="skip">Connected, pact made (every night, 12:00am)</button><button class="btn" data-act="reset">Reset</button></div></section>
+    <section><span class="tag">WHAT HAPPENED</span><div class="log">${S.log.map(l => `<div><span class="t">${fmtWhen(l.t)}</span><br>${esc(l.text)}</div>`).join("") || `<p class="muted small">Nothing yet.</p>`}</div></section>
+    <section><span class="tag">FOR LATER</span><ul class="qs">
+      <li>The Oura page opens outside the installed app. Coming back reloads Pact, so the form saves where it was and returns to the Goal step.</li>
+      <li>No Oura data, check now and disconnection are ticket 09.</li></ul></section>`;
+}
+
+// ---------- actions ----------
+function newForm() { return { bedBy: null, name: "", named: false, days: [], pen: "5", sam: true, other: false }; }
+function problemOf(c) {
+  const f = c.form;
+  switch (c.step) {
+    case "goal": return f.bedBy === null ? "Pick a time." : !f.name.trim() ? "Give it a name." : null;
+    case "schedule": return f.days.length ? null : "Pick at least one night.";
+    case "penalty": return +f.pen > 0 ? null : "Enter an amount, like 5 or 2.50.";
+    case "reviewers": return f.sam ? null : "Pick at least one reviewer.";
+    default: return null;
+  }
+}
+function goStep(dir) {
+  const c = S.create, list = steps(c), i = list.indexOf(c.step);
+  if (dir > 0 && problemOf(c)) { c.tried = true; return; }
+  c.tried = false;
+  const j = i + dir;
+  if (j < 0) { S.create = null; return; }
+  c.step = list[j];
+  if (c.step === "connect" && S.connected !== null) c.step = list[j + dir] ?? "kind";
+}
+function makePact(f) {
+  const p = { id: "p" + (S.pacts.length + 1), kind: "oura", name: f.name.trim(), bedBy: f.bedBy, days: [...f.days], pen: Math.round(+f.pen * 100), rcp: "Red Cross", created: S.now };
+  p.first = firstNight(p.days, p.bedBy, S.now);
+  S.pacts.push(p);
+  log(`Created ${p.name}. First night ${fmtDate(p.first)}.`);
+  return p;
+}
+function nextAt(hour) {
+  let t = startOf(key(S.now)) + hour * HOUR;
+  if (t <= S.now) t = startOf(addDays(key(S.now), 1)) + hour * HOUR;
+  return t;
+}
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  if (el.dataset.act === "closeSheet" && e.target.closest("[data-stop]") && !e.target.closest("button[data-act=closeSheet]")) return;
+  const arg = el.dataset.arg;
+  switch (el.dataset.act) {
+    case "tab": S.tab = arg; S.page = null; S.create = null; break;
+    case "back": if (S.create) goStep(-1); else S.page = null; break;
+    case "openPact": S.page = arg; break;
+    case "profile": S.sheet = "profile"; break;
+    case "closeSheet": S.sheet = null; break;
+    case "newPact": S.create = { step: "kind", form: newForm(), needsConnect: S.connected === null }; break;
+    case "cancelCreate": S.create = null; break;
+    case "pickCamera": toast("Camera works as on main. It isn't part of this prototype."); break;
+    case "pickOura":
+      S.create.needsConnect = S.connected === null;
+      if (S.connected !== null) S.create.step = "goal";
+      else if (S.v.connect === "A") S.oauth = true;
+      else S.create.step = "connect";
+      break;
+    case "goOura": S.oauth = true; break;
+    case "ouraAllow": S.oauth = null; S.connected = S.now; S.create.step = "goal"; log("Oura connected"); toast("Oura connected"); break;
+    case "ouraDeny": S.oauth = null; S.create.step = "kind"; break;
+    case "stepBack": goStep(-1); break;
+    case "next": goStep(1); break;
+    case "bedBy": { const f = S.create.form; f.bedBy = +arg; f.other = false; if (!f.named) f.name = bedName(f.bedBy); break; }
+    case "other": S.create.form.other = true; break;
+    case "day": { const f = S.create.form, d = +arg; f.days = f.days.includes(d) ? f.days.filter(x => x !== d) : [...f.days, d]; break; }
+    case "everyDay": { const f = S.create.form; f.days = f.days.length === 7 ? [] : [...WEEK]; break; }
+    case "createPact": makePact(S.create.form); S.create = null; S.tab = "today"; S.page = null; toast("Pact created"); break;
+    case "takeL": S.tookL[arg] = true; break;
+    case "noop": toast("Works as on main. Not part of this prototype."); break;
+    case "set": { const [f, v] = arg.split(","); S.v[f] = v; break; }
+    case "adv": advanceTo(S.now + +arg * HOUR); break;
+    case "to": advanceTo(nextAt(+arg)); break;
+    case "sync":
+      if (S.connected === null) { toast("Connect Oura first."); break; }
+      sync(arg); break;
+    case "skip":
+      reset(); S.connected = S.now; makePact({ name: "In bed by midnight", bedBy: 0, days: [...WEEK], pen: "5" }); break;
+    case "reset": reset(); break;
+    case "side": S.sideOpen = !S.sideOpen; break;
+    default: return;
+  }
+  render();
+});
+document.addEventListener("input", e => {
+  const el = e.target, f = S.create?.form;
+  if (!f || !el.dataset.f) return;
+  if (el.dataset.f === "name") { f.name = el.value; f.named = el.value.trim() !== "" && el.value !== bedName(f.bedBy ?? -1); return; }
+  if (el.dataset.f === "pen") { f.pen = el.value; return; }
+  if (el.dataset.f === "bedBy") {
+    if (!el.value) return;
+    const [h, m] = el.value.split(":").map(Number);
+    f.bedBy = h * 60 + m;
+    if (!f.named) { f.name = bedName(f.bedBy); const n = document.querySelector('[data-f="name"]'); if (n) n.value = f.name; }
+  }
+});
+document.addEventListener("change", e => {
+  const el = e.target, f = S.create?.form;
+  if (f && el.dataset.f === "sam") { f.sam = el.checked; }
+});
+
+reset();
+render();
+</script>

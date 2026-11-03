@@ -24,15 +24,21 @@ After the edit window, an owner can change an Active pact: stricter changes appl
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Spec example: raising the penalty at 3pm Thursday on a daily pact → Thursday still costs the old amount, Friday the new.
-- [ ] Lowering the penalty → change request; old amount applies until approved, then from the next occurrence not yet open.
-- [ ] Recipient change, description change and reviewer removal each create a change request.
-- [ ] Penalty raised and a day removed in one change → one change request; nothing applies until approved.
-- [ ] Rejected change → terms unchanged.
-- [ ] Removing the only reviewer is refused; adding one notifies them at once.
-- [ ] Approved end → Ended, no further occurrences; already-judged penalties stay on the ledger.
-- [ ] A pending change request survives a restart.
+- [x] Spec example: raising the penalty at 3pm Thursday on a daily pact → Thursday still costs the old amount, Friday the new.
+- [x] Lowering the penalty → change request; old amount applies until approved, then from the next occurrence not yet open.
+- [x] Recipient change, description change and reviewer removal each create a change request.
+- [x] Penalty raised and a day removed in one change → one change request; nothing applies until approved.
+- [x] Rejected change → terms unchanged.
+- [x] Removing the only reviewer is refused; adding one notifies them at once.
+- [x] Approved end → Ended, no further occurrences; already-judged penalties stay on the ledger.
+- [x] A pending change request survives a restart.
 
 ## Notes
 
 - Trap: `#pactsToJudge` in `src/core/core.ts` selects every pact with no filter on `stage`, so judging keeps adding a penalty for an Ended pact, and setting `stage = 'ended'` alone doesn't stop it. `#judgingReached` also calls it and throws if the pact is missing, so a filter inside it isn't enough on its own.
+
+## Comments
+
+**Prototype round 1 (2026-11-03):** `.scratch/pact-v0/prototype/changes.prototype.html`, Change tab. Option B (open on Check, Change per row) was chosen. Also settled: one waiting change request per pact, withdrawable; no stricter change while one waits (withdraw first); an optional "Why?" note; name, reminders and adding a reviewer apply at once even inside a waiting change; End pact is its own button and sheet, and there's no Delete after the edit window. The spec's Screens (Request change, Waiting change request, End pact, Change request review item) and Rules (Creation and change) hold the details.
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/change-requests.test.ts. Earlier terms are kept per pact, so an occurrence judged after a change costs its own day's penalty and goes to its own day's recipient. Ending a pact is a change request and is blocked while another waits. Known gap: while a change request waits, the core allows renaming and adding a reviewer, but the pact page has no button for them yet (the spec screen replaces Request change entirely).

@@ -46,6 +46,11 @@ export function weekdayOf(date: LocalDate): Weekday {
   return WEEKDAYS[(new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7] as Weekday;
 }
 
+/** The Monday of `date`'s Mon–Sun week. */
+export function mondayOf(date: LocalDate): LocalDate {
+  return addDays(date, -WEEKDAYS.indexOf(weekdayOf(date)));
+}
+
 /**
  * The first instant of `date` in `timezone`. That's its midnight, except where
  * the clocks jump forward at midnight (as in Chile): midnight never happens

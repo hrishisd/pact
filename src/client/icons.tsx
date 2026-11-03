@@ -101,3 +101,11 @@ export const ExcuseIcon = () => (
     <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4M9.5 12.5l5 5M14.5 12.5l-5 5" />
   </svg>
 );
+
+/** The Change kind: a pencil. */
+export const PencilIcon = () => (
+  <svg {...common}>
+    <path d="M15.5 4.5l4 4L9 19l-5 1 1-5z" />
+    <path d="M13.5 6.5l4 4" />
+  </svg>
+);

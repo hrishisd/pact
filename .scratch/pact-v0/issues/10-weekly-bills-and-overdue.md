@@ -28,11 +28,15 @@ Turn penalties into one bill per recipient every Wednesday at 6pm, due a week la
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Penalties judged Mon–Sun → all on Wednesday 18:00's bill, including Sunday night's bedtime judged Monday 18:00.
-- [ ] A penalty judged Tuesday (excuse window still open Wednesday 18:00) waits for the next Wednesday.
-- [ ] A held penalty released by a rejected excuse lands on the next bill; an earlier bill is unchanged.
-- [ ] No penalties → no bill and no notification.
-- [ ] Bill unpaid at its due time → alert and daily reminder; a pending payment covering it removes the alert and stops reminders; that payment rejected → alert returns.
-- [ ] Reviewers notified on first overdue, not again for six days, again on day seven.
-- [ ] Catching up after hours of downtime in one advance creates the bills and overdue states it missed.
-- [ ] Today shows no money before a bill exists, and the bill's To do card afterwards.
+- [x] Penalties judged Mon–Sun → all on Wednesday 18:00's bill, including Sunday night's bedtime judged Monday 18:00.
+- [x] A penalty judged Tuesday (excuse window still open Wednesday 18:00) waits for the next Wednesday.
+- [x] A held penalty released by a rejected excuse lands on the next bill; an earlier bill is unchanged.
+- [x] No penalties → no bill and no notification.
+- [x] Bill unpaid at its due time → alert and daily reminder; a pending payment covering it removes the alert and stops reminders; that payment rejected → alert returns.
+- [x] Reviewers notified on first overdue, not again for six days, again on day seven.
+- [x] Catching up after hours of downtime in one advance creates the bills and overdue states it missed.
+- [x] Today shows no money before a bill exists, and the bill's To do card afterwards.
+
+## Comments
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/bills.test.ts. The Sunday-bedtime case relies on the boundary (judged Mon 18:00, window closes exactly at Wed 18:00) and has no dedicated test yet. Held penalties show only "Held while an excuse waits for approval", with no bill marker, since their bill isn't known until the excuse is decided. Ledgers show one status line in priority order: overdue, then bill due, then awaiting approval.

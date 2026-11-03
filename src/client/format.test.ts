@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseCents } from "./format.ts";
+import { describe, expect, it, test } from "vitest";
+import { clockText, formatDueAt, inBedByName, parseCents } from "./format.ts";
 
 describe("parseCents", () => {
   it.each([
@@ -17,5 +17,29 @@ describe("parseCents", () => {
 
   it.each(["", ".", "$", "1.234", "abc", "-1"])("refuses %j", (text) => {
     expect(parseCents(text)).toBeNull();
+  });
+});
+
+describe("bedtimes", () => {
+  test.each([
+    ["00:00", "12:00am", "In bed by midnight"],
+    ["23:30", "11:30pm", "In bed by 11:30pm"],
+    ["01:00", "1:00am", "In bed by 1am"],
+    ["22:00", "10:00pm", "In bed by 10pm"],
+    ["12:00", "12:00pm", "In bed by 12pm"],
+  ])("%s reads %s, and names the pact %s", (time, clock, name) => {
+    expect(clockText(time)).toBe(clock);
+    expect(inBedByName(time)).toBe(name);
+  });
+});
+
+describe("formatDueAt", () => {
+  test.each([
+    ["2026-01-21T23:00:00.000Z", "America/New_York", "Wed Jan 21 at 6pm"],
+    ["2026-01-21T23:30:00.000Z", "America/New_York", "Wed Jan 21 at 6:30pm"],
+    ["2026-01-22T05:00:00.000Z", "America/New_York", "Thu Jan 22 at 12am"],
+    ["2026-01-21T05:00:00.000Z", "Pacific/Auckland", "Wed Jan 21 at 6pm"],
+  ])("%s in %s reads %s", (instant, timeZone, text) => {
+    expect(formatDueAt(instant, timeZone)).toBe(text);
   });
 });

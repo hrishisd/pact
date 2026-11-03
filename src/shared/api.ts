@@ -6,6 +6,16 @@ import type {
   AcceptInviteResult,
   AcceptMissResult,
   AddRecipientResult,
+  AskOwnerResult,
+  EvidenceResult,
+  PaymentResult,
+  ReplyResult,
+  ChangePactResult,
+  ChangePreviewResult,
+  ChangeRequestResult,
+  PactChange,
+  RequestEndResult,
+  WithdrawChangeRequestResult,
   CreatePactResult,
   DeletePactResult,
   EditPactResult,
@@ -75,6 +85,14 @@ export const INVITE_REQUIRED_PATH = "/invite-required";
  */
 export const INVITE_TOKEN_SIGN_IN_KEY = "inviteToken";
 
+/**
+ * How connecting Oura went, on the new pact form's URL after Oura's callback:
+ * `/pacts/new?oura=connected`, `cancelled` (the owner said no on Oura's page),
+ * `failed`, or `unavailable` (Oura isn't set up on this server).
+ */
+export const OURA_RESULT_PARAM = "oura";
+export type OuraResult = "connected" | "cancelled" | "failed" | "unavailable";
+
 /** The client route of an invite link; the SPA renders it. */
 export function invitePath(token: string): string {
   return `/invite/${token}`;
@@ -90,12 +108,20 @@ export function inviteTokenFromPath(pathname: string): string | null {
 export const APP_PATHS = {
   today: "/",
   pacts: "/pacts",
+  newPact: "/pacts/new",
   review: "/review",
   ledgers: "/ledgers",
   pact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}`,
   editPact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}/edit`,
+  /** Request change: the pact's terms, each with Change. */
+  changePact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}/change`,
+  changeRequest: (changeRequestId: string) => `/changes/${encodeURIComponent(changeRequestId)}`,
   ledger: (recipientId: string) => `/ledgers/${encodeURIComponent(recipientId)}`,
   excuse: (excuseId: string) => `/excuses/${encodeURIComponent(excuseId)}`,
+  /** Evidence's page, for its owner: where a reviewer's question about it opens. */
+  evidence: (evidenceId: string) => `/evidence/${encodeURIComponent(evidenceId)}`,
+  /** A payment's page, for its owner: where a reviewer's question about it opens. */
+  payment: (paymentId: string) => `/payments/${encodeURIComponent(paymentId)}`,
 } as const;
 
 /**
@@ -105,6 +131,10 @@ export const APP_PATHS = {
  */
 export const API_PATHS = {
   me: "/api/me",
+  /** A browser visit, not JSON: redirects to Oura's authorize page. */
+  ouraConnect: "/api/oura/connect",
+  /** Where Oura sends the browser back; it redirects to the new pact form with OURA_RESULT_PARAM. */
+  ouraCallback: "/api/oura/callback",
   timezone: "/api/me/timezone",
   today: "/api/today",
   invites: "/api/invites",
@@ -127,6 +157,16 @@ export const API_PATHS = {
    * 404 an unknown photo does.
    */
   photo: <T extends string>(photoId: T) => `/api/photos/${photoId}` as const,
+  /** POST: what sending a change to the pact would do (the Request change verdict). */
+  changePreview: <T extends string>(pactId: T) => `/api/pacts/${pactId}/change/preview` as const,
+  /** POST: change the pact after its edit window. */
+  changePact: <T extends string>(pactId: T) => `/api/pacts/${pactId}/change` as const,
+  /** POST: ask to end the pact. */
+  endPact: <T extends string>(pactId: T) => `/api/pacts/${pactId}/end` as const,
+  /** GET: a change request's page, for its owner. */
+  changeRequest: <T extends string>(changeRequestId: T) => `/api/changes/${changeRequestId}` as const,
+  /** POST (no body): withdraw a change request still waiting. */
+  withdrawChangeRequest: <T extends string>(changeRequestId: T) => `/api/changes/${changeRequestId}/withdraw` as const,
   /** POST: file an excuse for the pact. */
   excuses: <T extends string>(pactId: T) => `/api/pacts/${pactId}/excuses` as const,
   /** GET, with `?from=YYYY-MM-DD&to=YYYY-MM-DD`: the days an excuse with those dates would cover. */
@@ -138,7 +178,17 @@ export const API_PATHS = {
   /** POST (no body): Take the L on a rejected excuse. */
   acceptExcuseRejection: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}/accept-rejection` as const,
   reviewQueue: "/api/review",
+  /** GET: items the account may decide that are waiting on their owner's reply. */
+  waitingOnReply: "/api/review/waiting-on-reply",
   decide: <T extends string>(itemId: T) => `/api/review/${itemId}/decision` as const,
+  /** POST: a reviewer asks the owner about an item instead of deciding it. */
+  askOwner: <T extends string>(itemId: T) => `/api/review/${itemId}/question` as const,
+  /** POST: the owner replies to a reviewer's question about one of their items. */
+  reply: <T extends string>(itemId: T) => `/api/review/${itemId}/reply` as const,
+  /** GET: evidence's page, for its owner. */
+  evidenceItem: <T extends string>(evidenceId: T) => `/api/evidence/${evidenceId}` as const,
+  /** GET: a payment's page, for its owner. */
+  paymentItem: <T extends string>(paymentId: T) => `/api/payments/${paymentId}` as const,
   ledgers: "/api/ledgers",
   ledger: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}` as const,
   payments: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}/payments` as const,
@@ -202,10 +252,37 @@ export type DeletePactResponse = DeletePactResult;
 /** POST /api/pacts/first-occurrence: the form's Check step, before the pact exists or its edit is saved. */
 export interface FirstOccurrenceRequest {
   schedule: Schedule;
+  /** Oura Ring only: the in-bed-by time, "HH:MM". */
+  inBedBy?: string;
+  /** Camera only: the due-by time, "HH:MM". */
+  dueBy?: string;
+  /** The start date, "YYYY-MM-DD". */
+  startDate?: string;
   /** The pact being edited: the rule then counts from when it was created. */
   editing?: string;
 }
 export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
+
+/**
+ * POST /api/pacts/:id/change/preview and POST /api/pacts/:id/change: every
+ * term, changed or not, and an optional note. A body of another shape is a
+ * 400 "invalid-request"; the core's refusals are 200s.
+ */
+export type ChangePactRequest = PactChange;
+export type ChangePreviewResponse = ChangePreviewResult;
+export type ChangePactResponse = ChangePactResult;
+
+/** POST /api/pacts/:id/end, with an optional note. */
+export interface EndPactRequest {
+  note?: string;
+}
+export type EndPactResponse = RequestEndResult;
+
+/** GET /api/changes/:id: someone else's change request, or none, is a 200 refusal. */
+export type ChangeRequestResponse = Json<ChangeRequestResult>;
+
+/** POST /api/changes/:id/withdraw (no body). */
+export type WithdrawChangeRequestResponse = WithdrawChangeRequestResult;
 
 /** GET /api/pacts: the Pacts tab. */
 export type PactsResponse = Json<PactSummary>[];
@@ -260,8 +337,32 @@ export type ReviewQueueResponse = Json<ReviewItem[]>;
 export type DecideRequest = ReviewDecision;
 export type DecideResponse = DecideResult;
 
+/** GET /api/review/waiting-on-reply: in the Review Queue's order. */
+export type WaitingOnReplyResponse = Json<ReviewItem[]>;
+
+/**
+ * POST /api/review/:id/question. A body without a string `question` is a 400
+ * "invalid-request"; the core's refusals ("blank-question" included) are 200s.
+ */
+export interface AskOwnerRequest {
+  question: string;
+}
+export type AskOwnerResponse = AskOwnerResult;
+
+/** POST /api/review/:id/reply, as the item's owner. Shapes and refusals as for a question. */
+export interface ReplyRequest {
+  reply: string;
+}
+export type ReplyResponse = ReplyResult;
+
+/** GET /api/evidence/:id: the evidence's page. Someone else's evidence, or none, is a 200 refusal. */
+export type EvidenceResponse = Json<EvidenceResult>;
+
+/** GET /api/payments/:id: the payment's page. Someone else's payment, or none, is a 200 refusal. */
+export type PaymentResponse = Json<PaymentResult>;
+
 /** GET /api/ledgers: the Ledgers tab, one per recipient, sorted by name. */
-export type LedgersResponse = LedgerSummary[];
+export type LedgersResponse = Json<LedgerSummary>[];
 
 /** GET /api/ledgers/:recipientId: a ledger's page. Another account's recipient, or none, is a 200 refusal. */
 export type LedgerResponse = Json<LedgerResult>;
@@ -304,7 +405,7 @@ export interface RemovePushSubscriptionRequest {
 }
 
 /** GET /api/me: the signed-in account's profile. */
-export type MeResponse = Profile;
+export type MeResponse = Json<Profile>;
 
 /**
  * POST /api/me/timezone. Answers 200 with the core's result whether the zone

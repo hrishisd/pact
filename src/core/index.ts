@@ -1,7 +1,8 @@
 // The Pact core's public surface, for the server.
 
 export { createPactCore, type PactCore } from "./core.ts";
-export { stubOuraSource, systemClock } from "./adapters.ts";
+export { systemClock } from "./adapters.ts";
+export { devOura, ouraAdapter, unavailableOura, type OuraConnector } from "./oura.ts";
 export { webPushNotifier } from "./web-push.ts";
 export { localDiskPhotoStore, r2PhotoStore, type R2Bucket } from "./photo-stores.ts";
 export type * from "./ports.ts";

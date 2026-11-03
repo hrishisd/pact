@@ -27,6 +27,8 @@ describe("a ledger's history", () => {
           awaitingCents: 0,
           awaitingCount: 0,
           paidCents: 0,
+          overdueCents: 0,
+          billDue: null,
         },
         history: [
           {
@@ -39,6 +41,7 @@ describe("a ledger's history", () => {
             addedAt: s.at("Thu 00:00"),
             paidCents: 0,
             held: false,
+            bill: { kind: "next-bill", billedOn: "2026-01-14" },
           },
           {
             kind: "penalty",
@@ -50,6 +53,7 @@ describe("a ledger's history", () => {
             addedAt: s.at("Tue 00:00"),
             paidCents: 0,
             held: false,
+            bill: { kind: "next-bill", billedOn: "2026-01-14" },
           },
           {
             kind: "penalty",
@@ -61,6 +65,7 @@ describe("a ledger's history", () => {
             addedAt: s.at("Tue 00:00"),
             paidCents: 0,
             held: false,
+            bill: { kind: "next-bill", billedOn: "2026-01-14" },
           },
         ],
       },
@@ -125,6 +130,8 @@ describe("a ledger's history", () => {
           awaitingCents: 0,
           awaitingCount: 0,
           paidCents: 0,
+          overdueCents: 0,
+          billDue: null,
         },
         history: [],
       },
@@ -228,6 +235,7 @@ describe("payments in a ledger's history", () => {
       addedAt: s.at(addedAt),
       paidCents,
       held: false,
+      bill: { kind: "next-bill", billedOn: "2026-01-14" },
     });
     expect(owner.ledger(sam.id)).toEqual({
       ok: true,
@@ -240,6 +248,8 @@ describe("payments in a ledger's history", () => {
           awaitingCents: 400,
           awaitingCount: 1,
           paidCents: 300,
+          overdueCents: 0,
+          billDue: null,
         },
         history: [
           penalty("2026-01-09", "Sat 00:00", 0),

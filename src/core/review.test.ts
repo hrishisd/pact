@@ -23,6 +23,7 @@ describe("the Review Queue", () => {
       occurrenceDate: "2026-01-05",
       penaltyCents: 500,
       recipientName: "Sam",
+      thread: { comments: [], waitingOnReply: false },
     };
     expect(reviewer.reviewQueue()).toEqual([item]);
     expect(second.reviewQueue()).toEqual([item]);
