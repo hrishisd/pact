@@ -22,6 +22,8 @@
   --excused-bg: #f4e8cf;
   --slate: #4f5675;
   --slate-bg: #e4e6ef;
+  --amber: #8a5300;
+  --amber-bg: #fbebcc;
   --scrim: rgba(14, 22, 18, 0.45);
   --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -1146,4 +1148,136 @@ a.btn {
 }
 a.btn.primary {
   color: var(--accent-ink);
+}
+
+/* Change requests: the amber pencil kind, the Request change list, its verdict, and before/after diffs. */
+.k-change {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.c-change {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.c-ended {
+  background: var(--sunk);
+  color: var(--muted);
+}
+.alert.amber {
+  background: var(--amber-bg);
+  border-color: var(--amber);
+}
+.termrow {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+}
+.termrow dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.termrow dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.termrow.changed {
+  background: var(--amber-bg);
+}
+.termrow.changed.stricter {
+  background: var(--kept-bg);
+}
+.termrow.changed.at-once {
+  background: var(--sunk);
+}
+.termrow s,
+.diff s {
+  color: var(--muted);
+  font-size: 13px;
+  display: block;
+}
+.tagline {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.t-needs-approval {
+  color: var(--amber);
+}
+.t-stricter {
+  color: var(--kept);
+}
+.t-at-once {
+  color: var(--muted);
+}
+.diff {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.diff > div {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  align-items: start;
+}
+.diff > div + div {
+  border-top: 1px solid var(--line);
+}
+.diff dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.diff dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.verdict {
+  border-radius: 14px;
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  border: 1px solid;
+}
+.verdict.needs-approval {
+  background: var(--amber-bg);
+  border-color: var(--amber);
+}
+.verdict.stricter,
+.verdict.at-once {
+  background: var(--kept-bg);
+  border-color: var(--kept);
+}
+.verdict.nothing {
+  background: var(--sunk);
+  border-color: var(--line);
+  color: var(--muted);
+}
+details.folded summary,
+details.ended summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 2px;
+}
+details.folded .kv {
+  margin-top: 8px;
+}
+.term-list {
+  margin: 0;
+  flex-shrink: 0; /* the scrolling page is a flex column: keep every row */
+}
+/* A create-form step opened from Request change: the sheet's title names it. */
+.step-in-sheet > h2 {
+  display: none;
 }

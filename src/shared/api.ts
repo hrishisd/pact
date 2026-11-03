@@ -6,6 +6,12 @@ import type {
   AcceptInviteResult,
   AcceptMissResult,
   AddRecipientResult,
+  ChangePactResult,
+  ChangePreviewResult,
+  ChangeRequestResult,
+  PactChange,
+  RequestEndResult,
+  WithdrawChangeRequestResult,
   CreatePactResult,
   DeletePactResult,
   EditPactResult,
@@ -103,6 +109,9 @@ export const APP_PATHS = {
   ledgers: "/ledgers",
   pact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}`,
   editPact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}/edit`,
+  /** Request change: the pact's terms, each with Change. */
+  changePact: (pactId: string) => `/pacts/${encodeURIComponent(pactId)}/change`,
+  changeRequest: (changeRequestId: string) => `/changes/${encodeURIComponent(changeRequestId)}`,
   ledger: (recipientId: string) => `/ledgers/${encodeURIComponent(recipientId)}`,
   excuse: (excuseId: string) => `/excuses/${encodeURIComponent(excuseId)}`,
 } as const;
@@ -140,6 +149,16 @@ export const API_PATHS = {
    * 404 an unknown photo does.
    */
   photo: <T extends string>(photoId: T) => `/api/photos/${photoId}` as const,
+  /** POST: what sending a change to the pact would do (the Request change verdict). */
+  changePreview: <T extends string>(pactId: T) => `/api/pacts/${pactId}/change/preview` as const,
+  /** POST: change the pact after its edit window. */
+  changePact: <T extends string>(pactId: T) => `/api/pacts/${pactId}/change` as const,
+  /** POST: ask to end the pact. */
+  endPact: <T extends string>(pactId: T) => `/api/pacts/${pactId}/end` as const,
+  /** GET: a change request's page, for its owner. */
+  changeRequest: <T extends string>(changeRequestId: T) => `/api/changes/${changeRequestId}` as const,
+  /** POST (no body): withdraw a change request still waiting. */
+  withdrawChangeRequest: <T extends string>(changeRequestId: T) => `/api/changes/${changeRequestId}/withdraw` as const,
   /** POST: file an excuse for the pact. */
   excuses: <T extends string>(pactId: T) => `/api/pacts/${pactId}/excuses` as const,
   /** GET, with `?from=YYYY-MM-DD&to=YYYY-MM-DD`: the days an excuse with those dates would cover. */
@@ -221,6 +240,27 @@ export interface FirstOccurrenceRequest {
   editing?: string;
 }
 export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
+
+/**
+ * POST /api/pacts/:id/change/preview and POST /api/pacts/:id/change: every
+ * term, changed or not, and an optional note. A body of another shape is a
+ * 400 "invalid-request"; the core's refusals are 200s.
+ */
+export type ChangePactRequest = PactChange;
+export type ChangePreviewResponse = ChangePreviewResult;
+export type ChangePactResponse = ChangePactResult;
+
+/** POST /api/pacts/:id/end, with an optional note. */
+export interface EndPactRequest {
+  note?: string;
+}
+export type EndPactResponse = RequestEndResult;
+
+/** GET /api/changes/:id: someone else's change request, or none, is a 200 refusal. */
+export type ChangeRequestResponse = Json<ChangeRequestResult>;
+
+/** POST /api/changes/:id/withdraw (no body). */
+export type WithdrawChangeRequestResponse = WithdrawChangeRequestResult;
 
 /** GET /api/pacts: the Pacts tab. */
 export type PactsResponse = Json<PactSummary>[];

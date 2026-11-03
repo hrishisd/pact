@@ -83,9 +83,15 @@ _Avoid_: Contact, connection, follower, buddy
 The list of items waiting for a reviewer's decision.
 _Avoid_: Inbox, to-do list
 
+**Terms**:
+What a pact holds its owner to: its schedule, what its photo must show or its in-bed-by time, its penalty, recipient and reviewers. Each occurrence follows the terms in force when it opened, so a change applies only to occurrences not open yet.
+
 **Change Request**:
-An owner's proposed edit to a pact that makes it less strict, such as deleting it, lowering the penalty or changing the recipient. The pact stays as it is until a reviewer approves the change.
+An owner's proposed change to a pact after its edit window that makes it less strict, such as ending it, lowering the penalty, removing a day or a reviewer, or changing the recipient or description. The pact keeps its terms until a reviewer approves it; a change that relaxes anything is reviewed as a whole. A pact has at most one waiting, and the owner can withdraw it. It may carry a note saying why.
 _Avoid_: Edit, amendment
+
+**Stricter change**:
+A change that only makes a pact stricter, such as a higher penalty or more days. It needs no approval and applies from the first occurrence not open yet. Renaming a pact or adding a reviewer applies at once, even inside a change request.
 
 ### Notifications
 

@@ -35,6 +35,13 @@ import {
   type AcceptMissResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
+  type ChangePactRequest,
+  type ChangePactResponse,
+  type ChangePreviewResponse,
+  type ChangeRequestResponse,
+  type EndPactRequest,
+  type EndPactResponse,
+  type WithdrawChangeRequestResponse,
   type ApiErrorResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
@@ -421,6 +428,41 @@ export function createApp({
     return c.json(body);
   });
 
+  app.post(API_PATHS.changePreview(":id"), async (c) => {
+    const change = parsePactChange(await c.req.json().catch(() => null));
+    if (!change) return apiError(c, 400, "invalid-request");
+    const body: ChangePreviewResponse = core.as(c.get("accountId")).changePreview(c.req.param("id"), change);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.changePact(":id"), async (c) => {
+    const change = parsePactChange(await c.req.json().catch(() => null));
+    if (!change) return apiError(c, 400, "invalid-request");
+    const body: ChangePactResponse = await core.as(c.get("accountId")).changePact(c.req.param("id"), change);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.endPact(":id"), async (c) => {
+    const request = (await c.req.json().catch(() => null)) as Partial<Record<keyof EndPactRequest, unknown>> | null;
+    if (!isRecord(request) || (request.note !== undefined && typeof request.note !== "string")) {
+      return apiError(c, 400, "invalid-request");
+    }
+    const body: EndPactResponse = await core.as(c.get("accountId")).requestEnd(c.req.param("id"), request.note);
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.changeRequest(":id"), (c) => {
+    const body: ChangeRequestResponse = json(core.as(c.get("accountId")).changeRequest(c.req.param("id")));
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.withdrawChangeRequest(":id"), async (c) => {
+    const body: WithdrawChangeRequestResponse = await core
+      .as(c.get("accountId"))
+      .withdrawChangeRequest(c.req.param("id"));
+    return c.json(body);
+  });
+
   app.delete(API_PATHS.pact(":id"), async (c) => {
     const body: DeletePactResponse = await core.as(c.get("accountId")).deletePact(c.req.param("id"));
     return c.json(body);
@@ -698,6 +740,35 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
   }
   const pact: CreatePactRequest = { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds };
   return inBedBy === undefined ? pact : { ...pact, inBedBy };
+}
+
+function parsePactChange(value: unknown): ChangePactRequest | null {
+  if (!isRecord(value)) return null;
+  const { name, description, inBedBy, penaltyCents, recipientId, reviewerIds, note } = value;
+  const schedule = parseSchedule(value.schedule);
+  if (
+    (inBedBy !== undefined && typeof inBedBy !== "string") ||
+    (note !== undefined && typeof note !== "string") ||
+    typeof name !== "string" ||
+    typeof description !== "string" ||
+    !schedule ||
+    typeof penaltyCents !== "number" ||
+    !Number.isSafeInteger(penaltyCents) ||
+    typeof recipientId !== "string" ||
+    !isStringArray(reviewerIds)
+  ) {
+    return null;
+  }
+  return {
+    name,
+    description,
+    schedule,
+    penaltyCents,
+    recipientId,
+    reviewerIds,
+    ...(inBedBy !== undefined && { inBedBy }),
+    ...(note !== undefined && { note }),
+  };
 }
 
 function parseDecision(value: unknown): DecideRequest | null {

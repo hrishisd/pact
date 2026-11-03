@@ -43,7 +43,7 @@ export interface OuraSource {
 
 export type NotificationKind =
   | "operator-alert"
-  /** To each reviewer of a new pact, when its edit window closes. */
+  /** To each reviewer of a new pact, when its edit window closes; to a reviewer added later, at once. */
   | "picked-as-reviewer"
   /** To each reviewer of a pact: a new item in their Review Queue. */
   | "review-item"
@@ -53,6 +53,8 @@ export type NotificationKind =
   | "excuse-decided"
   /** To the owner: a reviewer approved or rejected their payment. */
   | "payment-decided"
+  /** To the owner: a reviewer approved or rejected their change request. */
+  | "change-request-decided"
   /** To the owner: an occurrence reached its due time and was judged Missed. */
   | "missed-occurrence"
   /** To the owner: a Wednesday bill to one recipient. */

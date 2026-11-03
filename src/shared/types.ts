@@ -130,9 +130,14 @@ export interface PactSummary {
   name: string;
   schedule: Schedule;
   penaltyCents: number;
+  /** Ended pacts come after every Active one. */
+  stage: PactStage;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
 }
+
+/** Active from creation; Ended once an approved change request ends it. */
+export type PactStage = "active" | "ended";
 
 /** The pact page: the pact's terms. */
 export interface PactTerms {
@@ -147,17 +152,24 @@ export interface PactTerms {
   recipient: Recipient;
   /** Sorted by name. */
   reviewers: { id: AccountId; name: string }[];
-  /** Ended comes with end dates and change requests. */
-  stage: "active";
+  stage: PactStage;
+  /** When an approved change request ended it; null while Active. */
+  endedAt: Date | null;
   firstOccurrence: FirstOccurrence;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The pact's evidence and excuses waiting for a reviewer's decision, newest first. */
+  /**
+   * A change in force whose first occurrence hasn't opened yet: the terms
+   * above are the new ones. `todayKeepsCents` is today's penalty when today
+   * is an occurrence on the old terms with another penalty.
+   */
+  newTerms: { startsOn: string; todayKeepsCents: number | null } | null;
+  /** The pact's evidence, excuses and change request waiting for a reviewer's decision, newest first. */
   waiting: PactWaitingItem[];
 }
 
 /** What the pact page's "Waiting on" list holds: never payments, which belong to a recipient. */
-export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" }>;
+export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" | "change-request" }>;
 
 export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "pact-not-found" };
 
@@ -190,11 +202,13 @@ export type AcceptMissRefusal =
 export type AcceptMissResult = { ok: true } | { ok: false; reason: AcceptMissRefusal };
 
 /**
- * An item in a reviewer's Review Queue, oldest first (by when evidence was
- * submitted or a payment recorded). Items never expire. Change requests and
- * excuses join as other kinds.
+ * An item in a reviewer's Review Queue: change requests first, then the
+ * rest oldest first (by when evidence was submitted, an excuse filed or a
+ * payment recorded). Items never expire.
  */
 export type ReviewItem =
+  /** A change request: the reviewer compares the old terms with the new, or decides on ending the pact. */
+  | ({ kind: "change-request"; ownerName: string } & ChangeRequestView)
   /** Photo evidence: the reviewer checks the photos against what counts. */
   | {
       kind: "evidence";
@@ -525,6 +539,17 @@ export type TodayWaitingItem =
       recipientName: string;
       amountCents: number;
       recordedAt: Date;
+    }
+  /** The pact's change request, until a reviewer decides it or the owner withdraws it. */
+  | {
+      kind: "change-request";
+      /** The change request's id. */
+      id: string;
+      pactId: string;
+      name: string;
+      /** It asks to end the pact, rather than change its terms. */
+      endsPact: boolean;
+      requestedAt: Date;
     };
 export type TodayYesterdayEntry = never;
 
@@ -770,3 +795,151 @@ export interface Health {
   ok: boolean;
   lastTick: Date | null;
 }
+
+/**
+ * The terms an owner sends to change a pact after its edit window: all of
+ * them, changed or not, as the Request change form holds them. The evidence
+ * kind never changes.
+ */
+export interface PactChange {
+  name: string;
+  /** For Camera: what the photo will show. Oura Ring pacts have none. */
+  description: string;
+  /** Oura Ring only: see `NewPact.inBedBy`. */
+  inBedBy?: string;
+  schedule: Schedule;
+  /** In US cents: a positive whole number. */
+  penaltyCents: number;
+  recipientId: string;
+  /** One or more of the owner's friends. */
+  reviewerIds: AccountId[];
+  /** Why, for the reviewers, when part of it needs approval. Optional; trimmed, and a blank note is none. */
+  note?: string;
+}
+
+/**
+ * What changing one term does: it relaxes the pact, so it waits for a
+ * reviewer's approval; it only makes it stricter, so it applies without
+ * approval to occurrences not open yet; or it doesn't change what counts (the
+ * name, an added reviewer), so it applies at once.
+ */
+export type ChangeEffect = "needs-approval" | "stricter" | "at-once";
+
+/** One term a change changes, before and after. */
+export type TermChange =
+  | { term: "name"; before: string; after: string; effect: ChangeEffect }
+  | { term: "description"; before: string; after: string; effect: ChangeEffect }
+  /** "HH:MM". */
+  | { term: "in-bed-by"; before: string; after: string; effect: ChangeEffect }
+  | { term: "schedule"; before: Schedule; after: Schedule; effect: ChangeEffect }
+  /** In US cents. */
+  | { term: "penalty"; before: number; after: number; effect: ChangeEffect }
+  | { term: "recipient"; before: Recipient; after: Recipient; effect: ChangeEffect }
+  /** Each list sorted by name. Removing anyone needs approval; adding applies at once. */
+  | {
+      term: "reviewers";
+      before: Friend[];
+      after: Friend[];
+      added: Friend[];
+      removed: Friend[];
+      effect: ChangeEffect;
+    };
+
+/** What sending a change does, taken as a whole. */
+export type ChangeOutcome =
+  /** Nothing differs from the terms as they stand. */
+  | { kind: "nothing" }
+  /** Only the name or added reviewers: done now. */
+  | { kind: "at-once" }
+  /**
+   * Only stricter (and maybe at-once) changes: they apply without approval
+   * from `appliesFrom`, the first occurrence not open yet. `todayKeepsCents`
+   * is today's penalty when today is an occurrence and the penalty changes.
+   */
+  | { kind: "stricter"; appliesFrom: string; todayKeepsCents: number | null }
+  /**
+   * Something relaxes the pact, so it's a change request, reviewed as a whole
+   * (`bundlesStricter`: with stricter changes in it, which wait too). Name
+   * and added reviewers still apply at once. `reviewerNames`: who may decide
+   * it, the added reviewers included, sorted by name.
+   */
+  | { kind: "needs-approval"; reviewerNames: string[]; bundlesStricter: boolean };
+
+/** The Request change form's verdict: each term that differs, in the form's order, and what sending would do. */
+export interface ChangePreview {
+  changes: TermChange[];
+  outcome: ChangeOutcome;
+}
+
+export type ChangePactRefusal =
+  | CreatePactRefusal
+  /** Not this owner's pact, or no pact. */
+  | "pact-not-found"
+  /** In the edit window the pact is edited instead. */
+  | "edit-window-open"
+  | "pact-ended"
+  /** A change request waits: until it's decided or withdrawn, only the name and added reviewers change. */
+  | "change-request-waiting"
+  | "nothing-changed";
+
+export type ChangePreviewResult = { ok: true; preview: ChangePreview } | { ok: false; reason: ChangePactRefusal };
+
+export type ChangePactResult =
+  | { ok: true; outcome: Exclude<ChangeOutcome, { kind: "nothing" }>; changeRequestId: string | null }
+  | { ok: false; reason: ChangePactRefusal };
+
+export type RequestEndResult =
+  | { ok: true; changeRequestId: string }
+  | { ok: false; reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" };
+
+/** A pact's terms as they stand, as a change request shows those it leaves alone. */
+export type CurrentTerms = Pick<
+  PactTerms,
+  "name" | "description" | "evidenceKind" | "inBedBy" | "schedule" | "penaltyCents" | "recipient" | "reviewers"
+>;
+
+/** A change request, as its reviewers and its owner see it. */
+export interface ChangeRequestView {
+  /** The change request's id. */
+  id: string;
+  pactId: string;
+  pactName: string;
+  /** It asks to end the pact; `changes` is empty then. */
+  endsPact: boolean;
+  /** The owner's "Why?", or null. */
+  note: string | null;
+  requestedAt: Date;
+  /** The terms it changes, old and new, each `needs-approval` or `stricter`. */
+  changes: TermChange[];
+  /** The pact's terms as they stand: what it leaves alone stays as here. */
+  current: CurrentTerms;
+  /**
+   * While it waits: the first occurrence the new terms would apply to if it
+   * were approved now, "YYYY-MM-DD". Null when it ends the pact, or once decided.
+   */
+  appliesFrom: string | null;
+  /** While it waits: today's penalty, when today is an occurrence and the penalty changes. */
+  todayKeepsCents: number | null;
+}
+
+/** Where a change request stands. */
+export type ChangeRequestState =
+  | { kind: "waiting" }
+  | { kind: "approved"; reviewerName: string; decidedAt: Date }
+  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string }
+  | { kind: "withdrawn"; withdrawnAt: Date };
+
+/** The change request's page, for its owner. */
+export interface ChangeRequestDetail extends ChangeRequestView {
+  state: ChangeRequestState;
+  /** The pact's reviewers, sorted by name: who may decide it. */
+  reviewerNames: string[];
+}
+
+export type ChangeRequestResult =
+  { ok: true; changeRequest: ChangeRequestDetail } | { ok: false; reason: "change-request-not-found" };
+
+export type WithdrawChangeRequestResult =
+  | { ok: true }
+  /** Not this owner's, or decided or withdrawn already. */
+  | { ok: false; reason: "change-request-not-found" | "not-waiting" };

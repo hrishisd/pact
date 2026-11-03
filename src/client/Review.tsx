@@ -1,6 +1,6 @@
-// The Review tab: the account's Review Queue (evidence, excuses and
-// payments), one item at a time, with Reject (a reason is required, and for
-// evidence and excuses the form says what rejecting costs), Approve, and
+// The Review tab: the account's Review Queue (change requests first, then
+// evidence, excuses and payments), one item at a time, with Reject (a reason
+// is required, and the form says what rejecting does), Approve, and
 // Prev/Skip.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -9,7 +9,8 @@ import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.
 import { api, failureText } from "./api.ts";
 import { formatDate, formatDayTime, money, weekdayName } from "./format.ts";
 import { DayChip, dayNote, excuseDatesText } from "./excuse-days.tsx";
-import { CameraIcon, DollarIcon, ExcuseIcon } from "./icons.tsx";
+import { DiffList, EverythingElse, startsText } from "./change-terms.tsx";
+import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { Empty, useLoad, useNow } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
@@ -41,7 +42,7 @@ export function Review({
         {notice && <p className="error small">{notice}</p>}
         <Empty
           title="Nothing to review"
-          body="When a friend picks you as a reviewer, their submitted evidence, excuses and payments show up here."
+          body="When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here."
         />
       </>
     );
@@ -80,6 +81,8 @@ export function Review({
         <EvidenceItem key={item.id} item={item} onDecided={decided} />
       ) : item.kind === "excuse" ? (
         <ExcuseItem key={item.id} item={item} onDecided={decided} />
+      ) : item.kind === "change-request" ? (
+        <ChangeRequestItem key={item.id} item={item} onDecided={decided} />
       ) : (
         <PaymentItem key={item.id} item={item} timezone={timezone} onDecided={decided} />
       )}
@@ -96,6 +99,7 @@ const REFUSAL_TEXT: Record<DecideRefusal, string> = {
 type EvidenceReviewItem = Extract<Json<ReviewItem>, { kind: "evidence" }>;
 type ExcuseReviewItem = Extract<Json<ReviewItem>, { kind: "excuse" }>;
 type PaymentReviewItem = Extract<Json<ReviewItem>, { kind: "payment" }>;
+type ChangeReviewItem = Extract<Json<ReviewItem>, { kind: "change-request" }>;
 
 /** After the core answered: null when the decision went through. */
 type OnDecided = (refusal: DecideRefusal | null) => void;
@@ -210,6 +214,46 @@ function ExcuseItem({ item, onDecided }: { item: ExcuseReviewItem; onDecided: On
         itemId={item.id}
         placeholder="e.g. You were at the party, not sick"
         cost={rejectCost.length > 0 && <p className="small">Rejecting {rejectCost.join(" and ")}.</p>}
+        onDecided={onDecided}
+      />
+    </>
+  );
+}
+
+/**
+ * A Change request item: the note, the changed terms old and new, when they'd
+ * start, and the rest folded away; or, for an end, what approving does.
+ */
+function ChangeRequestItem({ item, onDecided }: { item: ChangeReviewItem; onDecided: OnDecided }) {
+  return (
+    <>
+      <div className="row2">
+        <span className="kind k-change">
+          <PencilIcon />
+          Change
+        </span>
+        <span className="muted">from {item.ownerName}</span>
+      </div>
+      <article className="card">
+        <h3>{item.endsPact ? `End ${item.pactName}` : item.pactName}</h3>
+        {item.note !== null && <span className="quote">“{item.note}”</span>}
+        {item.endsPact ? (
+          <p className="small">
+            Approving makes {item.pactName} Ended at once: no more days. Penalties already judged stay on{" "}
+            {item.ownerName}'s ledger.
+          </p>
+        ) : (
+          <>
+            <DiffList changes={item.changes} />
+            <p className="small">{startsText(item, "Approving applies")}</p>
+            <EverythingElse request={item} />
+          </>
+        )}
+      </article>
+      <Decision
+        itemId={item.id}
+        placeholder={item.endsPact ? "e.g. Give it another month" : "e.g. $5 is what makes it stick"}
+        cost={<p className="small">Rejecting keeps {item.pactName} as it is.</p>}
         onDecided={onDecided}
       />
     </>

@@ -19,6 +19,13 @@ import {
   type AddRecipientRequest,
   type AddRecipientResponse,
   type ApiErrorResponse,
+  type ChangePactRequest,
+  type ChangePactResponse,
+  type ChangePreviewResponse,
+  type ChangeRequestResponse,
+  type EndPactRequest,
+  type EndPactResponse,
+  type WithdrawChangeRequestResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
@@ -149,6 +156,16 @@ export const api = {
   firstOccurrence: (request: FirstOccurrenceRequest) =>
     post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
   pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),
+  changePreview: (pactId: string, change: ChangePactRequest) =>
+    post<ChangePreviewResponse>(API_PATHS.changePreview(encodeURIComponent(pactId)), change),
+  changePact: (pactId: string, change: ChangePactRequest) =>
+    post<ChangePactResponse>(API_PATHS.changePact(encodeURIComponent(pactId)), change),
+  endPact: (pactId: string, request: EndPactRequest) =>
+    post<EndPactResponse>(API_PATHS.endPact(encodeURIComponent(pactId)), request),
+  changeRequest: (changeRequestId: string) =>
+    call<ChangeRequestResponse>(API_PATHS.changeRequest(encodeURIComponent(changeRequestId))),
+  withdrawChangeRequest: (changeRequestId: string) =>
+    post<WithdrawChangeRequestResponse>(API_PATHS.withdrawChangeRequest(encodeURIComponent(changeRequestId))),
   /** `photos` are already shrunk (photos.ts), in the order taken. */
   submitEvidence: (pactId: string, photos: Blob[]) => {
     const form = new FormData();

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
+import { ChangePact } from "./ChangePact.tsx";
+import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
 import { CreatePact, EditPact } from "./CreatePact.tsx";
 import { ExcusePage } from "./ExcusePage.tsx";
 import { formatDay, initial } from "./format.ts";
@@ -238,6 +240,7 @@ function Shell({
   const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
   const openLedger = (recipientId: string, name: string) => nav.push({ kind: "ledger", recipientId, name });
   const openExcuse = (id: string) => nav.push({ kind: "excuse", id });
+  const openChangeRequest = (id: string) => nav.push({ kind: "change-request", id });
   const create = () => nav.push({ kind: "create" });
   const openNotifications = () => {
     setProfileOpen(false);
@@ -249,6 +252,8 @@ function Shell({
   if (page?.kind === "pact") title = pactNames[page.id] ?? page.name ?? "";
   else if (page?.kind === "create") title = "New pact";
   else if (page?.kind === "edit-pact") title = "Edit pact";
+  else if (page?.kind === "change-pact") title = "Request change";
+  else if (page?.kind === "change-request") title = "Change request";
   else if (page?.kind === "ledger") title = ledgerNames[page.recipientId] ?? page.name ?? "";
   else if (page?.kind === "excuse") title = "Excuse";
   else if (page?.kind === "notifications") title = "Notifications";
@@ -285,10 +290,24 @@ function Shell({
           <PactPage
             key={page.id}
             pactId={page.id}
+            timezone={profile.timezone}
             onLoaded={pactLoaded}
             onEdit={() => nav.push({ kind: "edit-pact", id: page.id })}
             onDeleted={nav.back}
+            onRequestChange={() => nav.push({ kind: "change-pact", id: page.id })}
             onOpenExcuse={openExcuse}
+            onOpenChangeRequest={openChangeRequest}
+          />
+        )}
+        {page?.kind === "change-pact" && (
+          <ChangePact key={page.id} pactId={page.id} onDone={nav.back} onInvite={() => setProfileOpen(true)} />
+        )}
+        {page?.kind === "change-request" && (
+          <ChangeRequestPage
+            key={page.id}
+            changeRequestId={page.id}
+            timezone={profile.timezone}
+            onOpenPact={openPact}
           />
         )}
         {page?.kind === "edit-pact" && (
@@ -310,6 +329,7 @@ function Shell({
             onOpenPact={openPact}
             onOpenLedger={openLedger}
             onOpenExcuse={openExcuse}
+            onOpenChangeRequest={openChangeRequest}
             onCreate={create}
             onInvite={() => setProfileOpen(true)}
           />

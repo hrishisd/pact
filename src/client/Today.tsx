@@ -23,7 +23,7 @@ import { api, failureText, uploadFailureText } from "./api.ts";
 import { clockText, formatDate, formatDay, formatDueAt, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
-import { CameraIcon, DollarIcon, ExcuseIcon } from "./icons.tsx";
+import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
 import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
@@ -43,6 +43,7 @@ export function Today({
   onOpenPact,
   onOpenLedger,
   onOpenExcuse,
+  onOpenChangeRequest,
   onCreate,
   onInvite,
 }: {
@@ -51,6 +52,7 @@ export function Today({
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onOpenExcuse: (excuseId: string) => void;
+  onOpenChangeRequest: (changeRequestId: string) => void;
   onCreate: () => void;
   onInvite: () => void;
 }) {
@@ -115,6 +117,7 @@ export function Today({
           onOpenPact={onOpenPact}
           onOpenLedger={onOpenLedger}
           onOpenExcuse={onOpenExcuse}
+          onOpenChangeRequest={onOpenChangeRequest}
         />
       )}
       {excusing && (
@@ -609,26 +612,38 @@ const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<
 
 /**
  * Waiting for approval, last on Today: each item with its kind's icon in a
- * coloured square. Evidence opens its pact; an excuse, its excuse page; a
- * payment, its recipient's ledger.
+ * coloured square. Evidence opens its pact; an excuse or a change request,
+ * its page; a payment, its recipient's ledger.
  */
 function Waiting({
   items,
   onOpenPact,
   onOpenLedger,
   onOpenExcuse,
+  onOpenChangeRequest,
 }: {
   items: Json<TodayWaitingItem>[];
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onOpenExcuse: (excuseId: string) => void;
+  onOpenChangeRequest: (changeRequestId: string) => void;
 }) {
   return (
     <section className="stack">
       <div className="label">Waiting for approval</div>
       <div className="cards">
         {items.map((item) =>
-          item.kind === "excuse" ? (
+          item.kind === "change-request" ? (
+            <button key={item.id} className="rowbtn" onClick={() => onOpenChangeRequest(item.id)}>
+              <span className="kico k-change">
+                <PencilIcon />
+              </span>
+              <span className="rt">
+                <b>{item.name}</b>
+                <small>{item.endsPact ? "Change · End this pact" : "Change"}</small>
+              </span>
+            </button>
+          ) : item.kind === "excuse" ? (
             <button key={item.id} className="rowbtn" onClick={() => onOpenExcuse(item.id)}>
               <span className="kico k-excuse">
                 <ExcuseIcon />

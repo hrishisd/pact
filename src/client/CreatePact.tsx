@@ -57,7 +57,7 @@ const DAY_BUTTONS: Record<Weekday, { short: string; full: string }> = {
   sun: { short: "Su", full: "Sunday" },
 };
 
-interface Form {
+export interface Form {
   kind: EvidenceKind;
   /** Oura Ring: "HH:MM" as the time field gives it, or "" until picked. */
   inBedBy: string;
@@ -84,7 +84,12 @@ const EMPTY_FORM: Form = {
   reviewerIds: [],
 };
 
-function formOf(pact: Pact): Form {
+export function formOf(
+  pact: Pick<
+    Pact,
+    "evidenceKind" | "inBedBy" | "name" | "description" | "schedule" | "penaltyCents" | "recipient" | "reviewers"
+  >,
+): Form {
   return {
     kind: pact.evidenceKind,
     inBedBy: pact.inBedBy ?? "",
@@ -104,7 +109,7 @@ function formOf(pact: Pact): Form {
  */
 type Problem = EditPactRefusal | "no-amount" | "no-recipient" | "oura-failed";
 
-const PROBLEMS: Record<Problem, string> = {
+export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
   "invalid-in-bed-by": "Pick a time.",
   "blank-name": "Give it a name.",
@@ -449,7 +454,7 @@ function ConnectStep() {
   );
 }
 
-function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+export function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
   if (form.kind === "oura") {
     return (
       <>
@@ -507,7 +512,7 @@ function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>
   );
 }
 
-function ScheduleStep({
+export function ScheduleStep({
   kind,
   days,
   onDays,
@@ -554,7 +559,7 @@ function ScheduleStep({
   );
 }
 
-function PenaltyStep({
+export function PenaltyStep({
   form,
   update,
   recipients,
@@ -707,11 +712,12 @@ function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipien
   );
 }
 
-function ReviewersStep({
+export function ReviewersStep({
   friends,
   reviewerIds,
   onReviewerIds,
   kind,
+  hint,
   onInvite,
   onCheckAgain,
 }: {
@@ -719,6 +725,8 @@ function ReviewersStep({
   reviewerIds: string[];
   onReviewerIds: (ids: string[]) => void;
   kind: EvidenceKind;
+  /** Says what picking does, in place of the default line. */
+  hint?: string;
   onInvite: () => void;
   onCheckAgain: () => void;
 }) {
@@ -763,9 +771,10 @@ function ReviewersStep({
         ))}
       </div>
       <small className="muted">
-        {kind === "oura"
-          ? "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses."
-          : "Any reviewer you pick can check your photos."}
+        {hint ??
+          (kind === "oura"
+            ? "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses."
+            : "Any reviewer you pick can check your photos.")}
       </small>
     </>
   );

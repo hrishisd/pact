@@ -26,6 +26,11 @@ import {
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientResponse,
+  type ChangePactRequest,
+  type ChangePactResponse,
+  type ChangePreviewResponse,
+  type ChangeRequestResponse,
+  type EndPactResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
@@ -663,7 +668,7 @@ describe("pacts", () => {
       yesterday: [],
     } satisfies TodayResponse);
     expect((await s.api(API_PATHS.pacts, { cookie })).body).toEqual([
-      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500, editWindowClosesAt },
+      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500, stage: "active", editWindowClosesAt },
     ] satisfies PactsResponse);
     expect((await s.api(API_PATHS.pact(pactId), { cookie })).body).toEqual({
       ok: true,
@@ -678,8 +683,10 @@ describe("pacts", () => {
         recipient: { id: pact.recipientId, name: "Sam" },
         reviewers: [{ id: friendId, name: "friend" }],
         stage: "active",
+        endedAt: null,
         firstOccurrence,
         editWindowClosesAt,
+        newTerms: null,
         waiting: [],
       },
     } satisfies PactResponse);
@@ -1173,6 +1180,81 @@ describe("excuses", () => {
       body: { error: "invalid-request" },
     });
     expect(await s.api(`${API_PATHS.excusePreview(pactId)}?from=2026-01-05`, { cookie: owner.cookie })).toEqual({
+      status: 400,
+      body: { error: "invalid-request" },
+    });
+  });
+});
+
+describe("change requests", () => {
+  test("the owner previews and sends a change, sees it waiting, withdraws it, then asks to end the pact; the reviewer approves", async () => {
+    const { s, owner, friend, pact, pactId } = await ownerWithPact();
+    const { cookie } = owner;
+    const lower: ChangePactRequest = { ...pact, penaltyCents: 200, note: "Tight month" };
+
+    const preview = await s.api<ChangePreviewResponse>(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: lower,
+    });
+    expect(preview.body).toEqual({
+      ok: true,
+      preview: {
+        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
+        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: false },
+      },
+    } satisfies ChangePreviewResponse);
+    const sent = await s.api<ChangePactResponse>(API_PATHS.changePact(pactId), { cookie, method: "POST", body: lower });
+    if (!sent.body.ok) throw new Error(sent.body.reason);
+    const id = sent.body.changeRequestId!;
+    const page = await s.api<ChangeRequestResponse>(API_PATHS.changeRequest(id), { cookie });
+    expect(page.body).toMatchObject({ ok: true, changeRequest: { note: "Tight month", state: { kind: "waiting" } } });
+    expect((await s.api(API_PATHS.changeRequest(id), { cookie: friend.cookie })).body).toEqual({
+      ok: false,
+      reason: "change-request-not-found",
+    });
+    expect((await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, { cookie: friend.cookie })).body).toEqual([
+      expect.objectContaining({ kind: "change-request", id }),
+    ]);
+    const withdraw = () => s.api(API_PATHS.withdrawChangeRequest(id), { cookie, method: "POST" });
+    expect(await withdraw()).toEqual({ status: 200, body: { ok: true } });
+    expect(await withdraw()).toEqual({ status: 200, body: { ok: false, reason: "not-waiting" } });
+
+    const end = await s.api<EndPactResponse>(API_PATHS.endPact(pactId), {
+      cookie,
+      method: "POST",
+      body: { note: "Moved away" },
+    });
+    if (!end.body.ok) throw new Error(end.body.reason);
+    await s.api(API_PATHS.decide(end.body.changeRequestId), {
+      cookie: friend.cookie,
+      method: "POST",
+      body: { kind: "approve" } satisfies DecideRequest,
+    });
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: { stage: "ended" },
+    });
+  });
+
+  test("the core's refusals are 200s; a body of another shape is a 400", async () => {
+    const { s, owner, pact, pactId } = await ownerWithPact();
+    const { cookie } = owner;
+
+    expect(
+      await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: { ...pact, reviewerIds: [] } }),
+    ).toEqual({ status: 200, body: { ok: false, reason: "no-reviewers" } });
+    expect(await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: pact })).toEqual({
+      status: 200,
+      body: { ok: false, reason: "nothing-changed" },
+    });
+    for (const path of [API_PATHS.changePact(pactId), API_PATHS.changePreview(pactId)]) {
+      expect(await s.api(path, { cookie, method: "POST", body: { ...pact, penaltyCents: "5" } })).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+    expect(await s.api(API_PATHS.endPact(pactId), { cookie, method: "POST", body: { note: 5 } })).toEqual({
       status: 400,
       body: { error: "invalid-request" },
     });

@@ -46,8 +46,10 @@ describe("creating a pact", () => {
         recipient: { id: recipient.id, name: "Sam" },
         reviewers: [{ id: reviewer.id, name: "reviewer" }],
         stage: "active",
+        endedAt: null,
         firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
         editWindowClosesAt: s.at("Mon 09:10"),
+        newTerms: null,
         waiting: [],
       },
     });
@@ -172,6 +174,7 @@ describe("the Pacts tab", () => {
         name: "Gym",
         schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
         penaltyCents: 500,
+        stage: "active",
         editWindowClosesAt: s.at("Mon 09:10"),
       },
       {
@@ -179,6 +182,7 @@ describe("the Pacts tab", () => {
         name: "Reading",
         schedule: { kind: "fixed-days", days: ["sat", "sun"] },
         penaltyCents: 250,
+        stage: "active",
         editWindowClosesAt: s.at("Mon 09:10"),
       },
     ]);

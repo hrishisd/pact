@@ -370,4 +370,53 @@ export const migrations: readonly string[] = [
     PRIMARY KEY (owner_account_id, recipient_id)
   );
   `,
+  // 15: change requests and ending pacts
+  `
+  -- When an approved change request ended the pact (stage 'ended'); NULL while Active.
+  ALTER TABLE pact ADD COLUMN ended_at TEXT;
+
+  -- The terms a pact had before a change took effect. They still apply to its
+  -- occurrences dated before \`until\`, the first day not open when the change
+  -- took effect; the pact row holds the terms from the latest \`until\` on. So
+  -- an open occurrence keeps the old terms, and judging it later (a rejection,
+  -- a night Oura reports late) costs what it cost then.
+  CREATE TABLE pact_earlier_terms (
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    until TEXT NOT NULL, -- "YYYY-MM-DD" in the owner's timezone
+    description TEXT NOT NULL,
+    schedule TEXT NOT NULL, -- JSON, the shared Schedule type
+    in_bed_by TEXT,
+    penalty_cents INTEGER NOT NULL CHECK (penalty_cents > 0),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    PRIMARY KEY (pact_id, until)
+  );
+
+  -- An owner's proposed change that relaxes a pact, or ends it, waiting for a
+  -- reviewer. before_terms and after_terms are the changeable terms (JSON) when
+  -- it was sent, after what applied at once (the name, added reviewers);
+  -- after_terms is NULL when it ends the pact. decision is NULL while it
+  -- waits; the first decision is final. The owner can withdraw it while it
+  -- waits. A pact has at most one waiting.
+  CREATE TABLE change_request (
+    id TEXT PRIMARY KEY,
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    ends_pact INTEGER NOT NULL CHECK (ends_pact IN (0, 1)),
+    before_terms TEXT NOT NULL,
+    after_terms TEXT,
+    note TEXT,
+    requested_at TEXT NOT NULL,
+    decision TEXT CHECK (decision IN ('approved', 'rejected')),
+    decided_by_account_id TEXT REFERENCES account (id),
+    decided_at TEXT,
+    reject_reason TEXT,
+    withdrawn_at TEXT,
+    CHECK ((ends_pact = 1) = (after_terms IS NULL)),
+    CHECK ((decision IS NULL) = (decided_at IS NULL)),
+    CHECK ((decision IS NULL) = (decided_by_account_id IS NULL)),
+    CHECK ((decision IS 'rejected') = (reject_reason IS NOT NULL)),
+    CHECK (decision IS NULL OR withdrawn_at IS NULL)
+  );
+  CREATE UNIQUE INDEX change_request_one_waiting ON change_request (pact_id)
+    WHERE decision IS NULL AND withdrawn_at IS NULL;
+  `,
 ];

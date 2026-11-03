@@ -78,25 +78,46 @@ export interface Occurrences {
 
 /** The occurrences of a pact with `terms`, in its owner's `timezone`. */
 export function occurrences(terms: OccurrenceTerms, timezone: string): Occurrences {
-  const inBedBy = terms.inBedBy ?? null;
-  const occurrence = (date: LocalDate) => fixedDaysOccurrence(date, timezone, inBedBy);
-  const includes = (date: LocalDate) => date >= terms.firstOccurrence && terms.schedule.days.includes(weekdayOf(date));
+  return occurrencesOverTime([{ until: null, terms }], timezone);
+}
+
+/**
+ * Terms a pact had for a while: they apply to its occurrences dated before
+ * `until` ("YYYY-MM-DD"), or from then on when it's null. A change starts a
+ * new era from the first date not open yet.
+ */
+export interface TermsEra {
+  until: LocalDate | null;
+  terms: OccurrenceTerms;
+}
+
+/**
+ * The occurrences of a pact whose terms changed over time: each date follows
+ * the era it falls in. `eras` are oldest first, the last with `until` null,
+ * and all share the pact's first occurrence.
+ */
+export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string): Occurrences {
+  const termsOn = (date: LocalDate) =>
+    (eras.find((era) => era.until === null || date < era.until) ?? eras.at(-1)!).terms;
+  const firstOccurrence = eras.at(-1)!.terms.firstOccurrence;
+  const occurrence = (date: LocalDate) => fixedDaysOccurrence(date, timezone, termsOn(date).inBedBy ?? null);
+  const scheduled = (date: LocalDate) => termsOn(date).schedule.days.includes(weekdayOf(date));
+  const includes = (date: LocalDate) => date >= firstOccurrence && scheduled(date);
   return {
-    first: occurrence(terms.firstOccurrence),
+    first: occurrence(firstOccurrence),
     openAt(t) {
       const date = localDateOf(t, timezone);
-      if (date < terms.firstOccurrence || !terms.schedule.days.includes(weekdayOf(date))) return null;
-      return occurrence(date);
+      return includes(date) ? occurrence(date) : null;
     },
     includes,
     dueAfter(after, t) {
       const due: Occurrence[] = [];
-      const start = after === null || after < terms.firstOccurrence ? terms.firstOccurrence : addDays(after, 1);
+      const start = after === null || after < firstOccurrence ? firstOccurrence : addDays(after, 1);
       // Due times only grow with the date, so the first not due yet ends the list.
       for (let date = start; ; date = addDays(date, 1)) {
         const next = occurrence(date);
         if (next.dueAt.getTime() > t.getTime()) return due;
-        if (terms.schedule.days.includes(weekdayOf(date))) due.push(next);
+        if (scheduled(date)) due.push(next);
       }
     },
     between(from, to) {

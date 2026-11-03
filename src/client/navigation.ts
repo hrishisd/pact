@@ -24,6 +24,8 @@ export type Page =
   | { kind: "pact"; id: string; name?: string }
   | { kind: "create" }
   | { kind: "edit-pact"; id: string }
+  | { kind: "change-pact"; id: string }
+  | { kind: "change-request"; id: string }
   | { kind: "ledger"; recipientId: string; name?: string }
   | { kind: "excuse"; id: string }
   | { kind: "notifications" };
@@ -49,6 +51,10 @@ function pagePath(page: Page): string {
       return APP_PATHS.pact(page.id);
     case "edit-pact":
       return APP_PATHS.editPact(page.id);
+    case "change-pact":
+      return APP_PATHS.changePact(page.id);
+    case "change-request":
+      return APP_PATHS.changeRequest(page.id);
     case "ledger":
       return APP_PATHS.ledger(page.recipientId);
     case "excuse":
@@ -66,17 +72,20 @@ function routePath(route: Route): string {
 function routeFromPath(pathname: string): Route {
   if (pathname === APP_PATHS.newPact) return { tab: "pacts", stack: [{ kind: "create" }] };
   if (pathname === NOTIFICATIONS_PATH) return { tab: "today", stack: [{ kind: "notifications" }] };
-  const edit = /^\/pacts\/([^/]+)\/edit$/.exec(pathname);
+  const edit = /^\/pacts\/([^/]+)\/(edit|change)$/.exec(pathname);
   if (edit) {
     const id = decodeURIComponent(edit[1]!);
     return {
       tab: "pacts",
       stack: [
         { kind: "pact", id },
-        { kind: "edit-pact", id },
+        { kind: edit[2] === "edit" ? "edit-pact" : "change-pact", id },
       ],
     };
   }
+  // A change request opens from Today or its pact; a link to one lands on Today.
+  const change = /^\/changes\/([^/]+)$/.exec(pathname);
+  if (change) return { tab: "today", stack: [{ kind: "change-request", id: decodeURIComponent(change[1]!) }] };
   const pact = /^\/pacts\/([^/]+)$/.exec(pathname);
   if (pact) return { tab: "pacts", stack: [{ kind: "pact", id: decodeURIComponent(pact[1]!) }] };
   const ledger = /^\/ledgers\/([^/]+)$/.exec(pathname);

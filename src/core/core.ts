@@ -8,12 +8,16 @@
 import { createECDH, randomBytes, randomUUID } from "node:crypto";
 import { addDays, localDateOf, weekdayOf, zonedWallTimeToInstant, type LocalDate } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
+import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
   newOccurrenceTerms,
   nightStartsAt,
   occurrences,
+  occurrencesOverTime,
   type Occurrence,
+  type Occurrences,
   type OccurrenceTerms,
+  type TermsEra,
 } from "./occurrences.ts";
 import type {
   Clock,
@@ -37,6 +41,19 @@ import {
   type AcceptMissResult,
   type AccountId,
   type AddRecipientResult,
+  type ChangeOutcome,
+  type ChangePactRefusal,
+  type ChangePactResult,
+  type ChangePreview,
+  type ChangePreviewResult,
+  type ChangeRequestResult,
+  type ChangeRequestState,
+  type ChangeRequestView,
+  type CurrentTerms,
+  type PactChange,
+  type RequestEndResult,
+  type TermChange,
+  type WithdrawChangeRequestResult,
   type CreatePactRefusal,
   type CreatePactResult,
   type DecideResult,
@@ -184,10 +201,40 @@ export interface AccountView {
    * step names. Same rule as `createPact`.
    */
   firstOccurrence(timing: PactTiming, editing?: string): FirstOccurrenceResult;
-  /** This owner's Active pacts, for the Pacts tab: those in their edit window first, then by name. */
+  /**
+   * This owner's pacts, for the Pacts tab: Active ones in their edit window
+   * first, then the other Active ones by name, then Ended ones by name.
+   */
   pacts(): PactSummary[];
   /** The pact page's terms. Someone else's pact, or none, is not found. */
   pact(pactId: string): PactResult;
+  /**
+   * What sending `change` to an Active pact past its edit window would do,
+   * term by term and as a whole: the Request change form's verdict. The same
+   * rules as `changePact`, which it never calls.
+   */
+  changePreview(pactId: string, change: PactChange): ChangePreviewResult;
+  /**
+   * The owner changes an Active pact past its edit window. The name and added
+   * reviewers apply at once (each new reviewer is told). If anything else
+   * relaxes the pact, the rest waits as one change request for a reviewer,
+   * stricter parts included, and the reviewers get a review item. Otherwise
+   * the stricter parts apply now, to every occurrence not open yet (from
+   * tomorrow, in the owner's timezone). While a change request waits, only
+   * the name and added reviewers may change. The same checks as
+   * `createPact`, so a pact never has zero reviewers. A refusal changes nothing.
+   */
+  changePact(pactId: string, change: PactChange): Promise<ChangePactResult>;
+  /**
+   * The owner asks to end an Active pact past its edit window: a change
+   * request. Approved, the pact is Ended at once and makes no more
+   * occurrences; its judged occurrences and penalties stay. A refusal changes nothing.
+   */
+  requestEnd(pactId: string, note?: string): Promise<RequestEndResult>;
+  /** A change request's page, for its owner. Someone else's, or none, is not found. */
+  changeRequest(changeRequestId: string): ChangeRequestResult;
+  /** The owner withdraws a change request still waiting: it leaves every queue and the terms stay. */
+  withdrawChangeRequest(changeRequestId: string): Promise<WithdrawChangeRequestResult>;
   profile(): Profile;
   /**
    * Records that the account connected Oura: the Oura adapter has just stored
@@ -245,10 +292,11 @@ export interface AccountView {
    */
   photo(photoId: string): Promise<PhotoResult>;
   /**
-   * Items waiting for this account's decision as a reviewer: evidence and
-   * excuses for pacts it reviews, and payments to a recipient of any pact it
-   * reviews. Oldest first, by when the evidence was submitted, the excuse
-   * filed or the payment recorded.
+   * Items waiting for this account's decision as a reviewer: change
+   * requests, evidence and excuses for pacts it reviews, and payments to a
+   * recipient of any pact it reviews. Change requests first, then the rest
+   * oldest first, by when the evidence was submitted, the excuse filed or the
+   * payment recorded.
    */
   reviewQueue(): ReviewItem[];
   /**
@@ -266,6 +314,9 @@ export interface AccountView {
    * not judged yet are judged Excused at their due time (or at once, if that
    * has passed). Rejected, its held penalties are owed again, its days not
    * judged yet are judged as usual, and the owner gets a rejected-excuse alert.
+   * For a change request, approval applies its terms from the first
+   * occurrence not open yet, or ends the pact at once; rejection leaves the
+   * terms as they are.
    */
   decide(itemId: string, decision: ReviewDecision): Promise<DecideResult>;
   /**
@@ -314,6 +365,7 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "payment-decided": "decision",
   "missed-occurrence": "missed-occurrence",
   "excuse-decided": "decision",
+  "change-request-decided": "decision",
   "new-bill": "new-bill",
   "overdue-bill": "overdue-bill",
 };
@@ -728,56 +780,149 @@ class Core implements PactCore {
       },
       pacts: () => {
         account();
-        const pacts = this.#activePacts(accountId).map(({ id, name, terms, penaltyCents, editWindowClosesAt }) => ({
-          id,
-          name,
-          schedule: terms.schedule,
-          penaltyCents,
-          editWindowClosesAt,
+        const pacts = this.#activePacts(accountId).map(
+          ({ id, name, terms, penaltyCents, editWindowClosesAt }): PactSummary => ({
+            id,
+            name,
+            schedule: terms.schedule,
+            penaltyCents,
+            stage: "active",
+            editWindowClosesAt,
+          }),
+        );
+        const ended = (
+          this.#db
+            .prepare(
+              `SELECT id, name, schedule, penalty_cents FROM pact
+               WHERE owner_account_id = ? AND stage = 'ended'
+               ORDER BY name, created_at, id`,
+            )
+            .all(accountId) as Pick<PactRow, "id" | "name" | "schedule" | "penalty_cents">[]
+        ).map((row): PactSummary => ({
+          id: row.id,
+          name: row.name,
+          schedule: JSON.parse(row.schedule) as Schedule,
+          penaltyCents: row.penalty_cents,
+          stage: "ended",
+          editWindowClosesAt: null,
         }));
         return [
           ...pacts.filter((pact) => pact.editWindowClosesAt),
           ...pacts.filter((pact) => !pact.editWindowClosesAt),
+          ...ended,
         ];
       },
       pact: (pactId) => {
         const { timezone } = account();
         const row = this.#ownPact(accountId, pactId);
         if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
-        const reviewers = this.#db
-          .prepare(
-            `SELECT account.id, account.name FROM pact_reviewer
-             JOIN account ON account.id = pact_reviewer.reviewer_account_id
-             WHERE pact_reviewer.pact_id = ?
-             ORDER BY account.name, account.id`,
-          )
-          .all(pactId) as { id: AccountId; name: string }[];
-        const [recipient] = this.#selectRecipients(`id = ?`, row.recipient_id);
-        if (!recipient) throw new Error(`pact ${row.id} has no recipient ${row.recipient_id}`);
-        const terms = occurrenceTermsOf(row);
-        const first = occurrences(terms, timezone).first;
+        const now = this.#clock.now();
+        const { first } = this.#occurrencesOf(pactId, timezone);
         const pact: PactTerms = {
           id: row.id,
-          name: row.name,
-          description: row.description,
-          evidenceKind: row.evidence_kind,
-          inBedBy: row.in_bed_by,
-          schedule: terms.schedule,
-          penaltyCents: row.penalty_cents,
-          recipient,
-          reviewers,
+          ...this.#currentTerms(row),
           stage: row.stage,
+          endedAt: row.ended_at === null ? null : new Date(row.ended_at),
           firstOccurrence: { date: first.date, dueAt: first.dueAt },
-          editWindowClosesAt: editWindowClosesAt(row, this.#clock.now()),
+          editWindowClosesAt: editWindowClosesAt(row, now),
+          newTerms: this.#newTerms(row, timezone, now),
           waiting: mergeByTime(
             waitingSince,
             "newest-first",
+            this.#waitingChangeRequests(accountId, pactId),
             this.#waitingEvidence(accountId, pactId),
             this.#waitingExcuses(accountId, pactId),
           ) as PactWaitingItem[],
         };
         return { ok: true, pact };
       },
+      changePreview: (pactId, change) => {
+        const { timezone } = account();
+        const checked = this.#checkedChange(accountId, timezone, pactId, change, this.#clock.now());
+        if (!checked.ok) return checked;
+        const { before, after, diffs, outcome } = checked;
+        const preview: ChangePreview = { changes: this.#termChanges(before, after, diffs), outcome };
+        return { ok: true, preview } satisfies ChangePreviewResult;
+      },
+      changePact: (pactId, change) =>
+        this.#command((): ChangePactResult => {
+          const { timezone, name: ownerName } = account();
+          const now = this.#clock.now();
+          const checked = this.#checkedChange(accountId, timezone, pactId, change, now);
+          if (!checked.ok) return checked;
+          const { pact, before, after, outcome } = checked;
+          if (outcome.kind === "nothing") return { ok: false, reason: "nothing-changed" };
+          // The name and added reviewers apply at once, even inside a change that waits.
+          if (after.name !== before.name)
+            this.#db.prepare(`UPDATE pact SET name = ? WHERE id = ?`).run(after.name, pactId);
+          const added = after.reviewerIds.filter((id) => !before.reviewerIds.includes(id));
+          this.#setReviewers(pactId, added);
+          for (const reviewerId of added) {
+            this.#enqueue({
+              recipient: reviewerId,
+              kind: "picked-as-reviewer",
+              channel: "push",
+              payload: {
+                pactId,
+                title: `${ownerName} added you as a reviewer`,
+                body: `${after.name} · ${scheduleText(before.schedule)} · ${money(before.penaltyCents)} per miss`,
+                url: APP_PATHS.review,
+              },
+            });
+          }
+          if (outcome.kind === "needs-approval") {
+            const sent = { ...before, name: after.name, reviewerIds: [...before.reviewerIds, ...added].sort() };
+            const id = this.#sendChangeRequest({ ...pact, name: after.name }, ownerName, sent, after, change.note);
+            return { ok: true, outcome, changeRequestId: id };
+          }
+          if (outcome.kind === "stricter") this.#applyTerms(pact, after, now, checked.timezone);
+          return { ok: true, outcome, changeRequestId: null };
+        }),
+      requestEnd: (pactId, note) =>
+        this.#command((): RequestEndResult => {
+          const { name: ownerName } = account();
+          const pact = this.#ownPact(accountId, pactId);
+          if (!pact) return { ok: false, reason: "pact-not-found" };
+          if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
+          if (editWindowClosesAt(pact, this.#clock.now()) !== null) return { ok: false, reason: "edit-window-open" };
+          if (this.#waitingChangeRequestId(pactId) !== null) return { ok: false, reason: "change-request-waiting" };
+          const id = this.#sendChangeRequest(pact, ownerName, this.#changeableTerms(pact), null, note);
+          return { ok: true, changeRequestId: id };
+        }),
+      changeRequest: (changeRequestId) => {
+        account();
+        const row = this.#changeRequestRow(changeRequestId);
+        if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
+        let state: ChangeRequestState = { kind: "waiting" };
+        if (row.withdrawn_at !== null) state = { kind: "withdrawn", withdrawnAt: new Date(row.withdrawn_at) };
+        if (row.decision !== null) {
+          const decided = {
+            reviewerName: this.#accountName(row.decided_by_account_id!),
+            decidedAt: new Date(row.decided_at!),
+          };
+          state =
+            row.decision === "approved"
+              ? { kind: "approved", ...decided }
+              : { kind: "rejected", ...decided, reason: row.reject_reason! };
+        }
+        const changeRequest = {
+          ...this.#changeRequestView(row),
+          state,
+          reviewerNames: this.#friendsSortedByName(this.#reviewersOf(row.pact_id)).map((friend) => friend.name),
+        };
+        return { ok: true, changeRequest } satisfies ChangeRequestResult;
+      },
+      withdrawChangeRequest: (changeRequestId) =>
+        this.#command((): WithdrawChangeRequestResult => {
+          account();
+          const row = this.#changeRequestRow(changeRequestId);
+          if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
+          if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
+          this.#db
+            .prepare(`UPDATE change_request SET withdrawn_at = ? WHERE id = ?`)
+            .run(this.#clock.now().toISOString(), changeRequestId);
+          return { ok: true };
+        }),
       profile: () => {
         const { email, name, timezone } = account();
         const connections = (
@@ -914,7 +1059,7 @@ class Core implements PactCore {
             )
             .get(pactId, today, since) as { date: LocalDate | null }
         ).date;
-        const { between } = occurrences(occurrenceTermsOf(pact), timezone);
+        const { between } = this.#occurrencesOf(pactId, timezone);
         const recentDays = between(earliest ?? today, today)
           .map((occurrence) => ({ date: occurrence.date, status: this.#occurrenceStatus(pactId, occurrence) }))
           .filter(({ status }) => this.#skipReason(status, now) === null)
@@ -1019,7 +1164,7 @@ class Core implements PactCore {
           reason: row.reason,
           photoIds: this.#excusePhotoIds(excuseId),
           filedAt: new Date(row.filed_at),
-          days: this.#excuseDays(excuseId, pact, pact.timezone),
+          days: this.#excuseDays(excuseId, pact.id, pact.timezone),
           state,
           reviewerNames,
         };
@@ -1127,27 +1272,41 @@ class Core implements PactCore {
           penalty_cents: number;
           recipient_name: string;
         }[];
-        const evidence = rows.map((row): ReviewItem => ({
-          kind: "evidence",
-          id: row.id,
-          pactId: row.pact_id,
-          pactName: row.pact_name,
-          ownerName: row.owner_name,
-          description: row.description,
-          photoIds: this.#evidencePhotoIds(row.id),
-          submittedAt: new Date(row.submitted_at),
-          occurrenceDate: row.occurrence_date,
-          penaltyCents: row.penalty_cents,
-          recipientName: row.recipient_name,
-        }));
-        return mergeByTime(
-          (item) =>
-            item.kind === "evidence" ? item.submittedAt : item.kind === "excuse" ? item.filedAt : item.recordedAt,
-          "oldest-first",
-          evidence,
-          this.#excusesToReview(accountId),
-          this.#paymentsToReview(accountId),
-        );
+        const evidence = rows.map((row): ReviewItem => {
+          // What counts, and what rejecting costs: the terms of the occurrence's day.
+          const terms = this.#termsOn(row.pact_id, row.occurrence_date);
+          return {
+            kind: "evidence",
+            id: row.id,
+            pactId: row.pact_id,
+            pactName: row.pact_name,
+            ownerName: row.owner_name,
+            description: terms.description,
+            photoIds: this.#evidencePhotoIds(row.id),
+            submittedAt: new Date(row.submitted_at),
+            occurrenceDate: row.occurrence_date,
+            penaltyCents: terms.penalty_cents,
+            recipientName: this.#recipientName(terms.recipient_id),
+          };
+        });
+        // Change requests first: one waiting holds up any other change to its pact.
+        return [
+          ...this.#changeRequestsToReview(accountId),
+          ...mergeByTime(
+            (item) =>
+              item.kind === "evidence"
+                ? item.submittedAt
+                : item.kind === "excuse"
+                  ? item.filedAt
+                  : item.kind === "payment"
+                    ? item.recordedAt
+                    : item.requestedAt,
+            "oldest-first",
+            evidence,
+            this.#excusesToReview(accountId),
+            this.#paymentsToReview(accountId),
+          ),
+        ];
       },
       decide: (itemId, decision) =>
         this.#command((): DecideResult => {
@@ -1174,7 +1333,18 @@ class Core implements PactCore {
                 )
                 .get(accountId, itemId) as ExcuseToDecide | undefined);
           const payment = evidence || excuse ? undefined : this.#paymentToDecide(accountId, itemId);
-          const item = evidence ?? excuse ?? payment;
+          const changeRequest =
+            evidence || excuse || payment
+              ? undefined
+              : (this.#db
+                  .prepare(
+                    `SELECT change_request.id, change_request.decision FROM change_request
+                     JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
+                                       AND pact_reviewer.reviewer_account_id = ?
+                     WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL`,
+                  )
+                  .get(accountId, itemId) as ChangeRequestToDecide | undefined);
+          const item = evidence ?? excuse ?? payment ?? changeRequest;
           if (!item) return { ok: false, reason: "item-not-found" };
           if (item.decision !== null) return { ok: false, reason: "already-decided" };
           const reason = decision.kind === "reject" ? decision.reason.trim() : null;
@@ -1183,6 +1353,7 @@ class Core implements PactCore {
           if (evidence) this.#decideEvidence(evidence, decided, accountId);
           if (excuse) this.#decideExcuse(excuse, decided, accountId);
           if (payment) this.#decidePayment(payment, decided, accountId);
+          if (changeRequest) this.#decideChangeRequest(changeRequest, decided, accountId);
           return { ok: true };
         }),
       ledgers: () => {
@@ -1745,7 +1916,7 @@ class Core implements PactCore {
     if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };
     if (to > addDays(from, MAX_EXCUSE_SPAN_DAYS - 1)) return { ok: false, reason: "too-many-days" };
     const preview: ExcusePreview = { covered: [], skipped: [], heldCents: 0 };
-    for (const occurrence of occurrences(occurrenceTermsOf(pact), timezone).between(from, to)) {
+    for (const occurrence of this.#occurrencesOf(pactId, timezone).between(from, to)) {
       const status = this.#occurrenceStatus(pactId, occurrence);
       const skipped = this.#skipReason(status, now);
       if (skipped !== null) {
@@ -1758,21 +1929,20 @@ class Core implements PactCore {
     return { ok: true, preview };
   }
 
-  /** The days an excuse covers, oldest first, as they stand now. */
-  #excuseDays(excuseId: string, pact: Pick<PactRow, "schedule" | "first_occurrence">, timezone: string): ExcuseDay[] {
-    const { between } = occurrences(occurrenceTermsOf(pact), timezone);
+  /**
+   * The days an excuse covers, oldest first, as they stand now. A day ahead
+   * that an approved change took off the schedule isn't one any more.
+   */
+  #excuseDays(excuseId: string, pactId: string, timezone: string): ExcuseDay[] {
+    const { between } = this.#occurrencesOf(pactId, timezone);
     const dates = (
       this.#db.prepare(`SELECT date FROM excuse_day WHERE excuse_id = ? ORDER BY date`).all(excuseId) as {
         date: LocalDate;
       }[]
     ).map((row) => row.date);
-    const pactId = (this.#db.prepare(`SELECT pact_id FROM excuse WHERE id = ?`).get(excuseId) as { pact_id: string })
-      .pact_id;
-    // The schedule was fixed when the edit window closed, before any excuse.
-    return dates.map((date) => {
+    return dates.flatMap((date) => {
       const [occurrence] = between(date, date);
-      if (!occurrence) throw new Error(`excuse ${excuseId} covers ${date}, which pact ${pactId} doesn't have`);
-      return { date, status: this.#occurrenceStatus(pactId, occurrence) };
+      return occurrence ? [{ date, status: this.#occurrenceStatus(pactId, occurrence) }] : [];
     });
   }
 
@@ -1886,7 +2056,7 @@ class Core implements PactCore {
       first_occurrence: string;
     }[];
     return rows.map((row): ReviewItem => {
-      const days = this.#excuseDays(row.id, row, row.timezone);
+      const days = this.#excuseDays(row.id, row.pact_id, row.timezone);
       return {
         kind: "excuse",
         id: row.id,
@@ -1966,7 +2136,7 @@ class Core implements PactCore {
       reviewer_name: string;
     }[];
     return rows.map((row) => {
-      const days = this.#excuseDays(row.id, row, row.timezone);
+      const days = this.#excuseDays(row.id, row.pact_id, row.timezone);
       const { owed } = this.#db
         .prepare(
           `SELECT COALESCE(SUM(penalty.amount_cents), 0) AS owed FROM excuse_day
@@ -1994,6 +2164,463 @@ class Core implements PactCore {
         },
       };
     });
+  }
+
+  /** The pact's terms over time, oldest first: those it had before each change, then those it has now. */
+  #erasOf(pact: Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by">): TermsEra[] {
+    const earlier = this.#db
+      .prepare(`SELECT until, schedule, in_bed_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`)
+      .all(pact.id) as { until: LocalDate; schedule: string; in_bed_by: string | null }[];
+    return [
+      ...earlier.map((row) => ({
+        until: row.until,
+        terms: occurrenceTermsOf({ ...row, first_occurrence: pact.first_occurrence }),
+      })),
+      { until: null, terms: occurrenceTermsOf(pact) },
+    ];
+  }
+
+  /** The occurrences of pact `pactId` in `timezone`, each dated one on the terms it opened with. */
+  #occurrencesOf(pactId: string, timezone: string): Occurrences {
+    const pact = this.#db
+      .prepare(`SELECT id, schedule, first_occurrence, in_bed_by FROM pact WHERE id = ?`)
+      .get(pactId) as Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by"> | undefined;
+    if (!pact) throw new Error(`no pact ${pactId}`);
+    return occurrencesOverTime(this.#erasOf(pact), timezone);
+  }
+
+  /** The terms the pact's occurrence dated `date` follows: those in force when it opened. */
+  #termsOn(pactId: string, date: LocalDate): DatedTerms {
+    const columns = `description, schedule, in_bed_by, penalty_cents, recipient_id`;
+    const earlier = this.#db
+      .prepare(`SELECT ${columns} FROM pact_earlier_terms WHERE pact_id = ? AND until > ? ORDER BY until LIMIT 1`)
+      .get(pactId, date) as DatedTerms | undefined;
+    return earlier ?? (this.#db.prepare(`SELECT ${columns} FROM pact WHERE id = ?`).get(pactId) as DatedTerms);
+  }
+
+  /** The pact's terms an owner can change, as they stand. */
+  #changeableTerms(pact: PactRow): ChangeableTerms {
+    return {
+      name: pact.name,
+      description: pact.description,
+      inBedBy: pact.in_bed_by,
+      schedule: JSON.parse(pact.schedule) as Schedule,
+      penaltyCents: pact.penalty_cents,
+      recipientId: pact.recipient_id,
+      reviewerIds: this.#reviewersOf(pact.id),
+    };
+  }
+
+  /** The pact's terms as the pact page and a change request show them. */
+  #currentTerms(pact: PactRow): CurrentTerms {
+    const [recipient] = this.#selectRecipients(`id = ?`, pact.recipient_id);
+    if (!recipient) throw new Error(`pact ${pact.id} has no recipient ${pact.recipient_id}`);
+    return {
+      name: pact.name,
+      description: pact.description,
+      evidenceKind: pact.evidence_kind,
+      inBedBy: pact.in_bed_by,
+      schedule: JSON.parse(pact.schedule) as Schedule,
+      penaltyCents: pact.penalty_cents,
+      recipient,
+      reviewers: this.#friendsSortedByName(this.#reviewersOf(pact.id)),
+    };
+  }
+
+  /** The accounts `ids` as friends, sorted by name. */
+  #friendsSortedByName(ids: AccountId[]): Friend[] {
+    return ids
+      .map((id) => ({ id, name: this.#accountName(id) }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }
+
+  /** The id of the pact's change request waiting for a decision, or null. */
+  #waitingChangeRequestId(pactId: string): string | null {
+    const row = this.#db
+      .prepare(`SELECT id FROM change_request WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`)
+      .get(pactId) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  /**
+   * What sending `change` to the owner's pact would do at `now`: the pact,
+   * its terms before and after, what each changed term does, and the whole
+   * change's outcome; or why it's refused.
+   */
+  #checkedChange(
+    ownerId: AccountId,
+    timezone: string | null,
+    pactId: string,
+    change: PactChange,
+    now: Date,
+  ):
+    | {
+        ok: true;
+        pact: PactRow;
+        timezone: string;
+        before: ChangeableTerms;
+        after: ChangeableTerms;
+        diffs: TermDiff[];
+        outcome: ChangeOutcome;
+      }
+    | { ok: false; reason: ChangePactRefusal } {
+    const pact = this.#ownPact(ownerId, pactId);
+    if (!pact) return { ok: false, reason: "pact-not-found" };
+    if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
+    if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
+    const { note: _note, ...terms } = change;
+    const checked = this.#checkedPact(
+      ownerId,
+      timezone,
+      { ...terms, evidenceKind: pact.evidence_kind },
+      new Date(pact.created_at),
+    );
+    if (!checked.ok) return checked;
+    // #checkedPact refuses an owner with no timezone.
+    const zone = timezone!;
+    const before = this.#changeableTerms(pact);
+    const after: ChangeableTerms = {
+      name: checked.name,
+      description: checked.description,
+      inBedBy: checked.terms.inBedBy ?? null,
+      schedule: checked.terms.schedule,
+      penaltyCents: change.penaltyCents,
+      recipientId: change.recipientId,
+      reviewerIds: [...checked.reviewerIds].sort(),
+    };
+    const diffs = termDiffs(before, after);
+    if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
+      return { ok: false, reason: "change-request-waiting" };
+    }
+    return {
+      ok: true,
+      pact,
+      timezone: zone,
+      before,
+      after,
+      diffs,
+      outcome: this.#changeOutcome(pact, zone, before, after, diffs, now),
+    };
+  }
+
+  #changeOutcome(
+    pact: PactRow,
+    timezone: string,
+    before: ChangeableTerms,
+    after: ChangeableTerms,
+    diffs: TermDiff[],
+    now: Date,
+  ): ChangeOutcome {
+    if (diffs.length === 0) return { kind: "nothing" };
+    if (diffs.some((diff) => diff.effect === "needs-approval")) {
+      // Added reviewers join at once; removed ones review until it's approved.
+      const deciders = [...new Set([...before.reviewerIds, ...after.reviewerIds])];
+      return {
+        kind: "needs-approval",
+        reviewerNames: this.#friendsSortedByName(deciders).map((friend) => friend.name),
+        bundlesStricter: diffs.some((diff) => diff.effect === "stricter"),
+      };
+    }
+    if (diffs.some((diff) => diff.effect === "stricter")) {
+      return { kind: "stricter", ...this.#startOfNewTerms(pact, timezone, after, now) };
+    }
+    return { kind: "at-once" };
+  }
+
+  /**
+   * If `after` took effect at `at`: the first occurrence it would apply to,
+   * the first not open yet, and today's penalty when today is an occurrence
+   * whose penalty it changes.
+   */
+  #startOfNewTerms(
+    pact: PactRow,
+    timezone: string,
+    after: Pick<ChangeableTerms, "schedule" | "inBedBy" | "penaltyCents">,
+    at: Date,
+  ): { appliesFrom: LocalDate; todayKeepsCents: number | null } {
+    const today = localDateOf(at, timezone);
+    const from = addDays(today, 1);
+    const eras = this.#erasOf(pact);
+    const earlier = eras.slice(0, -1);
+    const planned: TermsEra[] = [
+      ...earlier,
+      ...(earlier.some((era) => era.until === from) ? [] : [{ until: from, terms: eras.at(-1)!.terms }]),
+      {
+        until: null,
+        terms: {
+          schedule: after.schedule,
+          firstOccurrence: firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from),
+          inBedBy: after.inBedBy,
+        },
+      },
+    ];
+    const [first] = occurrencesOverTime(planned, timezone).between(from, addDays(from, 7));
+    if (!first) throw new Error("unreachable: every scheduled weekday recurs within 8 days");
+    const todayTerms = this.#termsOn(pact.id, today);
+    const keeps =
+      occurrencesOverTime(eras, timezone).includes(today) && todayTerms.penalty_cents !== after.penaltyCents;
+    return { appliesFrom: first.date, todayKeepsCents: keeps ? todayTerms.penalty_cents : null };
+  }
+
+  /**
+   * Puts `after` in force for the pact's occurrences not open at `at`, those
+   * dated from tomorrow in the owner's timezone; the terms it had stay with
+   * those dated before. A pact whose first occurrence hasn't come gets the
+   * first day of the new schedule from tomorrow. The name and reviewers are
+   * left as they are.
+   */
+  #applyTerms(pact: PactRow, after: ChangeableTerms, at: Date, timezone: string): void {
+    const from = addDays(localDateOf(at, timezone), 1);
+    // A change already made today put the terms today keeps there first.
+    this.#db
+      .prepare(
+        `INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, in_bed_by, penalty_cents, recipient_id)
+         SELECT id, ?, description, schedule, in_bed_by, penalty_cents, recipient_id FROM pact WHERE id = ?
+         ON CONFLICT (pact_id, until) DO NOTHING`,
+      )
+      .run(from, pact.id);
+    this.#db
+      .prepare(
+        `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, penalty_cents = ?, recipient_id = ?,
+                         first_occurrence = ?
+         WHERE id = ?`,
+      )
+      .run(
+        after.description,
+        JSON.stringify(after.schedule),
+        after.inBedBy,
+        after.penaltyCents,
+        after.recipientId,
+        firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from),
+        pact.id,
+      );
+  }
+
+  /** The changed terms, old and new, with names for the recipient and reviewers. */
+  #termChanges(before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
+    return diffs.map(({ term, effect }): TermChange => {
+      switch (term) {
+        case "name":
+          return { term, before: before.name, after: after.name, effect };
+        case "description":
+          return { term, before: before.description, after: after.description, effect };
+        case "in-bed-by":
+          return { term, before: before.inBedBy!, after: after.inBedBy!, effect };
+        case "schedule":
+          return { term, before: before.schedule, after: after.schedule, effect };
+        case "penalty":
+          return { term, before: before.penaltyCents, after: after.penaltyCents, effect };
+        case "recipient":
+          return {
+            term,
+            before: { id: before.recipientId, name: this.#recipientName(before.recipientId) },
+            after: { id: after.recipientId, name: this.#recipientName(after.recipientId) },
+            effect,
+          };
+        case "reviewers":
+          return {
+            term,
+            before: this.#friendsSortedByName(before.reviewerIds),
+            after: this.#friendsSortedByName(after.reviewerIds),
+            added: this.#friendsSortedByName(after.reviewerIds.filter((id) => !before.reviewerIds.includes(id))),
+            removed: this.#friendsSortedByName(before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))),
+            effect,
+          };
+      }
+    });
+  }
+
+  /** Records a change request for the pact, and gives its reviewers a review item. */
+  #sendChangeRequest(
+    pact: PactRow,
+    ownerName: string,
+    before: ChangeableTerms,
+    after: ChangeableTerms | null,
+    note: string | undefined,
+  ): string {
+    const id = randomUUID();
+    const trimmed = note?.trim() ?? "";
+    this.#db
+      .prepare(
+        `INSERT INTO change_request (id, pact_id, ends_pact, before_terms, after_terms, note, requested_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        pact.id,
+        after === null ? 1 : 0,
+        JSON.stringify(before),
+        after === null ? null : JSON.stringify(after),
+        trimmed === "" ? null : trimmed,
+        this.#clock.now().toISOString(),
+      );
+    const what = after === null ? [] : termDiffs(before, after).map(({ term }) => TERM_LABELS[term]);
+    const body = [...what, ...(trimmed === "" ? [] : [`“${trimmed}”`])].join(" · ");
+    for (const reviewerId of this.#reviewersOf(pact.id)) {
+      this.#enqueue({
+        recipient: reviewerId,
+        kind: "review-item",
+        channel: "push",
+        payload: {
+          itemKind: "change-request",
+          itemId: id,
+          pactId: pact.id,
+          title: `${ownerName} asked to ${after === null ? "end" : "change"} ${pact.name}`,
+          body: body === "" ? "It needs your approval" : body,
+          url: APP_PATHS.review,
+        },
+      });
+    }
+    return id;
+  }
+
+  /** A change request with its pact's owner and their timezone. */
+  #changeRequestRow(id: string): ChangeRequestRow | undefined {
+    return this.#db
+      .prepare(
+        `SELECT change_request.*, pact.owner_account_id, owner.name AS owner_name, owner.timezone
+         FROM change_request
+         JOIN pact ON pact.id = change_request.pact_id
+         JOIN account AS owner ON owner.id = pact.owner_account_id
+         WHERE change_request.id = ?`,
+      )
+      .get(id) as ChangeRequestRow | undefined;
+  }
+
+  #changeRequestView(row: ChangeRequestRow): ChangeRequestView {
+    const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
+    const before = JSON.parse(row.before_terms) as ChangeableTerms;
+    const after = row.after_terms === null ? null : (JSON.parse(row.after_terms) as ChangeableTerms);
+    const waiting = row.decision === null && row.withdrawn_at === null;
+    // Every pact's owner has a timezone: creating one needs it.
+    const start =
+      waiting && after !== null ? this.#startOfNewTerms(pact, row.timezone!, after, this.#clock.now()) : null;
+    return {
+      id: row.id,
+      pactId: row.pact_id,
+      pactName: pact.name,
+      endsPact: row.ends_pact === 1,
+      note: row.note,
+      requestedAt: new Date(row.requested_at),
+      changes: after === null ? [] : this.#termChanges(before, after, termDiffs(before, after)),
+      current: this.#currentTerms(pact),
+      appliesFrom: start?.appliesFrom ?? null,
+      todayKeepsCents: start?.todayKeepsCents ?? null,
+    };
+  }
+
+  /** Change requests waiting for a decision that `reviewerId` may make: those for pacts they review, oldest first. */
+  #changeRequestsToReview(reviewerId: AccountId): ReviewItem[] {
+    const ids = this.#db
+      .prepare(
+        `SELECT change_request.id FROM change_request
+         JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
+                           AND pact_reviewer.reviewer_account_id = ?
+         WHERE change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
+         ORDER BY change_request.requested_at, change_request.id`,
+      )
+      .all(reviewerId) as { id: string }[];
+    return ids.map(({ id }) => {
+      const row = this.#changeRequestRow(id)!;
+      return { kind: "change-request", ownerName: row.owner_name, ...this.#changeRequestView(row) };
+    });
+  }
+
+  /** The owner's change requests waiting for a decision (or just that for `pactId`), newest first. */
+  #waitingChangeRequests(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT change_request.id, change_request.pact_id, pact.name, change_request.ends_pact,
+                change_request.requested_at
+         FROM change_request JOIN pact ON pact.id = change_request.pact_id
+         WHERE pact.owner_account_id = ? AND change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
+           AND (? IS NULL OR pact.id = ?)
+         ORDER BY change_request.requested_at DESC, change_request.id`,
+      )
+      .all(ownerId, pactId ?? null, pactId ?? null) as {
+      id: string;
+      pact_id: string;
+      name: string;
+      ends_pact: 0 | 1;
+      requested_at: string;
+    }[];
+    return rows.map((row) => ({
+      kind: "change-request",
+      id: row.id,
+      pactId: row.pact_id,
+      name: row.name,
+      endsPact: row.ends_pact === 1,
+      requestedAt: new Date(row.requested_at),
+    }));
+  }
+
+  /**
+   * Records a reviewer's decision on a change request and tells the owner.
+   * Approved, an end makes the pact Ended at once; a change applies its terms
+   * from the first occurrence not open yet, and takes off the reviewers it
+   * removes. Rejected, nothing changes.
+   */
+  #decideChangeRequest(request: ChangeRequestToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
+    const now = this.#clock.now();
+    this.#db
+      .prepare(
+        `UPDATE change_request SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
+         WHERE id = ?`,
+      )
+      .run(outcome, reviewerId, now.toISOString(), reason, request.id);
+    const row = this.#changeRequestRow(request.id)!;
+    const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
+    const reviewerName = this.#accountName(reviewerId);
+    const endsPact = row.ends_pact === 1;
+    const title = `${reviewerName} ${outcome} ${endsPact ? `ending ${pact.name}` : "your change"}`;
+    let body = `${pact.name} · “${reason}”`;
+    if (outcome === "approved" && endsPact) {
+      this.#db.prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ?`).run(now.toISOString(), pact.id);
+      body = `${pact.name} is Ended`;
+    } else if (outcome === "approved") {
+      const before = JSON.parse(row.before_terms) as ChangeableTerms;
+      const after = JSON.parse(row.after_terms!) as ChangeableTerms;
+      for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
+        this.#db
+          .prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`)
+          .run(pact.id, removed);
+      }
+      // Every pact's owner has a timezone: creating one needs it.
+      const { appliesFrom } = this.#startOfNewTerms(pact, row.timezone!, after, now);
+      this.#applyTerms(pact, after, now, row.timezone!);
+      body = `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
+    }
+    this.#enqueue({
+      recipient: row.owner_account_id,
+      kind: "change-request-decided",
+      channel: "push",
+      payload: {
+        itemKind: "change-request",
+        itemId: request.id,
+        pactId: pact.id,
+        decision: outcome,
+        ...(reason !== null && { reason }),
+        title,
+        body,
+        url: APP_PATHS.pact(pact.id),
+      },
+    });
+  }
+
+  /** As the pact page puts it: when the newest terms start, while their first occurrence hasn't opened. */
+  #newTerms(pact: PactRow, timezone: string, now: Date): PactTerms["newTerms"] {
+    if (pact.stage === "ended") return null;
+    const latest = this.#db
+      .prepare(`SELECT until FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until DESC LIMIT 1`)
+      .get(pact.id) as { until: LocalDate } | undefined;
+    if (!latest) return null;
+    const occurrences = this.#occurrencesOf(pact.id, timezone);
+    const [start] = occurrences.between(latest.until, addDays(latest.until, 7));
+    const today = localDateOf(now, timezone);
+    if (!start || start.date <= today) return null;
+    const todayTerms = this.#termsOn(pact.id, today);
+    const keeps = occurrences.includes(today) && todayTerms.penalty_cents !== pact.penalty_cents;
+    return { startsOn: start.date, todayKeepsCents: keeps ? todayTerms.penalty_cents : null };
   }
 
   /** `ownerId`'s pact `pactId`, if it is one. */
@@ -2262,7 +2889,7 @@ class Core implements PactCore {
     if (pact.judged_through !== null && date <= pact.judged_through) return true;
     // Every pact's owner has a timezone: creating one needs it.
     if (pact.timezone === null) return false;
-    return occurrences(occurrenceTermsOf(pact), pact.timezone)
+    return this.#occurrencesOf(pactId, pact.timezone)
       .dueAfter(pact.judged_through, t)
       .some((occurrence) => occurrence.date === date);
   }
@@ -2348,7 +2975,7 @@ class Core implements PactCore {
     if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
     if (photoCount === 0) return { ok: false, reason: "no-photos" };
     if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
-    const occurrence = occurrences(occurrenceTermsOf(row), timezone).openAt(at);
+    const occurrence = this.#occurrencesOf(pactId, timezone).openAt(at);
     if (!occurrence) return { ok: false, reason: "not-open" };
     const decision = this.#evidenceDecision(pactId, occurrence.date);
     if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
@@ -2398,6 +3025,7 @@ class Core implements PactCore {
     return mergeByTime(
       waitingSince,
       "newest-first",
+      this.#waitingChangeRequests(ownerId),
       this.#waitingEvidence(ownerId),
       this.#waitingExcuses(ownerId),
       payments,
@@ -2445,13 +3073,17 @@ class Core implements PactCore {
     const automatic: TodayAutomaticCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
-      const card = { pactId: pact.id, name: pact.name, penaltyCents: pact.penaltyCents };
+      // Each card shows the terms of the occurrence it's about.
+      const cardOn = (date: LocalDate) => ({
+        pactId: pact.id,
+        name: pact.name,
+        penaltyCents: this.#termsOn(pact.id, date).penalty_cents,
+      });
       const { editWindowClosesAt } = pact;
-      const { first, openAt, between } = occurrences(pact.terms, timezone);
-      const { inBedBy } = pact.terms;
-      if (inBedBy) {
+      const { first, openAt, between } = this.#occurrencesOf(pact.id, timezone);
+      if (pact.terms.inBedBy) {
         if (now.getTime() < first.opensAt.getTime()) {
-          comingUp.push({ ...card, editWindowClosesAt, opensOn: first.date });
+          comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date });
           continue;
         }
         // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
@@ -2464,7 +3096,13 @@ class Core implements PactCore {
             this.#excuseOn(pact.id, night.date) === null,
         );
         if (tonight) {
-          automatic.push({ ...card, editWindowClosesAt, occurrenceDate: tonight.date, dueAt: tonight.dueAt, inBedBy });
+          automatic.push({
+            ...cardOn(tonight.date),
+            editWindowClosesAt,
+            occurrenceDate: tonight.date,
+            dueAt: tonight.dueAt,
+            inBedBy: this.#termsOn(pact.id, tonight.date).in_bed_by!,
+          });
         }
         continue;
       }
@@ -2477,9 +3115,15 @@ class Core implements PactCore {
         if (decision === "waiting" || decision === "approved") continue;
         // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
         if (this.#excuseOn(pact.id, open.date) !== null) continue;
-        toDo.push({ kind: "evidence", ...card, editWindowClosesAt, occurrenceDate: open.date, dueAt: open.dueAt });
+        toDo.push({
+          kind: "evidence",
+          ...cardOn(open.date),
+          editWindowClosesAt,
+          occurrenceDate: open.date,
+          dueAt: open.dueAt,
+        });
       } else if (now.getTime() < first.opensAt.getTime()) {
-        comingUp.push({ ...card, editWindowClosesAt, opensOn: first.date });
+        comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date });
       }
     }
     const bills = this.#billsForToday(ownerId, now);
@@ -2676,7 +3320,7 @@ class Core implements PactCore {
     for (const pact of this.#pactsToJudge()) {
       // Every pact's owner has a timezone: creating one needs it. Oura reports bedtime nights.
       if (pact.timezone === null || pact.evidence_kind !== "camera") continue;
-      const due = occurrences(occurrenceTermsOf(pact), pact.timezone).dueAfter(pact.judged_through, t);
+      const due = this.#occurrencesOf(pact.id, pact.timezone).dueAfter(pact.judged_through, t);
       for (const occurrence of due) this.#judgeAtDueTime(pact.id, occurrence);
       const last = due.at(-1);
       if (last) this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(last.date, pact.id);
@@ -2693,7 +3337,7 @@ class Core implements PactCore {
       if (pact.evidence_kind !== "oura" || pact.timezone === null) continue;
       const { timezone } = pact;
       const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
-      for (const night of occurrences(occurrenceTermsOf(pact), timezone).between(from, localDateOf(t, timezone))) {
+      for (const night of this.#occurrencesOf(pact.id, timezone).between(from, localDateOf(t, timezone))) {
         if (nightStartsAt(night.date, timezone).getTime() > t.getTime()) break;
         if (!this.#isJudged(pact.id, night.date)) waiting.push({ pact: { ...pact, timezone }, night });
       }
@@ -2740,7 +3384,7 @@ class Core implements PactCore {
     const stopped = new Set<string>();
     for (const { pact, night } of this.#nightsWaiting(t)) {
       if (stopped.has(pact.id)) continue;
-      const inBedBy = pact.in_bed_by!;
+      const inBedBy = this.#termsOn(pact.id, night.date).in_bed_by!;
       const period = (sleep.get(pact.owner_account_id) ?? [])
         .filter((p) => p.type === "long_sleep" && nightOf(p.bedtime_start) === night.date)
         .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start)))[0];
@@ -2766,14 +3410,18 @@ class Core implements PactCore {
     }
   }
 
-  /** Every pact (or just `pactId`) with what judging reads of it: its terms, cursor and owner's timezone. */
+  /**
+   * Every Active pact (or just `pactId`, Active or Ended) with what judging
+   * reads of it: its terms, cursor and owner's timezone. An Ended pact makes
+   * no more occurrences, but a decision can still judge one it had.
+   */
   #pactsToJudge(pactId?: string): PactToJudge[] {
     return this.#db
       .prepare(
         `SELECT pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
                 pact.judged_through, account.timezone, pact.owner_account_id
          FROM pact JOIN account ON account.id = pact.owner_account_id
-         WHERE ? IS NULL OR pact.id = ?`,
+         WHERE (? IS NULL AND pact.stage = 'active') OR pact.id = ?`,
       )
       .all(pactId ?? null, pactId ?? null) as PactToJudge[];
   }
@@ -2800,9 +3448,13 @@ class Core implements PactCore {
 
   /** Only for judging at the due time: a rejection already told the owner, with the reason. */
   #enqueueMissed(pactId: string, date: LocalDate): void {
-    const pact = this.#db
-      .prepare(`SELECT owner_account_id, name, recipient_id, penalty_cents FROM pact WHERE id = ?`)
-      .get(pactId) as { owner_account_id: AccountId; name: string; recipient_id: string; penalty_cents: number };
+    const pact = {
+      ...(this.#db.prepare(`SELECT owner_account_id, name FROM pact WHERE id = ?`).get(pactId) as {
+        owner_account_id: AccountId;
+        name: string;
+      }),
+      ...this.#termsOn(pactId, date),
+    };
     this.#enqueue({
       recipient: pact.owner_account_id,
       kind: "missed-occurrence",
@@ -2827,14 +3479,17 @@ class Core implements PactCore {
   }
 
   /**
-   * Records an occurrence's outcome as of `at`. Missed adds the pact's
-   * penalty to the owner's ledger for the pact's recipient (held, while an
-   * excuse for it waits for approval).
+   * Records an occurrence's outcome as of `at`. Missed adds the penalty to
+   * the owner's ledger for the recipient, both as the pact's terms stood when
+   * the occurrence opened (held, while an excuse for it waits for approval).
    */
   #judge(pactId: string, date: LocalDate, outcome: "kept" | "missed" | "excused", at: Date): void {
-    const pact = this.#db
-      .prepare(`SELECT owner_account_id, recipient_id, penalty_cents FROM pact WHERE id = ?`)
-      .get(pactId) as Pick<PactRow, "recipient_id" | "penalty_cents"> & { owner_account_id: AccountId };
+    const pact = {
+      ...(this.#db.prepare(`SELECT owner_account_id FROM pact WHERE id = ?`).get(pactId) as {
+        owner_account_id: AccountId;
+      }),
+      ...this.#termsOn(pactId, date),
+    };
     this.#db
       .prepare(
         `INSERT INTO occurrence (pact_id, date, outcome, judged_at) VALUES (?, ?, ?, ?)
@@ -3027,6 +3682,60 @@ interface PactRow {
   first_occurrence: string;
   created_at: string;
   reviewers_notified_at: string | null;
+  ended_at: string | null;
+}
+
+/** The terms an occurrence follows: the pact's, as they stood when it opened. */
+type DatedTerms = Pick<PactRow, "description" | "schedule" | "in_bed_by" | "penalty_cents" | "recipient_id">;
+
+/** A change request as stored, with its pact's owner, their name and timezone. */
+interface ChangeRequestRow {
+  id: string;
+  pact_id: string;
+  ends_pact: 0 | 1;
+  /** JSON ChangeableTerms. */
+  before_terms: string;
+  after_terms: string | null;
+  note: string | null;
+  requested_at: string;
+  decision: ReviewOutcome | null;
+  decided_by_account_id: AccountId | null;
+  decided_at: string | null;
+  reject_reason: string | null;
+  withdrawn_at: string | null;
+  owner_account_id: AccountId;
+  owner_name: string;
+  timezone: string | null;
+}
+
+/** A change request a reviewer is deciding on, as `decide` reads it. */
+interface ChangeRequestToDecide {
+  id: string;
+  decision: ReviewOutcome | null;
+}
+
+/** How a review item's push names each changed term. */
+const TERM_LABELS: Record<TermDiff["term"], string> = {
+  name: "Name",
+  description: "Photo shows",
+  "in-bed-by": "In bed by",
+  schedule: "Days",
+  penalty: "Penalty",
+  recipient: "Recipient",
+  reviewers: "Reviewers",
+};
+
+/**
+ * A pact's first occurrence once a change to `schedule` takes effect `from`
+ * a date: as it was if that's before `from`; otherwise, as the change came
+ * before the pact started, the first day of the new schedule from `from`.
+ */
+function firstOccurrenceAfterChange(firstOccurrence: LocalDate, schedule: Schedule, from: LocalDate): LocalDate {
+  if (firstOccurrence < from) return firstOccurrence;
+  for (let date = from, i = 0; i < 7; date = addDays(date, 1), i++) {
+    if (schedule.days.includes(weekdayOf(date))) return date;
+  }
+  throw new Error("unreachable: a schedule has at least one day");
 }
 
 /** A pact as judging reads it. */
@@ -3062,6 +3771,8 @@ function waitingSince(item: TodayWaitingItem): Date {
       return item.filedAt;
     case "payment":
       return item.recordedAt;
+    case "change-request":
+      return item.requestedAt;
   }
 }
 
