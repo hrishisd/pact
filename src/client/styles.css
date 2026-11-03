@@ -20,6 +20,7 @@
   --fresh-bg: #ddeafb;
   --excused: #8f5c0c;
   --excused-bg: #f4e8cf;
+  --excused-cell: #c99a3d; /* a heat map's Excused square: lighter than --excused, as the prototype has it */
   --slate: #4f5675;
   --slate-bg: #e4e6ef;
   --amber: #8a5300;
@@ -1317,4 +1318,98 @@ details.folded .kv {
 /* A create-form step opened from Request change: the sheet's title names it. */
 .step-in-sheet > h2 {
   display: none;
+}
+
+/* History: the pact page's heat map (ticket 17 prototype, option A). */
+.hm-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.hm {
+  display: flex;
+  gap: 3px;
+  width: max-content;
+}
+.hm-col {
+  display: grid;
+  grid-template-rows: 14px repeat(7, 15px);
+  gap: 3px;
+  width: 15px;
+}
+.hm-lbl {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 15px;
+  height: 15px;
+  white-space: nowrap;
+}
+.hm-lbl.mo {
+  line-height: 14px;
+  height: 14px;
+  overflow: visible;
+}
+.cell {
+  display: block;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background: var(--sunk);
+  border: 0;
+  padding: 0;
+}
+.cell.none {
+  background: transparent;
+  outline: 1px solid var(--sunk);
+  outline-offset: -1px;
+}
+.cell.kept {
+  background: var(--kept);
+}
+.cell.missed {
+  background: var(--missed);
+}
+.cell.excused {
+  background: var(--excused-cell);
+}
+.cell.not-judged {
+  background: var(--slate-bg);
+  outline: 1.5px solid var(--slate);
+  outline-offset: -1.5px;
+}
+.cell.open {
+  background: var(--accent-soft);
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+.cell.ahead {
+  background: transparent;
+  outline: 1px dashed var(--line);
+  outline-offset: -1px;
+}
+.cell.sel {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legend .cell {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+.hmdetail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13.5px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: var(--sunk);
 }

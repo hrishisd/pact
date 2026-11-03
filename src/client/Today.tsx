@@ -3,7 +3,7 @@
 // approval. Evidence is submitted inline on a To do card; an excuse is filed
 // in the File excuse sheet, opened from a To do or Missed card or an alert; a
 // payment is recorded in the Record a payment sheet, opened from a bill's To
-// do card or an overdue alert.
+// do card or an overdue alert. Last, Yesterday: how each pact due yesterday did.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
@@ -23,6 +23,7 @@ import { api, failureText, uploadFailureText } from "./api.ts";
 import { clockText, formatDate, formatDay, formatDueAt, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
+import { Yesterday } from "./history.tsx";
 import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
@@ -138,6 +139,7 @@ export function Today({
           onOpenChangeRequest={onOpenChangeRequest}
         />
       )}
+      <Yesterday entries={today.yesterday} now={now} onOpenPact={onOpenPact} />
       {excusing && (
         <ExcuseSheet
           pactId={excusing.pactId}

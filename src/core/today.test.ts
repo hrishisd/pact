@@ -44,7 +44,13 @@ describe("Today", () => {
     await createPact("Gym", ["mon"]);
 
     s.setClockTo("Tue 10:00");
-    expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
+    expect(owner.today()).toEqual({
+      hasPacts: true,
+      alerts: [],
+      sections: [],
+      waiting: [],
+      yesterday: [expect.objectContaining({ name: "Gym", occurrenceDate: "2026-01-05" })],
+    });
   });
 
   test("lists an open pact as To do and a not-yet-open one as Coming up", async () => {

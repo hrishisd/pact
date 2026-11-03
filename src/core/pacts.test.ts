@@ -51,6 +51,7 @@ describe("creating a pact", () => {
         editWindowClosesAt: s.at("Mon 09:10"),
         newTerms: null,
         waiting: [],
+        history: expect.objectContaining({ kind: "fixed-days" }),
       },
     });
   });

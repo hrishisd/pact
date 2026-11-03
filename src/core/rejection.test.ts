@@ -77,7 +77,14 @@ describe("a rejection is final straight away", () => {
       ],
       sections: [],
       waiting: [],
-      yesterday: [],
+      yesterday: [
+        expect.objectContaining({
+          occurrenceDate: MONDAY,
+          occurrence: expect.objectContaining({
+            decidedBy: { kind: "evidence-rejected", reviewerName: "reviewer", reason: "That's last week's photo" },
+          }),
+        }),
+      ],
     } satisfies Today);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
   });

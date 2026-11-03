@@ -166,7 +166,60 @@ export interface PactTerms {
   newTerms: { startsOn: string; todayKeepsCents: number | null } | null;
   /** The pact's evidence, excuses and change request waiting for a reviewer's decision, newest first. */
   waiting: PactWaitingItem[];
+  /** What its heat map shows. */
+  history: PactHistory;
 }
+
+/**
+ * A pact's heat map: one square per occurrence period. Fixed days has one
+ * per day. Weekly count (ticket 14) will add `{ kind: "weekly-count" }`, one
+ * square per Mon–Sun week with the sessions that counted.
+ */
+export type PactHistory = {
+  kind: "fixed-days";
+  /**
+   * Every day from the first occurrence through the Sunday ending this week
+   * (or the week the pact Ended, or the first occurrence's week while it's
+   * coming up), oldest first.
+   */
+  days: HeatMapDay[];
+};
+
+/** One day on a heat map. */
+export interface HeatMapDay {
+  /** "YYYY-MM-DD" in the owner's timezone. */
+  date: string;
+  /**
+   * How its occurrence went, or null on a day the pact has none: one its
+   * schedule skips, or one from the day it Ended that was never judged.
+   */
+  occurrence: OccurrenceRecord | null;
+}
+
+/** How one occurrence went, as a heat map's tapped square and a Yesterday row tell it. */
+export interface OccurrenceRecord {
+  status: OccurrenceStatus;
+  /**
+   * The reviewer's decision that settled it: approved evidence (Kept), rejected
+   * evidence (Missed), or an approved excuse (Excused, or a day ahead it already
+   * covers). Null for anything else, such as a day Missed with no evidence.
+   */
+  decidedBy: OccurrenceDecision | null;
+  /** Missed only: the recipient its penalty went to. */
+  recipientName: string | null;
+  /**
+   * Bedtime pacts only, once judged Kept or Missed: when the owner got into
+   * bed, "HH:MM" on Oura's clock, or null when Oura reported no sleep by
+   * 18:00 the next day.
+   */
+  night?: { inBedAt: string | null };
+}
+
+/** A reviewer's decision that settled an occurrence. `reason` is the rejection's, or the excuse's. */
+export type OccurrenceDecision =
+  | { kind: "evidence-approved"; reviewerName: string }
+  | { kind: "evidence-rejected"; reviewerName: string; reason: string }
+  | { kind: "excuse-approved"; reviewerName: string; reason: string };
 
 /** What the pact page's "Waiting on" list holds: never payments, which belong to a recipient. */
 export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" | "change-request" }>;
@@ -435,8 +488,8 @@ export interface Connection {
  * then Waiting for approval, then Yesterday. When alerts and sections are all
  * empty, the UI shows the "Nothing to do right now" card.
  *
- * Sections come in display order and an empty one is left out. Yesterday is
- * `never` until the ticket that fills it.
+ * Sections come in display order and an empty one is left out. Yesterday
+ * lists the pacts due yesterday, by name.
  */
 export interface Today {
   /** False until the account has made a pact: a new account's Today says what to do first. */
@@ -658,7 +711,16 @@ export type TodayWaitingItem =
       endsPact: boolean;
       requestedAt: Date;
     };
-export type TodayYesterdayEntry = never;
+/** One pact due yesterday, and how it did. Weekly count pacts are never in it. */
+export interface TodayYesterdayEntry {
+  pactId: string;
+  name: string;
+  /** A bedtime night not judged yet is waiting on Oura, not a reviewer. */
+  evidenceKind: EvidenceKind;
+  /** Yesterday, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  occurrence: OccurrenceRecord;
+}
 
 /** What the owner owes one recipient, across every pact naming it. */
 export interface LedgerSummary {

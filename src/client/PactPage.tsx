@@ -1,7 +1,7 @@
 // A pact's page, pushed on the current tab: its terms, Edit and Delete in
 // its edit window; after it File excuse, Request change and End pact (or,
 // while a change request waits, word of it); when new terms start; and
-// what's waiting on a reviewer. History comes later.
+// what's waiting on a reviewer; and its History, a heat map of its days.
 
 import { useCallback, useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
@@ -9,6 +9,7 @@ import type { PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
+import { HeatMap } from "./history.tsx";
 import { listNames } from "./change-terms.tsx";
 import { clockText, formatDate, formatDay, minutesLeft, money, scheduleText } from "./format.ts";
 import { CameraIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
@@ -84,6 +85,7 @@ export function PactPage({
               onOpenChangeRequest={onOpenChangeRequest}
             />
           )}
+          <History pact={state.pact} />
           <Terms pact={state.pact} />
           <EndPact pact={state.pact} onSent={load} />
           {state.pact.endedAt !== null && (
@@ -354,6 +356,11 @@ function WaitingOn({
       </div>
     </section>
   );
+}
+
+function History({ pact }: { pact: Pact }) {
+  const now = useNow();
+  return <HeatMap pact={pact} now={now} />;
 }
 
 function Terms({ pact }: { pact: Pact }) {

@@ -36,6 +36,7 @@ import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
   NOTIFICATION_SETTINGS,
+  WEEKDAYS,
   type AcceptExcuseRejectionResult,
   type AcceptInviteResult,
   type AcceptMissResult,
@@ -75,6 +76,7 @@ import {
   type FileExcuseRefusal,
   type FileExcuseResult,
   type FirstOccurrenceResult,
+  type HeatMapDay,
   type Friend,
   type Health,
   type Invite,
@@ -90,6 +92,8 @@ import {
   type NewRecipient,
   type NotificationSetting,
   type NotificationSettingState,
+  type OccurrenceDecision,
+  type OccurrenceRecord,
   type OccurrenceStatus,
   type Connection,
   type PactTiming,
@@ -124,6 +128,7 @@ import {
   type TodaySection,
   type TodayToDoCard,
   type TodayWaitingItem,
+  type TodayYesterdayEntry,
 } from "../shared/types.ts";
 
 export interface PactCoreOptions {
@@ -865,6 +870,7 @@ class Core implements PactCore {
             this.#waitingEvidence(accountId, pactId),
             this.#waitingExcuses(accountId, pactId),
           ) as PactWaitingItem[],
+          history: { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) },
         };
         return { ok: true, pact };
       },
@@ -981,7 +987,8 @@ class Core implements PactCore {
         const { alerts, sections } =
           timezone === null ? { alerts: [], sections: [] } : this.#todayCards(accountId, timezone);
         const hasPacts = this.#db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
-        return { hasPacts, alerts, sections, waiting: this.#waiting(accountId), yesterday: [] };
+        const yesterday = timezone === null ? [] : this.#yesterday(accountId, timezone);
+        return { hasPacts, alerts, sections, waiting: this.#waiting(accountId), yesterday };
       },
       notificationSettings: () => {
         account();
@@ -2185,6 +2192,113 @@ class Core implements PactCore {
       evidenceWaiting: this.#evidenceDecision(pactId, date) === "waiting",
       excuse,
     };
+  }
+
+  /**
+   * The pact's heat map as of `now`: every day from its first occurrence
+   * through the Sunday ending this week, or the week it Ended, or its first
+   * occurrence's week while that's ahead.
+   */
+  #heatMapDays(pact: PactRow, timezone: string, first: LocalDate, now: Date): HeatMapDay[] {
+    const endedOn = pact.ended_at === null ? null : localDateOf(new Date(pact.ended_at), timezone);
+    const last = [first, endedOn ?? localDateOf(now, timezone)].sort().at(-1)!;
+    const sunday = addDays(last, WEEKDAYS.length - 1 - WEEKDAYS.indexOf(weekdayOf(last)));
+    return this.#occurrenceRecords(pact, timezone, first, sunday);
+  }
+
+  /** The owner's pacts due yesterday, by name, each with how its occurrence went. */
+  #yesterday(ownerId: AccountId, timezone: string): TodayYesterdayEntry[] {
+    const yesterday = addDays(localDateOf(this.#clock.now(), timezone), -1);
+    const pacts = this.#db
+      .prepare(`SELECT * FROM pact WHERE owner_account_id = ? ORDER BY name, created_at, id`)
+      .all(ownerId) as PactRow[];
+    return pacts.flatMap((pact) =>
+      this.#occurrenceRecords(pact, timezone, yesterday, yesterday).flatMap(({ date, occurrence }) =>
+        occurrence
+          ? [{ pactId: pact.id, name: pact.name, evidenceKind: pact.evidence_kind, occurrenceDate: date, occurrence }]
+          : [],
+      ),
+    );
+  }
+
+  /**
+   * How each of the pact's days from `from` to `to` went, oldest first: null
+   * on a day it has no occurrence. An Ended pact has none from the day it
+   * Ended, except one a decision has judged since.
+   */
+  #occurrenceRecords(pact: PactRow, timezone: string, from: LocalDate, to: LocalDate): HeatMapDay[] {
+    const endedOn = pact.ended_at === null ? null : localDateOf(new Date(pact.ended_at), timezone);
+    const found = new Map(
+      this.#occurrencesOf(pact.id, timezone)
+        .between(from, to)
+        .map((occurrence) => [occurrence.date, occurrence]),
+    );
+    const days: HeatMapDay[] = [];
+    for (let date = from; date <= to; date = addDays(date, 1)) {
+      const occurrence = found.get(date);
+      const record = occurrence ? this.#occurrenceRecord(pact, occurrence) : null;
+      const afterEnd = endedOn !== null && date >= endedOn && record?.status.kind === "not-judged";
+      days.push({ date, occurrence: afterEnd ? null : record });
+    }
+    return days;
+  }
+
+  /** How the pact's `occurrence` went, as of now: where it stands, who settled it, and a bedtime night's sleep. */
+  #occurrenceRecord(pact: Pick<PactRow, "id" | "evidence_kind">, occurrence: Occurrence): OccurrenceRecord {
+    const status = this.#occurrenceStatus(pact.id, occurrence);
+    const row = this.#db
+      .prepare(
+        `SELECT occurrence.bedtime_start, recipient.name AS recipient_name
+         FROM occurrence
+         LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
+         LEFT JOIN recipient ON recipient.id = penalty.recipient_id
+         WHERE occurrence.pact_id = ? AND occurrence.date = ?`,
+      )
+      .get(pact.id, occurrence.date) as { bedtime_start: string | null; recipient_name: string | null } | undefined;
+    const record: OccurrenceRecord = {
+      status,
+      decidedBy: this.#decidedBy(pact.id, occurrence.date, status),
+      recipientName: status.kind === "missed" ? (row?.recipient_name ?? null) : null,
+    };
+    if (pact.evidence_kind === "oura" && (status.kind === "kept" || status.kind === "missed")) {
+      const bedtimeStart = row?.bedtime_start ?? null;
+      record.night = { inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
+    }
+    return record;
+  }
+
+  /**
+   * The decision that settled an occurrence with `status`: its approved
+   * evidence (Kept), its rejected evidence (Missed), or the approved excuse
+   * that covers it (Excused, or a day not judged yet it already excuses).
+   */
+  #decidedBy(pactId: string, date: LocalDate, status: OccurrenceStatus): OccurrenceDecision | null {
+    if (status.kind === "kept") {
+      const row = this.#db
+        .prepare(
+          `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
+           WHERE evidence.pact_id = ? AND evidence.occurrence_date = ? AND evidence.decision = 'approved'`,
+        )
+        .get(pactId, date) as { name: string } | undefined;
+      return row ? { kind: "evidence-approved", reviewerName: row.name } : null;
+    }
+    if (status.kind === "missed") {
+      const rejection = this.#rejection(pactId, date);
+      return rejection && { kind: "evidence-rejected", ...rejection };
+    }
+    if (status.kind === "excused" || (status.kind === "not-judged" && status.excuse === "approved")) {
+      const row = this.#db
+        .prepare(
+          `SELECT account.name, excuse.reason FROM excuse_day
+           JOIN excuse ON excuse.id = excuse_day.excuse_id
+           JOIN account ON account.id = excuse.decided_by_account_id
+           WHERE excuse_day.pact_id = ? AND excuse_day.date = ? AND excuse.decision = 'approved'
+           ORDER BY excuse.decided_at DESC LIMIT 1`,
+        )
+        .get(pactId, date) as { name: string; reason: string } | undefined;
+      return row ? { kind: "excuse-approved", reviewerName: row.name, reason: row.reason } : null;
+    }
+    return null;
   }
 
   /** Whether an excuse waiting for approval, or else an approved one, covers the occurrence. */

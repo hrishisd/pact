@@ -43,7 +43,7 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Tue 08:01");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 0 })]);
-    expect(owner.today()).toEqual(nothingOnToday);
+    expect(owner.today()).toEqual({ ...nothingOnToday, yesterday: gymMonday({ kind: "kept" }) });
   });
 
   test("evidence submitted Monday, still waiting at midnight: not judged yet; rejected Tuesday: Missed as of the rejection, $5 owed", async () => {
@@ -56,7 +56,11 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Tue 00:00");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
-    expect(owner.today()).toEqual({ ...nothingOnToday, waiting: [expect.objectContaining({ id: evidenceId })] });
+    expect(owner.today()).toEqual({
+      ...nothingOnToday,
+      waiting: [expect.objectContaining({ id: evidenceId })],
+      yesterday: gymMonday(expect.objectContaining({ kind: "not-judged", evidenceWaiting: true })),
+    });
 
     s.setClockTo("Tue 08:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "That's last week's photo" });
@@ -66,6 +70,7 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.today()).toEqual({
       ...nothingOnToday,
       alerts: [expect.objectContaining({ pactId: gym, occurrenceDate: MONDAY, reason: "That's last week's photo" })],
+      yesterday: gymMonday(expect.objectContaining({ kind: "missed" })),
     });
     // The next tick doesn't judge it again.
     await s.advanceTo("Tue 08:01");
@@ -158,7 +163,11 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Tue 00:00");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
-    expect(owner.today()).toEqual({ ...nothingOnToday, waiting: [expect.objectContaining({ id: evidenceId })] });
+    expect(owner.today()).toEqual({
+      ...nothingOnToday,
+      waiting: [expect.objectContaining({ id: evidenceId })],
+      yesterday: gymMonday(expect.objectContaining({ kind: "not-judged", evidenceWaiting: true })),
+    });
 
     s.setClockTo("Tue 08:00");
     await reviewer.decide(evidenceId, { kind: "approve" });
@@ -166,7 +175,7 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Tue 23:00");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
-    expect(owner.today()).toEqual(nothingOnToday);
+    expect(owner.today()).toEqual({ ...nothingOnToday, yesterday: gymMonday({ kind: "kept" }) });
   });
 });
 
@@ -267,6 +276,13 @@ describe("Today's order", () => {
 });
 
 const nothingOnToday: Today = { hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] };
+
+/** Today's Yesterday on Tuesday: Gym's Monday, with `status`. */
+function gymMonday(status: unknown) {
+  return [
+    expect.objectContaining({ name: "Gym", occurrenceDate: MONDAY, occurrence: expect.objectContaining({ status }) }),
+  ];
+}
 
 /** The owner submits a photo for the occurrence of `pactId` open now; returns the evidence's id. */
 async function submit(owner: AccountHandle, pactId: string): Promise<string> {

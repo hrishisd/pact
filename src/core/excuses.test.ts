@@ -122,7 +122,9 @@ describe("the spec's example", () => {
       // Monday is in the alert, not also a Missed card.
       sections: [],
       waiting: [],
-      yesterday: [],
+      yesterday: [
+        expect.objectContaining({ occurrenceDate: MONDAY, occurrence: expect.objectContaining({ decidedBy: null }) }),
+      ],
     });
     expect(owner.excuse(excuseId)).toMatchObject({
       excuse: { state: { kind: "rejected", reviewerName: "reviewer", reason: "You were at the movies" } },

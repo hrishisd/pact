@@ -695,8 +695,53 @@ describe("pacts", () => {
         editWindowClosesAt,
         newTerms: null,
         waiting: [],
+        history: {
+          kind: "fixed-days",
+          days: ["05", "06", "07", "08", "09", "10", "11"].map((day) => ({
+            date: `2026-01-${day}`,
+            occurrence: ["05", "07", "09"].includes(day)
+              ? {
+                  status: {
+                    kind: "not-judged",
+                    opensAt: `2026-01-${day}T05:00:00.000Z`,
+                    dueAt: `2026-01-${String(Number(day) + 1).padStart(2, "0")}T05:00:00.000Z`,
+                    evidenceWaiting: false,
+                    excuse: null,
+                  },
+                  decidedBy: null,
+                  recipientName: null,
+                }
+              : null,
+          })),
+        },
       },
     } satisfies PactResponse);
+  });
+
+  test("Today's Yesterday says how each pact due yesterday did", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: pact,
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    s.clock.set(s.at("Tue 10:00"));
+    await s.core.advanceTo(s.at("Tue 10:00"));
+
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie })).body.yesterday).toEqual([
+      {
+        pactId: created.body.pactId,
+        name: "Gym",
+        evidenceKind: "camera",
+        occurrenceDate: "2026-01-05",
+        occurrence: {
+          status: { kind: "missed", penaltyCents: 500, held: false, excusableUntil: "2026-01-08T05:00:00.000Z" },
+          decidedBy: null,
+          recipientName: "Sam",
+        },
+      },
+    ] satisfies TodayResponse["yesterday"]);
   });
 
   test("a reviewer who isn't a friend is refused as data", async () => {
