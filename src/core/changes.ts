@@ -1,8 +1,8 @@
 // What a change to a pact after its edit window does, term by term: relaxes
 // it (a change request, waiting for a reviewer), only makes it stricter
 // (applies without approval to occurrences not open yet), or doesn't change
-// what counts (applies at once), like the name and the reminders. Tickets 14
-// and 15 add their terms here.
+// what counts (applies at once), like the name and the reminders. Ticket 15
+// adds its terms here.
 
 import type { AccountId, ChangeEffect, Schedule } from "../shared/types.ts";
 
@@ -55,10 +55,8 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms): Term
   if (after.inBedBy !== before.inBedBy && before.inBedBy !== null && after.inBedBy !== null) {
     add("in-bed-by", lateness(after.inBedBy) > lateness(before.inBedBy) ? "needs-approval" : "stricter");
   }
-  const removedDays = before.schedule.days.filter((day) => !after.schedule.days.includes(day));
-  const addedDays = after.schedule.days.filter((day) => !before.schedule.days.includes(day));
-  if (removedDays.length > 0) add("schedule", "needs-approval");
-  else if (addedDays.length > 0) add("schedule", "stricter");
+  const schedule = scheduleEffect(before.schedule, after.schedule);
+  if (schedule !== null) add("schedule", schedule);
   // Midnight is the latest a day can be due, so no due-by time is the latest.
   if (after.dueBy !== before.dueBy) {
     add("due-by", (after.dueBy ?? "24:00") > (before.dueBy ?? "24:00") ? "needs-approval" : "stricter");
@@ -82,6 +80,24 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms): Term
   // Reminders only nudge the owner; they don't change what counts.
   if (after.reminders.join() !== before.reminders.join()) add("reminders", "at-once");
   return diffs;
+}
+
+/**
+ * What changing the schedule from `before` to `after` does: fewer days, or a
+ * lower Weekly count target, relaxes it; only more days, or a higher target,
+ * is stricter. Swapping one kind for the other is refused before this, after
+ * the edit window; a reviewer would have to judge it. Null when it's the same.
+ */
+function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null {
+  if (before.kind === "fixed-days" && after.kind === "fixed-days") {
+    if (before.days.some((day) => !after.days.includes(day))) return "needs-approval";
+    return after.days.some((day) => !before.days.includes(day)) ? "stricter" : null;
+  }
+  if (before.kind === "weekly-count" && after.kind === "weekly-count") {
+    if (after.target === before.target) return null;
+    return after.target < before.target ? "needs-approval" : "stricter";
+  }
+  return "needs-approval";
 }
 
 /**

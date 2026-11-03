@@ -460,4 +460,22 @@ export const migrations: readonly string[] = [
   -- first tick looks, which starts from its own time.
   ALTER TABLE pact ADD COLUMN reminded_through TEXT;
   `,
+  // 19: Weekly count
+  `
+  -- The day evidence counts for, "YYYY-MM-DD" in the owner's timezone: its
+  -- occurrence's date on Fixed days; on Weekly count, the day of the week
+  -- (occurrence_date is the week's Monday) it was submitted on. Every insert
+  -- sets it. At most one day of evidence counts per calendar day, so a day
+  -- has at most one waiting and one approved.
+  ALTER TABLE evidence ADD COLUMN day TEXT NOT NULL DEFAULT '';
+  UPDATE evidence SET day = occurrence_date;
+  DROP INDEX evidence_one_waiting;
+  DROP INDEX evidence_one_approved;
+  CREATE UNIQUE INDEX evidence_one_waiting ON evidence (pact_id, day) WHERE decision IS NULL;
+  CREATE UNIQUE INDEX evidence_one_approved ON evidence (pact_id, day) WHERE decision = 'approved';
+  -- Weekly count only: when the owner took the L on the day's rejected
+  -- evidence, which clears its alert. On Fixed days a rejection judges the
+  -- occurrence, and occurrence.miss_accepted_at records it.
+  ALTER TABLE evidence ADD COLUMN rejection_accepted_at TEXT;
+  `,
 ];

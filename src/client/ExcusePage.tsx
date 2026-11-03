@@ -7,7 +7,7 @@
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { DayChip, excuseDatesText } from "./excuse-days.tsx";
+import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
 import { formatDate, formatDayTime } from "./format.ts";
 import { ExcuseIcon } from "./icons.tsx";
 import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
@@ -77,9 +77,9 @@ export function ExcusePage({
           {excuse.days.map((day) => (
             <div key={day.date} className="covrow">
               <span className="rt">
-                <b>{formatDate(day.date)}</b>
+                <b>{excuseDayText(day)}</b>
               </span>
-              <DayChip status={day.status} now={now} />
+              <DayChip status={day.status} now={now} week={day.through !== undefined} />
             </div>
           ))}
         </div>

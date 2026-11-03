@@ -46,10 +46,19 @@ export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as con
 /** A day of the week: "mon" … "sun". */
 export type Weekday = (typeof WEEKDAYS)[number];
 
-/** When a pact's occurrences fall due. Only Fixed days so far. */
+/** When a pact's occurrences fall due. */
 export type Schedule =
   /** Each listed weekday, in the owner's timezone, is its own occurrence. Listed Monday first, no repeats. */
-  { kind: "fixed-days"; days: Weekday[] };
+  | { kind: "fixed-days"; days: Weekday[] }
+  /**
+   * Camera only: each Mon–Sun week is one occurrence, Kept once `target` days
+   * of it have approved evidence (at most one counts per day): a whole number
+   * from 1 to `MAX_WEEKLY_TARGET`.
+   */
+  | { kind: "weekly-count"; target: number };
+
+/** A Weekly count target can't be more than one day of evidence a day. */
+export const MAX_WEEKLY_TARGET = 7;
 
 /** How a pact's evidence is gathered. Picked at creation and never changes. */
 export type EvidenceKind = "camera" | "oura";
@@ -106,6 +115,8 @@ export type CreatePactRefusal =
   | "blank-name"
   | "blank-description"
   | "no-days"
+  /** A Weekly count on an Oura Ring pact, or a target that isn't a whole number from 1 to `MAX_WEEKLY_TARGET`. */
+  | "invalid-schedule"
   | "invalid-penalty"
   /** Not one of this owner's saved recipients. */
   | "unknown-recipient"
@@ -146,9 +157,12 @@ export interface PactTiming {
 
 /** A pact's first occurrence, as the create form's Check step names it. */
 export interface FirstOccurrence {
-  /** The occurrence's day in the owner's timezone, "YYYY-MM-DD". */
+  /** The occurrence's day in the owner's timezone, "YYYY-MM-DD": for Weekly count, its week's Monday. */
   date: string;
-  /** Its due time: midnight at the end of that day, or the due-by or in-bed-by time, in the owner's timezone. */
+  /**
+   * Its due time: midnight at the end of that day, or the due-by or in-bed-by
+   * time, in the owner's timezone; for Weekly count, the end of its Sunday.
+   */
   dueAt: Date;
 }
 
@@ -221,18 +235,44 @@ export interface PactTerms {
 
 /**
  * A pact's heat map: one square per occurrence period. Fixed days has one
- * per day. Weekly count (ticket 14) will add `{ kind: "weekly-count" }`, one
- * square per Mon–Sun week with the sessions that counted.
+ * per day; Weekly count, one per Mon–Sun week with the days that counted.
  */
-export type PactHistory = {
-  kind: "fixed-days";
-  /**
-   * Every day from the first occurrence through the Sunday ending this week
-   * (or the week the pact Ended, or the first occurrence's week while it's
-   * coming up), oldest first.
-   */
-  days: HeatMapDay[];
-};
+export type PactHistory =
+  | {
+      kind: "fixed-days";
+      /**
+       * Every day from the first occurrence through the Sunday ending this week
+       * (or the week the pact Ended, or the first occurrence's week while it's
+       * coming up), oldest first.
+       */
+      days: HeatMapDay[];
+    }
+  | {
+      kind: "weekly-count";
+      /** Every week from the first occurrence through this week (or the week it Ended, or the first while it's coming up), oldest first. */
+      weeks: HeatMapWeek[];
+    };
+
+/** One week on a Weekly count pact's heat map. */
+export interface HeatMapWeek {
+  /** Its Monday, "YYYY-MM-DD" in the owner's timezone. */
+  date: string;
+  /** How its occurrence went, or null for a week from the one the pact Ended that was never judged. */
+  occurrence: OccurrenceRecord | null;
+  /** How far it got: see `WeekProgress`. */
+  progress: WeekProgress;
+}
+
+/**
+ * How far a Weekly count week has got: `sessions` days with approved evidence
+ * (at most one counts per day), `waiting` more with evidence waiting for a
+ * reviewer, toward the `target` its terms set.
+ */
+export interface WeekProgress {
+  sessions: number;
+  waiting: number;
+  target: number;
+}
 
 /** One day on a heat map. */
 export interface HeatMapDay {
@@ -286,11 +326,15 @@ export type SubmitEvidenceRefusal =
   | "too-many-photos"
   /** No occurrence is open when the server receives the photos: a day the schedule skips, before the first occurrence, or past the due time. */
   | "not-open"
-  /** Evidence for this occurrence is already waiting for a reviewer. */
+  /** Evidence for this occurrence (on Weekly count, for today) is already waiting for a reviewer. */
   | "evidence-waiting"
-  /** Evidence for this occurrence was already approved. */
+  /** Evidence for this occurrence (on Weekly count, for today) was already approved. */
   | "already-approved"
-  /** This occurrence is already judged: its evidence was rejected, which is final. */
+  /**
+   * This occurrence is already judged: its evidence was rejected, which is
+   * final. On Weekly count, today's evidence was rejected: the week can be
+   * made up on another day.
+   */
   | "already-judged";
 
 export type SubmitEvidenceResult = { ok: true; evidenceId: string } | { ok: false; reason: SubmitEvidenceRefusal };
@@ -325,11 +369,13 @@ export type ReviewItem =
       photoIds: string[];
       /** When the server received its last photo. */
       submittedAt: Date;
-      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it counts for. */
       occurrenceDate: string;
       /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
       penaltyCents: number;
       recipientName: string;
+      /** Weekly count only: its week so far. Rejecting costs nothing then: the day just doesn't count. */
+      week?: WeekProgress;
       thread: QuestionThread;
     }
   /**
@@ -434,7 +480,7 @@ export interface EvidenceDetail {
   id: string;
   pactId: string;
   pactName: string;
-  /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+  /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it counts for. */
   occurrenceDate: string;
   /** What counts, as the occurrence's terms say. */
   description: string;
@@ -569,6 +615,10 @@ export type TodayAlert =
    * Missed and added `penaltyCents` to the ledger for `recipientName`. Newest
    * rejection first. It stays until the owner accepts the miss (Take the L,
    * `acceptMiss`), which changes nothing else, or files an excuse for the day.
+   *
+   * On Weekly count (`week` set) the day just doesn't count: nothing is Missed
+   * or owed yet, and the owner can make it up another day before `week.dueAt`.
+   * The alert goes once the week is judged too.
    */
   | {
       kind: "evidence-rejected";
@@ -576,12 +626,14 @@ export type TodayAlert =
       name: string;
       reviewerName: string;
       reason: string;
-      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it was for. */
       occurrenceDate: string;
       penaltyCents: number;
       recipientName: string;
-      /** Until when an excuse for the day is accepted: 48 hours after the rejection. */
+      /** Until when an excuse for the day is accepted: 48 hours after the rejection (on Weekly count, after the week's due time). */
       excusableUntil: Date;
+      /** Weekly count only: the week's due time, the end of its Sunday. */
+      week?: { dueAt: Date };
     }
   /**
    * A reviewer rejected an excuse: its held penalties are owed again, and its
@@ -647,17 +699,26 @@ interface TodayPactCard {
   penaltyCents: number;
 }
 
-/** A Fixed-days pact whose occurrence is open today. */
+/**
+ * A Camera pact whose occurrence is open today and still takes evidence
+ * today. A Weekly count week (`week` set) shows while today has none and the
+ * week's target isn't met or waiting for approval.
+ */
 export interface TodayToDoCard extends TodayPactCard {
   kind: "evidence";
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+  /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone: for Weekly count, its week's Monday. */
   occurrenceDate: string;
-  /** Its due-by time today, or midnight ending today, in the owner's timezone. */
+  /**
+   * Its due-by time today, or midnight ending today, in the owner's timezone;
+   * for Weekly count, the end of its Sunday, so it sorts below things due today.
+   */
   dueAt: Date;
-  /** Its due-by time, "HH:MM", or null when it's due at midnight. */
+  /** Its due-by time, "HH:MM", or null when it's due at midnight. On Weekly count it limits each day's evidence. */
   dueBy: string | null;
+  /** Weekly count only: the week so far. */
+  week?: WeekProgress;
 }
 
 /**
@@ -699,6 +760,8 @@ export interface TodayMissedCard extends TodayPactCard {
    * with no evidence: it shows as Closed.
    */
   closed?: { dueBy: string };
+  /** Weekly count only: how far the week got. `penaltyCents` is one penalty per day short. */
+  week?: WeekProgress;
 }
 
 /** A bedtime pact's night that runs now. */
@@ -845,6 +908,8 @@ export interface LedgerPenalty {
   amountCents: number;
   /** When it was added: when the occurrence was judged Missed. */
   addedAt: Date;
+  /** Weekly count only: how far its week got. `amountCents` is one penalty per day short of the target. */
+  week?: WeekProgress;
   /**
    * How much of it approved payments have paid: none, part or all of
    * `amountCents`. Approved payments to the recipient pay off its penalties
@@ -936,8 +1001,10 @@ export type OccurrenceStatus =
 
 /** One of a pact's days on an excuse, and where it stands. */
 export interface ExcuseDay {
-  /** "YYYY-MM-DD" in the owner's timezone. */
+  /** "YYYY-MM-DD" in the owner's timezone: for Weekly count, its week's Monday. */
   date: string;
+  /** Weekly count only: its week's Sunday. A day in the week excuses the whole week. */
+  through?: string;
   status: OccurrenceStatus;
 }
 
@@ -1123,6 +1190,8 @@ export type ChangePactRefusal =
   | "change-request-waiting"
   /** The start date can't change once the first occurrence has opened. */
   | "pact-started"
+  /** Fixed days and Weekly count can't be swapped after the edit window: a new pact is needed. */
+  | "schedule-kind-fixed"
   | "nothing-changed";
 
 export type ChangePreviewResult = { ok: true; preview: ChangePreview } | { ok: false; reason: ChangePactRefusal };

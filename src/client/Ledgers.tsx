@@ -147,7 +147,9 @@ function PenaltyRow({
           {penalty.pactName}
         </button>
         <small>
-          Missed {formatDate(penalty.occurrenceDate)}
+          {penalty.week
+            ? `Week of ${formatDate(penalty.occurrenceDate)}, ${penalty.week.sessions} of ${penalty.week.target}`
+            : `Missed ${formatDate(penalty.occurrenceDate)}`}
           {penalty.bill?.kind === "on-bill" && ` · On the ${formatDate(penalty.bill.billedOn)} bill`}
           {penalty.bill?.kind === "next-bill" && ` · Goes on the ${formatDate(penalty.bill.billedOn)} bill`}
           {penalty.held ? (

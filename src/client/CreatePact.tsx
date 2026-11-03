@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  MAX_WEEKLY_TARGET,
   WEEKDAYS,
   type EditPactRefusal,
   type EvidenceKind,
@@ -15,6 +16,7 @@ import {
   type Friend,
   type PactTerms,
   type Recipient,
+  type Schedule,
   type Weekday,
 } from "../shared/types.ts";
 import { API_PATHS, OURA_RESULT_PARAM, type Json, type OuraResult } from "../shared/api.ts";
@@ -67,7 +69,10 @@ export interface Form {
   named: boolean;
   name: string;
   description: string;
+  /** Camera only: a Weekly count of `target` days a week, rather than Fixed days on `days`. */
+  weekly: boolean;
   days: Weekday[];
+  target: number;
   /** Camera only: whether evidence is due by a set time instead of midnight. */
   dueByOn: boolean;
   /** "HH:MM" as the time field gives it, or "" until picked. */
@@ -89,7 +94,9 @@ const EMPTY_FORM: Form = {
   named: false,
   name: "",
   description: "",
+  weekly: false,
   days: [],
+  target: 3,
   dueByOn: false,
   dueBy: "",
   startDate: "",
@@ -123,7 +130,9 @@ export function formOf(
     named: true,
     name: pact.name,
     description: pact.description,
-    days: pact.schedule.days,
+    weekly: pact.schedule.kind === "weekly-count",
+    days: pact.schedule.kind === "fixed-days" ? pact.schedule.days : [],
+    target: pact.schedule.kind === "weekly-count" ? pact.schedule.target : EMPTY_FORM.target,
     dueByOn: pact.dueBy !== null,
     dueBy: pact.dueBy ?? "",
     startDate: pact.startDate ?? "",
@@ -147,6 +156,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "blank-name": "Give it a name.",
   "blank-description": "Say what your photo will show.",
   "no-days": "Pick at least one day.",
+  "invalid-schedule": `Pick from 1 to ${MAX_WEEKLY_TARGET} days a week.`,
   "invalid-due-by": "Pick a time before midnight, or turn off Due by a set time.",
   "invalid-start-date": "Pick a start date, or clear it.",
   "invalid-end-date": "Pick an end date, or clear it.",
@@ -175,7 +185,7 @@ function stepProblem(step: Step, form: Form): Problem | null {
       if (form.description.trim() === "") return "blank-description";
       return null;
     case "schedule":
-      if (form.days.length === 0) return "no-days";
+      if (!isWeekly(form) && form.days.length === 0) return "no-days";
       return form.kind === "camera" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
     case "penalty": {
       const penaltyCents = parseCents(form.penalty);
@@ -296,7 +306,7 @@ export function CreatePact({
         description: form.kind === "oura" ? "" : form.description.trim(),
         ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
         ...optionalTimes(form),
-        schedule: { kind: "fixed-days", days: form.days },
+        schedule: scheduleOf(form),
         penaltyCents,
         recipientId,
         reviewerIds: form.reviewerIds,
@@ -557,6 +567,16 @@ export function GoalStep({ form, update }: { form: Form; update: (change: Partia
   );
 }
 
+/** Whether the form makes a Weekly count pact: Camera only. */
+function isWeekly(form: Form): boolean {
+  return form.kind === "camera" && form.weekly;
+}
+
+/** The form's schedule as the core takes it. */
+export function scheduleOf(form: Form): Schedule {
+  return isWeekly(form) ? { kind: "weekly-count", target: form.target } : { kind: "fixed-days", days: form.days };
+}
+
 /** The form's optional times as the core takes them: each left out when it isn't set. */
 export function optionalTimes(form: Form): { dueBy?: string; startDate?: string; endDate?: string } {
   return {
@@ -566,43 +586,99 @@ export function optionalTimes(form: Form): { dueBy?: string; startDate?: string;
   };
 }
 
-export function ScheduleStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+export function ScheduleStep({
+  form,
+  update,
+  kindFixed = false,
+}: {
+  form: Form;
+  update: (change: Partial<Form>) => void;
+  /** After the edit window, Fixed days and Weekly count can't be swapped: only the chosen one shows. */
+  kindFixed?: boolean;
+}) {
   const { days } = form;
   const oura = form.kind === "oura";
+  const weekly = isWeekly(form);
   const everyDay = days.length === WEEKDAYS.length;
   const onDays = (days: Weekday[]) => update({ days });
   // Kept in week order, Monday first.
   const toggle = (day: Weekday) => onDays(WEEKDAYS.filter((d) => (d === day ? !days.includes(d) : days.includes(d))));
   const until = form.dueByOn && form.dueBy !== "" ? clockText(form.dueBy) : "midnight";
+  const setTarget = (target: number) => update({ target: Math.min(MAX_WEEKLY_TARGET, Math.max(1, target)) });
   return (
     <>
       <h2>Schedule</h2>
-      <div className="field">
-        <span>{oura ? "Nights" : "Days"}</span>
-        <div className="days" role="group" aria-label={oura ? "Nights" : "Days"}>
-          {WEEKDAYS.map((day) => (
-            <button
-              key={day}
-              aria-pressed={days.includes(day)}
-              aria-label={DAY_BUTTONS[day].full}
-              onClick={() => toggle(day)}
-            >
-              {DAY_BUTTONS[day].short}
-            </button>
-          ))}
+      {!oura && !kindFixed && (
+        <div className="seg" role="group" aria-label="Schedule type">
+          <button aria-pressed={!weekly} onClick={() => update({ weekly: false })}>
+            Fixed days
+          </button>
+          <button aria-pressed={weekly} onClick={() => update({ weekly: true })}>
+            Weekly count
+          </button>
         </div>
-      </div>
-      <button
-        className="btn sm self-start"
-        aria-pressed={everyDay}
-        onClick={() => onDays(everyDay ? [] : [...WEEKDAYS])}
-      >
-        {oura ? "Every night" : "Every day"}
-      </button>
+      )}
+      {weekly ? (
+        <>
+          <div className="field">
+            <span>Days a week</span>
+            <div className="stepper">
+              <button
+                className="iconbtn"
+                aria-label="Fewer"
+                disabled={form.target <= 1}
+                onClick={() => setTarget(form.target - 1)}
+              >
+                −
+              </button>
+              <b className="num">{form.target}×</b>
+              <span>per week (Mon–Sun)</span>
+              <button
+                className="iconbtn"
+                aria-label="More"
+                disabled={form.target >= MAX_WEEKLY_TARGET}
+                onClick={() => setTarget(form.target + 1)}
+              >
+                +
+              </button>
+            </div>
+          </div>
+          <small className="muted">
+            Any days you like, one photo a day. One penalty for each day you're short when the week ends.
+          </small>
+        </>
+      ) : (
+        <>
+          <div className="field">
+            <span>{oura ? "Nights" : "Days"}</span>
+            <div className="days" role="group" aria-label={oura ? "Nights" : "Days"}>
+              {WEEKDAYS.map((day) => (
+                <button
+                  key={day}
+                  aria-pressed={days.includes(day)}
+                  aria-label={DAY_BUTTONS[day].full}
+                  onClick={() => toggle(day)}
+                >
+                  {DAY_BUTTONS[day].short}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            className="btn sm self-start"
+            aria-pressed={everyDay}
+            onClick={() => onDays(everyDay ? [] : [...WEEKDAYS])}
+          >
+            {oura ? "Every night" : "Every day"}
+          </button>
+        </>
+      )}
       <small className="muted">
         {oura
           ? "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed."
-          : `You can submit on scheduled days only, until ${until}.`}
+          : weekly
+            ? `You can submit on any day of the week, until ${until}.`
+            : `You can submit on scheduled days only, until ${until}.`}
       </small>
       {!oura && (
         <>
@@ -656,8 +732,9 @@ export function ScheduleStep({ form, update }: { form: Form; update: (change: Pa
         </label>
       </div>
       <small className="muted">
-        It starts with the first {oura ? "night" : "day"} that's due at least an hour after you create it, or on the
-        start date if that's later. After the end date it makes no more {oura ? "nights" : "days"} and is Ended.
+        {weekly
+          ? "It starts the Monday after you create it, or the first Monday from the start date if that's later. Only whole weeks up to the end date count, then it's Ended."
+          : `It starts with the first ${oura ? "night" : "day"} that's due at least an hour after you create it, or on the start date if that's later. After the end date it makes no more ${oura ? "nights" : "days"} and is Ended.`}
       </small>
     </>
   );
@@ -902,7 +979,9 @@ function CheckStep({
   editing?: Pact;
 }) {
   const [first, setFirst] = useState<FirstState>({ kind: "loading" });
-  const days = form.days;
+  const schedule = scheduleOf(form);
+  // Asked for again only when the schedule really changes.
+  const scheduleKey = JSON.stringify(schedule);
   const inBedBy = form.kind === "oura" ? form.inBedBy : undefined;
   const { dueBy, startDate, endDate } = optionalTimes(form);
 
@@ -912,22 +991,20 @@ function CheckStep({
       if (current) setFirst(state);
     };
     const load = () =>
-      api
-        .firstOccurrence({ schedule: { kind: "fixed-days", days }, inBedBy, dueBy, startDate, editing: editing?.id })
-        .then(
-          (result) =>
-            show(
-              result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
-            ),
-          (error: unknown) => show({ kind: "failed", error }),
-        );
+      api.firstOccurrence({ schedule, inBedBy, dueBy, startDate, editing: editing?.id }).then(
+        (result) =>
+          show(
+            result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
+          ),
+        (error: unknown) => show({ kind: "failed", error }),
+      );
     void load();
     const timer = window.setInterval(() => void load(), FIRST_OCCURRENCE_REFRESH_MS);
     return () => {
       current = false;
       window.clearInterval(timer);
     };
-  }, [days, inBedBy, dueBy, startDate, editing?.id]);
+  }, [scheduleKey, inBedBy, dueBy, startDate, editing?.id]);
 
   const recipient = recipients.find((r) => r.id === form.recipientId);
   return (
@@ -944,7 +1021,7 @@ function CheckStep({
               dueBy: dueBy ?? null,
               startDate: startDate ?? null,
               endDate: endDate ?? null,
-              schedule: { kind: "fixed-days", days },
+              schedule,
               penaltyCents: parseCents(form.penalty) ?? 0,
               recipient,
               reviewers: friends.filter((f) => form.reviewerIds.includes(f.id)),
@@ -962,6 +1039,10 @@ function CheckStep({
               {inBedBy ? (
                 <>
                   The first night is <b>{formatDate(first.first.date)}</b>, in bed by {clockText(inBedBy)}.
+                </>
+              ) : schedule.kind === "weekly-count" ? (
+                <>
+                  The first week starts <b>{formatDate(first.first.date)}</b>, due by the end of Sunday.
                 </>
               ) : (
                 <>

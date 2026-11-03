@@ -1,7 +1,7 @@
 // Set-up shared by the scenarios about Oura Ring bedtime pacts: an owner with
 // Oura connected, and sleep periods shaped like Oura's `sleep` collection.
 
-import { WEEKDAYS, type NewPact } from "../../shared/types.ts";
+import { WEEKDAYS, type NewPact, type Weekday } from "../../shared/types.ts";
 import type { OuraSleepPeriod } from "../ports.ts";
 import type { AccountHandle, Scenario } from "./scenario.ts";
 
@@ -17,7 +17,7 @@ export async function ownerWithOura(s: Scenario, signedIn?: AccountHandle) {
   const added = await owner.addRecipient({ name: "Sam" });
   if (!added.ok) throw new Error(added.reason);
   await owner.connectOura();
-  const createPact = async (inBedBy = "00:00", days: NewPact["schedule"]["days"] = [...WEEKDAYS]) => {
+  const createPact = async (inBedBy = "00:00", days: Weekday[] = [...WEEKDAYS]) => {
     const created = await owner.createPact(bedtimePact(added.recipient.id, reviewer, inBedBy, days));
     if (!created.ok) throw new Error(created.reason);
     return created.pactId;
@@ -29,7 +29,7 @@ export function bedtimePact(
   recipientId: string,
   reviewer: AccountHandle,
   inBedBy = "00:00",
-  days: NewPact["schedule"]["days"] = [...WEEKDAYS],
+  days: Weekday[] = [...WEEKDAYS],
 ): NewPact {
   return {
     evidenceKind: "oura",

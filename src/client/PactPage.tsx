@@ -12,7 +12,7 @@ import { api, failureText } from "./api.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
-import { listNames } from "./change-terms.tsx";
+import { listNames, openOccurrenceText } from "./change-terms.tsx";
 import { clockText, formatDate, formatDay, minutesLeft, money, remindersText, scheduleText } from "./format.ts";
 import { CameraIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
@@ -176,7 +176,7 @@ function NewTerms({ pact }: { pact: Pact }) {
     <div className="alert ok" role="status">
       <p>
         <b>New terms start {formatDate(startsOn)}.</b>
-        {todayKeepsCents !== null && ` Today keeps ${money(todayKeepsCents)} per miss.`}
+        {todayKeepsCents !== null && ` ${openOccurrenceText(pact.schedule)} keeps ${money(todayKeepsCents)} per miss.`}
       </p>
     </div>
   );
@@ -412,6 +412,7 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
   const [error, setError] = useState<string | null>(null);
   const form = {
     kind: pact.evidenceKind,
+    weekly: pact.schedule.kind === "weekly-count",
     inBedBy: pact.inBedBy ?? "",
     dueByOn: pact.dueBy !== null,
     dueBy: pact.dueBy ?? "",

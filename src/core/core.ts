@@ -6,10 +6,20 @@
 // reads. The core reads time only from the Clock port.
 
 import { createECDH, randomBytes, randomUUID } from "node:crypto";
-import { addDays, localDateOf, startOfDay, weekdayOf, zonedWallTimeToInstant, type LocalDate } from "./calendar.ts";
+import {
+  addDays,
+  localDateOf,
+  mondayOf,
+  startOfDay,
+  weekdayOf,
+  zonedWallTimeToInstant,
+  type LocalDate,
+} from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
+  firstWeekFrom,
+  lastDayOf,
   newOccurrenceTerms,
   nightStartsAt,
   occurrences,
@@ -37,6 +47,7 @@ import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
   MAX_REMINDERS,
+  MAX_WEEKLY_TARGET,
   NOTIFICATION_SETTINGS,
   WEEKDAYS,
   type AcceptExcuseRejectionResult,
@@ -79,6 +90,7 @@ import {
   type FileExcuseResult,
   type FirstOccurrenceResult,
   type HeatMapDay,
+  type HeatMapWeek,
   type Friend,
   type Health,
   type Invite,
@@ -131,6 +143,7 @@ import {
   type TodayToDoCard,
   type TodayWaitingItem,
   type TodayYesterdayEntry,
+  type WeekProgress,
 } from "../shared/types.ts";
 
 export interface PactCoreOptions {
@@ -452,13 +465,19 @@ function paymentReviewersSql(owner: string, recipient: string): string {
 }
 /** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
 const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
+/** SQL: the `pact` row's schedule is Fixed days. */
+const FIXED_DAYS_PACT = `json_extract(pact.schedule, '$.kind') = 'fixed-days'`;
+/** SQL: the `pact` row's schedule is Weekly count. */
+const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
 /**
- * SQL: the Missed `occurrence` row was judged through a rejection. Any
- * rejected evidence will do: a rejection judges the occurrence at once.
+ * SQL: the Missed `occurrence` row (of the `pact` row) was judged through a
+ * rejection. Any rejected evidence will do: on Fixed days a rejection judges
+ * the occurrence at once. A Weekly count week's rejected evidence just
+ * doesn't count, so a short week is never Missed through it.
  */
-const MISSED_THROUGH_REJECTION = `EXISTS (SELECT 1 FROM evidence
+const MISSED_THROUGH_REJECTION = `(${FIXED_DAYS_PACT} AND EXISTS (SELECT 1 FROM evidence
   WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
-    AND evidence.decision = 'rejected')`;
+    AND evidence.decision = 'rejected'))`;
 /**
  * SQL: an excuse matching `condition` (on `excuse`) covers the occurrence of
  * pact `pact` on `date` (SQL expressions).
@@ -888,7 +907,10 @@ class Core implements PactCore {
             this.#waitingEvidence(accountId, pactId),
             this.#waitingExcuses(accountId, pactId),
           ) as PactWaitingItem[],
-          history: { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) },
+          history:
+            (JSON.parse(row.schedule) as Schedule).kind === "weekly-count"
+              ? { kind: "weekly-count", weeks: this.#heatMapWeeks(row, timezone, first.date, now) }
+              : { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) },
         };
         return { ok: true, pact };
       },
@@ -1065,14 +1087,14 @@ class Core implements PactCore {
         return this.#command((): SubmitEvidenceResult => {
           const acceptance = this.#evidenceAcceptance(accountId, timezone, pactId, photos.length, submittedAt);
           if (!acceptance.ok) return acceptance;
-          const { date } = acceptance.occurrence;
+          const { occurrence, day } = acceptance;
           this.#db
             .prepare(`INSERT INTO occurrence (pact_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
-            .run(pactId, date);
+            .run(pactId, occurrence.date);
           const evidenceId = randomUUID();
           this.#db
-            .prepare(`INSERT INTO evidence (id, pact_id, occurrence_date, submitted_at) VALUES (?, ?, ?, ?)`)
-            .run(evidenceId, pactId, date, submittedAt.toISOString());
+            .prepare(`INSERT INTO evidence (id, pact_id, occurrence_date, day, submitted_at) VALUES (?, ?, ?, ?, ?)`)
+            .run(evidenceId, pactId, occurrence.date, day, submittedAt.toISOString());
           stored.forEach(({ photoId, receivedAt }, position) => {
             this.#db
               .prepare(`INSERT INTO evidence_photo (evidence_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
@@ -1082,7 +1104,7 @@ class Core implements PactCore {
           const pact = this.#ownPact(accountId, pactId);
           // Its reviewers already told, it may be from inside the window but it missed that.
           if (pact && (pact.reviewers_notified_at !== null || editWindowClosesAt(pact, submittedAt) === null)) {
-            this.#enqueueEvidenceReviewItems(pactId, evidenceId, date, ownerName);
+            this.#enqueueEvidenceReviewItems(pactId, evidenceId, day, ownerName);
           }
           return { ok: true, evidenceId };
         });
@@ -1094,13 +1116,23 @@ class Core implements PactCore {
             .prepare(`SELECT 1 FROM pact WHERE id = ? AND owner_account_id = ?`)
             .get(pactId, accountId);
           if (!isOwn) return { ok: false, reason: "pact-not-found" };
+          const now = this.#clock.now().toISOString();
           const accepted = this.#db
             .prepare(
               `UPDATE occurrence SET miss_accepted_at = ?
                WHERE pact_id = ? AND date = ? AND outcome = 'missed' AND miss_accepted_at IS NULL`,
             )
-            .run(this.#clock.now().toISOString(), pactId, occurrenceDate);
-          return accepted.changes === 1 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
+            .run(now, pactId, occurrenceDate);
+          if (accepted.changes === 1) return { ok: true };
+          // On Weekly count, a rejected day isn't a miss, but its alert goes the same way.
+          const rejected = this.#db
+            .prepare(
+              `UPDATE evidence SET rejection_accepted_at = ?
+               WHERE pact_id = ? AND day = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL
+                 AND (SELECT json_extract(schedule, '$.kind') FROM pact WHERE id = ?) = 'weekly-count'`,
+            )
+            .run(now, pactId, occurrenceDate, pactId);
+          return rejected.changes > 0 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
         }),
       excusePreview: (pactId, dates) => {
         const { timezone } = account();
@@ -1123,9 +1155,9 @@ class Core implements PactCore {
             )
             .get(pactId, today, since) as { date: LocalDate | null }
         ).date;
-        const { between } = this.#occurrencesOf(pactId, timezone);
-        const recentDays = between(earliest ?? today, today)
-          .map((occurrence) => ({ date: occurrence.date, status: this.#occurrenceStatus(pactId, occurrence) }))
+        const { overlapping } = this.#occurrencesOf(pactId, timezone);
+        const recentDays = overlapping(earliest ?? today, today)
+          .map((occurrence) => this.#excuseDay(pactId, occurrence))
           .filter(({ status }) => this.#skipReason(status, now) === null)
           .toReversed();
         return { ok: true, options: { today, recentDays } };
@@ -1323,7 +1355,7 @@ class Core implements PactCore {
         account();
         const row = this.#db
           .prepare(
-            `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date,
+            `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date, evidence.day,
                     evidence.submitted_at, ${reviewStateColumns("evidence")}
              FROM evidence
              JOIN pact ON pact.id = evidence.pact_id
@@ -1336,6 +1368,7 @@ class Core implements PactCore {
               pact_id: string;
               pact_name: string;
               occurrence_date: LocalDate;
+              day: LocalDate;
               submitted_at: string;
             })
           | undefined;
@@ -1346,7 +1379,7 @@ class Core implements PactCore {
             id: row.id,
             pactId: row.pact_id,
             pactName: row.pact_name,
-            occurrenceDate: row.occurrence_date,
+            occurrenceDate: row.day,
             description: this.#termsOn(row.pact_id, row.occurrence_date).description,
             photoIds: this.#evidencePhotoIds(row.id),
             submittedAt: new Date(row.submitted_at),
@@ -1483,7 +1516,8 @@ class Core implements PactCore {
         const penaltyRows = this.#db
           .prepare(
             `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
-                    penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held
+                    penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held,
+                    ${WEEKLY_COUNT_PACT} AS weekly
              FROM penalty JOIN pact ON pact.id = penalty.pact_id
              WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
              ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
@@ -1497,14 +1531,15 @@ class Core implements PactCore {
           added_at: string;
           bill_id: string | null;
           held: 0 | 1;
+          weekly: 0 | 1;
         }[];
         const allocation = this.#allocate(accountId, recipientId);
         const bills = this.#billsOf(accountId, recipientId);
         const timezone = account().timezone;
         const penalties = penaltyRows.map((row): LedgerPenalty => {
           const held = row.held === 1;
-          // Missed with evidence means all of it was rejected.
-          const rejection = this.#rejection(row.pact_id, row.occurrence_date);
+          // Missed with evidence means all of it was rejected, on Fixed days; a short week is its own miss.
+          const rejection = row.weekly === 1 ? null : this.#rejection(row.pact_id, row.occurrence_date);
           const bill = bills.find((b) => b.id === row.bill_id);
           return {
             kind: "penalty",
@@ -1513,6 +1548,7 @@ class Core implements PactCore {
             pactName: row.pact_name,
             occurrenceDate: row.occurrence_date,
             amountCents: row.amount_cents,
+            ...(row.weekly === 1 && { week: this.#weekProgress(row.pact_id, row.occurrence_date) }),
             addedAt: new Date(row.added_at),
             paidCents: allocation.get(row.id)?.paidCents ?? 0,
             ...(rejection && { rejection }),
@@ -1549,10 +1585,11 @@ class Core implements PactCore {
   #itemToDecide(reviewerId: AccountId, itemId: string): ItemToDecide | undefined {
     const evidence = this.#db
       .prepare(
-        `SELECT evidence.id, evidence.pact_id, evidence.occurrence_date, evidence.decision,
-                  pact.owner_account_id
+        `SELECT evidence.id, evidence.pact_id, evidence.occurrence_date, evidence.day, evidence.decision,
+                  pact.owner_account_id, owner.timezone
            FROM evidence
            JOIN pact ON pact.id = evidence.pact_id
+           JOIN account AS owner ON owner.id = pact.owner_account_id
            JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
            WHERE evidence.id = ? AND pact.created_at <= ?`,
       )
@@ -1715,8 +1752,8 @@ class Core implements PactCore {
     const rows = this.#db
       .prepare(
         `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
-                pact.description, evidence.submitted_at, evidence.occurrence_date,
-                pact.penalty_cents, recipient.name AS recipient_name
+                pact.description, evidence.submitted_at, evidence.occurrence_date, evidence.day,
+                pact.penalty_cents, recipient.name AS recipient_name, ${WEEKLY_COUNT_PACT} AS weekly
          FROM evidence
          JOIN pact ON pact.id = evidence.pact_id
          JOIN account AS owner ON owner.id = pact.owner_account_id
@@ -1733,8 +1770,10 @@ class Core implements PactCore {
       description: string;
       submitted_at: string;
       occurrence_date: string;
+      day: string;
       penalty_cents: number;
       recipient_name: string;
+      weekly: 0 | 1;
     }[];
     const evidence = rows.map((row): ReviewItem => {
       // What counts, and what rejecting costs: the terms of the occurrence's day.
@@ -1748,9 +1787,10 @@ class Core implements PactCore {
         description: terms.description,
         photoIds: this.#evidencePhotoIds(row.id),
         submittedAt: new Date(row.submitted_at),
-        occurrenceDate: row.occurrence_date,
+        occurrenceDate: row.day,
         penaltyCents: terms.penalty_cents,
         recipientName: this.#recipientName(terms.recipient_id),
+        ...(row.weekly === 1 && { week: this.#weekProgress(row.pact_id, row.occurrence_date) }),
         thread: this.#thread(row.id, true),
       };
     });
@@ -2154,7 +2194,16 @@ class Core implements PactCore {
       .run(outcome, reviewerId, now.toISOString(), reason, evidence.id);
     // A day ahead with an approved excuse stays for judging at its due time, which makes it Excused.
     const excusedAhead = this.#excuseOn(evidence.pact_id, evidence.occurrence_date) === "approved";
-    if (
+    if (this.#isWeekly(evidence.pact_id)) {
+      // A week waiting on this decision past its due time is judged now; the decision told the owner.
+      if (
+        !this.#isJudged(evidence.pact_id, evidence.occurrence_date) &&
+        this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now)
+      ) {
+        const week = this.#occurrencesOf(evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date)!;
+        this.#judgeWeek(evidence.pact_id, week, now, false);
+      }
+    } else if (
       !this.#isJudged(evidence.pact_id, evidence.occurrence_date) &&
       ((outcome === "rejected" && !excusedAhead) ||
         this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now))
@@ -2173,9 +2222,7 @@ class Core implements PactCore {
         decision: outcome,
         ...(reason !== null && { reason }),
         title: `${this.#accountName(reviewerId)} ${outcome} your evidence`,
-        body: `${this.#pactName(evidence.pact_id)} · ${
-          reason === null ? formatDate(evidence.occurrence_date) : `“${reason}”`
-        }`,
+        body: `${this.#pactName(evidence.pact_id)} · ${reason === null ? formatDate(evidence.day) : `“${reason}”`}`,
         // A rejection shows as an alert on Today, where the owner can respond to it.
         url: outcome === "approved" ? APP_PATHS.pact(evidence.pact_id) : APP_PATHS.today,
       },
@@ -2230,11 +2277,33 @@ class Core implements PactCore {
     return this.#occurrenceRecords(pact, timezone, first, sunday);
   }
 
+  /**
+   * A Weekly count pact's heat map as of `now`: every week from its first
+   * through this one, or the one it Ended, or its first while that's ahead;
+   * none from the week it Ended that was never judged.
+   */
+  #heatMapWeeks(pact: PactRow, timezone: string, first: LocalDate, now: Date): HeatMapWeek[] {
+    const endedOn = pact.ended_at === null ? null : localDateOf(new Date(pact.ended_at), timezone);
+    const last = [first, endedOn ?? localDateOf(now, timezone)].sort().at(-1)!;
+    return this.#occurrencesOf(pact.id, timezone)
+      .between(first, last)
+      .map((week) => {
+        const record = this.#occurrenceRecord(pact, week);
+        const afterEnd = endedOn !== null && week.date >= mondayOf(endedOn) && record.status.kind === "not-judged";
+        return {
+          date: week.date,
+          occurrence: afterEnd ? null : record,
+          progress: this.#weekProgress(pact.id, week.date),
+        };
+      });
+  }
+
   /** The owner's pacts due yesterday, by name, each with how its occurrence went. */
   #yesterday(ownerId: AccountId, timezone: string): TodayYesterdayEntry[] {
     const yesterday = addDays(localDateOf(this.#clock.now(), timezone), -1);
+    // A Weekly count week isn't due on any one day.
     const pacts = this.#db
-      .prepare(`SELECT * FROM pact WHERE owner_account_id = ? ORDER BY name, created_at, id`)
+      .prepare(`SELECT * FROM pact WHERE owner_account_id = ? AND ${FIXED_DAYS_PACT} ORDER BY name, created_at, id`)
       .all(ownerId) as PactRow[];
     return pacts.flatMap((pact) =>
       this.#occurrenceRecords(pact, timezone, yesterday, yesterday).flatMap(({ date, occurrence }) =>
@@ -2297,6 +2366,8 @@ class Core implements PactCore {
    * that covers it (Excused, or a day not judged yet it already excuses).
    */
   #decidedBy(pactId: string, date: LocalDate, status: OccurrenceStatus): OccurrenceDecision | null {
+    // A Weekly count week is Kept or Missed by its days, not by any one decision.
+    if ((status.kind === "kept" || status.kind === "missed") && this.#isWeekly(pactId)) return null;
     if (status.kind === "kept") {
       const row = this.#db
         .prepare(
@@ -2373,15 +2444,16 @@ class Core implements PactCore {
     if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };
     if (to > addDays(from, MAX_EXCUSE_SPAN_DAYS - 1)) return { ok: false, reason: "too-many-days" };
     const preview: ExcusePreview = { covered: [], skipped: [], heldCents: 0 };
-    for (const occurrence of this.#occurrencesOf(pactId, timezone).between(from, to)) {
-      const status = this.#occurrenceStatus(pactId, occurrence);
-      const skipped = this.#skipReason(status, now);
+    // On Weekly count, a day of a week covers the whole week.
+    for (const occurrence of this.#occurrencesOf(pactId, timezone).overlapping(from, to)) {
+      const day = this.#excuseDay(pactId, occurrence);
+      const skipped = this.#skipReason(day.status, now);
       if (skipped !== null) {
         preview.skipped.push({ date: occurrence.date, reason: skipped });
         continue;
       }
-      preview.covered.push({ date: occurrence.date, status });
-      if (status.kind === "missed") preview.heldCents += status.penaltyCents;
+      preview.covered.push(day);
+      if (day.status.kind === "missed") preview.heldCents += day.status.penaltyCents;
     }
     return { ok: true, preview };
   }
@@ -2399,8 +2471,18 @@ class Core implements PactCore {
     ).map((row) => row.date);
     return dates.flatMap((date) => {
       const [occurrence] = between(date, date);
-      return occurrence ? [{ date, status: this.#occurrenceStatus(pactId, occurrence) }] : [];
+      return occurrence ? [this.#excuseDay(pactId, occurrence)] : [];
     });
+  }
+
+  /** The pact's `occurrence` as an excuse's day: a Weekly count week runs through its Sunday. */
+  #excuseDay(pactId: string, occurrence: Occurrence): ExcuseDay {
+    const schedule = JSON.parse(this.#termsOn(pactId, occurrence.date).schedule) as Schedule;
+    return {
+      date: occurrence.date,
+      ...(schedule.kind === "weekly-count" && { through: lastDayOf(schedule, occurrence.date) }),
+      status: this.#occurrenceStatus(pactId, occurrence),
+    };
   }
 
   /** The photos of an excuse, in the order added. */
@@ -2424,12 +2506,17 @@ class Core implements PactCore {
       .get(excuseId) as (PactRow & { owner_account_id: AccountId; timezone: string }) | undefined;
   }
 
-  /** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days. */
+  /** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days; "Week of Mon Jan 5" for a Weekly count week. */
   #excuseDatesText(excuseId: string): string {
-    const { first, last } = this.#db
-      .prepare(`SELECT MIN(date) AS first, MAX(date) AS last FROM excuse_day WHERE excuse_id = ?`)
-      .get(excuseId) as { first: LocalDate; last: LocalDate };
-    return first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
+    const {
+      first,
+      last,
+      pact_id: pactId,
+    } = this.#db
+      .prepare(`SELECT MIN(date) AS first, MAX(date) AS last, pact_id FROM excuse_day WHERE excuse_id = ?`)
+      .get(excuseId) as { first: LocalDate; last: LocalDate; pact_id: string };
+    const text = first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
+    return this.#isWeekly(pactId) ? `Week of ${text}` : text;
   }
 
   /**
@@ -2748,6 +2835,8 @@ class Core implements PactCore {
     // #checkedPact refuses an owner with no timezone.
     const zone = timezone!;
     const before = this.#changeableTerms(pact);
+    // Only a new pact can swap a week's count for its days, or back.
+    if (checked.terms.schedule.kind !== before.schedule.kind) return { ok: false, reason: "schedule-kind-fixed" };
     const after: ChangeableTerms = {
       name: checked.name,
       description: checked.description,
@@ -2765,15 +2854,15 @@ class Core implements PactCore {
     if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
       return { ok: false, reason: "change-request-waiting" };
     }
-    // Days already open keep their terms: a start date means nothing once the first has opened,
-    // and an end date can't take away a day that has.
-    const from = addDays(localDateOf(now, zone), 1);
+    // Occurrences already open keep their terms: a start date means nothing once the first has opened,
+    // and an end date can't take away a day (or a week) that has.
+    const from = firstDayNotOpen(before.schedule, localDateOf(now, zone));
     if (after.startDate !== before.startDate && pact.first_occurrence < from) {
       return { ok: false, reason: "pact-started" };
     }
     const firstFrom = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
     if (after.endDate !== null && after.endDate !== before.endDate) {
-      if (after.endDate < addDays(from, -1) || after.endDate < firstFrom) {
+      if (after.endDate < addDays(from, -1) || after.endDate < lastDayOf(after.schedule, firstFrom)) {
         return { ok: false, reason: "end-date-too-early" };
       }
     }
@@ -2824,7 +2913,7 @@ class Core implements PactCore {
     at: Date,
   ): { appliesFrom: LocalDate; todayKeepsCents: number | null } {
     const today = localDateOf(at, timezone);
-    const from = addDays(today, 1);
+    const from = firstDayNotOpen(after.schedule, today);
     const eras = this.#erasOf(pact);
     const earlier = eras.slice(0, -1);
     const firstOccurrence = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
@@ -2843,24 +2932,38 @@ class Core implements PactCore {
       },
     ];
     const start = firstOccurrence > from ? firstOccurrence : from;
-    // With no day left before its end date, the change still starts tomorrow.
+    // With no day left before its end date, the change still starts tomorrow (or next week).
     const [first] = occurrencesOverTime(planned, timezone).between(from, addDays(start, 7));
-    const todayTerms = this.#termsOn(pact.id, today);
-    const keeps =
-      occurrencesOverTime(eras, timezone).includes(today) && todayTerms.penalty_cents !== after.penaltyCents;
-    return { appliesFrom: first?.date ?? from, todayKeepsCents: keeps ? todayTerms.penalty_cents : null };
+    return {
+      appliesFrom: first?.date ?? from,
+      todayKeepsCents: this.#todayKeeps(pact.id, eras, timezone, today, after),
+    };
+  }
+
+  /** The penalty the occurrence open `today` keeps, when it differs from `after`'s; else null. */
+  #todayKeeps(
+    pactId: string,
+    eras: TermsEra[],
+    timezone: string,
+    today: LocalDate,
+    after: Pick<ChangeableTerms, "penaltyCents">,
+  ): number | null {
+    const open = occurrencesOverTime(eras, timezone).covering(today);
+    if (!open) return null;
+    const { penalty_cents: penalty } = this.#termsOn(pactId, open.date);
+    return penalty !== after.penaltyCents ? penalty : null;
   }
 
   /**
    * Puts `after` in force for the pact's occurrences not open at `at`, those
-   * dated from tomorrow in the owner's timezone; the terms it had stay with
-   * those dated before. A pact whose first occurrence hasn't come gets the
+   * dated from tomorrow (for Weekly count, next Monday) in the owner's
+   * timezone; the terms it had stay with those dated before. A pact whose first occurrence hasn't come gets the
    * first day of the new schedule from tomorrow. The name and reviewers are
    * left as they are.
    */
   #applyTerms(pact: PactRow, after: ChangeableTerms, at: Date, timezone: string): void {
     const today = localDateOf(at, timezone);
-    const from = addDays(today, 1);
+    const from = firstDayNotOpen(after.schedule, today);
     // A change already made today put the terms today keeps there first.
     this.#db
       .prepare(
@@ -2871,9 +2974,10 @@ class Core implements PactCore {
       )
       .run(from, pact.id);
     // Approved after the pact started, a new start date is moot; approved after
-    // the end date it asked for, the pact still keeps today, which is open.
+    // the end date it asked for, the pact still keeps today (or this week), which is open.
     const started = pact.first_occurrence < from;
-    const endDate = after.endDate !== null && after.endDate < today ? today : after.endDate;
+    const lastOpen = addDays(from, -1);
+    const endDate = after.endDate !== null && after.endDate < lastOpen ? lastOpen : after.endDate;
     this.#db
       .prepare(
         `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?, end_date = ?,
@@ -3131,9 +3235,10 @@ class Core implements PactCore {
     const [start] = occurrences.between(from, addDays(from, 7));
     const today = localDateOf(now, timezone);
     if (!start || start.date <= today) return null;
-    const todayTerms = this.#termsOn(pact.id, today);
-    const keeps = occurrences.includes(today) && todayTerms.penalty_cents !== pact.penalty_cents;
-    return { startsOn: start.date, todayKeepsCents: keeps ? todayTerms.penalty_cents : null };
+    const todayKeepsCents = this.#todayKeeps(pact.id, this.#erasOf(pact), timezone, today, {
+      penaltyCents: pact.penalty_cents,
+    });
+    return { startsOn: start.date, todayKeepsCents };
   }
 
   /** `ownerId`'s pact `pactId`, if it is one. */
@@ -3164,6 +3269,13 @@ class Core implements PactCore {
     if (oura && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
       return { ok: false, reason: "invalid-in-bed-by" };
     }
+    // A ring's nights are Fixed days only, and at most one day of evidence counts a day.
+    if (pact.schedule.kind === "weekly-count") {
+      const { target } = pact.schedule;
+      if (oura || !Number.isSafeInteger(target) || target < 1 || target > MAX_WEEKLY_TARGET) {
+        return { ok: false, reason: "invalid-schedule" };
+      }
+    }
     // A due-by time is for evidence the owner submits; a ring's night has its in-bed-by time.
     if (pact.dueBy !== undefined && (oura || !isDueBy(pact.dueBy))) return { ok: false, reason: "invalid-due-by" };
     if (pact.startDate !== undefined && !isLocalDate(pact.startDate)) {
@@ -3193,7 +3305,10 @@ class Core implements PactCore {
       oura ? nightOrder(time) < nightOrder(pact.inBedBy!) : dueBy === null || time < dueBy;
     if (!reminders.every(goesOffInTime)) return { ok: false, reason: "reminder-after-due-time" };
     const endDate = pact.endDate ?? null;
-    if (endDate !== null && endDate < timing.terms.firstOccurrence) return { ok: false, reason: "end-date-too-early" };
+    // The first occurrence has to end by the end date: a whole week, for Weekly count.
+    if (endDate !== null && endDate < lastDayOf(timing.terms.schedule, timing.terms.firstOccurrence)) {
+      return { ok: false, reason: "end-date-too-early" };
+    }
     if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
       return { ok: false, reason: "invalid-penalty" };
     }
@@ -3303,13 +3418,13 @@ class Core implements PactCore {
       const closedAt = editWindowEnd(pact).toISOString();
       const held = this.#db
         .prepare(
-          `SELECT id, occurrence_date FROM evidence
+          `SELECT id, day FROM evidence
            WHERE pact_id = ? AND decision IS NULL AND submitted_at < ?
            ORDER BY submitted_at, id`,
         )
-        .all(pact.id, closedAt) as { id: string; occurrence_date: LocalDate }[];
-      for (const { id, occurrence_date } of held) {
-        this.#enqueueEvidenceReviewItems(pact.id, id, occurrence_date, ownerName);
+        .all(pact.id, closedAt) as { id: string; day: LocalDate }[];
+      for (const { id, day } of held) {
+        this.#enqueueEvidenceReviewItems(pact.id, id, day, ownerName);
       }
       this.#db.prepare(`UPDATE pact SET reviewers_notified_at = ? WHERE id = ?`).run(t.toISOString(), pact.id);
     }
@@ -3508,9 +3623,11 @@ class Core implements PactCore {
 
   /**
    * Whether `ownerId` may submit evidence with `photoCount` photos for
-   * `pactId` at `at`, and if so for which occurrence: the one open at `at`,
-   * unless evidence for it is already waiting or approved, or it's already
-   * judged (a rejection judges it Missed at once).
+   * `pactId` at `at`, and if so for which occurrence and day: the one open at
+   * `at`, unless evidence for it is already waiting or approved, or it's
+   * already judged (a rejection judges it Missed at once). On Weekly count
+   * that's for the day: one day of evidence counts per day, and a day whose
+   * evidence was rejected is made up on another.
    */
   #evidenceAcceptance(
     ownerId: AccountId,
@@ -3518,7 +3635,7 @@ class Core implements PactCore {
     pactId: string,
     photoCount: number,
     at: Date,
-  ): { ok: true; occurrence: Occurrence } | { ok: false; reason: SubmitEvidenceRefusal } {
+  ): { ok: true; occurrence: Occurrence; day: LocalDate } | { ok: false; reason: SubmitEvidenceRefusal } {
     const row = this.#db
       .prepare(`SELECT schedule, first_occurrence, evidence_kind FROM pact WHERE id = ? AND owner_account_id = ?`)
       .get(pactId, ownerId) as Pick<PactRow, "schedule" | "first_occurrence" | "evidence_kind"> | undefined;
@@ -3527,20 +3644,32 @@ class Core implements PactCore {
     if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
     if (photoCount === 0) return { ok: false, reason: "no-photos" };
     if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
-    const occurrence = this.#occurrencesOf(pactId, timezone).openAt(at);
+    const occurrences = this.#occurrencesOf(pactId, timezone);
+    const occurrence = occurrences.openAt(at);
+    const day = localDateOf(at, timezone);
     // Past its due-by time, the day takes no more evidence.
-    if (!occurrence || at.getTime() >= occurrence.dueAt.getTime()) return { ok: false, reason: "not-open" };
-    const decision = this.#evidenceDecision(pactId, occurrence.date);
+    if (!occurrence || at.getTime() >= occurrences.dayDueAt(day)!.getTime()) return { ok: false, reason: "not-open" };
+    const decision = this.#evidenceDecision(pactId, day, "day");
     if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
     if (decision === "approved") return { ok: false, reason: "already-approved" };
-    if (this.#isJudged(pactId, occurrence.date)) return { ok: false, reason: "already-judged" };
-    return { ok: true, occurrence };
+    const weekly = (JSON.parse(row.schedule) as Schedule).kind === "weekly-count";
+    if ((weekly && decision === "rejected") || this.#isJudged(pactId, occurrence.date)) {
+      return { ok: false, reason: "already-judged" };
+    }
+    return { ok: true, occurrence, day };
   }
 
-  /** Where the evidence for an occurrence stands: waiting or approved if any is, else rejected or none. */
-  #evidenceDecision(pactId: string, date: LocalDate): ReviewOutcome | "waiting" | "none" {
+  /**
+   * Where the evidence for an occurrence (or with `by` "day", for one day of
+   * it) stands: waiting or approved if any is, else rejected or none.
+   */
+  #evidenceDecision(
+    pactId: string,
+    date: LocalDate,
+    by: "occurrence_date" | "day" = "occurrence_date",
+  ): ReviewOutcome | "waiting" | "none" {
     const decisions = (
-      this.#db.prepare(`SELECT decision FROM evidence WHERE pact_id = ? AND occurrence_date = ?`).all(pactId, date) as {
+      this.#db.prepare(`SELECT decision FROM evidence WHERE pact_id = ? AND ${by} = ?`).all(pactId, date) as {
         decision: ReviewOutcome | null;
       }[]
     ).map((row) => row.decision ?? "waiting");
@@ -3589,7 +3718,7 @@ class Core implements PactCore {
   #waitingEvidence(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
     const rows = this.#db
       .prepare(
-        `SELECT evidence.id, evidence.pact_id, pact.name, evidence.occurrence_date, evidence.submitted_at
+        `SELECT evidence.id, evidence.pact_id, pact.name, evidence.day AS occurrence_date, evidence.submitted_at
          FROM evidence JOIN pact ON pact.id = evidence.pact_id
          WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND (? IS NULL OR pact.id = ?)
          ORDER BY evidence.submitted_at DESC, evidence.id`,
@@ -3634,7 +3763,7 @@ class Core implements PactCore {
         penaltyCents: this.#termsOn(pact.id, date).penalty_cents,
       });
       const { editWindowClosesAt } = pact;
-      const { first, openAt, between } = this.#occurrencesOf(pact.id, timezone);
+      const { first, openAt, between, dayDueAt } = this.#occurrencesOf(pact.id, timezone);
       if (pact.terms.inBedBy) {
         if (now.getTime() < first.opensAt.getTime()) {
           comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date, startDate: pact.startDate });
@@ -3665,7 +3794,11 @@ class Core implements PactCore {
       // it's past its due-by time, so it's Missed. Past it and not judged yet,
       // the next tick judges it.
       if (open && (this.#isJudged(pact.id, open.date) || now.getTime() >= open.dueAt.getTime())) continue;
-      if (open) {
+      if (open && pact.terms.schedule.kind === "weekly-count") {
+        const today = localDateOf(now, timezone);
+        const week = this.#weekToDo(pact.id, open, today, dayDueAt(today)!, now);
+        if (week) toDo.push({ kind: "evidence", ...cardOn(open.date), editWindowClosesAt, ...week });
+      } else if (open) {
         // Evidence waiting or approved: Waiting for approval, or done.
         const decision = this.#evidenceDecision(pact.id, open.date);
         if (decision === "waiting" || decision === "approved") continue;
@@ -3697,6 +3830,7 @@ class Core implements PactCore {
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
     const alerts = [
       ...this.#rejectedEvidenceAlerts(ownerId),
+      ...this.#rejectedDayAlerts(ownerId, timezone),
       ...this.#rejectedExcuseAlerts(ownerId, now),
       ...this.#questionAlerts(ownerId),
     ];
@@ -3704,6 +3838,27 @@ class Core implements PactCore {
       alerts: [...bills.alerts, ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert)],
       sections,
     };
+  }
+
+  /**
+   * A Weekly count week's To do card as of `now`, when `today` still takes
+   * evidence (before `todayDueAt`) and has none, no excuse covers the week,
+   * and its target isn't met or waiting for approval; else null.
+   */
+  #weekToDo(
+    pactId: string,
+    week: Occurrence,
+    today: LocalDate,
+    todayDueAt: Date,
+    now: Date,
+  ): Pick<TodayToDoCard, "occurrenceDate" | "dueAt" | "dueBy" | "week"> | null {
+    if (now.getTime() >= todayDueAt.getTime()) return null;
+    if (this.#excuseOn(pactId, week.date) !== null) return null;
+    if (this.#evidenceDecision(pactId, today, "day") !== "none") return null;
+    const progress = this.#weekProgress(pactId, week.date);
+    if (progress.sessions + progress.waiting >= progress.target) return null;
+    const { due_by: dueBy } = this.#termsOn(pactId, week.date);
+    return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, week: progress };
   }
 
   /**
@@ -3760,6 +3915,63 @@ class Core implements PactCore {
   }
 
   /**
+   * One alert per Weekly count day of the owner's whose evidence was
+   * rejected, newest rejection first, with when it was rejected: nothing is
+   * Missed, and the day can be made up another day. It goes once the owner
+   * takes the L on it, an excuse covers the week (one rejected after the
+   * rejection has its own alert), or the week is judged.
+   */
+  #rejectedDayAlerts(ownerId: AccountId, timezone: string): { at: Date; alert: TodayAlert }[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT pact.id, pact.name, evidence.occurrence_date, evidence.day, evidence.decided_at,
+                evidence.reject_reason, reviewer.name AS reviewer_name
+         FROM evidence
+         JOIN pact ON pact.id = evidence.pact_id
+         JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
+         WHERE pact.owner_account_id = ? AND ${WEEKLY_COUNT_PACT}
+           AND evidence.decision = 'rejected' AND evidence.rejection_accepted_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM occurrence
+                           WHERE occurrence.pact_id = evidence.pact_id AND occurrence.date = evidence.occurrence_date
+                             AND occurrence.outcome IS NOT NULL)
+           AND NOT ${excuseCoversSql(
+             "evidence.pact_id",
+             "evidence.occurrence_date",
+             "(excuse.decision IS NULL OR excuse.decision = 'approved' OR excuse.filed_at >= evidence.decided_at)",
+           )}
+         ORDER BY evidence.decided_at DESC, pact.name, pact.id`,
+      )
+      .all(ownerId) as {
+      id: string;
+      name: string;
+      occurrence_date: LocalDate;
+      day: LocalDate;
+      decided_at: string;
+      reject_reason: string;
+      reviewer_name: string;
+    }[];
+    return rows.map((row) => {
+      const week = this.#occurrencesOf(row.id, timezone).covering(row.occurrence_date)!;
+      const terms = this.#termsOn(row.id, row.occurrence_date);
+      return {
+        at: new Date(row.decided_at),
+        alert: {
+          kind: "evidence-rejected",
+          pactId: row.id,
+          name: row.name,
+          reviewerName: row.reviewer_name,
+          reason: row.reject_reason,
+          occurrenceDate: row.day,
+          penaltyCents: terms.penalty_cents,
+          recipientName: this.#recipientName(terms.recipient_id),
+          excusableUntil: new Date(week.dueAt.getTime() + EXCUSE_WINDOW_MS),
+          week: { dueAt: week.dueAt },
+        },
+      };
+    });
+  }
+
+  /**
    * The owner's occurrences judged Missed in the 48 hours before `now`,
    * latest first, but not accepted misses, nor those Missed through a
    * rejection or on a rejected excuse (those are alerts), nor those on an
@@ -3771,8 +3983,8 @@ class Core implements PactCore {
     const since = new Date(now.getTime() - EXCUSE_WINDOW_MS);
     const rows = this.#db
       .prepare(
-        `SELECT pact.id, pact.name, pact.evidence_kind, penalty.amount_cents, occurrence.date, occurrence.judged_at,
-                occurrence.bedtime_start
+        `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, penalty.amount_cents, occurrence.date,
+                occurrence.judged_at, occurrence.bedtime_start
          FROM occurrence
          JOIN pact ON pact.id = occurrence.pact_id
          JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
@@ -3789,13 +4001,15 @@ class Core implements PactCore {
       id: string;
       name: string;
       evidence_kind: PactTerms["evidenceKind"];
+      schedule: string;
       amount_cents: number;
       date: LocalDate;
       judged_at: string;
       bedtime_start: string | null;
     }[];
     return rows.map((row) => {
-      const dueBy = row.date === today ? this.#termsOn(row.id, row.date).due_by : null;
+      const weekly = (JSON.parse(row.schedule) as Schedule).kind === "weekly-count";
+      const dueBy = row.date === today && !weekly ? this.#termsOn(row.id, row.date).due_by : null;
       return {
         pactId: row.id,
         name: row.name,
@@ -3807,6 +4021,7 @@ class Core implements PactCore {
           night: { inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) },
         }),
         ...(dueBy !== null && { closed: { dueBy } }),
+        ...(weekly && { week: this.#weekProgress(row.id, row.date) }),
       };
     });
   }
@@ -3909,19 +4124,20 @@ class Core implements PactCore {
    * scheduler last looked (the pact's `reminded_through`), so a stopped
    * scheduler catches up, but drops those more than 15 minutes late and
    * tells the operator. A reminder goes off before its occurrence's due time
-   * and only while it's useful: a Camera day with no evidence and not judged,
-   * any scheduled bedtime night (the app can't know the owner is in bed until
+   * and only while it's useful: a Camera day with no evidence and not judged
+   * (on Weekly count, any day of the week while its target isn't met or
+   * waiting for approval), any scheduled bedtime night (the app can't know the owner is in bed until
    * the ring syncs), never one an approved excuse covers.
    */
   #remind(t: Date): DroppedReminder[] {
     const pacts = this.#db
       .prepare(
-        `SELECT pact.id, pact.name, pact.evidence_kind, pact.reminders, pact.reminded_through,
+        `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
                 pact.owner_account_id, account.timezone
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.stage = 'active'`,
       )
-      .all() as (Pick<PactRow, "id" | "name" | "evidence_kind" | "reminders" | "reminded_through"> & {
+      .all() as (Pick<PactRow, "id" | "name" | "evidence_kind" | "schedule" | "reminders" | "reminded_through"> & {
       owner_account_id: AccountId;
       timezone: string | null;
     })[];
@@ -3935,22 +4151,32 @@ class Core implements PactCore {
       if (times.length === 0 || pact.timezone === null) continue;
       const timezone = pact.timezone;
       const night = pact.evidence_kind === "oura";
+      const occurrences = this.#occurrencesOf(pact.id, timezone);
       // A night's reminder can go off the morning after, so start a day early.
-      const days = this.#occurrencesOf(pact.id, timezone).between(
-        addDays(localDateOf(from, timezone), -1),
-        localDateOf(t, timezone),
-      );
-      for (const occurrence of days) {
+      const fromDate = addDays(localDateOf(from, timezone), -1);
+      const toDate = localDateOf(t, timezone);
+      // Each day a reminder can go off on, with when that day's evidence is due:
+      // on Weekly count, every day of an open week.
+      const days: { date: LocalDate; dueAt: Date }[] = [];
+      if ((JSON.parse(pact.schedule) as Schedule).kind === "weekly-count") {
+        for (let date = fromDate; date <= toDate; date = addDays(date, 1)) {
+          const dueAt = occurrences.dayDueAt(date);
+          if (dueAt) days.push({ date, dueAt });
+        }
+      } else {
+        days.push(...occurrences.between(fromDate, toDate));
+      }
+      for (const day of days) {
         for (const time of times) {
-          const at = reminderAt(occurrence.date, time, timezone, night);
+          const at = reminderAt(day.date, time, timezone, night);
           if (at.getTime() <= from.getTime() || at.getTime() > t.getTime()) continue;
-          if (at.getTime() >= occurrence.dueAt.getTime() || !this.#worthReminding(pact, occurrence.date)) continue;
+          if (at.getTime() >= day.dueAt.getTime() || !this.#worthReminding(pact, day.date)) continue;
           const lateMs = t.getTime() - at.getTime();
           if (lateMs > REMINDER_LATE_MS) {
-            dropped.push({ pactId: pact.id, date: occurrence.date, time, lateMs });
+            dropped.push({ pactId: pact.id, date: day.date, time, lateMs });
             continue;
           }
-          this.#enqueueReminder(pact, occurrence.date);
+          this.#enqueueReminder(pact, day.date);
         }
       }
     }
@@ -3973,25 +4199,38 @@ class Core implements PactCore {
     return dropped;
   }
 
-  /** Whether the occurrence still needs a nudge: a bedtime night always, a Camera day with nothing submitted or judged. */
-  #worthReminding(pact: Pick<PactRow, "id" | "evidence_kind">, date: LocalDate): boolean {
+  /**
+   * Whether the day `day` still needs a nudge: a bedtime night always, a
+   * Camera day with nothing submitted or judged, and on Weekly count a day
+   * with nothing submitted of a week not judged, whose target isn't met or
+   * waiting for approval.
+   */
+  #worthReminding(pact: Pick<PactRow, "id" | "evidence_kind" | "schedule">, day: LocalDate): boolean {
+    const weekly = (JSON.parse(pact.schedule) as Schedule).kind === "weekly-count";
+    const date = weekly ? mondayOf(day) : day;
     if (this.#excuseOn(pact.id, date) === "approved") return false;
     if (pact.evidence_kind === "oura") return true;
-    const submitted = this.#db
-      .prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND occurrence_date = ?`)
-      .get(pact.id, date);
-    return submitted === undefined && !this.#isJudged(pact.id, date);
+    const submitted = this.#db.prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND day = ?`).get(pact.id, day);
+    if (submitted !== undefined || this.#isJudged(pact.id, date)) return false;
+    if (!weekly) return true;
+    const { sessions, waiting, target } = this.#weekProgress(pact.id, date);
+    return sessions + waiting < target;
   }
 
+  /** A reminder about the day `date` (on Weekly count, a day of the week). */
   #enqueueReminder(
-    pact: Pick<PactRow, "id" | "name" | "evidence_kind"> & { owner_account_id: AccountId },
+    pact: Pick<PactRow, "id" | "name" | "evidence_kind" | "schedule"> & { owner_account_id: AccountId },
     date: LocalDate,
   ): void {
-    const terms = this.#termsOn(pact.id, date);
-    const body =
-      pact.evidence_kind === "oura"
-        ? `In bed by ${clockText(terms.in_bed_by!)} tonight.`
-        : `No photo yet today. Due at ${terms.due_by === null ? "midnight" : clockText(terms.due_by)}.`;
+    const weekly = (JSON.parse(pact.schedule) as Schedule).kind === "weekly-count";
+    const terms = this.#termsOn(pact.id, weekly ? mondayOf(date) : date);
+    const due = terms.due_by === null ? "midnight" : clockText(terms.due_by);
+    let body = `No photo yet today. Due at ${due}.`;
+    if (pact.evidence_kind === "oura") body = `In bed by ${clockText(terms.in_bed_by!)} tonight.`;
+    if (weekly) {
+      const { sessions, target } = this.#weekProgress(pact.id, mondayOf(date));
+      body = `${sessions} of ${target} this week. Today's photo is due at ${due}.`;
+    }
     this.#enqueue({
       recipient: pact.owner_account_id,
       kind: "reminder",
@@ -4148,6 +4387,7 @@ class Core implements PactCore {
    */
   #judgeAtDueTime(pactId: string, occurrence: Occurrence): void {
     if (this.#isJudged(pactId, occurrence.date)) return;
+    if (this.#isWeekly(pactId)) return this.#judgeWeek(pactId, occurrence, occurrence.dueAt, true);
     const decision = this.#evidenceDecision(pactId, occurrence.date);
     const excuse = this.#excuseOn(pactId, occurrence.date);
     if (decision !== "approved" && excuse === "approved") {
@@ -4159,6 +4399,42 @@ class Core implements PactCore {
     if (outcome === "missed" && excuse === null) this.#enqueueMissed(pactId, occurrence.date);
   }
 
+  /**
+   * Judges a Weekly count week at `at`, unless its evidence still waits for a
+   * decision that could change it: Kept once enough days have approved
+   * evidence, else Excused with an approved excuse, else Missed, with one
+   * penalty per day short. `tell` the owner it's Missed, unless a decision
+   * judged it (that told them) or they asked for it to be excused.
+   */
+  #judgeWeek(pactId: string, week: Occurrence, at: Date, tell: boolean): void {
+    const { sessions, waiting, target } = this.#weekProgress(pactId, week.date);
+    const excuse = this.#excuseOn(pactId, week.date);
+    if (sessions >= target) return this.#judge(pactId, week.date, "kept", at);
+    if (excuse === "approved") return this.#judge(pactId, week.date, "excused", at);
+    if (waiting > 0) return;
+    this.#judge(pactId, week.date, "missed", at);
+    if (tell && excuse === null) this.#enqueueMissed(pactId, week.date);
+  }
+
+  /** How far the pact's Weekly count week starting `monday` has got: see `WeekProgress`. */
+  #weekProgress(pactId: string, monday: LocalDate): WeekProgress {
+    const schedule = JSON.parse(this.#termsOn(pactId, monday).schedule) as Schedule;
+    const counts = this.#db
+      .prepare(
+        `SELECT COUNT(DISTINCT CASE WHEN decision = 'approved' THEN day END) AS sessions,
+                COUNT(DISTINCT CASE WHEN decision IS NULL THEN day END) AS waiting
+         FROM evidence WHERE pact_id = ? AND occurrence_date = ?`,
+      )
+      .get(pactId, monday) as { sessions: number; waiting: number };
+    return { ...counts, target: schedule.kind === "weekly-count" ? schedule.target : 1 };
+  }
+
+  /** Whether the pact's schedule is Weekly count. It keeps its kind once its edit window has closed. */
+  #isWeekly(pactId: string): boolean {
+    const row = this.#db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
+    return (JSON.parse(row.schedule) as Schedule).kind === "weekly-count";
+  }
+
   /** Only for judging at the due time: a rejection already told the owner, with the reason. */
   #enqueueMissed(pactId: string, date: LocalDate): void {
     const pact = {
@@ -4168,17 +4444,19 @@ class Core implements PactCore {
       }),
       ...this.#termsOn(pactId, date),
     };
+    const schedule = JSON.parse(pact.schedule) as Schedule;
+    const recipient = this.#recipientName(pact.recipient_id);
+    let body = `${formatDate(date)} · ${money(pact.penalty_cents)} to ${recipient}`;
+    if (schedule.kind === "weekly-count") {
+      const { sessions, target } = this.#weekProgress(pactId, date);
+      const short = target - sessions;
+      body = `Week of ${formatDate(date)} · ${short} short · ${money(short * pact.penalty_cents)} to ${recipient}`;
+    }
     this.#enqueue({
       recipient: pact.owner_account_id,
       kind: "missed-occurrence",
       channel: "push",
-      payload: {
-        pactId,
-        occurrenceDate: date,
-        title: `${pact.name} is Missed`,
-        body: `${formatDate(date)} · ${money(pact.penalty_cents)} to ${this.#recipientName(pact.recipient_id)}`,
-        url: APP_PATHS.pact(pactId),
-      },
+      payload: { pactId, occurrenceDate: date, title: `${pact.name} is Missed`, body, url: APP_PATHS.pact(pactId) },
     });
   }
 
@@ -4194,7 +4472,8 @@ class Core implements PactCore {
   /**
    * Records an occurrence's outcome as of `at`. Missed adds the penalty to
    * the owner's ledger for the recipient, both as the pact's terms stood when
-   * the occurrence opened (held, while an excuse for it waits for approval).
+   * the occurrence opened (held, while an excuse for it waits for approval):
+   * for a Weekly count week, one penalty for each day short of its target.
    */
   #judge(pactId: string, date: LocalDate, outcome: "kept" | "missed" | "excused", at: Date): void {
     const pact = {
@@ -4210,6 +4489,8 @@ class Core implements PactCore {
       )
       .run(pactId, date, outcome, at.toISOString());
     if (outcome === "missed") {
+      const schedule = JSON.parse(pact.schedule) as Schedule;
+      const short = schedule.kind === "weekly-count" ? schedule.target - this.#weekProgress(pactId, date).sessions : 1;
       this.#db
         .prepare(
           `INSERT INTO penalty (id, owner_account_id, recipient_id, pact_id, occurrence_date, amount_cents, added_at)
@@ -4221,7 +4502,7 @@ class Core implements PactCore {
           pact.recipient_id,
           pactId,
           date,
-          pact.penalty_cents,
+          pact.penalty_cents * short,
           at.toISOString(),
         );
     }
@@ -4520,11 +4801,21 @@ function firstOccurrenceAfterChange(
   startDate: LocalDate | null,
 ): LocalDate {
   if (firstOccurrence < from) return firstOccurrence;
+  if (schedule.kind === "weekly-count") return firstWeekFrom(from, startDate);
   const start = startDate !== null && startDate > from ? startDate : from;
   for (let date = start, i = 0; i < 7; date = addDays(date, 1), i++) {
     if (schedule.days.includes(weekdayOf(date))) return date;
   }
   throw new Error("unreachable: a schedule has at least one day");
+}
+
+/**
+ * The first day not open on `today` for a pact with `schedule`, from which a
+ * change applies: tomorrow, or for Weekly count, whose week is open until its
+ * Sunday, next Monday.
+ */
+function firstDayNotOpen(schedule: Schedule, today: LocalDate): LocalDate {
+  return schedule.kind === "weekly-count" ? addDays(mondayOf(today), WEEKDAYS.length) : addDays(today, 1);
 }
 
 /**
@@ -4573,6 +4864,10 @@ interface EvidenceToDecide {
   id: string;
   pact_id: string;
   occurrence_date: LocalDate;
+  /** The day it counts for: on Weekly count, the day of the week. */
+  day: LocalDate;
+  /** The owner's: every pact's owner has one, as creating a pact needs it. */
+  timezone: string;
   decision: ReviewOutcome | null;
   owner_account_id: AccountId;
 }

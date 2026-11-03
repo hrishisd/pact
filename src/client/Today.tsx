@@ -17,7 +17,9 @@ import {
   type TodayBillCard,
   type TodayMissedCard,
   type TodaySection,
+  type TodayToDoCard,
   type TodayWaitingItem,
+  type WeekProgress,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
 import { clockText, formatDate, formatDay, formatDueAt, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
@@ -210,12 +212,17 @@ function Section({
             chip={<span className="chip c-todo">To do</span>}
             onOpen={() => onOpenPact(card.pactId, card.name)}
           >
-            <div className="meta due">
-              Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
-              {timeLeft(Date.parse(card.dueAt) - now)}
-            </div>
+            {card.week ? (
+              <WeekToDo card={card} week={card.week} timezone={timezone} />
+            ) : (
+              <div className="meta due">
+                Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
+                {timeLeft(Date.parse(card.dueAt) - now)}
+              </div>
+            )}
             <EvidenceForm
               pactId={card.pactId}
+              weekly={card.week !== undefined}
               onSubmitted={onChanged}
               onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
             />
@@ -283,11 +290,45 @@ function Section({
 }
 
 /**
+ * A Weekly count week on its To do card: a dot per day of the target, filled
+ * once a day counts (or shaded while it waits for approval), "1 of 3 this
+ * week", and when the week is due; with a due-by time, when today's photo is.
+ */
+function WeekToDo({ card, week, timezone }: { card: Json<TodayToDoCard>; week: Json<WeekProgress>; timezone: string }) {
+  const { sessions, waiting, target } = week;
+  // The week is due at the midnight ending its Sunday: name the Sunday.
+  const sunday = new Date(Date.parse(card.dueAt) - 1).toISOString();
+  return (
+    <>
+      <div className="spread">
+        <div className="dots" aria-hidden="true">
+          {Array.from({ length: target }, (_, i) => (
+            <i key={i} className={i < sessions ? "on" : i < sessions + waiting ? "wait" : undefined} />
+          ))}
+        </div>
+        <span className="num meta">
+          {sessions} of {target} this week
+        </span>
+      </div>
+      <div className="meta due">
+        Due by {formatDay(sunday, timezone)}
+        {card.dueBy !== null && ` · today's photo by ${clockText(card.dueBy)}`}
+      </div>
+    </>
+  );
+}
+
+/**
  * A Missed card's day, and for a bedtime night when Oura saw the owner get
- * into bed. Today's day past its due-by time says when evidence was due.
+ * into bed. Today's day past its due-by time says when evidence was due. A
+ * Weekly count week says how far it got.
  */
 function missedLine(card: Json<TodayMissedCard>): string {
   if (card.closed) return `Evidence was due by ${clockText(card.closed.dueBy)}.`;
+  if (card.week) {
+    const { sessions, target } = card.week;
+    return `Week of ${formatDate(card.occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
+  }
   if (!card.night) return formatDate(card.occurrenceDate);
   const { inBedAt } = card.night;
   return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;
@@ -573,7 +614,8 @@ function RejectedEvidenceAlert({
     ACCEPT_MISS_REFUSAL_TEXT,
     onTaken,
   );
-  const fileLabel = fileExcuseLabel("File excuse", alert.excusableUntil, now);
+  // A Weekly count week isn't judged yet, so filing has no 48 hours running.
+  const fileLabel = alert.week ? "File excuse" : fileExcuseLabel("File excuse", alert.excusableUntil, now);
 
   return (
     <div className="alert bad" role="status">
@@ -581,12 +623,16 @@ function RejectedEvidenceAlert({
         {alert.reviewerName} rejected your evidence for {alert.name}
       </b>
       <span>“{alert.reason}”</span>
-      <span className="small">
-        {formatDate(alert.occurrenceDate)} is Missed ·{" "}
-        <b className="pen">
-          {money(alert.penaltyCents)} to {alert.recipientName}
-        </b>
-      </span>
+      {alert.week ? (
+        <span className="small">Doesn't count toward this week · make it up by Sunday</span>
+      ) : (
+        <span className="small">
+          {formatDate(alert.occurrenceDate)} is Missed ·{" "}
+          <b className="pen">
+            {money(alert.penaltyCents)} to {alert.recipientName}
+          </b>
+        </span>
+      )}
       <div className="row2">
         {fileLabel && (
           <button
@@ -768,10 +814,13 @@ function Waiting({
  */
 function EvidenceForm({
   pactId,
+  weekly,
   onSubmitted,
   onFileExcuse,
 }: {
   pactId: string;
+  /** A Weekly count week: a refused day can be made up on another. */
+  weekly: boolean;
   onSubmitted: () => void;
   onFileExcuse: () => void;
 }) {
@@ -806,7 +855,9 @@ function EvidenceForm({
         photos.map((photo) => photo.blob),
       );
       if (result.ok) return onSubmitted();
-      setError(REFUSAL_TEXT[result.reason]);
+      setError(
+        weekly && result.reason === "already-judged" ? WEEKLY_ALREADY_REJECTED_TEXT : REFUSAL_TEXT[result.reason],
+      );
     } catch (failure) {
       setError(
         uploadFailureText(
@@ -870,6 +921,8 @@ function EvidenceForm({
     </div>
   );
 }
+
+const WEEKLY_ALREADY_REJECTED_TEXT = "Today's photo was rejected. Make it up another day this week.";
 
 const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",

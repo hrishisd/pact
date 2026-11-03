@@ -14,7 +14,9 @@ const EVERY_DAY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 function historyOf(owner: AccountHandle, pactId: string): HeatMapDay[] {
   const result = owner.pact(pactId);
   if (!result.ok) throw new Error(result.reason);
-  return result.pact.history.days;
+  const { history } = result.pact;
+  if (history.kind !== "fixed-days") throw new Error(`a ${history.kind} heat map`);
+  return history.days;
 }
 
 /** Submits a photo for today's occurrence as `owner`; returns the evidence's id. */

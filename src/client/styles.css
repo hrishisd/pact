@@ -831,6 +831,63 @@ textarea.inp {
   width: 24px;
   height: 24px;
 }
+/* Fixed days or Weekly count, on the Schedule step. */
+.seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.seg button {
+  flex: 1;
+  border: 0;
+  background: none;
+  padding: 9px 6px;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--muted);
+  touch-action: manipulation;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+/* A Weekly count's target: − 3× per week (Mon–Sun) +. */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stepper .num {
+  font-size: 20px;
+}
+.stepper .iconbtn {
+  font-size: 18px;
+  touch-action: manipulation;
+}
+.stepper .iconbtn:disabled {
+  opacity: 0.4;
+}
+/* A Weekly count week's progress on Today: a dot per day, filled once it counts. */
+.dots {
+  display: flex;
+  gap: 6px;
+}
+.dots i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--kept);
+  display: block;
+}
+.dots i.on {
+  background: var(--kept);
+}
+.dots i.wait {
+  border-color: var(--slate);
+  background: var(--slate-bg);
+}
 /* Weekday picker, Monday first. */
 .days {
   display: flex;
@@ -1388,6 +1445,35 @@ details.folded .kv {
 }
 .cell.sel {
   box-shadow: 0 0 0 2px var(--ink);
+}
+/* A Weekly count pact's heat map: one square per week, with the days that counted. */
+.hm-weeks {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  align-items: flex-end;
+}
+.hm-wcol {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+}
+.cell.wk {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+.cell.wk.open {
+  color: var(--accent);
+}
+.cell.wk.not-judged {
+  color: var(--slate);
 }
 .legend {
   display: flex;

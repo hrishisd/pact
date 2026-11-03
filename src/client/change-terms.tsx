@@ -5,7 +5,7 @@
 
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
-import type { ChangeRequestView, CurrentTerms, TermChange } from "../shared/types.ts";
+import type { ChangeRequestView, CurrentTerms, Schedule, TermChange } from "../shared/types.ts";
 import { clockText, formatDate, money, remindersText, scheduleText } from "./format.ts";
 
 export type Term = TermChange["term"];
@@ -25,6 +25,16 @@ export const TERM_LABELS: Record<Term, string> = {
   reviewers: "Reviewers",
   reminders: "Reminders",
 };
+
+/** A term's label on a pact with `schedule`: a Weekly count pact's schedule is its Target. */
+export function termLabel(term: Term, schedule: Pick<Schedule, "kind">): string {
+  return term === "schedule" && schedule.kind === "weekly-count" ? "Target" : TERM_LABELS[term];
+}
+
+/** What a pact's open occurrence is called in "Today keeps $5 per miss": This week, for Weekly count. */
+export function openOccurrenceText(schedule: Pick<Schedule, "kind">): string {
+  return schedule.kind === "weekly-count" ? "This week" : "Today";
+}
 
 /** The terms a pact of this kind lists, in the Request change order. */
 export function termsOfKind(current: Pick<Current, "evidenceKind">): Term[] {
@@ -125,7 +135,7 @@ export function effectText(change: Change): string {
     case "in-bed-by":
       return "Needs approval: a later time";
     case "schedule":
-      return "Needs approval: fewer days";
+      return change.before.kind === "weekly-count" ? "Needs approval: a lower target" : "Needs approval: fewer days";
     case "due-by":
       return change.after === null ? "Needs approval: due at midnight instead" : "Needs approval: a later time";
     case "start-date":
@@ -148,7 +158,7 @@ export function DiffList({ changes }: { changes: Change[] }) {
     <dl className="diff">
       {changes.map((change) => (
         <div key={change.term}>
-          <dt>{TERM_LABELS[change.term]}</dt>
+          <dt>{change.term === "schedule" ? termLabel(change.term, change.before) : TERM_LABELS[change.term]}</dt>
           <dd>
             <s>{changeValue(change, "before")}</s>
             <b>{changeValue(change, "after")}</b>
@@ -169,7 +179,7 @@ export function EverythingElse({ request }: { request: Json<ChangeRequestView> }
       <dl className="kv">
         {rest.map((term) => (
           <Fragment key={term}>
-            <dt>{TERM_LABELS[term]}</dt>
+            <dt>{termLabel(term, request.current.schedule)}</dt>
             <dd>{currentValue(term, request.current)}</dd>
           </Fragment>
         ))}
@@ -180,12 +190,17 @@ export function EverythingElse({ request }: { request: Json<ChangeRequestView> }
 
 /**
  * When an approved change would start, as a change request says it: "Approving
- * applies from Wed Nov 4, the first Gym day not open yet. Today keeps $5 per miss."
+ * applies from Wed Nov 4, the first Gym day not open yet. Today keeps $5 per miss." A Weekly count
+ * pact's applies from a week, and this week keeps its penalty.
  */
 export function startsText(request: Json<ChangeRequestView>, lead: string): string {
   if (request.appliesFrom === null) return "";
-  const unit = request.current.evidenceKind === "oura" ? "night" : "day";
-  const today = request.todayKeepsCents === null ? "" : ` Today keeps ${money(request.todayKeepsCents)} per miss.`;
+  const { schedule } = request.current;
+  const unit = request.current.evidenceKind === "oura" ? "night" : schedule.kind === "weekly-count" ? "week" : "day";
+  const today =
+    request.todayKeepsCents === null
+      ? ""
+      : ` ${openOccurrenceText(schedule)} keeps ${money(request.todayKeepsCents)} per miss.`;
   return `${lead} from ${formatDate(request.appliesFrom)}, the first ${request.pactName} ${unit} not open yet.${today}`;
 }
 

@@ -7,7 +7,7 @@ import type { Form } from "./CreatePact.tsx";
 import { clockText } from "./format.ts";
 
 /** What the step needs from the pact form: the kind and due time decide the copy and a new reminder's time. */
-type RemindersForm = Pick<Form, "kind" | "inBedBy" | "dueByOn" | "dueBy" | "reminders">;
+type RemindersForm = Pick<Form, "kind" | "weekly" | "inBedBy" | "dueByOn" | "dueBy" | "reminders">;
 
 /** The core's refusals about reminders, in the owner's words. */
 export const REMINDER_PROBLEMS = {
@@ -71,7 +71,9 @@ export function RemindersStep({
       <small className="muted">
         {oura
           ? `They go off every scheduled night before ${due}, even if you're already in bed. Pact can't tell until your ring syncs, usually the next morning.`
-          : `They go off on scheduled days before ${due}, only if you haven't submitted a photo yet.`}
+          : form.weekly
+            ? `They go off each day before ${due} that you haven't submitted a photo, until the week's target is met.`
+            : `They go off on scheduled days before ${due}, only if you haven't submitted a photo yet.`}
         {hint && ` ${hint}`}
       </small>
     </>

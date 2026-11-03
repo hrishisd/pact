@@ -29,6 +29,13 @@ function pactOf(owner: AccountHandle, pactId: string) {
   return result.pact;
 }
 
+/** A Fixed-days pact's heat map. */
+function heatMapDays(owner: AccountHandle, pactId: string) {
+  const { history } = pactOf(owner, pactId);
+  if (history.kind !== "fixed-days") throw new Error(`a ${history.kind} heat map`);
+  return history.days;
+}
+
 /** The pact's terms as the Request change form starts out: as they stand. */
 function termsOf(owner: AccountHandle, pactId: string): PactChange {
   const pact = pactOf(owner, pactId);
@@ -99,7 +106,7 @@ describe("a due-by time", () => {
     await reviewer.decide(evidenceId, { kind: "approve" });
     await s.advanceTo("Wed 09:01");
 
-    const days = pactOf(owner, gym).history.days;
+    const days = heatMapDays(owner, gym);
     expect(days.find((d) => d.date === TUESDAY)?.occurrence?.status).toEqual({ kind: "kept" });
     expect(days.find((d) => d.date === WEDNESDAY)?.occurrence?.status).toEqual({
       kind: "missed",
@@ -229,7 +236,7 @@ describe("a start date", () => {
 
     await s.advanceTo("Mon+1 00:00");
     expect(penaltyDays(owner)).toEqual([]);
-    expect(pactOf(owner, gym).history.days[0]?.date).toBe(NEXT_MONDAY);
+    expect(heatMapDays(owner, gym)[0]?.date).toBe(NEXT_MONDAY);
     await s.advanceTo("Tue+1 00:00");
     expect(penaltyDays(owner)).toEqual([NEXT_MONDAY]);
   });
@@ -290,7 +297,7 @@ describe("an end date", () => {
     await s.advanceTo("Mon+1 00:00");
     expect(penaltyDays(owner)).toEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]);
     expect(owner.today().yesterday).toEqual([]);
-    const days = pactOf(owner, gym).history.days;
+    const days = heatMapDays(owner, gym);
     expect(days.map((d) => d.date)).toEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY]);
     expect(days.filter((d) => d.occurrence === null).map((d) => d.date)).toEqual([SATURDAY, SUNDAY]);
   });

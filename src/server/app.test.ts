@@ -772,6 +772,7 @@ describe("pacts", () => {
       { ...pact, name: null },
       { ...pact, schedule: { kind: "fixed-days", days: ["monday"] } },
       { ...pact, schedule: { kind: "weekly-count", days: ["mon"] } },
+      { ...pact, schedule: { kind: "weekly-count", target: "3" } },
       { ...pact, penaltyCents: "500" },
       { ...pact, penaltyCents: 5.5 },
       { ...pact, reviewerIds: "someone" },
@@ -850,6 +851,77 @@ describe("pacts", () => {
         ],
         outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: true },
       },
+    });
+  });
+
+  test("a Weekly count pact goes through to the core: Today shows its week, the pact page its weeks, and its refusals are data", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const cookie = owner.cookie;
+    const weekly = {
+      ...pact,
+      name: "Piano",
+      schedule: { kind: "weekly-count", target: 3 },
+    } satisfies CreatePactRequest;
+
+    const check = await s.api(API_PATHS.firstOccurrence, {
+      cookie,
+      method: "POST",
+      body: { schedule: weekly.schedule },
+    });
+    expect(check.body).toEqual({
+      ok: true,
+      firstOccurrence: { date: "2026-01-12", dueAt: "2026-01-19T05:00:00.000Z" },
+    } satisfies FirstOccurrenceResponse);
+    const refused = await s.api(API_PATHS.pacts, {
+      cookie,
+      method: "POST",
+      body: { ...weekly, schedule: { kind: "weekly-count", target: 8 } },
+    });
+    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-schedule" } });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: weekly });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const { pactId } = created.body;
+
+    s.clock.set(s.at("Tue+1 10:00"));
+    expect((await s.api<TodayResponse>(API_PATHS.today, { cookie })).body.sections).toEqual([
+      {
+        kind: "to-do",
+        cards: [
+          {
+            kind: "evidence",
+            pactId,
+            name: "Piano",
+            penaltyCents: 500,
+            editWindowClosesAt: null,
+            occurrenceDate: "2026-01-12",
+            dueAt: "2026-01-19T05:00:00.000Z",
+            dueBy: null,
+            week: { sessions: 0, waiting: 0, target: 3 },
+          },
+        ],
+      },
+    ] satisfies TodayResponse["sections"]);
+    expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
+      ok: true,
+      pact: {
+        schedule: { kind: "weekly-count", target: 3 },
+        history: { kind: "weekly-count", weeks: [{ date: "2026-01-12", progress: { sessions: 0, target: 3 } }] },
+      },
+    });
+    const swapped = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...weekly, schedule: pact.schedule },
+    });
+    expect(swapped).toEqual({ status: 200, body: { ok: false, reason: "schedule-kind-fixed" } });
+    const lowered = await s.api(API_PATHS.changePreview(pactId), {
+      cookie,
+      method: "POST",
+      body: { ...weekly, schedule: { kind: "weekly-count", target: 2 } },
+    });
+    expect(lowered.body).toMatchObject({
+      ok: true,
+      preview: { changes: [{ term: "schedule", effect: "needs-approval" }] },
     });
   });
 

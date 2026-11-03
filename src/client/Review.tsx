@@ -9,7 +9,7 @@ import { API_PATHS, type Json } from "../shared/api.ts";
 import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { formatDate, formatDayTime, money, weekdayName } from "./format.ts";
-import { DayChip, dayNote, excuseDatesText } from "./excuse-days.tsx";
+import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
 import { DiffList, EverythingElse, startsText } from "./change-terms.tsx";
 import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
@@ -275,6 +275,11 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
           <h3>{item.pactName}</h3>
           <span className="meta">{formatDate(item.occurrenceDate)}</span>
         </div>
+        {item.week && (
+          <span className="meta">
+            Counts toward this week · {item.week.sessions} of {item.week.target} so far
+          </span>
+        )}
         <div className="stack-sm">
           <span className="label">What counts</span>
           <span>{item.description}</span>
@@ -295,10 +300,17 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
         onAsk={onAsk}
         placeholder="e.g. This looks like it's from last week"
         cost={
-          <p className="small">
-            Rejecting makes {weekdayName(item.occurrenceDate)} Missed and adds {money(item.penaltyCents)} to{" "}
-            {item.ownerName}'s {item.recipientName} ledger.
-          </p>
+          item.week ? (
+            <p className="small">
+              Rejecting means {weekdayName(item.occurrenceDate)} doesn't count toward {item.ownerName}'s{" "}
+              {item.week.target}× this week. They can make it up another day.
+            </p>
+          ) : (
+            <p className="small">
+              Rejecting makes {weekdayName(item.occurrenceDate)} Missed and adds {money(item.penaltyCents)} to{" "}
+              {item.ownerName}'s {item.recipientName} ledger.
+            </p>
+          )
         }
         onDecided={onDecided}
       />
@@ -349,12 +361,13 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
         })}
         <span className="label">Covers</span>
         <div className="list">
-          {item.days.map(({ date, status }) => {
-            const note = dayNote(status, now);
+          {item.days.map((day) => {
+            const { date, status } = day;
+            const note = dayNote(status, now, day.through !== undefined);
             return (
               <div key={date} className="covrow">
                 <span className="rt">
-                  <b>{formatDate(date)}</b>
+                  <b>{excuseDayText(day)}</b>
                   {note && <small>{note}</small>}
                 </span>
                 <DayChip status={status} now={now} compact />

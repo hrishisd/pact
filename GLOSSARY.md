@@ -26,6 +26,9 @@ _Avoid_: Draft, grace period
 When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. Mon, Wed, Fri, each day its own occurrence), **Weekly count** (e.g. 3× per week, the week being one occurrence), and **One-time** (one occurrence by a deadline).
 _Avoid_: Frequency, recurrence, cadence
 
+**Target**:
+How many days of a Weekly count week need approved evidence for the week to be Kept, e.g. 3 for "3× per week". At most one day of evidence counts per calendar day, and a week adds one penalty for each day it falls short.
+
 **Deadline**:
 When a One-time pact is due: a date, plus its due-by time if one is set, or else midnight.
 

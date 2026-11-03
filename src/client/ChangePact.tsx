@@ -21,7 +21,8 @@ import {
   currentValue,
   effectText,
   listNames,
-  TERM_LABELS,
+  openOccurrenceText,
+  termLabel,
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
@@ -32,6 +33,7 @@ import {
   PenaltyStep,
   PROBLEMS,
   ReviewersStep,
+  scheduleOf,
   ScheduleStep,
   type Form,
 } from "./CreatePact.tsx";
@@ -72,6 +74,7 @@ const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = 
   "change-request-waiting":
     "A change request is waiting. Until it's decided or you withdraw it, only the name, reminders and new reviewers can change.",
   "pact-started": "It has already started, so the start date can't change.",
+  "schedule-kind-fixed": "Fixed days and a weekly count can't be swapped now. Make a new pact for that.",
   "nothing-changed": "Nothing changed yet.",
 };
 
@@ -115,7 +118,7 @@ function changeOf(form: Form, note: string): PactChange | { problem: "no-amount"
     description: form.kind === "oura" ? "" : form.description.trim(),
     ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
     ...optionalTimes(form),
-    schedule: { kind: "fixed-days", days: form.days },
+    schedule: scheduleOf(form),
     penaltyCents,
     recipientId: form.recipientId,
     reviewerIds: form.reviewerIds,
@@ -200,7 +203,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
         body = <GoalStep form={form} update={update} />;
         break;
       case "schedule":
-        body = <ScheduleStep form={form} update={update} />;
+        body = <ScheduleStep form={form} update={update} kindFixed />;
         break;
       case "penalty":
         body = (
@@ -255,7 +258,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           const changed = changes.find((c) => c.term === term);
           return (
             <div key={term} className={changed ? `termrow changed ${changed.effect}` : "termrow"}>
-              <dt>{TERM_LABELS[term]}</dt>
+              <dt>{termLabel(term, pact.schedule)}</dt>
               <dd>
                 {changed ? (
                   <>
@@ -274,7 +277,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           );
         })}
       </dl>
-      <VerdictBox verdict={verdict} pactName={pact.name} />
+      <VerdictBox verdict={verdict} pactName={pact.name} open={openOccurrenceText(pact.schedule)} />
       {verdict.kind === "loaded" && verdict.preview.outcome.kind === "needs-approval" && (
         <label className="field">
           <span>Why? (optional)</span>
@@ -313,7 +316,8 @@ function buttonText(verdict: Verdict): string {
 }
 
 /** The core's verdict on the whole change, in words. */
-function VerdictBox({ verdict, pactName }: { verdict: Verdict; pactName: string }) {
+/** `open` names the occurrence open now, which keeps its terms: "Today", or "This week". */
+function VerdictBox({ verdict, pactName, open }: { verdict: Verdict; pactName: string; open: string }) {
   switch (verdict.kind) {
     case "loading":
       return <div className="verdict nothing">Checking the change…</div>;
@@ -359,7 +363,7 @@ function VerdictBox({ verdict, pactName }: { verdict: Verdict; pactName: string 
         <div className="verdict stricter">
           <p>
             <b>Applies without approval from {formatDate(outcome.appliesFrom)}.</b>
-            {outcome.todayKeepsCents !== null && ` Today keeps ${money(outcome.todayKeepsCents)} per miss.`}
+            {outcome.todayKeepsCents !== null && ` ${open} keeps ${money(outcome.todayKeepsCents)} per miss.`}
             {nowLine}
           </p>
         </div>

@@ -241,3 +241,40 @@ describe("due-by times", () => {
     ]);
   });
 });
+
+describe("Weekly count weeks", () => {
+  const twice: OccurrenceTerms = { schedule: { kind: "weekly-count", target: 2 }, firstOccurrence: "2026-10-26" };
+
+  test("the week New York falls back runs from Monday's midnight to the next, 169 hours", () => {
+    const week = occurrences(twice, NEW_YORK).openAt(new Date("2026-11-01T12:00:00-05:00"));
+
+    expect(week).toEqual({
+      date: "2026-10-26",
+      opensAt: new Date("2026-10-26T04:00:00Z"),
+      dueAt: new Date("2026-11-02T05:00:00Z"),
+      closesAt: new Date("2026-11-02T05:00:00Z"),
+    });
+  });
+
+  test("covers each of its days, each due at its own due-by time", () => {
+    const pact = occurrences({ ...twice, dueBy: "21:00" }, NEW_YORK);
+
+    expect(pact.covering("2026-11-01")?.date).toBe("2026-10-26");
+    expect(pact.covering("2026-10-25")).toBeNull();
+    expect(pact.dayDueAt("2026-11-01")).toEqual(new Date("2026-11-01T21:00:00-05:00"));
+    expect(pact.dayDueAt("2026-10-31")).toEqual(new Date("2026-10-31T21:00:00-04:00"));
+    expect(pact.overlapping("2026-10-29", "2026-11-03").map((o) => o.date)).toEqual(["2026-10-26", "2026-11-02"]);
+  });
+
+  test("an end date keeps only the weeks that end by it", () => {
+    const pact = occurrences({ ...twice, endDate: "2026-11-11" }, NEW_YORK);
+
+    expect(pact.between("2026-10-26", "2026-11-30").map((o) => o.date)).toEqual(["2026-10-26", "2026-11-02"]);
+  });
+
+  test("a pact made late on Sunday starts the next day", () => {
+    const result = newOccurrenceTerms(twice.schedule, new Date("2026-11-01T23:30:00-05:00"), NEW_YORK);
+
+    expect(result).toMatchObject({ ok: true, terms: { firstOccurrence: "2026-11-02" } });
+  });
+});

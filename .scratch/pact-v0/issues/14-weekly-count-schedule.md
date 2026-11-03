@@ -20,10 +20,18 @@ Camera pacts with a target per Mon–Sun week (e.g. 3× per week), where the own
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Spec example: 3× week, three photos submitted, one rejected → one penalty; no photos → three penalties.
-- [ ] Two photos on the same day count once.
-- [ ] Photo rejected Tuesday → nothing Missed and nothing owed yet; the alert says "Doesn't count toward this week · make it up by Sunday"; Take the L clears it; evidence on Wednesday still counts.
-- [ ] Created Wednesday → first occurrence is next Monday's week; nothing is owed for this week.
-- [ ] Excuse for Thursday approved → whole week Excused, no penalties.
-- [ ] Target met by Thursday → no reminders Friday–Sunday; a day with evidence gets no reminder.
-- [ ] Spec example: lowering the target, approved Wednesday, applies from next Monday.
+- [x] Spec example: 3× week, three photos submitted, one rejected → one penalty; no photos → three penalties.
+- [x] Two photos on the same day count once.
+- [x] Photo rejected Tuesday → nothing Missed and nothing owed yet; the alert says "Doesn't count toward this week · make it up by Sunday"; Take the L clears it; evidence on Wednesday still counts.
+- [x] Created Wednesday → first occurrence is next Monday's week; nothing is owed for this week.
+- [x] Excuse for Thursday approved → whole week Excused, no penalties.
+- [x] Target met by Thursday → no reminders Friday–Sunday; a day with evidence gets no reminder.
+- [x] Spec example: lowering the target, approved Wednesday, applies from next Monday.
+
+## Notes
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre. Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/weekly-count.test.ts. Choices the spec left open: a short week is one penalty row of (days short × penalty); evidence records its `day` (migration 19), and a day whose evidence was rejected takes no more ("make it up another day"); the rejected-day alert also goes once the week is judged; reminders and the To do card stop once approved plus waiting days meet the target; Fixed days and Weekly count can't be swapped after the edit window (`schedule-kind-fixed`); with an end date only whole weeks ending by it count; the Schedule step, Today card and heat map follow `prototype/pact-v0-flows` and the changes prototype (weekly squares).
+
+## Comments
+
+- 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/weekly-count.test.ts; the choices made where the spec was open are under Notes above. A short week adds one penalty for the days short times the penalty. Fixed days and Weekly count can't be swapped after the edit window.

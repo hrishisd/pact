@@ -742,7 +742,12 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function parseSchedule(value: unknown): Schedule | null {
-  if (!isRecord(value) || value.kind !== "fixed-days") return null;
+  if (!isRecord(value)) return null;
+  if (value.kind === "weekly-count") {
+    const { target } = value;
+    return typeof target === "number" ? { kind: "weekly-count", target } : null;
+  }
+  if (value.kind !== "fixed-days") return null;
   const { days } = value;
   if (!isStringArray(days) || !days.every(isWeekday)) return null;
   return { kind: "fixed-days", days };

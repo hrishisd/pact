@@ -44,8 +44,9 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
   sun: "Sun",
 };
 
-/** "Every day", or the days in order: "Mon, Wed, Fri". */
+/** "Every day", the days in order ("Mon, Wed, Fri"), or a Weekly count's target ("3× per week"). */
 export function scheduleText(schedule: Schedule): string {
+  if (schedule.kind === "weekly-count") return `${schedule.target}× per week`;
   if (schedule.days.length === WEEKDAYS.length) return "Every day";
   return schedule.days.map((day) => WEEKDAY_LABELS[day]).join(", ");
 }

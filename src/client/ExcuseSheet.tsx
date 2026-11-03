@@ -17,7 +17,7 @@ import {
   type PactTerms,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
-import { DayChip, SKIP_REASON_TEXT, dayNote } from "./excuse-days.tsx";
+import { DayChip, SKIP_REASON_TEXT, dayNote, excuseDayText } from "./excuse-days.tsx";
 import { formatDate, money, scheduleText, hoursLeft } from "./format.ts";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { Sheet, useNow } from "./ui.tsx";
@@ -176,10 +176,11 @@ function ExcuseForm({
     }
   };
 
-  // "Gym is Mon, Wed, Fri", or "Read is every day".
+  // "Gym is Mon, Wed, Fri", "Read is every day", or "Piano is 3× per week".
   const schedule = scheduleText(pact.schedule).replace("Every day", "every day");
+  const weekly = pact.schedule.kind === "weekly-count";
   const noDays = (from: string, to: string) =>
-    `No ${pact.name} day ${from === to ? `on ${formatDate(from)}` : `between ${formatDate(from)} and ${formatDate(to)}`}. It's ${schedule}.`;
+    `No ${pact.name} ${weekly ? "week" : "day"} ${from === to ? `on ${formatDate(from)}` : `between ${formatDate(from)} and ${formatDate(to)}`}. It's ${schedule}.`;
   const refusal = current && !current.ok ? DATES_REFUSAL_TEXT[current.reason] : null;
   const previewFailed =
     previewError !== null ? failureText(previewError, "The days couldn't load. Check your connection.") : null;
@@ -189,7 +190,7 @@ function ExcuseForm({
     const later = shown ? onlyAfter(shown, day) : null;
     days = (
       <>
-        <DayCard day={day} preview={shown} reviewers={reviewers} now={now} />
+        <DayCard day={day} weekly={weekly} preview={shown} reviewers={reviewers} now={now} />
         {more ? (
           <>
             <label className="field">
@@ -206,7 +207,7 @@ function ExcuseForm({
               through > day &&
               (refusal ??
                 previewFailed ??
-                (later && <DayList preview={later} now={now} empty={noDays(nextDay(day), through)} />))}
+                (later && <DayList preview={later} weekly={weekly} now={now} empty={noDays(nextDay(day), through)} />))}
             {through !== "" && through < day && <p className="error small">Pick {formatDate(day)} or a later day.</p>}
           </>
         ) : (
@@ -227,10 +228,10 @@ function ExcuseForm({
               <label key={d.date} className="opt">
                 <input type="radio" name="excuse-day" checked={choice === d.date} onChange={() => setChoice(d.date)} />
                 <span className="rt">
-                  <b>{formatDate(d.date)}</b>
-                  <small>{recentNote(d, now)}</small>
+                  <b>{excuseDayText(d)}</b>
+                  <small>{recentNote(d, now, weekly)}</small>
                 </span>
-                <DayChip status={d.status} now={now} />
+                <DayChip status={d.status} now={now} week={weekly} />
               </label>
             ))}
             <label className="opt">
@@ -274,7 +275,7 @@ function ExcuseForm({
               aheadTo !== "" &&
               (refusal ??
                 previewFailed ??
-                (shown && <DayList preview={shown} now={now} empty={noDays(aheadFrom, aheadTo)} />))}
+                (shown && <DayList preview={shown} weekly={weekly} now={now} empty={noDays(aheadFrom, aheadTo)} />))}
           </>
         )}
       </>
@@ -286,6 +287,7 @@ function ExcuseForm({
     <>
       <span className="meta excuse-sub">
         {pact.name} is {schedule} · {money(pact.penaltyCents)} per miss
+        {weekly && ". Excusing any day excuses the whole week."}
       </span>
       {days}
       <label className="field">
@@ -351,22 +353,28 @@ function ExcuseForm({
  */
 function DayCard({
   day,
+  weekly,
   preview,
   reviewers,
   now,
 }: {
   day: string;
+  /** A Weekly count pact: the day stands for its week, which the preview dates by its Monday. */
+  weekly: boolean;
   preview: Preview | null;
   reviewers: string;
   now: number;
 }) {
-  const status = preview?.covered.find((d) => d.date === day)?.status;
-  const skipped = preview?.skipped.find((d) => d.date === day);
+  const holds = (date: string) => (weekly ? date <= day && day <= weekEnd(date) : date === day);
+  const covered = preview?.covered.find((d) => holds(d.date));
+  const status = covered?.status;
+  const skipped = preview?.skipped.find((d) => holds(d.date));
+  const week = covered?.date ?? skipped?.date;
   return (
     <div className="card excuse-day">
       <div className="spread">
-        <b>{formatDate(day)}</b>
-        {status && <DayChip status={status} now={now} />}
+        <b>{weekly && week !== undefined ? `Week of ${formatDate(week)}` : formatDate(day)}</b>
+        {status && <DayChip status={status} now={now} week={weekly} />}
       </div>
       {status?.kind === "missed" ? (
         <>
@@ -376,7 +384,7 @@ function DayCard({
           <span className="meta due">{hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse</span>
         </>
       ) : status ? (
-        <span className="meta">{dayNote(status, now)}</span>
+        <span className="meta">{dayNote(status, now, weekly)}</span>
       ) : skipped ? (
         <span className="meta">{SKIP_REASON_TEXT[skipped.reason]}</span>
       ) : null}
@@ -384,10 +392,10 @@ function DayCard({
   );
 }
 
-/** A date range's days, in date order: Covered ones with their note, Skipped ones with why. */
-function DayList({ preview, now, empty }: { preview: Preview; now: number; empty: string }) {
+/** A date range's days (or a Weekly count pact's weeks), in date order: Covered ones with their note, Skipped ones with why. */
+function DayList({ preview, weekly, now, empty }: { preview: Preview; weekly: boolean; now: number; empty: string }) {
   const rows = [
-    ...preview.covered.map((d) => ({ date: d.date, covered: true, note: dayNote(d.status, now) })),
+    ...preview.covered.map((d) => ({ date: d.date, covered: true, note: dayNote(d.status, now, weekly) })),
     ...preview.skipped.map((d) => ({ date: d.date, covered: false, note: SKIP_REASON_TEXT[d.reason] })),
   ].sort((a, b) => a.date.localeCompare(b.date));
   if (rows.length === 0) return <p className="muted small">{empty}</p>;
@@ -396,7 +404,7 @@ function DayList({ preview, now, empty }: { preview: Preview; now: number; empty
       {rows.map((row) => (
         <div key={row.date} className={row.covered ? "covrow" : "covrow skip"}>
           <span className="rt">
-            <b>{formatDate(row.date)}</b>
+            <b>{weekly ? `Week of ${formatDate(row.date)}` : formatDate(row.date)}</b>
             {row.note && <small>{row.note}</small>}
           </span>
           {row.covered ? <span className="chip c-excused">Covered</span> : <span className="chip c-soon">Skipped</span>}
@@ -407,11 +415,11 @@ function DayList({ preview, now, empty }: { preview: Preview; now: number; empty
 }
 
 /** The small line on a recent day's radio row: the time left to file for a miss, else the day's note. */
-function recentNote(d: Day, now: number): string {
+function recentNote(d: Day, now: number, weekly: boolean): string {
   const { status } = d;
   if (status.kind === "missed")
     return `${money(status.penaltyCents)} · ${hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse`;
-  return dayNote(status, now);
+  return dayNote(status, now, weekly);
 }
 
 /** `preview` without `day` and the days before it: the later days a run-on adds. */
@@ -425,8 +433,17 @@ function onlyAfter(preview: Preview, day: string): Preview {
 
 /** The calendar day after `isoDate`, "YYYY-MM-DD". */
 function nextDay(isoDate: string): string {
+  return daysAfter(isoDate, 1);
+}
+
+/** The Sunday ending the Mon–Sun week that starts on the Monday `isoDate`. */
+function weekEnd(isoDate: string): string {
+  return daysAfter(isoDate, 6);
+}
+
+function daysAfter(isoDate: string, days: number): string {
   const [year, month, date] = isoDate.split("-").map(Number) as [number, number, number];
-  return new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10);
+  return new Date(Date.UTC(year, month - 1, date + days)).toISOString().slice(0, 10);
 }
 
 /**

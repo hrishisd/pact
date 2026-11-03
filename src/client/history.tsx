@@ -5,13 +5,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type { EvidenceKind, HeatMapDay, OccurrenceRecord, PactTerms, TodayYesterdayEntry } from "../shared/types.ts";
+import type {
+  EvidenceKind,
+  HeatMapDay,
+  HeatMapWeek,
+  OccurrenceRecord,
+  PactTerms,
+  TodayYesterdayEntry,
+} from "../shared/types.ts";
 import { DayChip } from "./excuse-days.tsx";
 import { listNames } from "./change-terms.tsx";
 import { clockText, formatDate, money } from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
+type Week = Json<HeatMapWeek>;
 
 /** How a square looks: an outcome, or for a day not judged yet whether it's ahead, open now or past due. */
 type Square = "kept" | "missed" | "excused" | "not-judged" | "open" | "ahead" | "none";
@@ -134,7 +142,15 @@ const SQUARE_TEXT: Record<Exclude<Square, "none">, string> = {
  * shows its day below the legend.
  */
 export function HeatMap({ pact, now }: { pact: Json<PactTerms>; now: number }) {
-  const { days } = pact.history;
+  const { history } = pact;
+  return history.kind === "weekly-count" ? (
+    <WeeklyHeatMap weeks={history.weeks} now={now} />
+  ) : (
+    <DailyHeatMap pact={pact} days={history.days} now={now} />
+  );
+}
+
+function DailyHeatMap({ pact, days, now }: { pact: Json<PactTerms>; days: Day[]; now: number }) {
   const [selected, setSelected] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -184,24 +200,7 @@ export function HeatMap({ pact, now }: { pact: Json<PactTerms>; now: number }) {
           ))}
         </div>
       </div>
-      <div className="legend">
-        <span>
-          <i className="cell kept" />
-          Kept
-        </span>
-        <span>
-          <i className="cell missed" />
-          Missed
-        </span>
-        <span>
-          <i className="cell excused" />
-          Excused
-        </span>
-        <span>
-          <i className="cell not-judged" />
-          Not judged yet
-        </span>
-      </div>
+      <Legend />
       {picked?.occurrence ? (
         <div className="hmdetail" role="status">
           <div className="spread">
@@ -218,6 +217,116 @@ export function HeatMap({ pact, now }: { pact: Json<PactTerms>; now: number }) {
       )}
     </section>
   );
+}
+
+function Legend() {
+  return (
+    <div className="legend">
+      <span>
+        <i className="cell kept" />
+        Kept
+      </span>
+      <span>
+        <i className="cell missed" />
+        Missed
+      </span>
+      <span>
+        <i className="cell excused" />
+        Excused
+      </span>
+      <span>
+        <i className="cell not-judged" />
+        Not judged yet
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A Weekly count pact's History: one square per week since the first, each
+ * with the number of days that counted, scrolled to now. Tapping one shows
+ * the week below the legend.
+ */
+function WeeklyHeatMap({ weeks, now }: { weeks: Week[]; now: number }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scroller.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [weeks.length]);
+  const picked = weeks.find((week) => week.date === selected && week.occurrence !== null);
+
+  return (
+    <section className="card">
+      <h3>History</h3>
+      <div className="hm-scroll" ref={scroller}>
+        <div className="hm-weeks">
+          {weeks.map((week, i) => {
+            const square = squareOf(week.occurrence, now);
+            const monday = new Date(`${week.date}T00:00:00Z`);
+            const month = monday.getUTCDate() <= 7 || i === 0 ? MONTHS[monday.getUTCMonth()] : "";
+            return (
+              <div key={week.date} className="hm-wcol">
+                <span className="hm-lbl">{month}</span>
+                {square === "none" ? (
+                  <div className="cell wk none" />
+                ) : (
+                  <button
+                    className={`cell wk ${square}${week.date === selected ? " sel" : ""}`}
+                    aria-label={`Week of ${formatDate(week.date)}: ${SQUARE_TEXT[square]}, ${weekText(week)}`}
+                    aria-pressed={week.date === selected}
+                    onClick={() => setSelected(week.date)}
+                  >
+                    {square === "excused" || square === "ahead" ? "" : week.progress.sessions}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <p className="small muted">One square per week, with how many days counted.</p>
+      <Legend />
+      {picked?.occurrence ? (
+        <div className="hmdetail" role="status">
+          <div className="spread">
+            <b>Week of {formatDate(picked.date)}</b>
+            <DayChip status={picked.occurrence.status} now={now} week />
+          </div>
+          <span className="small muted">{weekLine(picked)}</span>
+        </div>
+      ) : (
+        <p className="small muted">Tap a week to see what happened.</p>
+      )}
+    </section>
+  );
+}
+
+/** "2 of 3", with "so far" while the week runs and how many photos wait. */
+function weekText({ progress, occurrence }: Week): string {
+  const { sessions, waiting, target } = progress;
+  const running = occurrence?.status.kind === "not-judged";
+  return [
+    `${sessions} of ${target}${running ? " so far" : ""}`,
+    ...(waiting > 0 ? [`${waiting} waiting for approval`] : []),
+  ].join(" · ");
+}
+
+/** The line under a tapped week: how far it got, and what a short week cost or the excuse that covered it. */
+function weekLine(week: Week): string {
+  const record = week.occurrence;
+  if (record === null) return "";
+  const { status } = record;
+  if (status.kind === "missed") {
+    const short = week.progress.target - week.progress.sessions;
+    const cost = status.held
+      ? `${money(status.penaltyCents)} held.`
+      : `${money(status.penaltyCents)} to ${record.recipientName ?? "your recipient"}.`;
+    return `${weekText(week)}. ${short} short: ${cost}`;
+  }
+  const excused = occurrenceLine(record);
+  if (status.kind === "excused" || excused !== "") return excused;
+  return `${weekText(week)}.`;
 }
 
 function HeatMapSquare({
