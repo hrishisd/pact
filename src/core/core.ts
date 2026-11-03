@@ -40,6 +40,7 @@ import {
   type AcceptInviteResult,
   type AcceptMissResult,
   type AccountId,
+  type AskOwnerResult,
   type AddRecipientResult,
   type ChangeOutcome,
   type ChangePactRefusal,
@@ -60,6 +61,7 @@ import {
   type DeletePactResult,
   type EditPactResult,
   type EvidenceRejection,
+  type EvidenceResult,
   type ExcuseDates,
   type ExcuseDatesRefusal,
   type ExcuseDay,
@@ -91,6 +93,10 @@ import {
   type OccurrenceStatus,
   type Connection,
   type PactTiming,
+  type PaymentResult,
+  type QuestionThread,
+  type ReplyResult,
+  type ReviewState,
   type PactWaitingItem,
   type PactSummary,
   type PactResult,
@@ -296,13 +302,13 @@ export interface AccountView {
    * requests, evidence and excuses for pacts it reviews, and payments to a
    * recipient of any pact it reviews. Change requests first, then the rest
    * oldest first, by when the evidence was submitted, the excuse filed or the
-   * payment recorded.
+   * payment recorded. Items waiting on the owner's reply are left out.
    */
   reviewQueue(): ReviewItem[];
   /**
-   * A reviewer decides an item in their queue: evidence by a reviewer of its
-   * pact, a payment by a reviewer of any of the owner's pacts with its
-   * recipient. The first decision is final: the item leaves every reviewer's
+   * A reviewer decides an item in their queue, or one waiting on the owner's
+   * reply: evidence by a reviewer of its pact, a payment by a reviewer of any
+   * of the owner's pacts with its recipient. The first decision is final: the item leaves every reviewer's
    * queue and the owner is told. A refusal changes nothing. An approved
    * payment lowers owed and raises lifetime paid; a rejected one changes
    * neither. For evidence, a rejection is final: it judges the occurrence Missed
@@ -319,6 +325,30 @@ export interface AccountView {
    * terms as they are.
    */
   decide(itemId: string, decision: ReviewDecision): Promise<DecideResult>;
+  /**
+   * A reviewer asks the owner about an item they may decide, instead of
+   * deciding it. The item is then waiting on the owner's reply: it leaves
+   * every reviewer's queue (see `waitingOnReply`), and the owner gets a
+   * Today alert and a notification. Any reviewer can still decide it, and
+   * may ask again. The question is trimmed and can't be blank.
+   */
+  askOwner(itemId: string, question: string): Promise<AskOwnerResult>;
+  /**
+   * The owner replies, in text, to a reviewer's question about one of their
+   * items still waiting for a decision. It goes back into every reviewer's
+   * queue, in its place, and each of them is told. Trimmed; can't be blank.
+   */
+  reply(itemId: string, reply: string): Promise<ReplyResult>;
+  /**
+   * Items this account may decide that are waiting on the owner's reply, in
+   * the Review Queue's order. Out of the queue, but a reviewer can still
+   * open one and decide it.
+   */
+  waitingOnReply(): ReviewItem[];
+  /** One of this owner's evidence, for its page: where it stands and its questions. */
+  evidence(evidenceId: string): EvidenceResult;
+  /** One of this owner's payments, for its page: where it stands and its questions. */
+  payment(paymentId: string): PaymentResult;
   /**
    * The owner records a payment they made to one of their recipients outside
    * the app, with one screenshot of it. It waits for a reviewer of any of the
@@ -366,6 +396,8 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "missed-occurrence": "missed-occurrence",
   "excuse-decided": "decision",
   "change-request-decided": "decision",
+  "reviewer-question": "comment",
+  "owner-replied": "comment",
   "new-bill": "new-bill",
   "overdue-bill": "overdue-bill",
 };
@@ -909,6 +941,7 @@ class Core implements PactCore {
           ...this.#changeRequestView(row),
           state,
           reviewerNames: this.#friendsSortedByName(this.#reviewersOf(row.pact_id)).map((friend) => friend.name),
+          thread: this.#thread(row.id, state.kind === "waiting"),
         };
         return { ok: true, changeRequest } satisfies ChangeRequestResult;
       },
@@ -1167,6 +1200,7 @@ class Core implements PactCore {
           days: this.#excuseDays(excuseId, pact.id, pact.timezone),
           state,
           reviewerNames,
+          thread: this.#thread(excuseId, row.decision === null),
         };
         return { ok: true, excuse };
       },
@@ -1248,112 +1282,163 @@ class Core implements PactCore {
       },
       reviewQueue: () => {
         account();
-        const rows = this.#db
+        return this.#reviewItems(accountId).filter((item) => !item.thread.waitingOnReply);
+      },
+      waitingOnReply: () => {
+        account();
+        return this.#reviewItems(accountId).filter((item) => item.thread.waitingOnReply);
+      },
+      evidence: (evidenceId) => {
+        account();
+        const row = this.#db
           .prepare(
-            `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
-                    pact.description, evidence.submitted_at, evidence.occurrence_date,
-                    pact.penalty_cents, recipient.name AS recipient_name
+            `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date,
+                    evidence.submitted_at, ${reviewStateColumns("evidence")}
              FROM evidence
              JOIN pact ON pact.id = evidence.pact_id
-             JOIN account AS owner ON owner.id = pact.owner_account_id
-             JOIN recipient ON recipient.id = pact.recipient_id
-             JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-             WHERE evidence.decision IS NULL AND pact.created_at <= ?
-             ORDER BY evidence.submitted_at, evidence.id`,
+             LEFT JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
+             WHERE evidence.id = ? AND pact.owner_account_id = ?`,
           )
-          .all(accountId, this.#editWindowCutoff()) as {
-          id: string;
-          pact_id: string;
-          pact_name: string;
-          owner_name: string;
-          description: string;
-          submitted_at: string;
-          occurrence_date: string;
-          penalty_cents: number;
-          recipient_name: string;
-        }[];
-        const evidence = rows.map((row): ReviewItem => {
-          // What counts, and what rejecting costs: the terms of the occurrence's day.
-          const terms = this.#termsOn(row.pact_id, row.occurrence_date);
-          return {
-            kind: "evidence",
+          .get(evidenceId, accountId) as
+          | (ReviewStateRow & {
+              id: string;
+              pact_id: string;
+              pact_name: string;
+              occurrence_date: LocalDate;
+              submitted_at: string;
+            })
+          | undefined;
+        if (!row) return { ok: false, reason: "evidence-not-found" };
+        return {
+          ok: true,
+          evidence: {
             id: row.id,
             pactId: row.pact_id,
             pactName: row.pact_name,
-            ownerName: row.owner_name,
-            description: terms.description,
+            occurrenceDate: row.occurrence_date,
+            description: this.#termsOn(row.pact_id, row.occurrence_date).description,
             photoIds: this.#evidencePhotoIds(row.id),
             submittedAt: new Date(row.submitted_at),
-            occurrenceDate: row.occurrence_date,
-            penaltyCents: terms.penalty_cents,
-            recipientName: this.#recipientName(terms.recipient_id),
-          };
-        });
-        // Change requests first: one waiting holds up any other change to its pact.
-        return [
-          ...this.#changeRequestsToReview(accountId),
-          ...mergeByTime(
-            (item) =>
-              item.kind === "evidence"
-                ? item.submittedAt
-                : item.kind === "excuse"
-                  ? item.filedAt
-                  : item.kind === "payment"
-                    ? item.recordedAt
-                    : item.requestedAt,
-            "oldest-first",
-            evidence,
-            this.#excusesToReview(accountId),
-            this.#paymentsToReview(accountId),
-          ),
-        ];
+            state: reviewStateOf(row),
+            reviewerNames: this.#friendsSortedByName(this.#reviewersOf(row.pact_id)).map((friend) => friend.name),
+            thread: this.#thread(row.id, row.decision === null),
+          },
+        };
       },
+      payment: (paymentId) => {
+        account();
+        const row = this.#db
+          .prepare(
+            `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
+                    payment.note, payment.photo_id, payment.recorded_at, ${reviewStateColumns("payment")}
+             FROM payment
+             JOIN recipient ON recipient.id = payment.recipient_id
+             LEFT JOIN account AS reviewer ON reviewer.id = payment.decided_by_account_id
+             WHERE payment.id = ? AND payment.owner_account_id = ?`,
+          )
+          .get(paymentId, accountId) as
+          | (ReviewStateRow & {
+              id: string;
+              recipient_id: string;
+              recipient_name: string;
+              amount_cents: number;
+              note: string | null;
+              photo_id: string;
+              recorded_at: string;
+            })
+          | undefined;
+        if (!row) return { ok: false, reason: "payment-not-found" };
+        return {
+          ok: true,
+          payment: {
+            id: row.id,
+            recipientId: row.recipient_id,
+            recipientName: row.recipient_name,
+            amountCents: row.amount_cents,
+            note: row.note,
+            photoId: row.photo_id,
+            recordedAt: new Date(row.recorded_at),
+            state: reviewStateOf(row),
+            reviewerNames: this.#friendsSortedByName(this.#paymentReviewers(accountId, row.recipient_id)).map(
+              (friend) => friend.name,
+            ),
+            thread: this.#thread(row.id, row.decision === null),
+          },
+        };
+      },
+      askOwner: (itemId, question) =>
+        this.#command((): AskOwnerResult => {
+          const { name } = account();
+          const item = this.#itemToDecide(accountId, itemId);
+          if (!item) return { ok: false, reason: "item-not-found" };
+          if (item.row.decision !== null) return { ok: false, reason: "already-decided" };
+          const text = question.trim();
+          if (text === "") return { ok: false, reason: "blank-question" };
+          this.#addComment(itemId, accountId, false, text);
+          this.#enqueue({
+            recipient: item.row.owner_account_id,
+            kind: "reviewer-question",
+            channel: "push",
+            payload: {
+              itemKind: item.kind,
+              itemId,
+              title: `${name} asked about your ${this.#itemWhat(item.kind, itemId)}`,
+              body: `“${text}”`,
+              url: itemPath(item.kind, itemId),
+            },
+          });
+          return { ok: true };
+        }),
+      reply: (itemId, reply) =>
+        this.#command((): ReplyResult => {
+          const { name } = account();
+          const item = this.#ownItem(accountId, itemId);
+          if (!item) return { ok: false, reason: "item-not-found" };
+          if (!item.waiting) return { ok: false, reason: "not-waiting" };
+          if (!this.#thread(itemId, true).waitingOnReply) return { ok: false, reason: "no-question" };
+          const text = reply.trim();
+          if (text === "") return { ok: false, reason: "blank-reply" };
+          this.#addComment(itemId, accountId, true, text);
+          const what = this.#itemWhat(item.kind, itemId);
+          for (const reviewerId of item.reviewerIds) {
+            this.#enqueue({
+              recipient: reviewerId,
+              kind: "owner-replied",
+              channel: "push",
+              payload: {
+                itemKind: item.kind,
+                itemId,
+                title: `${name} replied about their ${what}`,
+                body: `“${text}” It's back in your queue.`,
+                url: APP_PATHS.review,
+              },
+            });
+          }
+          return { ok: true };
+        }),
       decide: (itemId, decision) =>
         this.#command((): DecideResult => {
           account();
-          const evidence = this.#db
-            .prepare(
-              `SELECT evidence.id, evidence.pact_id, evidence.occurrence_date, evidence.decision,
-                      pact.owner_account_id
-               FROM evidence
-               JOIN pact ON pact.id = evidence.pact_id
-               JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-               WHERE evidence.id = ? AND pact.created_at <= ?`,
-            )
-            .get(accountId, itemId, this.#editWindowCutoff()) as EvidenceToDecide | undefined;
-          const excuse = evidence
-            ? undefined
-            : (this.#db
-                .prepare(
-                  `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
-                   FROM excuse
-                   JOIN pact ON pact.id = excuse.pact_id
-                   JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-                   WHERE excuse.id = ?`,
-                )
-                .get(accountId, itemId) as ExcuseToDecide | undefined);
-          const payment = evidence || excuse ? undefined : this.#paymentToDecide(accountId, itemId);
-          const changeRequest =
-            evidence || excuse || payment
-              ? undefined
-              : (this.#db
-                  .prepare(
-                    `SELECT change_request.id, change_request.decision FROM change_request
-                     JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
-                                       AND pact_reviewer.reviewer_account_id = ?
-                     WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL`,
-                  )
-                  .get(accountId, itemId) as ChangeRequestToDecide | undefined);
-          const item = evidence ?? excuse ?? payment ?? changeRequest;
+          const item = this.#itemToDecide(accountId, itemId);
           if (!item) return { ok: false, reason: "item-not-found" };
-          if (item.decision !== null) return { ok: false, reason: "already-decided" };
+          if (item.row.decision !== null) return { ok: false, reason: "already-decided" };
           const reason = decision.kind === "reject" ? decision.reason.trim() : null;
           if (reason === "") return { ok: false, reason: "blank-reason" };
           const decided: Decided = { outcome: reason === null ? "approved" : "rejected", reason };
-          if (evidence) this.#decideEvidence(evidence, decided, accountId);
-          if (excuse) this.#decideExcuse(excuse, decided, accountId);
-          if (payment) this.#decidePayment(payment, decided, accountId);
-          if (changeRequest) this.#decideChangeRequest(changeRequest, decided, accountId);
+          switch (item.kind) {
+            case "evidence":
+              this.#decideEvidence(item.row, decided, accountId);
+              break;
+            case "excuse":
+              this.#decideExcuse(item.row, decided, accountId);
+              break;
+            case "payment":
+              this.#decidePayment(item.row, decided, accountId);
+              break;
+            case "change-request":
+              this.#decideChangeRequest(item.row, decided, accountId);
+              break;
+          }
           return { ok: true };
         }),
       ledgers: () => {
@@ -1422,6 +1507,240 @@ class Core implements PactCore {
         return { ok: true, ledger: { summary, history } };
       },
     };
+  }
+
+  /**
+   * The review item `itemId`, if `reviewerId` may decide it (decided or not):
+   * evidence or an excuse for a pact they review (evidence once the pact's
+   * edit window has closed), a payment to a recipient of any of the owner's
+   * pacts they review, or a change request not withdrawn.
+   */
+  #itemToDecide(reviewerId: AccountId, itemId: string): ItemToDecide | undefined {
+    const evidence = this.#db
+      .prepare(
+        `SELECT evidence.id, evidence.pact_id, evidence.occurrence_date, evidence.decision,
+                  pact.owner_account_id
+           FROM evidence
+           JOIN pact ON pact.id = evidence.pact_id
+           JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
+           WHERE evidence.id = ? AND pact.created_at <= ?`,
+      )
+      .get(reviewerId, itemId, this.#editWindowCutoff()) as EvidenceToDecide | undefined;
+    const excuse = evidence
+      ? undefined
+      : (this.#db
+          .prepare(
+            `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
+               FROM excuse
+               JOIN pact ON pact.id = excuse.pact_id
+               JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
+               WHERE excuse.id = ?`,
+          )
+          .get(reviewerId, itemId) as ExcuseToDecide | undefined);
+    const payment = evidence || excuse ? undefined : this.#paymentToDecide(reviewerId, itemId);
+    const changeRequest =
+      evidence || excuse || payment
+        ? undefined
+        : (this.#db
+            .prepare(
+              `SELECT change_request.id, change_request.decision, pact.owner_account_id FROM change_request
+                 JOIN pact ON pact.id = change_request.pact_id
+                 JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
+                                   AND pact_reviewer.reviewer_account_id = ?
+                 WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL`,
+            )
+            .get(reviewerId, itemId) as ChangeRequestToDecide | undefined);
+    if (evidence) return { kind: "evidence", row: evidence };
+    if (excuse) return { kind: "excuse", row: excuse };
+    if (payment) return { kind: "payment", row: payment };
+    if (changeRequest) return { kind: "change-request", row: changeRequest };
+    return undefined;
+  }
+
+  /**
+   * One of `ownerId`'s review items: its kind, whether it's still waiting for
+   * a decision (not decided, nor a change request withdrawn), and who may
+   * decide it.
+   */
+  #ownItem(
+    ownerId: AccountId,
+    itemId: string,
+  ): { kind: ReviewItem["kind"]; waiting: boolean; reviewerIds: AccountId[] } | undefined {
+    const ofPact = (table: "evidence" | "excuse") =>
+      this.#db
+        .prepare(
+          `SELECT ${table}.pact_id, ${table}.decision FROM ${table}
+           JOIN pact ON pact.id = ${table}.pact_id
+           WHERE ${table}.id = ? AND pact.owner_account_id = ?`,
+        )
+        .get(itemId, ownerId) as { pact_id: string; decision: ReviewOutcome | null } | undefined;
+    for (const kind of ["evidence", "excuse"] as const) {
+      const row = ofPact(kind);
+      if (row) return { kind, waiting: row.decision === null, reviewerIds: this.#reviewersOf(row.pact_id) };
+    }
+    const payment = this.#db
+      .prepare(`SELECT recipient_id, decision FROM payment WHERE id = ? AND owner_account_id = ?`)
+      .get(itemId, ownerId) as { recipient_id: string; decision: ReviewOutcome | null } | undefined;
+    if (payment) {
+      return {
+        kind: "payment",
+        waiting: payment.decision === null,
+        reviewerIds: this.#paymentReviewers(ownerId, payment.recipient_id),
+      };
+    }
+    const request = this.#changeRequestRow(itemId);
+    if (request && request.owner_account_id === ownerId) {
+      return {
+        kind: "change-request",
+        waiting: request.decision === null && request.withdrawn_at === null,
+        reviewerIds: this.#reviewersOf(request.pact_id),
+      };
+    }
+    return undefined;
+  }
+
+  /** How a notification names a review item after "your" or "their": "evidence for Gym", "$10 payment to Sam". */
+  #itemWhat(kind: ReviewItem["kind"], itemId: string): string {
+    switch (kind) {
+      case "evidence":
+      case "excuse": {
+        const { name } = this.#db
+          .prepare(`SELECT pact.name FROM ${kind} JOIN pact ON pact.id = ${kind}.pact_id WHERE ${kind}.id = ?`)
+          .get(itemId) as { name: string };
+        return `${kind} for ${name}`;
+      }
+      case "payment": {
+        const { amount_cents, recipient_id } = this.#db
+          .prepare(`SELECT amount_cents, recipient_id FROM payment WHERE id = ?`)
+          .get(itemId) as { amount_cents: number; recipient_id: string };
+        return `${money(amount_cents)} payment to ${this.#recipientName(recipient_id)}`;
+      }
+      case "change-request": {
+        const row = this.#changeRequestRow(itemId)!;
+        const name = this.#pactName(row.pact_id);
+        return row.ends_pact === 1 ? `request to end ${name}` : `change to ${name}`;
+      }
+    }
+  }
+
+  /** Adds a question (a reviewer's) or a reply (the owner's) to an item's thread. */
+  #addComment(itemId: string, authorId: AccountId, fromOwner: boolean, text: string): void {
+    this.#db
+      .prepare(`INSERT INTO comment (item_id, author_account_id, from_owner, text, sent_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(itemId, authorId, fromOwner ? 1 : 0, text, this.#clock.now().toISOString());
+  }
+
+  /**
+   * An item's questions and replies, oldest first. `waiting` says the item is
+   * still waiting for a decision; only then can it be waiting on a reply.
+   */
+  #thread(itemId: string, waiting: boolean): QuestionThread {
+    const comments = (
+      this.#db
+        .prepare(
+          `SELECT comment.from_owner, account.name, comment.text, comment.sent_at
+           FROM comment JOIN account ON account.id = comment.author_account_id
+           WHERE comment.item_id = ? ORDER BY comment.id`,
+        )
+        .all(itemId) as { from_owner: 0 | 1; name: string; text: string; sent_at: string }[]
+    ).map((row) => ({
+      fromOwner: row.from_owner === 1,
+      authorName: row.name,
+      text: row.text,
+      sentAt: new Date(row.sent_at),
+    }));
+    return { comments, waitingOnReply: waiting && comments.at(-1)?.fromOwner === false };
+  }
+
+  /**
+   * Alerts for the owner's items still waiting for a decision whose latest
+   * comment is a reviewer's question, with when it was asked.
+   */
+  #questionAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
+    return this.#waiting(ownerId).flatMap((item) => {
+      const { comments, waitingOnReply } = this.#thread(item.id, true);
+      const question = comments.at(-1);
+      if (!waitingOnReply || !question) return [];
+      return [
+        {
+          at: question.sentAt,
+          alert: {
+            kind: "reviewer-question",
+            item,
+            reviewerName: question.authorName,
+            question: question.text,
+            askedAt: question.sentAt,
+          },
+        },
+      ];
+    });
+  }
+
+  /**
+   * Every item `reviewerId` may decide, waiting on the owner's reply or not:
+   * change requests first, then the rest oldest first.
+   */
+  #reviewItems(reviewerId: AccountId): ReviewItem[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
+                pact.description, evidence.submitted_at, evidence.occurrence_date,
+                pact.penalty_cents, recipient.name AS recipient_name
+         FROM evidence
+         JOIN pact ON pact.id = evidence.pact_id
+         JOIN account AS owner ON owner.id = pact.owner_account_id
+         JOIN recipient ON recipient.id = pact.recipient_id
+         JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
+         WHERE evidence.decision IS NULL AND pact.created_at <= ?
+         ORDER BY evidence.submitted_at, evidence.id`,
+      )
+      .all(reviewerId, this.#editWindowCutoff()) as {
+      id: string;
+      pact_id: string;
+      pact_name: string;
+      owner_name: string;
+      description: string;
+      submitted_at: string;
+      occurrence_date: string;
+      penalty_cents: number;
+      recipient_name: string;
+    }[];
+    const evidence = rows.map((row): ReviewItem => {
+      // What counts, and what rejecting costs: the terms of the occurrence's day.
+      const terms = this.#termsOn(row.pact_id, row.occurrence_date);
+      return {
+        kind: "evidence",
+        id: row.id,
+        pactId: row.pact_id,
+        pactName: row.pact_name,
+        ownerName: row.owner_name,
+        description: terms.description,
+        photoIds: this.#evidencePhotoIds(row.id),
+        submittedAt: new Date(row.submitted_at),
+        occurrenceDate: row.occurrence_date,
+        penaltyCents: terms.penalty_cents,
+        recipientName: this.#recipientName(terms.recipient_id),
+        thread: this.#thread(row.id, true),
+      };
+    });
+    // Change requests first: one waiting holds up any other change to its pact.
+    return [
+      ...this.#changeRequestsToReview(reviewerId),
+      ...mergeByTime(
+        (item) =>
+          item.kind === "evidence"
+            ? item.submittedAt
+            : item.kind === "excuse"
+              ? item.filedAt
+              : item.kind === "payment"
+                ? item.recordedAt
+                : item.requestedAt,
+        "oldest-first",
+        evidence,
+        this.#excusesToReview(reviewerId),
+        this.#paymentsToReview(reviewerId),
+      ),
+    ];
   }
 
   /**
@@ -2069,6 +2388,7 @@ class Core implements PactCore {
         days,
         heldCents: days.reduce((sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0), 0),
         recipientName: row.recipient_name,
+        thread: this.#thread(row.id, true),
       };
     });
   }
@@ -2522,7 +2842,12 @@ class Core implements PactCore {
       .all(reviewerId) as { id: string }[];
     return ids.map(({ id }) => {
       const row = this.#changeRequestRow(id)!;
-      return { kind: "change-request", ownerName: row.owner_name, ...this.#changeRequestView(row) };
+      return {
+        kind: "change-request",
+        ownerName: row.owner_name,
+        thread: this.#thread(id, true),
+        ...this.#changeRequestView(row),
+      };
     });
   }
 
@@ -2816,6 +3141,7 @@ class Core implements PactCore {
       recordedAt: new Date(row.recorded_at),
       owedCents: row.owed_cents,
       owedAfterApprovalCents: Math.max(0, row.owed_cents - row.amount_cents),
+      thread: this.#thread(row.id, true),
     }));
   }
 
@@ -3060,7 +3386,8 @@ class Core implements PactCore {
 
   /**
    * Alerts: occurrences Missed through a rejection, and rejected excuses,
-   * until accepted or excused again; newest first. To do:
+   * until accepted or excused again, and reviewer questions until the owner
+   * replies or the item is decided; newest first. To do:
    * pacts with an occurrence open now that still needs evidence. Missed:
    * other occurrences judged Missed in the last 48 hours and not accepted.
    * Coming up: pacts whose first
@@ -3138,7 +3465,11 @@ class Core implements PactCore {
     if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
     if (automatic.length > 0) sections.push({ kind: "automatic", cards: automatic });
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
-    const alerts = [...this.#rejectedEvidenceAlerts(ownerId), ...this.#rejectedExcuseAlerts(ownerId, now)];
+    const alerts = [
+      ...this.#rejectedEvidenceAlerts(ownerId),
+      ...this.#rejectedExcuseAlerts(ownerId, now),
+      ...this.#questionAlerts(ownerId),
+    ];
     return {
       alerts: [...bills.alerts, ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert)],
       sections,
@@ -3712,6 +4043,48 @@ interface ChangeRequestRow {
 interface ChangeRequestToDecide {
   id: string;
   decision: ReviewOutcome | null;
+  owner_account_id: AccountId;
+}
+
+/** A review item a reviewer may decide, as `decide` and `askOwner` read it. */
+type ItemToDecide =
+  | { kind: "evidence"; row: EvidenceToDecide }
+  | { kind: "excuse"; row: ExcuseToDecide }
+  | { kind: "payment"; row: PaymentToDecide }
+  | { kind: "change-request"; row: ChangeRequestToDecide };
+
+/** SQL: the columns `reviewStateOf` reads from `table`, joined to its deciding reviewer as `reviewer`. */
+function reviewStateColumns(table: "evidence" | "payment"): string {
+  return `${table}.decision, ${table}.decided_at, ${table}.reject_reason, reviewer.name AS reviewer_name`;
+}
+
+interface ReviewStateRow {
+  decision: ReviewOutcome | null;
+  decided_at: string | null;
+  reject_reason: string | null;
+  reviewer_name: string | null;
+}
+
+function reviewStateOf(row: ReviewStateRow): ReviewState {
+  if (row.decision === null) return { kind: "waiting" };
+  const decided = { reviewerName: row.reviewer_name!, decidedAt: new Date(row.decided_at!) };
+  return row.decision === "approved"
+    ? { kind: "approved", ...decided }
+    : { kind: "rejected", ...decided, reason: row.reject_reason! };
+}
+
+/** The owner's page for a review item: where a question about it opens. */
+function itemPath(kind: ReviewItem["kind"], itemId: string): string {
+  switch (kind) {
+    case "evidence":
+      return APP_PATHS.evidence(itemId);
+    case "excuse":
+      return APP_PATHS.excuse(itemId);
+    case "payment":
+      return APP_PATHS.payment(itemId);
+    case "change-request":
+      return APP_PATHS.changeRequest(itemId);
+  }
 }
 
 /** How a review item's push names each changed term. */

@@ -426,6 +426,7 @@ describe("a payment in the Review Queue", () => {
       recordedAt: s.at("Sat 09:00"),
       owedCents: 1500,
       owedAfterApprovalCents: 500,
+      thread: { comments: [], waitingOnReply: false },
     };
     expect(reviewer.reviewQueue()).toEqual([item]);
     expect(second.reviewQueue()).toEqual([item]);

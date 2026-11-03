@@ -17,6 +17,7 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
     hint: "Evidence, an excuse, a payment or a change request is waiting for you",
   },
   decision: { label: "Decision", hint: "A reviewer approved or rejected something of yours" },
+  comment: { label: "Comment", hint: "A reviewer asked you about something, or a friend replied to your question" },
   "missed-occurrence": { label: "Missed occurrence", hint: "One of your pacts was judged Missed" },
   "new-bill": { label: "New bill", hint: "Your Wednesday bill to a recipient is ready" },
   "overdue-bill": { label: "Overdue bill", hint: "A bill of yours is overdue, or one of a friend's you review" },

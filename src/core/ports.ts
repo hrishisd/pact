@@ -55,6 +55,10 @@ export type NotificationKind =
   | "payment-decided"
   /** To the owner: a reviewer approved or rejected their change request. */
   | "change-request-decided"
+  /** To the owner: a reviewer asked about one of their review items. */
+  | "reviewer-question"
+  /** To each reviewer of an item: its owner replied to a question, so it's back in their queue. */
+  | "owner-replied"
   /** To the owner: an occurrence reached its due time and was judged Missed. */
   | "missed-occurrence"
   /** To the owner: a Wednesday bill to one recipient. */

@@ -208,7 +208,7 @@ export type AcceptMissResult = { ok: true } | { ok: false; reason: AcceptMissRef
  */
 export type ReviewItem =
   /** A change request: the reviewer compares the old terms with the new, or decides on ending the pact. */
-  | ({ kind: "change-request"; ownerName: string } & ChangeRequestView)
+  | ({ kind: "change-request"; ownerName: string; thread: QuestionThread } & ChangeRequestView)
   /** Photo evidence: the reviewer checks the photos against what counts. */
   | {
       kind: "evidence";
@@ -228,6 +228,7 @@ export type ReviewItem =
       /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
       penaltyCents: number;
       recipientName: string;
+      thread: QuestionThread;
     }
   /**
    * An excuse: the reviewer reads the reason and photos and decides all of
@@ -249,6 +250,7 @@ export type ReviewItem =
       /** The penalties held while it waits: approving removes them, rejecting makes them owed. */
       heldCents: number;
       recipientName: string;
+      thread: QuestionThread;
     }
   /**
    * A payment the owner recorded: the reviewer checks the screenshot. Any
@@ -270,7 +272,98 @@ export type ReviewItem =
       owedCents: number;
       /** What the owner would owe the recipient once this payment is approved, never below zero. */
       owedAfterApprovalCents: number;
+      thread: QuestionThread;
     };
+
+/**
+ * A review item's questions and replies, oldest first. A reviewer's question
+ * leaves the item waiting on the owner's reply; the owner's reply sends it
+ * back to every reviewer's Review Queue.
+ */
+export interface QuestionThread {
+  comments: ThreadComment[];
+  /**
+   * The latest comment is a reviewer's question and the item is still waiting
+   * for a decision: it's out of every reviewer's queue until the owner replies.
+   */
+  waitingOnReply: boolean;
+}
+
+/** A reviewer's question or the owner's reply. Text only. */
+export interface ThreadComment {
+  /** The owner's reply, rather than a reviewer's question. */
+  fromOwner: boolean;
+  authorName: string;
+  text: string;
+  sentAt: Date;
+}
+
+export type AskOwnerResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        /** Not an item this account may decide, or none. */
+        "item-not-found" | "already-decided" | "blank-question";
+    };
+
+export type ReplyResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        /** Not one of this owner's items, or none. */
+        | "item-not-found"
+        /** Decided already, or a change request withdrawn: there's nothing left to answer. */
+        | "not-waiting"
+        /** Its latest comment isn't a reviewer's question. */
+        | "no-question"
+        | "blank-reply";
+    };
+
+/** Where a review item of the owner's stands. */
+export type ReviewState =
+  | { kind: "waiting" }
+  | { kind: "approved"; reviewerName: string; decidedAt: Date }
+  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+
+/** Evidence's page, for its owner: what was sent, where it stands, and its questions. */
+export interface EvidenceDetail {
+  id: string;
+  pactId: string;
+  pactName: string;
+  /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  /** What counts, as the occurrence's terms say. */
+  description: string;
+  /** In the order taken; each is served at the photo path. */
+  photoIds: string[];
+  submittedAt: Date;
+  state: ReviewState;
+  /** The pact's reviewers, sorted by name: who may decide it. */
+  reviewerNames: string[];
+  thread: QuestionThread;
+}
+
+export type EvidenceResult = { ok: true; evidence: EvidenceDetail } | { ok: false; reason: "evidence-not-found" };
+
+/** A payment's page, for its owner: what was sent, where it stands, and its questions. */
+export interface PaymentDetail {
+  id: string;
+  recipientId: string;
+  recipientName: string;
+  amountCents: number;
+  note: string | null;
+  /** The screenshot, served at the photo path. */
+  photoId: string;
+  recordedAt: Date;
+  state: ReviewState;
+  /** The reviewers of the owner's pacts with the recipient, sorted by name: who may decide it. */
+  reviewerNames: string[];
+  thread: QuestionThread;
+}
+
+export type PaymentResult = { ok: true; payment: PaymentDetail } | { ok: false; reason: "payment-not-found" };
 
 /** A reviewer's decision on a Review Queue item. */
 export type ReviewDecision =
@@ -299,6 +392,7 @@ export const NOTIFICATION_SETTINGS = [
   "picked-as-reviewer",
   "review-item",
   "decision",
+  "comment",
   "missed-occurrence",
   "new-bill",
   "overdue-bill",
@@ -355,6 +449,19 @@ export interface Today {
 
 /** Something that needs the owner, shown first. */
 export type TodayAlert =
+  /**
+   * A reviewer asked about one of the owner's items still waiting for a
+   * decision, and the owner hasn't replied yet. One per item, with its latest
+   * question. It goes once the owner replies, or the item is decided (or a
+   * change request withdrawn).
+   */
+  | {
+      kind: "reviewer-question";
+      item: TodayWaitingItem;
+      reviewerName: string;
+      question: string;
+      askedAt: Date;
+    }
   /**
    * A reviewer rejected the evidence for an occurrence, which judged it
    * Missed and added `penaltyCents` to the ledger for `recipientName`. Newest
@@ -765,10 +872,7 @@ export type FileExcuseRefusal =
 export type FileExcuseResult = { ok: true; excuseId: string } | { ok: false; reason: FileExcuseRefusal };
 
 /** Where an excuse's review stands. */
-export type ExcuseState =
-  | { kind: "waiting" }
-  | { kind: "approved"; reviewerName: string; decidedAt: Date }
-  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+export type ExcuseState = ReviewState;
 
 /** The excuse page. */
 export interface ExcuseDetail {
@@ -783,6 +887,7 @@ export interface ExcuseDetail {
   state: ExcuseState;
   /** The pact's reviewers, sorted by name: who it was sent to. */
   reviewerNames: string[];
+  thread: QuestionThread;
 }
 
 export type ExcuseResult = { ok: true; excuse: ExcuseDetail } | { ok: false; reason: "excuse-not-found" };
@@ -934,6 +1039,7 @@ export interface ChangeRequestDetail extends ChangeRequestView {
   state: ChangeRequestState;
   /** The pact's reviewers, sorted by name: who may decide it. */
   reviewerNames: string[];
+  thread: QuestionThread;
 }
 
 export type ChangeRequestResult =

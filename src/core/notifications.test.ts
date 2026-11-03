@@ -98,6 +98,7 @@ describe("notification settings", () => {
       { setting: "picked-as-reviewer", enabled: true },
       { setting: "review-item", enabled: true },
       { setting: "decision", enabled: true },
+      { setting: "comment", enabled: true },
       { setting: "missed-occurrence", enabled: true },
       { setting: "new-bill", enabled: true },
       { setting: "overdue-bill", enabled: true },

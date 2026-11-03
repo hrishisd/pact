@@ -28,6 +28,8 @@ export type Page =
   | { kind: "change-request"; id: string }
   | { kind: "ledger"; recipientId: string; name?: string }
   | { kind: "excuse"; id: string }
+  | { kind: "evidence"; id: string }
+  | { kind: "payment"; id: string }
   | { kind: "notifications" };
 
 interface Route {
@@ -59,6 +61,10 @@ function pagePath(page: Page): string {
       return APP_PATHS.ledger(page.recipientId);
     case "excuse":
       return APP_PATHS.excuse(page.id);
+    case "evidence":
+      return APP_PATHS.evidence(page.id);
+    case "payment":
+      return APP_PATHS.payment(page.id);
     case "notifications":
       return NOTIFICATIONS_PATH;
   }
@@ -93,6 +99,12 @@ function routeFromPath(pathname: string): Route {
   // An excuse opens from Today or a pact; a link to one (an approved excuse's push) lands on Today.
   const excuse = /^\/excuses\/([^/]+)$/.exec(pathname);
   if (excuse) return { tab: "today", stack: [{ kind: "excuse", id: decodeURIComponent(excuse[1]!) }] };
+  // Evidence and payment pages open from a reviewer's question, on Today or in its push.
+  const item = /^\/(evidence|payments)\/([^/]+)$/.exec(pathname);
+  if (item) {
+    const id = decodeURIComponent(item[2]!);
+    return { tab: "today", stack: [item[1] === "evidence" ? { kind: "evidence", id } : { kind: "payment", id }] };
+  }
   const tab = (Object.keys(TAB_PATHS) as TabId[]).find((t) => TAB_PATHS[t] === pathname) ?? "today";
   return { tab, stack: [] };
 }

@@ -54,6 +54,11 @@ import {
   type FileExcuseResponse,
   type DecideRequest,
   type DecideResponse,
+  type AskOwnerResponse,
+  type EvidenceResponse,
+  type PaymentResponse,
+  type ReplyResponse,
+  type WaitingOnReplyResponse,
   type FirstOccurrenceRequest,
   type FirstOccurrenceResponse,
   type FriendsResponse,
@@ -591,6 +596,35 @@ export function createApp({
     const decision = parseDecision(await c.req.json().catch(() => null));
     if (!decision) return apiError(c, 400, "invalid-request");
     const body: DecideResponse = await core.as(c.get("accountId")).decide(c.req.param("id"), decision);
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.waitingOnReply, (c) => {
+    const body: WaitingOnReplyResponse = json(core.as(c.get("accountId")).waitingOnReply());
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.askOwner(":id"), async (c) => {
+    const request = (await c.req.json().catch(() => null)) as unknown;
+    if (!isRecord(request) || typeof request.question !== "string") return apiError(c, 400, "invalid-request");
+    const body: AskOwnerResponse = await core.as(c.get("accountId")).askOwner(c.req.param("id"), request.question);
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.reply(":id"), async (c) => {
+    const request = (await c.req.json().catch(() => null)) as unknown;
+    if (!isRecord(request) || typeof request.reply !== "string") return apiError(c, 400, "invalid-request");
+    const body: ReplyResponse = await core.as(c.get("accountId")).reply(c.req.param("id"), request.reply);
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.evidenceItem(":id"), (c) => {
+    const body: EvidenceResponse = json(core.as(c.get("accountId")).evidence(c.req.param("id")));
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.paymentItem(":id"), (c) => {
+    const body: PaymentResponse = json(core.as(c.get("accountId")).payment(c.req.param("id")));
     return c.json(body);
   });
 

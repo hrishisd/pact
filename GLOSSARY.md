@@ -83,6 +83,12 @@ _Avoid_: Contact, connection, follower, buddy
 The list of items waiting for a reviewer's decision.
 _Avoid_: Inbox, to-do list
 
+**Question**:
+A reviewer's comment on a review item (evidence, an excuse, a payment or a change request), asking its owner about it instead of deciding it. The item is then **waiting on the owner's reply**: it leaves every reviewer's Review Queue until the owner replies, though any reviewer can still decide it.
+
+**Reply**:
+The owner's answer to a question, in text only. It sends the item back to every reviewer's Review Queue.
+
 **Terms**:
 What a pact holds its owner to: its schedule, what its photo must show or its in-bed-by time, its penalty, recipient and reviewers. Each occurrence follows the terms in force when it opened, so a change applies only to occurrences not open yet.
 

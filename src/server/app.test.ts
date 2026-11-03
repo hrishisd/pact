@@ -25,6 +25,13 @@ import {
   PAYMENT_NOTE_FIELD,
   type AcceptInviteResponse,
   type AcceptMissResponse,
+  type AskOwnerRequest,
+  type AskOwnerResponse,
+  type EvidenceResponse,
+  type PaymentResponse,
+  type ReplyRequest,
+  type ReplyResponse,
+  type WaitingOnReplyResponse,
   type AddRecipientResponse,
   type ChangePactRequest,
   type ChangePactResponse,
@@ -942,6 +949,7 @@ describe("evidence", () => {
             occurrenceDate: "2026-01-05",
             penaltyCents: 500,
             recipientName: "Sam",
+            thread: { comments: [], waitingOnReply: false },
           },
         ] satisfies ReviewQueueResponse,
       });
@@ -1261,6 +1269,116 @@ describe("change requests", () => {
   });
 });
 
+describe("reviewer questions", () => {
+  /** Submits a photo of Monday's Gym as the owner; returns the evidence's id. */
+  async function evidenceWaiting() {
+    const setup = await ownerWithPact();
+    const form = new FormData();
+    form.append(EVIDENCE_PHOTO_FIELD, jpeg());
+    const response = await setup.s.request(API_PATHS.evidence(setup.pactId), {
+      method: "POST",
+      cookie: setup.owner.cookie,
+      body: form,
+    });
+    const submitted = (await response.json()) as SubmitEvidenceResponse;
+    if (!submitted.ok) throw new Error(submitted.reason);
+    return { ...setup, evidenceId: submitted.evidenceId };
+  }
+
+  test("the reviewer asks, the item waits on the owner's reply; the owner sees it on Today and its page, and replies", async () => {
+    const { s, owner, friend, evidenceId } = await evidenceWaiting();
+    const reviewer = { cookie: friend.cookie };
+
+    const asked = await s.api<AskOwnerResponse>(API_PATHS.askOwner(evidenceId), {
+      ...reviewer,
+      method: "POST",
+      body: { question: "Which gym is this?" } satisfies AskOwnerRequest,
+    });
+
+    expect(asked).toEqual({ status: 200, body: { ok: true } });
+    expect((await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, reviewer)).body).toEqual([]);
+    const waiting = await s.api<WaitingOnReplyResponse>(API_PATHS.waitingOnReply, reviewer);
+    const question = {
+      fromOwner: false,
+      authorName: "friend",
+      text: "Which gym is this?",
+      sentAt: s.clock.now().toISOString(),
+    };
+    expect(waiting.body).toEqual([
+      expect.objectContaining({ id: evidenceId, thread: { comments: [question], waitingOnReply: true } }),
+    ]);
+    const today = await s.api<TodayResponse>(API_PATHS.today, { cookie: owner.cookie });
+    expect(today.body.alerts).toEqual([
+      expect.objectContaining({ kind: "reviewer-question", reviewerName: "friend", question: "Which gym is this?" }),
+    ]);
+    const page = await s.api<EvidenceResponse>(API_PATHS.evidenceItem(evidenceId), { cookie: owner.cookie });
+    expect(page.body).toMatchObject({ ok: true, evidence: { id: evidenceId, thread: { waitingOnReply: true } } });
+    expect((await s.api(API_PATHS.evidenceItem(evidenceId), reviewer)).body).toEqual({
+      ok: false,
+      reason: "evidence-not-found",
+    });
+
+    const replied = await s.api<ReplyResponse>(API_PATHS.reply(evidenceId), {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { reply: "The one on 5th" } satisfies ReplyRequest,
+    });
+
+    expect(replied).toEqual({ status: 200, body: { ok: true } });
+    expect((await s.api<ReviewQueueResponse>(API_PATHS.reviewQueue, reviewer)).body).toEqual([
+      expect.objectContaining({ id: evidenceId, thread: expect.objectContaining({ waitingOnReply: false }) }),
+    ]);
+    expect((await s.api(API_PATHS.waitingOnReply, reviewer)).body).toEqual([]);
+  });
+
+  test("a payment's page is its owner's; anyone else gets a 200 refusal", async () => {
+    const { s, owner, friend, pact } = await ownerWithPact();
+    s.clock.set(s.at("Sat 00:00"));
+    await s.core.advanceTo(s.clock.now());
+    const form = new FormData();
+    form.append(PAYMENT_AMOUNT_FIELD, "500");
+    form.append(EVIDENCE_PHOTO_FIELD, jpeg());
+    const response = await s.request(API_PATHS.payments(pact.recipientId), {
+      method: "POST",
+      cookie: owner.cookie,
+      body: form,
+    });
+    const recorded = (await response.json()) as RecordPaymentResponse;
+    if (!recorded.ok) throw new Error(recorded.reason);
+
+    const page = await s.api<PaymentResponse>(API_PATHS.paymentItem(recorded.paymentId), { cookie: owner.cookie });
+    expect(page.body).toMatchObject({
+      ok: true,
+      payment: { amountCents: 500, recipientName: "Sam", state: { kind: "waiting" }, reviewerNames: ["friend"] },
+    });
+    expect((await s.api(API_PATHS.paymentItem(recorded.paymentId), { cookie: friend.cookie })).body).toEqual({
+      ok: false,
+      reason: "payment-not-found",
+    });
+  });
+
+  test("the core's refusals are 200s; a body of another shape is a 400", async () => {
+    const { s, owner, friend, evidenceId } = await evidenceWaiting();
+
+    expect(
+      await s.api(API_PATHS.askOwner(evidenceId), { cookie: friend.cookie, method: "POST", body: { question: " " } }),
+    ).toEqual({ status: 200, body: { ok: false, reason: "blank-question" } });
+    expect(
+      await s.api(API_PATHS.reply(evidenceId), { cookie: owner.cookie, method: "POST", body: { reply: "Hm" } }),
+    ).toEqual({ status: 200, body: { ok: false, reason: "no-question" } });
+    for (const [path, cookie, body] of [
+      [API_PATHS.askOwner(evidenceId), friend.cookie, { question: 5 }],
+      [API_PATHS.askOwner(evidenceId), friend.cookie, {}],
+      [API_PATHS.reply(evidenceId), owner.cookie, { reply: null }],
+    ] as const) {
+      expect(await s.api(path, { cookie, method: "POST", body })).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+  });
+});
+
 describe("ledgers", () => {
   test("a Missed occurrence's penalty shows on the recipient's ledger, and its history", async () => {
     const { s, owner, pact } = await ownerWithFriend();
@@ -1410,6 +1528,7 @@ describe("payments", () => {
         recordedAt: s.at("Sat 00:00").toISOString(),
         owedCents: 1500,
         owedAfterApprovalCents: 500,
+        thread: { comments: [], waitingOnReply: false },
       },
     ] satisfies ReviewQueueResponse);
 
@@ -1527,6 +1646,9 @@ describe("api", () => {
       API_PATHS.pact("some-pact"),
       API_PATHS.photo("some-photo"),
       API_PATHS.reviewQueue,
+      API_PATHS.waitingOnReply,
+      API_PATHS.evidenceItem("some-evidence"),
+      API_PATHS.paymentItem("some-payment"),
     ];
     for (const path of reads) {
       const response = await s.request(path);
@@ -1541,6 +1663,8 @@ describe("api", () => {
       API_PATHS.firstOccurrence,
       API_PATHS.evidence("some-pact"),
       API_PATHS.decide("some-item"),
+      API_PATHS.askOwner("some-item"),
+      API_PATHS.reply("some-item"),
       API_PATHS.acceptMiss("some-pact", "2026-01-05"),
       API_PATHS.payments("some-recipient"),
     ];
@@ -1782,6 +1906,7 @@ describe("notifications", () => {
         { setting: "picked-as-reviewer", enabled: true },
         { setting: "review-item", enabled: true },
         { setting: "decision", enabled: false },
+        { setting: "comment", enabled: true },
         { setting: "missed-occurrence", enabled: true },
         { setting: "new-bill", enabled: true },
         { setting: "overdue-bill", enabled: true },

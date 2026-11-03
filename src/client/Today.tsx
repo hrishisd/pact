@@ -44,6 +44,8 @@ export function Today({
   onOpenLedger,
   onOpenExcuse,
   onOpenChangeRequest,
+  onOpenEvidence,
+  onOpenPayment,
   onCreate,
   onInvite,
 }: {
@@ -53,12 +55,27 @@ export function Today({
   onOpenLedger: (recipientId: string, name: string) => void;
   onOpenExcuse: (excuseId: string) => void;
   onOpenChangeRequest: (changeRequestId: string) => void;
+  onOpenEvidence: (evidenceId: string) => void;
+  onOpenPayment: (paymentId: string) => void;
   onCreate: () => void;
   onInvite: () => void;
 }) {
   const { data: today, failed, reload } = useLoad(api.today);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
+  // A reviewer's question opens the page of the item it's about.
+  const openItem = (item: Json<TodayWaitingItem>) => {
+    switch (item.kind) {
+      case "evidence":
+        return onOpenEvidence(item.id);
+      case "excuse":
+        return onOpenExcuse(item.id);
+      case "payment":
+        return onOpenPayment(item.id);
+      case "change-request":
+        return onOpenChangeRequest(item.id);
+    }
+  };
 
   if (failed)
     return (
@@ -96,6 +113,7 @@ export function Today({
           timezone={timezone}
           now={now}
           onFileExcuse={setExcusing}
+          onOpenItem={openItem}
           onChanged={reload}
         />
       ))}
@@ -145,6 +163,8 @@ function alertKey(alert: Json<TodayAlert>): string {
       return `excuse:${alert.excuseId}`;
     case "bill-overdue":
       return `overdue:${alert.recipientId}`;
+    case "reviewer-question":
+      return `question:${alert.item.id}`;
   }
 }
 
@@ -382,21 +402,66 @@ function Alert({
   timezone,
   now,
   onFileExcuse,
+  onOpenItem,
   onChanged,
 }: {
   alert: Json<TodayAlert>;
   timezone: string;
   now: number;
   onFileExcuse: OnFileExcuse;
+  onOpenItem: (item: Json<TodayWaitingItem>) => void;
   onChanged: () => void;
 }) {
   switch (alert.kind) {
+    case "reviewer-question":
+      return <ReviewerQuestionAlert alert={alert} onReply={() => onOpenItem(alert.item)} />;
     case "evidence-rejected":
       return <RejectedEvidenceAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "excuse-rejected":
       return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "bill-overdue":
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
+  }
+}
+
+/**
+ * A reviewer's question waiting on the owner's reply. Reply opens the item's
+ * page, with what was asked about, the thread and the reply box.
+ */
+function ReviewerQuestionAlert({
+  alert,
+  onReply,
+}: {
+  alert: Extract<Json<TodayAlert>, { kind: "reviewer-question" }>;
+  onReply: () => void;
+}) {
+  return (
+    <div className="alert info" role="status">
+      <b>
+        {alert.reviewerName} asked about {questionSubject(alert.item)}
+      </b>
+      <span>“{alert.question}”</span>
+      <span className="small muted">It's waiting on your reply. {alert.reviewerName} can still decide it.</span>
+      <div className="row2">
+        <button className="btn sm primary" onClick={onReply}>
+          Reply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What a question is about, after "asked about": "your evidence for Gym, Mon Nov 2". */
+function questionSubject(item: Json<TodayWaitingItem>): string {
+  switch (item.kind) {
+    case "evidence":
+      return `your evidence for ${item.name}, ${formatDate(item.occurrenceDate)}`;
+    case "excuse":
+      return `your excuse for ${item.name}, ${datesText(item.firstDate, item.lastDate)}`;
+    case "payment":
+      return `your ${money(item.amountCents)} payment to ${item.recipientName}`;
+    case "change-request":
+      return item.endsPact ? `your request to end ${item.name}` : `your change to ${item.name}`;
   }
 }
 

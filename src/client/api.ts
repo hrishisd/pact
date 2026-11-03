@@ -18,6 +18,13 @@ import {
   type AcceptMissResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
+  type AskOwnerRequest,
+  type AskOwnerResponse,
+  type EvidenceResponse,
+  type PaymentResponse,
+  type ReplyRequest,
+  type ReplyResponse,
+  type WaitingOnReplyResponse,
   type ApiErrorResponse,
   type ChangePactRequest,
   type ChangePactResponse,
@@ -194,6 +201,13 @@ export const api = {
   reviewQueue: () => call<ReviewQueueResponse>(API_PATHS.reviewQueue),
   decide: (itemId: string, decision: DecideRequest) =>
     post<DecideResponse>(API_PATHS.decide(encodeURIComponent(itemId)), decision),
+  waitingOnReply: () => call<WaitingOnReplyResponse>(API_PATHS.waitingOnReply),
+  askOwner: (itemId: string, question: string) =>
+    post<AskOwnerResponse>(API_PATHS.askOwner(encodeURIComponent(itemId)), { question } satisfies AskOwnerRequest),
+  reply: (itemId: string, reply: string) =>
+    post<ReplyResponse>(API_PATHS.reply(encodeURIComponent(itemId)), { reply } satisfies ReplyRequest),
+  evidence: (evidenceId: string) => call<EvidenceResponse>(API_PATHS.evidenceItem(encodeURIComponent(evidenceId))),
+  payment: (paymentId: string) => call<PaymentResponse>(API_PATHS.paymentItem(encodeURIComponent(paymentId))),
   ledgers: () => call<LedgersResponse>(API_PATHS.ledgers),
   ledger: (recipientId: string) => call<LedgerResponse>(API_PATHS.ledger(encodeURIComponent(recipientId))),
   /** `screenshot` is already shrunk (photos.ts). */

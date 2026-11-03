@@ -6,6 +6,10 @@ import type {
   AcceptInviteResult,
   AcceptMissResult,
   AddRecipientResult,
+  AskOwnerResult,
+  EvidenceResult,
+  PaymentResult,
+  ReplyResult,
   ChangePactResult,
   ChangePreviewResult,
   ChangeRequestResult,
@@ -114,6 +118,10 @@ export const APP_PATHS = {
   changeRequest: (changeRequestId: string) => `/changes/${encodeURIComponent(changeRequestId)}`,
   ledger: (recipientId: string) => `/ledgers/${encodeURIComponent(recipientId)}`,
   excuse: (excuseId: string) => `/excuses/${encodeURIComponent(excuseId)}`,
+  /** Evidence's page, for its owner: where a reviewer's question about it opens. */
+  evidence: (evidenceId: string) => `/evidence/${encodeURIComponent(evidenceId)}`,
+  /** A payment's page, for its owner: where a reviewer's question about it opens. */
+  payment: (paymentId: string) => `/payments/${encodeURIComponent(paymentId)}`,
 } as const;
 
 /**
@@ -170,7 +178,17 @@ export const API_PATHS = {
   /** POST (no body): Take the L on a rejected excuse. */
   acceptExcuseRejection: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}/accept-rejection` as const,
   reviewQueue: "/api/review",
+  /** GET: items the account may decide that are waiting on their owner's reply. */
+  waitingOnReply: "/api/review/waiting-on-reply",
   decide: <T extends string>(itemId: T) => `/api/review/${itemId}/decision` as const,
+  /** POST: a reviewer asks the owner about an item instead of deciding it. */
+  askOwner: <T extends string>(itemId: T) => `/api/review/${itemId}/question` as const,
+  /** POST: the owner replies to a reviewer's question about one of their items. */
+  reply: <T extends string>(itemId: T) => `/api/review/${itemId}/reply` as const,
+  /** GET: evidence's page, for its owner. */
+  evidenceItem: <T extends string>(evidenceId: T) => `/api/evidence/${evidenceId}` as const,
+  /** GET: a payment's page, for its owner. */
+  paymentItem: <T extends string>(paymentId: T) => `/api/payments/${paymentId}` as const,
   ledgers: "/api/ledgers",
   ledger: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}` as const,
   payments: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}/payments` as const,
@@ -314,6 +332,30 @@ export type ReviewQueueResponse = Json<ReviewItem[]>;
  */
 export type DecideRequest = ReviewDecision;
 export type DecideResponse = DecideResult;
+
+/** GET /api/review/waiting-on-reply: in the Review Queue's order. */
+export type WaitingOnReplyResponse = Json<ReviewItem[]>;
+
+/**
+ * POST /api/review/:id/question. A body without a string `question` is a 400
+ * "invalid-request"; the core's refusals ("blank-question" included) are 200s.
+ */
+export interface AskOwnerRequest {
+  question: string;
+}
+export type AskOwnerResponse = AskOwnerResult;
+
+/** POST /api/review/:id/reply, as the item's owner. Shapes and refusals as for a question. */
+export interface ReplyRequest {
+  reply: string;
+}
+export type ReplyResponse = ReplyResult;
+
+/** GET /api/evidence/:id: the evidence's page. Someone else's evidence, or none, is a 200 refusal. */
+export type EvidenceResponse = Json<EvidenceResult>;
+
+/** GET /api/payments/:id: the payment's page. Someone else's payment, or none, is a 200 refusal. */
+export type PaymentResponse = Json<PaymentResult>;
 
 /** GET /api/ledgers: the Ledgers tab, one per recipient, sorted by name. */
 export type LedgersResponse = Json<LedgerSummary>[];

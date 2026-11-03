@@ -419,4 +419,21 @@ export const migrations: readonly string[] = [
   CREATE UNIQUE INDEX change_request_one_waiting ON change_request (pact_id)
     WHERE decision IS NULL AND withdrawn_at IS NULL;
   `,
+  // 16: reviewer questions
+  `
+  -- A review item's thread: a reviewer's question, or the owner's reply, text
+  -- only. item_id is the evidence, excuse, payment or change request it's
+  -- about; their ids are UUIDs, so they never collide. The item is waiting on
+  -- the owner's reply while its latest comment (the highest id) is a
+  -- reviewer's.
+  CREATE TABLE comment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    author_account_id TEXT NOT NULL REFERENCES account (id),
+    from_owner INTEGER NOT NULL CHECK (from_owner IN (0, 1)),
+    text TEXT NOT NULL,
+    sent_at TEXT NOT NULL
+  );
+  CREATE INDEX comment_item ON comment (item_id, id);
+  `,
 ];

@@ -597,6 +597,7 @@ describe("the review item", () => {
       ],
       heldCents: 500,
       recipientName: "Sam",
+      thread: { comments: [], waitingOnReply: false },
     });
     // Its photos are the owner's and the reviewers' to see.
     const photoId = item!.kind === "excuse" ? item!.photoIds[0]! : "";

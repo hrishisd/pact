@@ -433,6 +433,11 @@ p {
   background: var(--slate-bg);
   color: var(--slate);
 }
+/* A review item of the owner's that a reviewer's question waits on: blue, as its Today alert. */
+.c-reply {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 
 /* A pact in its edit window: a blue chip next to its name, a blue left edge, a blue bar on its page. */
 .c-new {
@@ -1046,6 +1051,38 @@ textarea.inp {
   gap: 8px;
   padding-block: 10px 4px;
   background: linear-gradient(to bottom, transparent, var(--paper) 25%);
+}
+.decide.with-ask {
+  grid-template-columns: 1fr 1fr 1.3fr;
+}
+/* A review item's questions and replies: one's own on the right. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px 14px 14px 4px;
+  padding: 8px 11px;
+  max-width: 88%;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.msg.mine {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  border-radius: 14px 14px 4px 14px;
+}
+.msg small {
+  color: var(--muted);
+  font-size: 11.5px;
 }
 .btn.ok {
   background: var(--kept);

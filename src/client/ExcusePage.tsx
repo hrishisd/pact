@@ -1,14 +1,16 @@
 // An excuse's page, pushed on the current tab: where its review stands, its
 // pact and dates, the reason and photos, each day it covers as it stands now,
-// and who it was sent to. It opens from Today, a pact's page and an approved
-// excuse's push.
+// who it was sent to, and any questions about it, with the reply box while
+// one waits on the owner's reply. It opens from Today, a pact's page, an
+// approved excuse's push and a reviewer's question.
 
 import { API_PATHS, type Json } from "../shared/api.ts";
-import type { ExcuseState } from "../shared/types.ts";
+import type { ExcuseDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { DayChip, excuseDatesText } from "./excuse-days.tsx";
 import { formatDate, formatDayTime } from "./format.ts";
 import { ExcuseIcon } from "./icons.tsx";
+import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
 import { Empty, useLoad, useNow } from "./ui.tsx";
 
 export function ExcusePage({
@@ -21,7 +23,7 @@ export function ExcusePage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { data: result, failed } = useLoad(() => api.excuse(excuseId));
+  const { data: result, failed, reload } = useLoad(() => api.excuse(excuseId));
   const now = useNow();
 
   if (result === null) {
@@ -42,7 +44,7 @@ export function ExcusePage({
           <ExcuseIcon />
           Excuse
         </span>
-        <StateChip state={state} />
+        <StateChip excuse={excuse} />
       </div>
       <article className="card">
         <div className="stack-sm">
@@ -82,6 +84,8 @@ export function ExcusePage({
           ))}
         </div>
       </section>
+      <Thread thread={excuse.thread} viewer="owner" timezone={timezone} />
+      {excuse.thread.waitingOnReply && <ReplyBox itemId={excuse.id} onReplied={reload} />}
       <p className="meta">
         Sent to {excuse.reviewerNames.join(" and ")} · {formatDayTime(excuse.filedAt, timezone)}
       </p>
@@ -89,10 +93,11 @@ export function ExcusePage({
   );
 }
 
-function StateChip({ state }: { state: Json<ExcuseState> }) {
+function StateChip({ excuse }: { excuse: Json<ExcuseDetail> }) {
+  const { state } = excuse;
   switch (state.kind) {
     case "waiting":
-      return <span className="chip c-wait">Waiting for approval</span>;
+      return <WaitingChip thread={excuse.thread} />;
     case "approved":
       return <span className="chip c-excused">Approved by {state.reviewerName}</span>;
     case "rejected":

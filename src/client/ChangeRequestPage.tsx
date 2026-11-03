@@ -1,15 +1,17 @@
 // A change request's page, for its owner, pushed from Today or the pact's
 // page: where it stands, the note, the changed terms old and new (or the end
-// it asks for), when it would start, the terms it leaves alone, and Withdraw
-// change while it waits.
+// it asks for), when it would start, the terms it leaves alone, any questions
+// about it with the reply box while one waits on the owner's reply, and
+// Withdraw change while it waits.
 
 import { useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type { ChangeRequestState } from "../shared/types.ts";
+import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { formatDayTime } from "./format.ts";
 import { PencilIcon } from "./icons.tsx";
+import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
 import { Empty, useLoad } from "./ui.tsx";
 
 export function ChangeRequestPage({
@@ -58,7 +60,7 @@ export function ChangeRequestPage({
           <PencilIcon />
           Change
         </span>
-        <StateChip state={request.state} />
+        <StateChip request={request} />
       </div>
       <article className="card">
         <div className="stack-sm">
@@ -89,6 +91,8 @@ export function ChangeRequestPage({
           </>
         )}
       </article>
+      <Thread thread={request.thread} viewer="owner" timezone={timezone} />
+      {request.thread.waitingOnReply && <ReplyBox itemId={request.id} onReplied={reload} />}
       {waiting && (
         <>
           <p className="meta">Sent to {listNames(request.reviewerNames)}</p>
@@ -105,10 +109,11 @@ export function ChangeRequestPage({
   );
 }
 
-function StateChip({ state }: { state: Json<ChangeRequestState> }) {
+function StateChip({ request }: { request: Json<ChangeRequestDetail> }) {
+  const { state } = request;
   switch (state.kind) {
     case "waiting":
-      return <span className="chip c-wait">Waiting for approval</span>;
+      return <WaitingChip thread={request.thread} />;
     case "approved":
       return <span className="chip c-kept">Approved by {state.reviewerName}</span>;
     case "rejected":
