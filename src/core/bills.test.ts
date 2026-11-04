@@ -4,8 +4,9 @@
 // an alert, a daily reminder to the owner, and word to the reviewers.
 
 import { describe, expect, test } from "vitest";
+import { ownerWithOura } from "./testing/bedtime-pact.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
-import { scenario, type Scenario } from "./testing/scenario.ts";
+import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
 /**
  * Gym on Mon/Wed/Fri at $5, every day Missed in the first week: $15 to Sam,
@@ -138,6 +139,46 @@ describe("Wednesday bills", () => {
     });
     expect(owner.today().alerts.filter((alert) => alert.kind === "bill-overdue")).toEqual([]);
     expect(s.notifier.sentTo(reviewer).filter((n) => n.kind === "overdue-bill")).toEqual([]);
+  });
+
+  test("a Sunday night with no Oura data, Missed at Monday 18:00, goes on Wednesday's bill; a night judged at Wednesday 18:00 waits a week", async () => {
+    const s = scenario();
+    const { owner, sam, createPact } = await ownerWithOura(s);
+    // Sunday's night closes Monday+1 18:00; Tuesday+1's closes Wednesday+1 18:00, the moment of the bill.
+    s.setClockTo("Sun 12:00");
+    await createPact("00:00", ["sun", "tue"]);
+    const penaltyBills = () => {
+      const ledger = owner.ledger(sam.id);
+      if (!ledger.ok) throw new Error(ledger.reason);
+      return ledger.ledger.history.map((entry) => entry.kind === "penalty" && [entry.occurrenceDate, entry.bill]);
+    };
+
+    await s.advanceTo("Mon+1 17:59");
+    expect(penaltyBills()).toEqual([]);
+    await s.advanceTo("Mon+1 18:00");
+    // Its 48 hours close exactly at Wednesday+1 18:00, so that Wednesday's bill takes it.
+    expect(penaltyBills()).toEqual([["2026-01-11", { kind: "next-bill", billedOn: "2026-01-14" }]]);
+
+    await s.advanceTo("Wed+1 17:59");
+    expect(bills(s, owner.id)).toEqual([]);
+    await s.advanceTo("Wed+1 18:00");
+    expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $5 to Sam"]);
+    expect(owner.ledgers()[0]!.billDue).toEqual({ amountCents: 500, dueAt: s.at("Wed+2 18:00") });
+    // Tuesday+1's night, Missed at Wednesday+1 18:00, can be excused until Friday+1: the next bill's.
+    expect(penaltyBills()).toEqual([
+      ["2026-01-13", { kind: "next-bill", billedOn: "2026-01-21" }],
+      ["2026-01-11", { kind: "on-bill", billedOn: "2026-01-14", dueAt: s.at("Wed+2 18:00") }],
+    ]);
+  });
+
+  test("a Sunday night judged late, in the tick that makes Wednesday's bill, is still on it", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    await createPact("00:00", ["sun"]);
+    await s.advanceTo("Mon+1 17:00");
+    // Down from before the night closed until the bill.
+    await s.advanceTo("Wed+1 18:00");
+    expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $5 to Sam"]);
   });
 
   test("no penalties, no bill and no notification", async () => {
@@ -274,6 +315,62 @@ describe("Overdue", () => {
     expect(told()).toHaveLength(1);
     await s.advanceTo("Wed+3 18:00");
     expect(told()).toHaveLength(2);
+  });
+
+  test("a new Overdue spell after the last was paid off reminds the owner and tells the reviewers at once", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, sam } = await missedWeek(s);
+    const reminders = () => s.notifier.sentTo(owner).filter((n) => n.kind === "overdue-bill");
+    const told = (account: AccountHandle) => s.notifier.sentTo(account).filter((n) => n.kind === "overdue-bill");
+    // Wednesday+1's $15 is covered by a payment at its due time; rejected Thursday+2 20:00, it goes Overdue.
+    s.setClockTo("Wed+2 17:00");
+    const rejected = await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
+    await s.advanceTo("Wed+2 18:00");
+    s.setClockTo("Thu+2 20:00");
+    await reviewer.decide(rejected, { kind: "reject", reason: "That's a different account" });
+    for (const day of ["Thu+2", "Fri+2", "Sat+2", "Sun+2", "Mon+3", "Tue+3"]) await s.advanceTo(`${day} 20:00`);
+    expect(reminders()).toHaveLength(6);
+    expect(told(reviewer)).toHaveLength(1);
+
+    // Paid off Tuesday+3 21:00: the spell is over.
+    s.setClockTo("Tue+3 21:00");
+    const paid = await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
+    await reviewer.decide(paid, { kind: "approve" });
+    await s.advanceTo("Tue+3 21:00");
+    expect(owner.today().alerts).toEqual([]);
+
+    // Wednesday+2's bill falls due 21 hours later: a new spell, told at once.
+    await s.advanceTo("Wed+3 18:00");
+    expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", overdueCents: 1500, billedOn: "2026-01-21" }]);
+    expect(reminders()).toHaveLength(7);
+    expect(told(reviewer)).toHaveLength(2);
+    expect(told(second)).toHaveLength(2);
+    // Then daily and weekly from the new spell.
+    await s.advanceTo("Thu+3 17:59");
+    expect(reminders()).toHaveLength(7);
+    await s.advanceTo("Thu+3 18:00");
+    expect(reminders()).toHaveLength(8);
+    expect(told(reviewer)).toHaveLength(2);
+  });
+
+  test("a payment covering an Overdue bill pauses the spell; rejected, it resumes and the reviewers aren't told again", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await missedWeek(s);
+    const reminders = () => s.notifier.sentTo(owner).filter((n) => n.kind === "overdue-bill");
+    const told = () => s.notifier.sentTo(reviewer).filter((n) => n.kind === "overdue-bill");
+    await s.advanceTo("Wed+2 18:00");
+    expect([reminders().length, told().length]).toEqual([1, 1]);
+
+    s.setClockTo("Thu+2 10:00");
+    const payment = await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
+    await s.advanceTo("Thu+2 11:00");
+    s.setClockTo("Thu+2 12:00");
+    await reviewer.decide(payment, { kind: "reject", reason: "That's a different account" });
+    await s.advanceTo("Thu+2 12:00");
+    // Today's reminder went at Wednesday+2 18:00, and the reviewers were told then.
+    expect([reminders().length, told().length]).toEqual([1, 1]);
+    await s.advanceTo("Thu+2 18:00");
+    expect([reminders().length, told().length]).toEqual([2, 1]);
   });
 
   test("overdue state survives a restart: no second reminder the same day", async () => {
