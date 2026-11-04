@@ -2,15 +2,44 @@
 // in scripts/ and runs the real config.ts; only fly.toml and the listing are fakes.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, describe, expect, test } from "vitest";
+import { delimiter, dirname, join } from "node:path";
+import { afterAll, describe, expect, test, vi } from "vitest";
 import { loadConfig } from "./config.ts";
+
+// Each test starts bash and node (about 1 s alone, 2 s or more on a loaded
+// machine), so the 5 s default would fail a busy CI runner, not a bug.
+vi.setConfig({ testTimeout: 30_000 });
 
 const SCRIPT = join(import.meta.dirname, "..", "..", "scripts", "check-fly-secrets.sh");
 const DIGEST = "digest-that-must-never-be-printed";
 const IN_FLY_TOML = ["PACT_DB_PATH", "BETTER_AUTH_URL"];
+
+/** Where `name` is on the PATH vitest was started with, or undefined. */
+function which(name: string): string | undefined {
+  return (process.env.PATH ?? "")
+    .split(delimiter)
+    .map((entry) => join(entry, name))
+    .find((candidate) => {
+      try {
+        accessSync(candidate, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+}
+
+// The script runs `node` and `jq` from PATH. Its node is the one running these
+// tests, not whichever is first on the machine's PATH, and a missing jq fails
+// here rather than turning every check into a skip warning.
+const JQ =
+  which("jq") ??
+  (() => {
+    throw new Error("check-fly-secrets tests need jq on PATH, as the deploy job has");
+  })();
+const TOOLS_PATH = [dirname(process.execPath), dirname(JQ), "/usr/bin", "/bin"].join(delimiter);
 
 const dir = mkdtempSync(join(tmpdir(), "check-fly-secrets-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -52,7 +81,7 @@ function check(stdout: string, flyToml = FLY_TOML) {
   return checkWithCommand(["printf", "%s", stdout], flyToml);
 }
 
-function checkWithCommand(command: string[], flyToml = FLY_TOML, path = process.env.PATH) {
+function checkWithCommand(command: string[], flyToml = FLY_TOML, path = TOOLS_PATH) {
   const result = spawnSync("/bin/bash", [SCRIPT, flyToml, ...command], {
     encoding: "utf8",
     env: { PATH: path },
@@ -68,6 +97,7 @@ describe("check-fly-secrets", () => {
 
   test("passes when every name is a secret or in fly.toml", () => {
     const { status, output } = check(listing(secretNames()));
+    expect(output).toContain("Fly secrets check passed");
     expect(output).not.toContain("::warning::");
     expect(output).not.toContain("::error::");
     expect(status).toBe(0);
@@ -85,6 +115,7 @@ describe("check-fly-secrets", () => {
 
   test("a staged secret counts as present", () => {
     const { status, output } = check(listing(secretNames(), "Staged"));
+    expect(output).toContain("Fly secrets check passed");
     expect(output).not.toContain("::error::");
     expect(status).toBe(0);
   });
@@ -145,9 +176,25 @@ describe("check-fly-secrets", () => {
       warned(check(listing(secretNames()), noEnv));
     });
 
-    test("when node or jq isn't there", () => {
-      warned(checkWithCommand(["/usr/bin/false"], FLY_TOML, join(dir, "empty-path")));
-      warned(checkWithCommand(["/usr/bin/printf", "%s", listing(secretNames())], FLY_TOML, join(dir, "empty-path")));
+    test("when node isn't there", () => {
+      const result = checkWithCommand(["printf", "%s", listing(secretNames())], FLY_TOML, join(dir, "empty-path"));
+      warned(result);
+      expect(result.output).toContain("couldn't read the required names");
+    });
+
+    test("when jq isn't there", () => {
+      // Everything else the script runs, and no jq.
+      const bin = join(dir, "no-jq-bin");
+      mkdirSync(bin);
+      symlinkSync(process.execPath, join(bin, "node"));
+      for (const tool of ["dirname", "awk", "grep", "printf"]) {
+        const found = which(tool);
+        if (found === undefined) throw new Error(`check-fly-secrets tests need ${tool} on PATH`);
+        symlinkSync(found, join(bin, tool));
+      }
+      const result = checkWithCommand(["printf", "%s", listing(secretNames())], FLY_TOML, bin);
+      warned(result);
+      expect(result.output).toContain("couldn't read the output of the secrets listing");
     });
   });
 });

@@ -62,7 +62,7 @@ function penalties(owner: AccountHandle) {
           : [],
       );
     })
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => a.date.localeCompare(b.date, "en-US"));
 }
 
 /** The days of the pact named `pactName` with a penalty on the owner's ledgers, oldest first. */

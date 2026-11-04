@@ -293,8 +293,12 @@ describe("evidence submitted in the edit window", () => {
     const { owner, reviewer, gym } = await newGym(s);
     s.setClockTo("Mon 10:09");
 
+    // Received at 10:09, but the upload only finishes after the window has closed.
+    const release = s.photoStore.hold();
     const submitting = owner.submitEvidence(gym, [photo()]);
     await s.advanceTo("Mon 10:10");
+    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer"]);
+    release();
     await submitting;
 
     expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer", "review-item"]);
