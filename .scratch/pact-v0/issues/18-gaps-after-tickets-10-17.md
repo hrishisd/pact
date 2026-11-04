@@ -1,6 +1,6 @@
 # 18 Gaps left after tickets 08 and 10–17
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 Things the shipped tickets left out or got slightly wrong, collected from the build notes and the 2026-11-04 code review. Each item is small. Triage may split them into tickets or close them.
@@ -27,3 +27,17 @@ Things the shipped tickets left out or got slightly wrong, collected from the bu
 
 - No dedicated test for a Sunday-night bedtime penalty landing on Wednesday's bill (judged Mon 18:00, window closes exactly Wed 18:00). Code: `src/core/bills.test.ts`.
 - Some scenarios in tickets 15 and 16 were written after the code and never seen failing.
+
+## Triage (2026-11-04)
+
+Kept in this ticket, to build now:
+
+- Backend: Oura refresh-token loss and the connect race; Oura's timezone for nights; the overdue reminder across spells; the Sunday-night bedtime bill test; seeing the ticket 15 and 16 scenarios fail.
+- Screens (the human asked for screenshots instead of a prototype): rename and add a reviewer while a change request waits; the bill marker on held penalties.
+
+Moved out:
+
+- Bill card countdown, the Oura option when Oura isn't set up, and the overdue alert wording go to ticket 19. They change what the owner sees and weren't asked for in this round.
+- Ledgers status line: closed. One line in priority order is what spec story 80 says ("one status line only when ..."), and it's already listed under Decisions to confirm in `manual-checks.md`.
+
+## Comments
