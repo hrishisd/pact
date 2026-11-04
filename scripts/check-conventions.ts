@@ -1,6 +1,8 @@
 // Repo conventions a linter can't express, checked over src/:
 //   - words GLOSSARY.md says to avoid (its `_Avoid_:` lines), in code and copy;
-//   - the core reads time only from the Clock port.
+//   - the core reads time only from the Clock port;
+//   - tests never read the real clock, so none passes or fails by the day, the
+//     hour, the year or the machine's timezone.
 // A line with a `conventions-ok` comment is skipped. Exits 1 on any finding.
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -34,23 +36,40 @@ const avoidedWords = readFileSync("GLOSSARY.md", "utf8")
   .filter((word) => word !== "" && !EVERYDAY_WORDS.has(word));
 
 const avoidedPattern = new RegExp(`\\b(${avoidedWords.map(escapeRegExp).join("|")})s?\\b`, "i");
-// The system clock adapter is the one place the core may read real time.
-const systemTimePattern = /\bDate\.now\(\)|\bnew Date\(\)/;
+
+// Reading the real clock: Date.now, or a Date made with no arguments.
+const systemTimePattern = /\bDate\.now\b|\bnew Date\s*(\(\s*\)|(?!\s*\())/;
+// The production clock, which tests replace with FakeClock.
+const systemClockPattern = /\bsystemClock\b/;
+// The system clock adapter is the one place the core may read real time, and
+// the core's index exports it for the server to wire in.
+const SYSTEM_CLOCK_ADAPTER = "src/core/adapters.ts";
+const SYSTEM_CLOCK_EXPORT = "src/core/index.ts";
+// Tests that read the real clock on purpose, to bracket an applied
+// migration's SQLite 'now', which no Clock reaches.
+const REAL_TIME_TESTS = new Set(["src/core/migrations.test.ts"]);
 
 const findings: string[] = [];
-for (const file of sourceFiles("src")) {
-  const inCore =
-    file.startsWith("src/core/") && !file.startsWith("src/core/testing/") && file !== "src/core/adapters.ts";
+for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
+  const isTest = /\.test\.tsx?$/.test(file) || file.startsWith("src/core/testing/");
+  const inCore = file.startsWith("src/core/") && !isTest && file !== SYSTEM_CLOCK_ADAPTER;
+  const realTimeAllowed = REAL_TIME_TESTS.has(file);
   readFileSync(file, "utf8")
     .split("\n")
     .forEach((line, index) => {
       if (line.includes("conventions-ok")) return;
       const where = `${file}:${index + 1}`;
-      const avoided = avoidedPattern.exec(line);
-      if (avoided && !ALLOWED_PHRASES.some((phrase) => line.includes(phrase)))
-        findings.push(`${where}: "${avoided[0]}" is a word GLOSSARY.md says to avoid`);
-      if (inCore && systemTimePattern.test(line))
+      if (file.startsWith("src/")) {
+        const avoided = avoidedPattern.exec(line);
+        if (avoided && !ALLOWED_PHRASES.some((phrase) => line.includes(phrase)))
+          findings.push(`${where}: "${avoided[0]}" is a word GLOSSARY.md says to avoid`);
+      }
+      const systemTime = systemTimePattern.test(line);
+      const systemClock = systemClockPattern.test(line);
+      if (inCore && (systemTime || (systemClock && file !== SYSTEM_CLOCK_EXPORT)))
         findings.push(`${where}: the core reads time only from the Clock port`);
+      if (isTest && !realTimeAllowed && (systemTime || systemClock))
+        findings.push(`${where}: tests read time from a FakeClock or a fixed Date, never the real clock`);
     });
 }
 
@@ -65,6 +84,10 @@ function* sourceFiles(dir: string): Generator<string> {
     if (entry.isDirectory()) yield* sourceFiles(path);
     else if (/\.(ts|tsx|html|css|webmanifest)$/.test(entry.name)) yield path;
   }
+}
+
+function* testFiles(dir: string): Generator<string> {
+  for (const file of sourceFiles(dir)) if (/\.test\.tsx?$/.test(file)) yield file;
 }
 
 function escapeRegExp(text: string): string {

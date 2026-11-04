@@ -11,11 +11,14 @@
 import { closeSync, fstatSync, mkdirSync, openSync, renameSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Writable } from "node:stream";
+import type { Clock } from "../core/index.ts";
 
 export interface LogFileOptions {
   path: string;
   /** Past this size the file is rotated. Production: 10 MB. */
   maxBytes: number;
+  /** Where each line's timestamp comes from. */
+  clock: Clock;
   /** The streams to copy. Tests pass their own. */
   stdout?: Writable;
   stderr?: Writable;
@@ -29,6 +32,7 @@ export interface LogFile {
 export function startLogFile({
   path,
   maxBytes,
+  clock,
   stdout = process.stdout,
   stderr = process.stderr,
 }: LogFileOptions): LogFile {
@@ -63,7 +67,7 @@ export function startLogFile({
 
   /** Puts the current time in front of each line that starts in `text`. */
   const stamp = (text: string): string => {
-    const time = new Date().toISOString();
+    const time = clock.now().toISOString();
     let stamped = "";
     for (const piece of text.split(/(?<=\n)/)) {
       if (atLineStart) stamped += `${time} `;
