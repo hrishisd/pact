@@ -2,7 +2,7 @@
 
 Things only a person at a computer or phone can check: a signed-in `flyctl`, a real Oura Ring, a real phone and real push notifications. Tick items off here; when one turns up a bug, file it under `issues/` and link it.
 
-Last updated 2026-11-04, after PR #3 (production commit `0ecbc7d`).
+Last updated 2026-11-04, after ticket 18's backend fixes (migrations 23 and 24).
 
 ## Production, as soon as possible
 
@@ -13,6 +13,10 @@ The deploy at 17:32Z on 2026-11-04 was the first to include PR #2. `/health` was
 - [ ] `scripts/prod-log.sh grep OPERATOR_ALERT`: nothing unexpected since the deploys of 2026-11-03 and 2026-11-04.
 - [ ] **First Wednesday bills, Wed 2026-11-04 18:00 New York.** Migration 20 (deployed 2026-11-03) started billing for existing accounts then. Check that each owner with owed penalties got one "New bill" push per recipient, with the right amount, and that nobody got an overdue alert or an "owner is overdue" push for an old bill.
 - [ ] A week later (Wed 2026-11-11 18:00): unpaid bills turn Overdue, the owner gets a reminder, and reviewers get one "owner is overdue" push.
+
+## After ticket 18's deploy
+
+- [ ] `scripts/prod-db.sh schema-version` reports 24 (migrations 23 and 24 applied), and the log shows no migration failure.
 
 ## On a phone (iOS Safari, home-screen app)
 
