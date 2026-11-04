@@ -4,7 +4,13 @@
 
 import { describe, expect, test } from "vitest";
 import type { Weekday } from "../shared/types.ts";
-import { newOccurrenceTerms, occurrences, type OccurrenceTerms } from "./occurrences.ts";
+import {
+  newOccurrenceTerms,
+  nightStartsAt,
+  noOuraDataPushAt,
+  occurrences,
+  type OccurrenceTerms,
+} from "./occurrences.ts";
 
 const NEW_YORK = "America/New_York";
 // Chile moves its clocks at midnight, so some days have no midnight and some have it twice.
@@ -201,6 +207,33 @@ describe("bedtime nights", () => {
       dueAt: new Date(dueAt),
       closesAt: new Date("2026-01-06T18:00:00-05:00"),
     });
+  });
+
+  test.each([
+    { ouraOffset: "+01:00", closesAt: "2026-01-06T18:00:00+01:00" },
+    { ouraOffset: "-10:00", closesAt: "2026-01-06T18:00:00-10:00" },
+    { ouraOffset: null, closesAt: "2026-01-06T18:00:00-05:00" },
+  ])("on Oura's clock at $ouraOffset, Monday night closes at 18:00 Tuesday there", ({ ouraOffset, closesAt }) => {
+    const night = occurrences({ ...mondays, inBedBy: "00:00" }, NEW_YORK, ouraOffset).first;
+    expect(night.closesAt).toEqual(new Date(closesAt));
+    // Only the close moves: the night still opens and falls due on the account's clock.
+    expect(night.dueAt).toEqual(new Date("2026-01-06T00:00:00-05:00"));
+    expect(nightStartsAt("2026-01-05", NEW_YORK, ouraOffset)).toEqual(
+      new Date(closesAt.replace("2026-01-06", "2026-01-05")),
+    );
+    expect(noOuraDataPushAt("2026-01-05", NEW_YORK, ouraOffset)).toEqual(new Date(closesAt.replace("T18", "T15")));
+  });
+
+  test("a night's 18:00 on the account's clock follows its daylight saving change", () => {
+    // Clocks go back at 02:00 Sun Nov 1 2026 in New York.
+    const sundays = {
+      schedule: { kind: "fixed-days" as const, days: ["sun" as const] },
+      firstOccurrence: "2026-11-01",
+    };
+    expect(occurrences({ ...sundays, inBedBy: "00:00" }, NEW_YORK).first.closesAt).toEqual(
+      new Date("2026-11-02T18:00:00-05:00"),
+    );
+    expect(nightStartsAt("2026-10-31", NEW_YORK)).toEqual(new Date("2026-10-31T18:00:00-04:00"));
   });
 
   test("the first night is the first whose in-bed-by time is at least an hour after creation", () => {

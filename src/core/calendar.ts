@@ -65,6 +65,11 @@ export function startOfDay(date: LocalDate, timezone: string): Date {
   return new Date(Date.UTC(year, month - 1, day) - offsetMs(midnight.getTime(), timezone));
 }
 
+/** `timezone`'s UTC offset at `instant`, in ms (negative west of UTC). */
+export function zoneOffsetAt(instant: Date, timezone: string): number {
+  return offsetMs(instant.getTime(), timezone);
+}
+
 function splitDate(date: LocalDate): [number, number, number] {
   const [year, month, day] = date.split("-").map(Number);
   return [year as number, month as number, day as number];
