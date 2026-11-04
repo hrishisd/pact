@@ -6,9 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { expect, onTestFinished, test } from "vitest";
+import { FakeClock } from "../core/testing/fakes.ts";
 import { startLogFile } from "./log-file.ts";
 
-const TIMESTAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /;
+const NOW = new Date("2026-01-05T14:00:00.000Z");
+const TIMESTAMP = /^2026-01-05T14:00:00\.000Z /;
 
 /** A stdout and stderr that record what they're given, and a log path in a fresh directory. */
 function setup() {
@@ -26,7 +28,7 @@ function setup() {
   };
   const stdout = recording();
   const stderr = recording();
-  return { dir, path: join(dir, "logs", "pact.log"), stdout, stderr };
+  return { dir, path: join(dir, "logs", "pact.log"), clock: new FakeClock(NOW), stdout, stderr };
 }
 
 const lines = (path: string) =>
@@ -35,8 +37,8 @@ const lines = (path: string) =>
     .filter((line) => line !== "");
 
 test("every line either stream writes is copied to the file with a timestamp, and still reaches the stream", () => {
-  const { path, stdout, stderr } = setup();
-  startLogFile({ path, maxBytes: 1024 * 1024, stdout: stdout.stream, stderr: stderr.stream });
+  const { path, clock, stdout, stderr } = setup();
+  startLogFile({ path, maxBytes: 1024 * 1024, clock, stdout: stdout.stream, stderr: stderr.stream });
 
   stdout.stream.write("listening\n");
   stderr.stream.write("first half of a line, ");
@@ -56,8 +58,8 @@ test("every line either stream writes is copied to the file with a timestamp, an
 });
 
 test("past the cap the file becomes <name>.1, replacing the old one, and a new file starts", () => {
-  const { path, stdout, stderr } = setup();
-  startLogFile({ path, maxBytes: 100, stdout: stdout.stream, stderr: stderr.stream });
+  const { path, clock, stdout, stderr } = setup();
+  startLogFile({ path, maxBytes: 100, clock, stdout: stdout.stream, stderr: stderr.stream });
 
   for (let i = 1; i <= 12; i++) stdout.stream.write(`line ${i}\n`);
 
@@ -75,21 +77,21 @@ test("past the cap the file becomes <name>.1, replacing the old one, and a new f
 });
 
 test("appends to the file a previous boot left", () => {
-  const { dir, path, stdout, stderr } = setup();
+  const { dir, path, clock, stdout, stderr } = setup();
   mkdirSync(join(dir, "logs"));
-  writeFileSync(path, "2026-01-05T14:00:00.000Z last boot\n");
-  startLogFile({ path, maxBytes: 1024 * 1024, stdout: stdout.stream, stderr: stderr.stream });
+  writeFileSync(path, "2026-01-04T09:30:00.000Z last boot\n");
+  startLogFile({ path, maxBytes: 1024 * 1024, clock, stdout: stdout.stream, stderr: stderr.stream });
 
   stdout.stream.write("this boot\n");
 
-  expect(lines(path).map((line) => line.replace(TIMESTAMP, ""))).toEqual(["last boot", "this boot"]);
+  expect(lines(path)).toEqual(["2026-01-04T09:30:00.000Z last boot", "2026-01-05T14:00:00.000Z this boot"]);
 });
 
 test("a file that can't be written is reported once on stderr, and the streams carry on", () => {
-  const { dir, path, stdout, stderr } = setup();
+  const { dir, path, clock, stdout, stderr } = setup();
   // A directory where the rotated file should go makes the first rotation fail.
   mkdirSync(join(dir, "logs", "pact.log.1", "in-the-way"), { recursive: true });
-  startLogFile({ path, maxBytes: 10, stdout: stdout.stream, stderr: stderr.stream });
+  startLogFile({ path, maxBytes: 10, clock, stdout: stdout.stream, stderr: stderr.stream });
 
   expect(() => {
     for (let i = 1; i <= 3; i++) stdout.stream.write(`line ${i}\n`);
@@ -105,11 +107,13 @@ test("a file that can't be written is reported once on stderr, and the streams c
 });
 
 test("a log directory that can't be made is reported, and the streams carry on", () => {
-  const { dir, stdout, stderr } = setup();
+  const { dir, clock, stdout, stderr } = setup();
   writeFileSync(join(dir, "not-a-directory"), "");
   const path = join(dir, "not-a-directory", "pact.log");
 
-  expect(() => startLogFile({ path, maxBytes: 1024, stdout: stdout.stream, stderr: stderr.stream })).not.toThrow();
+  expect(() =>
+    startLogFile({ path, maxBytes: 1024, clock, stdout: stdout.stream, stderr: stderr.stream }),
+  ).not.toThrow();
   stdout.stream.write("still here\n");
 
   expect(stdout.chunks).toEqual(["still here\n"]);

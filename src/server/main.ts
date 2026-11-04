@@ -29,7 +29,11 @@ const dataDir = dirname(config.dbPath);
 mkdirSync(dataDir, { recursive: true });
 
 // Before anything logs, so the boot lines are in the file too. Production: /data/logs/pact.log.
-const logFile = startLogFile({ path: join(dataDir, "logs", "pact.log"), maxBytes: 10 * 1024 * 1024 });
+const logFile = startLogFile({
+  path: join(dataDir, "logs", "pact.log"),
+  maxBytes: 10 * 1024 * 1024,
+  clock: systemClock,
+});
 // Node prints a crash's stack trace straight to the terminal, past process.stderr,
 // so the file gets its own copy. A monitor only watches: Node still prints it and exits.
 process.on("uncaughtExceptionMonitor", (error, origin) => logFile.append(`${origin}: ${error.stack ?? error}\n`));
