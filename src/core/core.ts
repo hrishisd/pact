@@ -2088,7 +2088,9 @@ class Core implements PactCore {
    * For each owner Overdue to a recipient at `t` (bills past due that
    * payments awaiting approval don't cover): reminds the owner once a day,
    * and tells the reviewers of the owner's pacts with that recipient when
-   * the owner first goes Overdue, then once a week while it lasts.
+   * a spell of being Overdue starts, then once a week while it lasts. A
+   * spell ends only when approved payments have paid every bill past due; a
+   * payment awaiting approval just pauses it, so a rejected one resumes it.
    */
   #remindOverdue(t: Date): void {
     const ledgers = this.#db
@@ -2109,8 +2111,11 @@ class Core implements PactCore {
         )
         .get(ownerId, recipientId) as
         { owner_reminded_at: string | null; reviewers_told_at: string | null } | undefined;
+      // A notice from an earlier spell, before the bills now unpaid fell due, doesn't count.
       const since = (at: string | null | undefined) =>
-        at === null || at === undefined ? Infinity : t.getTime() - new Date(at).getTime();
+        at === null || at === undefined || new Date(at).getTime() < overdue.spellStartedAt!.getTime()
+          ? Infinity
+          : t.getTime() - new Date(at).getTime();
       const recipientName = this.#recipientName(recipientId);
       const remind = since(notice?.owner_reminded_at) >= OVERDUE_REMINDER_MS;
       const tell = since(notice?.reviewers_told_at) >= OVERDUE_REVIEWER_NOTICE_MS;
@@ -5360,13 +5365,23 @@ interface BillState {
   uncoveredCents: number;
 }
 
-/** What's Overdue at `now`: the uncovered part of bills past due, and the oldest such bill. */
-function overdueOf(bills: BillState[], now: Date): { cents: number; billedOn: LocalDate | null; dueAt: Date | null } {
-  const overdue = bills.filter((bill) => bill.dueAt.getTime() <= now.getTime() && bill.uncoveredCents > 0);
+/**
+ * What's Overdue at `now`: the uncovered part of bills past due, and the
+ * oldest such bill. `spellStartedAt` is when the current spell of being
+ * Overdue began: the due time of the oldest bill past due that approved
+ * payments haven't paid, covered or not. Bills are oldest first.
+ */
+function overdueOf(
+  bills: BillState[],
+  now: Date,
+): { cents: number; billedOn: LocalDate | null; dueAt: Date | null; spellStartedAt: Date | null } {
+  const pastDue = bills.filter((bill) => bill.dueAt.getTime() <= now.getTime());
+  const overdue = pastDue.filter((bill) => bill.uncoveredCents > 0);
   return {
     cents: sum(overdue.map((bill) => bill.uncoveredCents)),
     billedOn: overdue[0]?.billedOn ?? null,
     dueAt: overdue[0]?.dueAt ?? null,
+    spellStartedAt: overdue.length > 0 ? pastDue.find((bill) => bill.unpaidCents > 0)!.dueAt : null,
   };
 }
 
