@@ -2,18 +2,19 @@
 // its edit window; after it File excuse, Request change and End pact (or,
 // while a change request waits, word of it); when new terms start; and
 // what's waiting on a reviewer; and its History, a heat map of its days.
-// After the edit window the reminders change right here, with no review,
-// even while a change request waits.
+// After the edit window the name, the reminders and added reviewers change
+// right here, with no review, even while a change request waits.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
-import type { PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
+import type { Friend, PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
 import { listNames, openOccurrenceText } from "./change-terms.tsx";
+import { PROBLEMS, ReviewersStep } from "./CreatePact.tsx";
 import { clockText, formatDate, formatDay, minutesLeft, money, remindersText, scheduleText } from "./format.ts";
 import { CameraIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
@@ -38,6 +39,7 @@ export function PactPage({
   onRequestChange,
   onOpenExcuse,
   onOpenChangeRequest,
+  onInvite,
 }: {
   pactId: string;
   /** The profile's timezone, for when it Ended. */
@@ -48,6 +50,7 @@ export function PactPage({
   onRequestChange: () => void;
   onOpenExcuse: (excuseId: string) => void;
   onOpenChangeRequest: (changeRequestId: string) => void;
+  onInvite: () => void;
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
@@ -91,7 +94,7 @@ export function PactPage({
             />
           )}
           <History pact={state.pact} />
-          <Terms pact={state.pact} onSaved={load} />
+          <Terms pact={state.pact} onSaved={load} onInvite={onInvite} />
           <EndPact pact={state.pact} onSent={load} />
           {state.pact.endedAt !== null && (
             <p className="small muted">
@@ -209,7 +212,8 @@ function Actions({ pact, onFiled, onRequestChange }: { pact: Pact; onFiled: () =
             pact.reviewers.map((r) => r.name),
             "or",
           )}{" "}
-          decides the change below, or you withdraw it.
+          decides the change below, or you withdraw it. Until then you can still change the name and reminders, or add a
+          reviewer, under Terms.
         </p>
       )}
       <div className="row2">
@@ -368,31 +372,42 @@ function History({ pact }: { pact: Pact }) {
   return <HeatMap pact={pact} now={now} />;
 }
 
-function Terms({ pact, onSaved }: { pact: Pact; onSaved: () => void }) {
+/**
+ * The pact's terms. Once the edit window has closed, Change on the name and
+ * the reminders and Add on the reviewers: changes that apply at once.
+ */
+function Terms({ pact, onSaved, onInvite }: { pact: Pact; onSaved: () => void; onInvite: () => void }) {
   const now = useNow();
-  const [changing, setChanging] = useState(false);
+  const [changing, setChanging] = useState<"name" | "reviewers" | "reminders" | null>(null);
+  const close = useCallback(() => setChanging(null), []);
+  const saved = () => {
+    setChanging(null);
+    onSaved();
+  };
   // In the edit window, Edit covers them.
   const changeable = pact.stage === "active" && minutesLeft(pact.editWindowClosesAt, now) === null;
   return (
     <section className="card">
       <h3>Terms</h3>
-      <TermsList terms={pact} onChangeReminders={changeable ? () => setChanging(true) : undefined} />
-      {changing && (
-        <RemindersSheet
-          pact={pact}
-          onClose={() => setChanging(false)}
-          onSaved={() => {
-            setChanging(false);
-            onSaved();
-          }}
-        />
-      )}
+      <TermsList
+        terms={pact}
+        name={pact.name}
+        onRename={changeable ? () => setChanging("name") : undefined}
+        onAddReviewer={changeable ? () => setChanging("reviewers") : undefined}
+        onChangeReminders={changeable ? () => setChanging("reminders") : undefined}
+      />
+      {changing === "name" && <NameSheet pact={pact} onClose={close} onSaved={saved} />}
+      {changing === "reviewers" && <AddReviewerSheet pact={pact} onClose={close} onSaved={saved} onInvite={onInvite} />}
+      {changing === "reminders" && <RemindersSheet pact={pact} onClose={close} onSaved={saved} />}
     </section>
   );
 }
 
-/** The pact's terms as they stand, with `reminders` instead of its own: a change that applies at once. */
-function withReminders(pact: Pact, reminders: string[]): PactChange {
+/** The pact's terms as they stand, with `change` in place of its own: a change that applies at once. */
+function changedAtOnce(
+  pact: Pact,
+  change: Partial<Pick<PactChange, "name" | "reviewerIds" | "reminders">>,
+): PactChange {
   return {
     name: pact.name,
     description: pact.description,
@@ -404,8 +419,143 @@ function withReminders(pact: Pact, reminders: string[]): PactChange {
     penaltyCents: pact.penaltyCents,
     recipientId: pact.recipient.id,
     reviewerIds: pact.reviewers.map((r) => r.id),
-    reminders,
+    reminders: pact.reminders,
+    ...change,
   };
+}
+
+/** The create form's words for a refusal it shares, or null for the sheet's own. */
+function problemText(reason: string): string | null {
+  return reason in PROBLEMS ? PROBLEMS[reason as keyof typeof PROBLEMS] : null;
+}
+
+function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(pact.name);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await api.changePact(pact.id, changedAtOnce(pact, { name: name.trim() }));
+      if (result.ok || result.reason === "nothing-changed") return onSaved();
+      setError(problemText(result.reason) ?? "Couldn't save it. Reopen the pact and try again.");
+    } catch (cause) {
+      setError(`Couldn't save it. ${failureText(cause, "Check your connection and try again.")}`);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Sheet title="Name" closeLabel="Cancel" onClose={onClose}>
+      <label className="field">
+        <span>Name</span>
+        <input
+          className="inp"
+          value={name}
+          placeholder={pact.inBedBy === null ? "e.g. Gym" : "e.g. In bed by midnight"}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <small>Shown on Today. A new name applies at once, with no approval.</small>
+      </label>
+      {error && <p className="error">{error}</p>}
+      <button className="btn primary block" disabled={saving} onClick={() => void save()}>
+        Save name
+      </button>
+    </Sheet>
+  );
+}
+
+/**
+ * Add a reviewer: the owner's friends who don't review the pact yet. Adding
+ * applies at once; removing one is a change request, so it's left to
+ * Request change.
+ */
+function AddReviewerSheet({
+  pact,
+  onClose,
+  onSaved,
+  onInvite,
+}: {
+  pact: Pact;
+  onClose: () => void;
+  onSaved: () => void;
+  onInvite: () => void;
+}) {
+  const [friends, setFriends] = useState<Friend[] | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadFriends = useCallback(() => api.friends().then(setFriends, () => setFriends([])), []);
+  useEffect(() => void loadFriends(), [loadFriends]);
+
+  const current = pact.reviewers.map((r) => r.id);
+  const others = friends?.filter((f) => !current.includes(f.id)) ?? null;
+  const reviewerNames = pact.reviewers.map((r) => r.name);
+  const pickedNames = (others ?? []).filter((f) => picked.includes(f.id)).map((f) => f.name);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await api.changePact(pact.id, changedAtOnce(pact, { reviewerIds: [...current, ...picked] }));
+      if (result.ok) return onSaved();
+      setError(problemText(result.reason) ?? "Couldn't add them. Reopen the pact and try again.");
+    } catch (cause) {
+      setError(`Couldn't add them. ${failureText(cause, "Check your connection and try again.")}`);
+    }
+    setSaving(false);
+  };
+
+  let body: ReactNode = null;
+  if (others !== null && others.length === 0) {
+    body = (
+      <>
+        <p className="muted">
+          {listNames(reviewerNames)} already {reviewerNames.length === 1 ? "reviews" : "review"} {pact.name}. Only
+          friends can review your pacts. Invite another, and they show up here once they accept.
+        </p>
+        <div className="row2">
+          <button className="btn primary" onClick={onInvite}>
+            Invite a friend
+          </button>
+          <button className="btn" onClick={() => void loadFriends()}>
+            Check again
+          </button>
+        </div>
+      </>
+    );
+  } else if (others !== null) {
+    const hint = changeWaiting(pact)
+      ? "Applies at once, with no approval, and they're told. They can decide the change waiting too."
+      : "Applies at once, with no approval, and they're told.";
+    body = (
+      <>
+        <div className="stack step-in-sheet">
+          <ReviewersStep
+            friends={others}
+            reviewerIds={picked}
+            onReviewerIds={setPicked}
+            kind={pact.evidenceKind}
+            hint={hint}
+            onInvite={onInvite}
+            onCheckAgain={() => void loadFriends()}
+          />
+        </div>
+        {error && <p className="error">{error}</p>}
+        <button className="btn primary block" disabled={saving || picked.length === 0} onClick={() => void save()}>
+          {picked.length === 0 ? "Add reviewer" : `Add ${listNames(pickedNames)}`}
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <Sheet title="Add a reviewer" closeLabel="Cancel" onClose={onClose}>
+      {body}
+    </Sheet>
+  );
 }
 
 function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void; onSaved: () => void }) {
@@ -428,7 +578,7 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
     setSaving(true);
     setError(null);
     try {
-      const result = await api.changePact(pact.id, withReminders(pact, reminders));
+      const result = await api.changePact(pact.id, changedAtOnce(pact, { reminders }));
       if (result.ok || result.reason === "nothing-changed") return onSaved();
       setError(
         result.reason in REMINDER_PROBLEMS
@@ -457,6 +607,9 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
 /** A pact's terms as a list. The create form's Check step shows the same list before the pact exists. */
 export function TermsList({
   terms,
+  name,
+  onRename,
+  onAddReviewer,
   onChangeReminders,
 }: {
   terms: Pick<
@@ -473,12 +626,27 @@ export function TermsList({
   > & {
     reviewers: { name: string }[];
   };
+  /** The pact's name, as a row of its own: on the pact page, where it can change. */
+  name?: string;
+  /** Offers Change on the name, when it can change on its own. */
+  onRename?: () => void;
+  /** Offers Add on the reviewers, when one can be added on its own. */
+  onAddReviewer?: () => void;
   /** Offers Change on the reminders, when they can change on their own. */
   onChangeReminders?: () => void;
 }) {
   const { recipient, reviewers } = terms;
   return (
     <dl className="kv">
+      {name !== undefined && (
+        <>
+          <dt>Name</dt>
+          <dd>
+            {name}
+            <RowAction label="Change" ariaLabel="Change name" onClick={onRename} />
+          </dd>
+        </>
+      )}
       <dt>Evidence</dt>
       <dd>{terms.evidenceKind === "camera" ? "Camera photo, checked by a reviewer" : "Oura Ring"}</dd>
       {terms.inBedBy !== null && (
@@ -512,19 +680,28 @@ export function TermsList({
       <dt>Recipient</dt>
       <dd>{recipient.name}</dd>
       <dt>{reviewers.length === 1 ? "Reviewer" : "Reviewers"}</dt>
-      <dd>{reviewers.map((r) => r.name).join(", ")}</dd>
+      <dd>
+        {reviewers.map((r) => r.name).join(", ")}
+        <RowAction label="Add" ariaLabel="Add a reviewer" onClick={onAddReviewer} />
+      </dd>
       <dt>Reminders</dt>
       <dd>
         {remindersText(terms.reminders)}
-        {onChangeReminders && (
-          <>
-            {" "}
-            <button className="link" onClick={onChangeReminders}>
-              Change
-            </button>
-          </>
-        )}
+        <RowAction label="Change" ariaLabel="Change reminders" onClick={onChangeReminders} />
       </dd>
     </dl>
+  );
+}
+
+/** A term row's own Change or Add, after its value; nothing without `onClick`. */
+function RowAction({ label, ariaLabel, onClick }: { label: string; ariaLabel: string; onClick?: () => void }) {
+  if (!onClick) return null;
+  return (
+    <>
+      {" "}
+      <button className="link" aria-label={ariaLabel} onClick={onClick}>
+        {label}
+      </button>
+    </>
   );
 }

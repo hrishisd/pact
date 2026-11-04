@@ -303,6 +303,7 @@ function Shell({
             onRequestChange={() => nav.push({ kind: "change-pact", id: page.id })}
             onOpenExcuse={openExcuse}
             onOpenChangeRequest={openChangeRequest}
+            onInvite={() => setProfileOpen(true)}
           />
         )}
         {page?.kind === "change-pact" && (

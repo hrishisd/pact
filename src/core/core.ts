@@ -1644,15 +1644,14 @@ class Core implements PactCore {
             paidCents: allocation.get(row.id)?.paidCents ?? 0,
             ...(rejection && { rejection }),
             held,
-            bill: held
-              ? null
-              : bill
-                ? { kind: "on-bill", billedOn: bill.billedOn, dueAt: bill.dueAt }
-                : {
-                    kind: "next-bill",
-                    // Every owner with a penalty has a timezone: making a pact needs it.
-                    billedOn: nextBillDay(new Date(row.added_at), this.#clock.now(), timezone!),
-                  },
+            bill: bill
+              ? { kind: "on-bill", billedOn: bill.billedOn, dueAt: bill.dueAt }
+              : {
+                  // A rejected excuse releases it to the next bill it can make, as if it had never been held.
+                  kind: held ? "if-excuse-rejected" : "next-bill",
+                  // Every owner with a penalty has a timezone: making a pact needs it.
+                  billedOn: nextBillDay(new Date(row.added_at), this.#clock.now(), timezone!),
+                },
           };
         });
         // A payment recorded the instant a penalty was added came after it, so it's listed first.

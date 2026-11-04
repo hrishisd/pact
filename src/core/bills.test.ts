@@ -81,6 +81,27 @@ describe("Wednesday bills", () => {
     expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $5 to Sam", "New bill: $5 to Sam"]);
   });
 
+  test("a held penalty says which bill it goes on if its excuse is rejected, and moves on while the excuse waits", async () => {
+    const s = scenario();
+    const { owner, gym, sam } = await missedWeek(s);
+    // Friday's miss, judged Sat 00:00, can be excused until Mon 00:00.
+    s.setClockTo("Sun 10:00");
+    const filed = await owner.fileExcuse(gym, { from: "2026-01-09", to: "2026-01-09", reason: "Sick" }, []);
+    if (!filed.ok) throw new Error(filed.reason);
+    const fridayBill = () => {
+      const ledger = owner.ledger(sam.id);
+      if (!ledger.ok) throw new Error(ledger.reason);
+      const friday = ledger.ledger.history.find((e) => e.kind === "penalty" && e.occurrenceDate === "2026-01-09");
+      return friday?.kind === "penalty" ? friday.bill : undefined;
+    };
+
+    expect(fridayBill()).toEqual({ kind: "if-excuse-rejected", billedOn: "2026-01-14" });
+
+    // Still waiting when Wednesday's bill is made, so it would go on the next one.
+    await s.advanceTo("Wed+1 18:00");
+    expect(fridayBill()).toEqual({ kind: "if-excuse-rejected", billedOn: "2026-01-21" });
+  });
+
   test("a held penalty released by a rejected excuse goes on the next bill; the earlier bill doesn't change", async () => {
     const s = scenario();
     const { owner, reviewer, gym, sam } = await missedWeek(s);
