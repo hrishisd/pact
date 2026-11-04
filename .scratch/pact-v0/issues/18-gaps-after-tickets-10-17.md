@@ -1,6 +1,6 @@
 # 18 Gaps left after tickets 08 and 10–17
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Things the shipped tickets left out or got slightly wrong, collected from the build notes and the 2026-11-04 code review. Each item is small. Triage may split them into tickets or close them.
@@ -47,3 +47,5 @@ Moved out:
 - 2026-11-04: **Overdue spells: built.** A notice older than the oldest past-due bill not yet paid by approved payments doesn't count, so a new spell reminds the owner and tells the reviewers at once. A payment awaiting approval only pauses a spell (listed under Decisions to confirm). Tests: `bills.test.ts`.
 - 2026-11-04: **Sunday-night bill test: added.** A Sunday night Missed at Mon 18:00 is on Wednesday's bill; a night judged exactly at Wed 18:00 goes on the next one. Both tests passed at once and were seen failing with the cutoff made exclusive.
 - 2026-11-04: **Ticket 15 and 16 scenarios seen failing.** 85 mutations over `one-time.test.ts` and `due-by-and-dates.test.ts`. Three scenarios passed under a mutation that should break them (the To do sort by due time, evidence moving with an approved later deadline, a Closed card before the tick); each is tightened and now fails. No code bug. Untested and left alone: a change that keeps the deadline in its last hour, and an end date approved after it passed.
+- 2026-11-04: **Screens: built.** The pact page's Terms has Change on Name and Add on Reviewer, each a sheet that saves at once and works while a change request waits (removing a reviewer stays in Request change). A held penalty reads "Held while an excuse waits for approval · Goes on the Wed Nov 18 bill if the excuse is rejected": the bill a rejection now would put it on. The human approved both from screenshots.
+- 2026-11-04: Done. What's left needs a person or a ring and is in `manual-checks.md` (the Oura clock and refresh-token checks, the new sheets on a phone, the schema version after deploy).
