@@ -61,11 +61,11 @@ export function formatDueAt(instant: string, timeZone: string): string {
   return `${formatDay(instant, timeZone)} at ${clock.replace(":00", "")}`;
 }
 
-/** Time left as "16h 19m", or "3d 4h" from 48 hours up. Never negative. */
+/** Time left as "16h 19m", or "1d 21h" from 24 hours up. Never negative. */
 export function timeLeft(ms: number): string {
   const minutes = Math.floor(Math.max(0, ms) / 60_000);
   const hours = Math.floor(minutes / 60);
-  if (hours >= 48) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
   return `${hours}h ${minutes % 60}m`;
 }
 

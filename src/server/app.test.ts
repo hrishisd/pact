@@ -336,6 +336,7 @@ describe("sign-in", () => {
       name: "owner",
       timezone: null,
       connections: [],
+      ouraAvailable: true,
     } satisfies MeResponse);
 
     const set = await s.setTimezone(cookie, "America/Los_Angeles");
@@ -517,7 +518,10 @@ describe("dev sign-in", () => {
     expect(response.headers.get("Location")).toBe("/");
     expect(s.authRows()).toEqual({ user: 1, account: 0, session: 1 });
     const me = await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(response) });
-    expect(me).toEqual({ status: 200, body: { email: OPERATOR, name: "owner", timezone: null, connections: [] } });
+    expect(me).toEqual({
+      status: 200,
+      body: { email: OPERATOR, name: "owner", timezone: null, connections: [], ouraAvailable: true },
+    });
   });
 
   test("in production the route doesn't exist: it answers as any unknown API route, and signs no one in", async () => {
@@ -2356,6 +2360,18 @@ describe("connecting Oura", () => {
     expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
   });
 
+  test("the profile says whether Oura is set up, so the form can disable its tile", async () => {
+    const set = await server();
+    const unset = await server({ production: true, ouraSetUp: false });
+    const meOf = async (s: Awaited<ReturnType<typeof server>>) => {
+      const { cookie } = await operatorWithInvite(s);
+      return (await s.api<MeResponse>(API_PATHS.me, { cookie })).body;
+    };
+
+    expect((await meOf(set)).ouraAvailable).toBe(true);
+    expect((await meOf(unset)).ouraAvailable).toBe(false);
+  });
+
   test("with Oura not set up, connecting returns to the form as unavailable and connects nothing", async () => {
     const s = await server({ production: true, ouraSetUp: false });
     const { cookie } = await operatorWithInvite(s);
@@ -2435,7 +2451,7 @@ describe("connecting Oura", () => {
     const response = await s.api<DisconnectOuraResponse>(API_PATHS.ouraDisconnect, { cookie, method: "POST" });
 
     expect(response.status).toBe(200);
-    expect(response.body.connections).toEqual([]);
+    expect(response.body).toMatchObject({ connections: [], ouraAvailable: true });
     expect(s.ouraForgets).toEqual([accountId]);
     const today = await s.api<TodayResponse>(API_PATHS.today, { cookie });
     expect(today.body.alerts).toEqual([{ kind: "oura-connection", status: "not-connected" }]);

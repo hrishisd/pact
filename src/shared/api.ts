@@ -415,8 +415,11 @@ export interface RemovePushSubscriptionRequest {
   endpoint: string;
 }
 
-/** GET /api/me: the signed-in account's profile. */
-export type MeResponse = Json<Profile>;
+/**
+ * GET /api/me: the signed-in account's profile, and whether this server has
+ * Oura set up. Without it, Create pact can't offer Oura Ring.
+ */
+export type MeResponse = Json<Profile> & { ouraAvailable: boolean };
 
 /**
  * POST /api/me/timezone. Answers 200 with the core's result whether the zone

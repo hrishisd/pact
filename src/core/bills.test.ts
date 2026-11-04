@@ -323,6 +323,21 @@ describe("Overdue", () => {
     expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", overdueCents: 500 }]);
   });
 
+  test("the alert names the reviewers only once the core has told them", async () => {
+    const s = scenario();
+    const { owner } = await missedWeek(s);
+    await s.advanceTo("Wed+2 17:59");
+    // Past the due time, before the scheduler's next tick has told anyone.
+    s.setClockTo("Wed+2 18:00");
+    expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", overdueCents: 1500, reviewerNames: [] }]);
+
+    await s.advanceTo("Wed+2 18:00");
+    expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", reviewerNames: ["reviewer", "second"] }]);
+    // Still named between the weekly notices.
+    await s.advanceTo("Sat+2 18:00");
+    expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", reviewerNames: ["reviewer", "second"] }]);
+  });
+
   test("reviewers are told when the owner first goes overdue, not again for six days, and again on day seven", async () => {
     const s = scenario();
     const { reviewer, second } = await missedWeek(s);
@@ -360,9 +375,14 @@ describe("Overdue", () => {
     await s.advanceTo("Tue+3 21:00");
     expect(owner.today().alerts).toEqual([]);
 
-    // Wednesday+2's bill falls due 21 hours later: a new spell, told at once.
+    // Wednesday+2's bill falls due 21 hours later: a new spell. Until the core tells them, the alert names nobody.
+    await s.advanceTo("Wed+3 17:59");
+    s.setClockTo("Wed+3 18:00");
+    expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", billedOn: "2026-01-21", reviewerNames: [] }]);
     await s.advanceTo("Wed+3 18:00");
-    expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", overdueCents: 1500, billedOn: "2026-01-21" }]);
+    expect(owner.today().alerts).toMatchObject([
+      { kind: "bill-overdue", overdueCents: 1500, billedOn: "2026-01-21", reviewerNames: ["reviewer", "second"] },
+    ]);
     expect(reminders()).toHaveLength(7);
     expect(told(reviewer)).toHaveLength(2);
     expect(told(second)).toHaveLength(2);

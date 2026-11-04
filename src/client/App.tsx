@@ -323,6 +323,7 @@ function Shell({
         {page?.kind === "create" && (
           <CreatePact
             ouraConnected={profile.connections.some((connection) => connection.service === "oura")}
+            ouraAvailable={profile.ouraAvailable}
             onCancel={nav.back}
             onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
             onInvite={() => setProfileOpen(true)}

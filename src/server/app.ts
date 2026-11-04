@@ -161,6 +161,12 @@ export function createApp({
 }: AppOptions) {
   const app = new Hono<Env>();
 
+  /** The account's profile, as GET /api/me and Oura's disconnect answer with it. */
+  const me = (accountId: AccountId): MeResponse => ({
+    ...json(core.as(accountId).profile()),
+    ouraAvailable: oura !== null,
+  });
+
   /**
    * One line per photo upload (evidence, or a payment's screenshot), to see
    * sizes and speeds in the server log. Nothing from the request's URL goes
@@ -376,12 +382,12 @@ export function createApp({
     const accountId = c.get("accountId");
     await core.as(accountId).disconnectOura();
     oura?.forget(accountId);
-    const body: DisconnectOuraResponse = json(core.as(accountId).profile());
+    const body: DisconnectOuraResponse = me(accountId);
     return c.json(body);
   });
 
   app.get(API_PATHS.me, (c) => {
-    const body: MeResponse = json(core.as(c.get("accountId")).profile());
+    const body: MeResponse = me(c.get("accountId"));
     return c.json(body);
   });
 

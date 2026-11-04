@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from "vitest";
-import { clockText, formatDueAt, inBedByName, parseCents } from "./format.ts";
+import { clockText, formatDueAt, inBedByName, parseCents, timeLeft } from "./format.ts";
 
 describe("parseCents", () => {
   it.each([
@@ -41,5 +41,18 @@ describe("formatDueAt", () => {
     ["2026-01-21T05:00:00.000Z", "Pacific/Auckland", "Wed Jan 21 at 6pm"],
   ])("%s in %s reads %s", (instant, timeZone, text) => {
     expect(formatDueAt(instant, timeZone)).toBe(text);
+  });
+});
+
+describe("timeLeft", () => {
+  const HOUR = 3_600_000;
+  test.each([
+    [45 * HOUR + 20 * 60_000, "1d 21h"],
+    [24 * HOUR, "1d 0h"],
+    [24 * HOUR - 60_000, "23h 59m"],
+    [5 * HOUR, "5h 0m"],
+    [-1, "0h 0m"],
+  ])("%d ms reads %s", (ms, text) => {
+    expect(timeLeft(ms)).toBe(text);
   });
 });

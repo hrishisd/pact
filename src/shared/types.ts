@@ -725,7 +725,10 @@ export type TodayAlert =
       /** The oldest overdue bill: the Wednesday it was made, "YYYY-MM-DD", and when it was due. */
       billedOn: string;
       dueAt: Date;
-      /** Who has been told: the reviewers of the owner's pacts with this recipient. */
+      /**
+       * Who has been told: the reviewers of the owner's pacts with this
+       * recipient, once the core has told them in this Overdue spell. Empty until then.
+       */
       reviewerNames: string[];
     };
 export type TodaySection =

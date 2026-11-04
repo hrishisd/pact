@@ -249,6 +249,7 @@ export function EditPact({
 export function CreatePact({
   editing,
   ouraConnected,
+  ouraAvailable = true,
   onCancel,
   onCreated,
   onInvite,
@@ -256,6 +257,8 @@ export function CreatePact({
   editing?: Pact;
   /** Whether the account has an Oura connection: without one, Oura Ring adds the Connect step. */
   ouraConnected: boolean;
+  /** Whether this server has Oura set up: without it, the Oura Ring tile can't be picked. Editing never shows the tile. */
+  ouraAvailable?: boolean;
   onCancel: () => void;
   /** After creating the pact, or saving the edit. */
   onCreated: (pactId: string, name: string) => void;
@@ -356,6 +359,7 @@ export function CreatePact({
     case "kind":
       body = (
         <KindStep
+          ouraAvailable={ouraAvailable}
           onPick={(kind) => {
             update({ kind });
             goTo(1);
@@ -474,7 +478,7 @@ export function CreatePact({
 
 // ---------- steps ----------
 
-function KindStep({ onPick }: { onPick: (kind: EvidenceKind) => void }) {
+function KindStep({ ouraAvailable, onPick }: { ouraAvailable: boolean; onPick: (kind: EvidenceKind) => void }) {
   return (
     <>
       <h2>How will you prove it?</h2>
@@ -486,12 +490,13 @@ function KindStep({ onPick }: { onPick: (kind: EvidenceKind) => void }) {
           <b>Camera</b>
           <small>Take a photo each time. Your reviewer checks it.</small>
         </button>
-        <button className="kind-tile" onClick={() => onPick("oura")}>
+        <button className="kind-tile" disabled={!ouraAvailable} onClick={() => onPick("oura")}>
           <span className="tico">
             <RingIcon />
           </span>
           <b>Oura Ring</b>
           <small>Your ring reports when you got into bed. Nothing to submit.</small>
+          {!ouraAvailable && <span className="chip c-soon">Oura isn't set up yet</span>}
         </button>
       </div>
       <small className="muted">You can't change this later.</small>

@@ -18,3 +18,11 @@ Split out of ticket 18 at triage on 2026-11-04. Each item changes what the owner
 - [ ] The overdue alert never claims reviewers were told before they were (a scenario covers the core side).
 
 ## Comments
+
+### 2026-11-04: settled with a prototype
+
+Prototype: `.scratch/pact-v0/prototype/ticket-19.prototype.html` on the branch `prototype/ticket-19`. The human picked:
+
+- **Countdown.** Every Today countdown switches to days from 24 hours up ("1d 21h"), not from 48. Under a day it stays "5h 20m".
+- **Oura tile.** `GET /api/me` (and the other responses that return the profile) carries `ouraAvailable`. When it's false the tile is disabled, greyed, and a chip at its foot reads "Oura isn't set up yet".
+- **Overdue alert.** The alert names the reviewers only once the core has told them in the current Overdue spell. Before that, the line is left out. ("Will be told" was rejected: a reviewer with overdue notifications switched off never is.)

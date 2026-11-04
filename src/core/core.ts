@@ -2117,21 +2117,11 @@ class Core implements PactCore {
     for (const { owner_account_id: ownerId, recipient_id: recipientId, owner_name: ownerName } of ledgers) {
       const overdue = overdueOf(this.#billsOf(ownerId, recipientId), t);
       if (overdue.cents === 0) continue;
-      const notice = this.#db
-        .prepare(
-          `SELECT owner_reminded_at, reviewers_told_at FROM overdue_notice
-           WHERE owner_account_id = ? AND recipient_id = ?`,
-        )
-        .get(ownerId, recipientId) as
-        { owner_reminded_at: string | null; reviewers_told_at: string | null } | undefined;
-      // A notice from an earlier spell, before the bills now unpaid fell due, doesn't count.
-      const since = (at: string | null | undefined) =>
-        at === null || at === undefined || new Date(at).getTime() < overdue.spellStartedAt!.getTime()
-          ? Infinity
-          : t.getTime() - new Date(at).getTime();
+      const notice = this.#overdueNotice(ownerId, recipientId, overdue.spellStartedAt!);
+      const since = (at: Date | null) => (at === null ? Infinity : t.getTime() - at.getTime());
       const recipientName = this.#recipientName(recipientId);
-      const remind = since(notice?.owner_reminded_at) >= OVERDUE_REMINDER_MS;
-      const tell = since(notice?.reviewers_told_at) >= OVERDUE_REVIEWER_NOTICE_MS;
+      const remind = since(notice.ownerRemindedAt) >= OVERDUE_REMINDER_MS;
+      const tell = since(notice.reviewersToldAt) >= OVERDUE_REVIEWER_NOTICE_MS;
       if (remind) {
         this.#enqueue({
           recipient: ownerId,
@@ -2171,11 +2161,33 @@ class Core implements PactCore {
           .run(
             ownerId,
             recipientId,
-            remind ? t.toISOString() : (notice?.owner_reminded_at ?? null),
-            tell ? t.toISOString() : (notice?.reviewers_told_at ?? null),
+            remind ? t.toISOString() : (notice.ownerRemindedAt?.toISOString() ?? null),
+            tell ? t.toISOString() : (notice.reviewersToldAt?.toISOString() ?? null),
           );
       }
     }
+  }
+
+  /**
+   * When the owner was last reminded about a ledger's overdue bills, and when
+   * its reviewers were last told, in the Overdue spell that started at
+   * `spellStartedAt`. A notice from an earlier spell, before the bills now
+   * unpaid fell due, doesn't count: null.
+   */
+  #overdueNotice(
+    ownerId: AccountId,
+    recipientId: string,
+    spellStartedAt: Date,
+  ): { ownerRemindedAt: Date | null; reviewersToldAt: Date | null } {
+    const row = this.#db
+      .prepare(
+        `SELECT owner_reminded_at, reviewers_told_at FROM overdue_notice
+         WHERE owner_account_id = ? AND recipient_id = ?`,
+      )
+      .get(ownerId, recipientId) as { owner_reminded_at: string | null; reviewers_told_at: string | null } | undefined;
+    const inSpell = (at: string | null | undefined) =>
+      at === null || at === undefined || new Date(at).getTime() < spellStartedAt.getTime() ? null : new Date(at);
+    return { ownerRemindedAt: inSpell(row?.owner_reminded_at), reviewersToldAt: inSpell(row?.reviewers_told_at) };
   }
 
   #timezoneOf(accountId: AccountId): string {
@@ -2208,9 +2220,13 @@ class Core implements PactCore {
           overdueCents: overdue.cents,
           billedOn: overdue.billedOn!,
           dueAt: overdue.dueAt!,
-          reviewerNames: this.#paymentReviewers(ownerId, recipientId)
-            .map((id) => this.#accountName(id))
-            .sort(),
+          // Named only once the core has told them in this spell: until the scheduler's next tick, nobody has been.
+          reviewerNames:
+            this.#overdueNotice(ownerId, recipientId, overdue.spellStartedAt!).reviewersToldAt === null
+              ? []
+              : this.#paymentReviewers(ownerId, recipientId)
+                  .map((id) => this.#accountName(id))
+                  .sort(),
         });
       }
       const due = bills.filter((bill) => bill.dueAt.getTime() > now.getTime() && bill.uncoveredCents > 0);
