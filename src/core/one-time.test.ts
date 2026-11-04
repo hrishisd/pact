@@ -380,9 +380,10 @@ describe("Today", () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
-    const gym = await createPact("Gym", MON_WED_FRI);
+    // Named to come after Taxes, so only the sort by due time puts it first.
+    const walk = await createPact("Walk", MON_WED_FRI);
 
-    expect(sectionCards(owner, "to-do").map((card) => ("pactId" in card ? card.pactId : null))).toEqual([gym, taxes]);
+    expect(sectionCards(owner, "to-do").map((card) => ("pactId" in card ? card.pactId : null))).toEqual([walk, taxes]);
     expect(sectionCards(owner, "to-do")[1]).toMatchObject({ occurrenceDate: THURSDAY, dueAt: s.at("Fri 00:00") });
   });
 });
@@ -486,10 +487,11 @@ describe("changing a One-time pact", () => {
     expect(effect({ dueBy: "17:00" })).toEqual(["due-by: stricter"]);
   });
 
-  test("an approved later deadline applies to the open occurrence", async () => {
+  test("an approved later deadline applies to the open occurrence, and the evidence already submitted counts for it", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const forms = await createPact("Forms", oneTime(THURSDAY, true));
     await s.advanceTo("Tue 10:00");
     const filed = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
     if (!filed.ok || filed.changeRequestId === null) throw new Error("not sent");
@@ -501,6 +503,13 @@ describe("changing a One-time pact", () => {
     expect(s.notifier.sentTo(owner).find((n) => n.kind === "change-request-decided")?.payload.body).toBe(
       "Taxes · New terms start Sat Jan 10",
     );
+    const evidenceId = await submit(owner, forms);
+    const moved = await owner.changePact(forms, changed(owner, forms, { schedule: oneTime(SATURDAY, true) }));
+    if (!moved.ok || moved.changeRequestId === null) throw new Error("not sent");
+    await reviewer.decide(moved.changeRequestId, { kind: "approve" });
+    expect(owner.today().waiting).toEqual([
+      expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: SATURDAY }),
+    ]);
     await s.advanceTo("Fri 10:00");
 
     expect(pactOf(owner, taxes)).toMatchObject({
@@ -515,6 +524,8 @@ describe("changing a One-time pact", () => {
       date: SATURDAY,
       occurrence: { status: { kind: "missed", penaltyCents: 500 } },
     });
+    await reviewer.decide(evidenceId, { kind: "approve" });
+    expect(occurrenceOf(owner, forms)).toMatchObject({ date: SATURDAY, occurrence: { status: { kind: "kept" } } });
   });
 
   test("an earlier deadline under an hour away is refused; one further off applies at once", async () => {
