@@ -44,6 +44,7 @@ Oura is off in production until its secrets are set. Connecting shows "Oura isn'
 Choices made while building where the spec was open. Each is written up in the ticket's Comments or Notes; ticket 18 lists the known gaps.
 
 - Bills (10): one status line on Ledgers in priority order; held penalties show no bill.
+- Overdue spells (18): a spell ends only when approved payments have paid every bill past due. The next spell reminds the owner and tells the reviewers at once. A payment awaiting approval only pauses a spell; if it's rejected, the spell resumes, and the reviewers aren't told again within the week.
 - Change requests (11): earlier terms are kept per occurrence; ending a pact needs approval; when a pact Ends, a waiting change request is withdrawn without a notification.
 - Questions (12): asking notifies only the owner; questions and replies share one "Comment" setting.
 - Reminders (13): a time of day, at most 5 per pact; Camera reminders skip a day with evidence, bedtime reminders always fire; a reminder more than 15 minutes late after downtime is dropped.
