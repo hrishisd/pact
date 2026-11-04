@@ -436,6 +436,8 @@ describe("one change request at a time", () => {
     expect(await owner.requestEnd(gym)).toEqual({ ok: false, reason: "change-request-waiting" });
     expect(await change(owner, gym, { name: "Gym, any gym" })).toMatchObject({ outcome: { kind: "at-once" } });
     await change(owner, gym, { reviewerIds: [...termsOf(owner, gym).reviewerIds, third.id] });
+    // The new reviewer can decide the change already waiting.
+    expect(third.reviewQueue()).toEqual([expect.objectContaining({ kind: "change-request", id })]);
     expect(pactOf(owner, gym).waiting).toEqual([
       {
         kind: "change-request",
