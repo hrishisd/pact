@@ -57,3 +57,5 @@ Make the gap between waking up and Oura syncing visible and cheap to fix, and ha
 **Left as is:** the File excuse sheet opened from the card labels the night "Not judged yet" (its existing day chip), not "No Oura data" as the spec's Occurrence labels say. The pact page's heat map already says "No Oura data".
 
 - 2026-11-04: Built on branch claude/unblocked-tickets-prototypes-361pre. Pending human review and a real-ring check together with ticket 08, so Status stays ready-for-agent. Core scenarios are in src/core/oura-no-data.test.ts.
+
+- 2026-11-04: The real-ring and Open Oura link checks are in `.scratch/pact-v0/manual-checks.md` (Oura Ring section).

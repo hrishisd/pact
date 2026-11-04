@@ -3,11 +3,11 @@
 Status: ready-for-human
 Blocked by: 03
 
-**Not finished: needs checking with a real ring.** The code is built and tested on `claude/admiring-franklin-7zbf41` (not merged), but it hasn't been tried against real Oura data. To finish:
-- [ ] Set the Fly secrets `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and `OURA_TOKEN_KEY` (`openssl rand -base64 32`). Production refuses to deploy without them, so merge only once they're set.
+**Not finished: needs checking with a real ring.** Merged and deployed with Oura switched off; it hasn't been tried against real Oura data. The steps to finish are in `.scratch/pact-v0/manual-checks.md` (Oura Ring section). Original list:
+- [ ] Set the Fly secrets `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and `OURA_TOKEN_KEY` (`openssl rand -base64 32`). Production now starts without them, with Oura off.
 - [ ] Add `https://pact.hrishisd.com/api/oura/callback` as a redirect address in the Oura app.
 - [ ] Connect a real ring and record a `sleep` response. Answer the open questions under Comments (UTC offset, short `long_sleep`, `end_date`, Oura's URLs), and seed the fake from it.
-- [ ] Decide whether a failing Oura call should stop the whole tick (as now) or skip only that account's nights.
+- [x] Decide whether a failing Oura call should stop the whole tick or skip only that account's nights. Decided in the 2026-11-04 review: it skips only that account, for that tick.
 
 Spec stories: 10, 12, 13, 14 (Oura), 35, 36 (on arrival and at 6pm), 39, 40, 93. Rules: Judging bedtime pacts, Oura polling, Oura calls stay out of the way.
 
@@ -82,5 +82,5 @@ The No Oura data card, check-now, the 3pm push and disconnection handling (09). 
 
 **Decided while building:**
 - An approved excuse beats a late bedtime, and an on-time bedtime beats an excuse, as approved photos do for Camera pacts.
-- A failed Oura call fails the whole tick, so nothing is half-applied, and the next tick retries.
+- A failed Oura call fails the whole tick, so nothing is half-applied, and the next tick retries. (Changed 2026-11-04: a failure now affects only that account's nights for that tick.)
 - Connecting needs `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and `OURA_TOKEN_KEY` in production. Development without them connects at once and reads sleep from `oura-sleep.json` next to the database.

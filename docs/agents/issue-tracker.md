@@ -10,6 +10,10 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
+## Manual checks
+
+Checks an agent can't do (a signed-in `flyctl`, a real Oura Ring, a phone, real push notifications) go in `.scratch/<feature-slug>/manual-checks.md` as a checklist, not only in a ticket's Comments. When work leaves something for the human to try by hand, add it there and link it from the ticket.
+
 ## Closing a ticket
 
 - A finished ticket gets `Status: done` once every acceptance criterion is checked and the work is on `main`
