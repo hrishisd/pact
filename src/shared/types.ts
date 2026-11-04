@@ -986,9 +986,13 @@ export interface LedgerPenalty {
   held: boolean;
   /**
    * The bill it's on, or the Wednesday bill it goes on once it can't be
-   * excused (dates "YYYY-MM-DD"). Null while it's held.
+   * excused (dates "YYYY-MM-DD"). While it's held, the bill it would go on
+   * if the excuse were rejected now: a later one the longer the excuse waits.
    */
-  bill: { kind: "on-bill"; billedOn: string; dueAt: Date } | { kind: "next-bill"; billedOn: string } | null;
+  bill:
+    | { kind: "on-bill"; billedOn: string; dueAt: Date }
+    | { kind: "next-bill"; billedOn: string }
+    | { kind: "if-excuse-rejected"; billedOn: string };
 }
 
 /** A payment to the recipient the owner recorded, and where its review stands. */

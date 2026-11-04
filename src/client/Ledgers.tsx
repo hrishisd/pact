@@ -128,6 +128,18 @@ export function LedgerPage({
   );
 }
 
+/** The bill a penalty is on or goes on; held, that an excuse holds it and the bill it goes on if that's rejected. */
+function billText(bill: Json<LedgerPenalty>["bill"]): string {
+  switch (bill.kind) {
+    case "on-bill":
+      return `On the ${formatDate(bill.billedOn)} bill`;
+    case "next-bill":
+      return `Goes on the ${formatDate(bill.billedOn)} bill`;
+    case "if-excuse-rejected":
+      return `Held while an excuse waits for approval · Goes on the ${formatDate(bill.billedOn)} bill if the excuse is rejected`;
+  }
+}
+
 /**
  * A penalty in the history: its pact, the day Missed, the bill it's on or
  * goes on, how much payments have paid (or that an excuse holds it, so it
@@ -150,11 +162,8 @@ function PenaltyRow({
           {penalty.week
             ? `Week of ${formatDate(penalty.occurrenceDate)}, ${penalty.week.sessions} of ${penalty.week.target}`
             : `Missed ${formatDate(penalty.occurrenceDate)}`}
-          {penalty.bill?.kind === "on-bill" && ` · On the ${formatDate(penalty.bill.billedOn)} bill`}
-          {penalty.bill?.kind === "next-bill" && ` · Goes on the ${formatDate(penalty.bill.billedOn)} bill`}
-          {penalty.held ? (
-            " · Held while an excuse waits for approval"
-          ) : penalty.paidCents === penalty.amountCents ? (
+          {` · ${billText(penalty.bill)}`}
+          {penalty.held ? null : penalty.paidCents === penalty.amountCents ? (
             <span className="paid"> · Paid</span>
           ) : (
             penalty.paidCents > 0 && ` · ${money(penalty.paidCents)} of ${money(penalty.amountCents)} paid`
