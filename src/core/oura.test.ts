@@ -344,8 +344,12 @@ describe("sleep periods", () => {
       timeoutMs: 20,
       fetch: (async (input: string | URL | Request, init?: RequestInit) => {
         if (new URL(String(input)).pathname === "/oauth/token") {
-          await new Promise((resolve) => setTimeout(resolve, 60));
-          if (init?.signal?.aborted) throw init.signal.reason;
+          // Answer once three sleep timeouts have passed, unless the token request's own timeout fires first.
+          const outlasted = AbortSignal.timeout(60);
+          await new Promise<void>((resolve, reject) => {
+            outlasted.addEventListener("abort", () => resolve());
+            init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+          });
         }
         return oura.fetch(input, init);
       }) as typeof fetch,
