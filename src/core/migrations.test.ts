@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { systemClock } from "./adapters.ts";
+import { systemClock } from "./adapters.ts"; // conventions-ok: brackets SQLite's 'now', which no Clock reaches
 import { localDateOf } from "./calendar.ts";
 import { createPactCore, type PactCore } from "./core.ts";
 import { openDatabase } from "./db.ts";
@@ -43,9 +43,9 @@ function coreAt(start: Date): { core: PactCore; clock: FakeClock; notifier: Reco
 
 /** Runs the remaining migrations, returning the real time read just before and just after. */
 function migrateRest(): { db: ReturnType<typeof openDatabase>; before: Date; after: Date } {
-  const before = systemClock.now();
+  const before = systemClock.now(); // conventions-ok: see the import
   const db = openDatabase(path);
-  const after = systemClock.now();
+  const after = systemClock.now(); // conventions-ok: see the import
   return { db, before, after };
 }
 
@@ -79,7 +79,9 @@ test("migration 5: a pact made before judging existed gets no penalty for any oc
   expect(judged_through >= localDateOf(before, "UTC") && judged_through <= localDateOf(after, "UTC")).toBe(true);
 
   // As if it ran on Wed 2026-01-07 (10:00 in New York), and the release with judging booted then.
+  // Migration 20 stamped the billing cursor with the real time too; it moves to the same moment.
   db.prepare("UPDATE pact SET judged_through = '2026-01-07' WHERE id = 'gym'").run();
+  db.prepare("UPDATE account SET billed_through = '2026-01-07T15:00:00.000Z' WHERE id = 'owner'").run();
   db.close();
   const { core, clock } = coreAt(new Date("2026-01-07T15:00:00Z"));
   const owner = core.as("owner");
@@ -122,6 +124,10 @@ test("migration 19: evidence from before Weekly count counts for its own day", a
   `);
   before.close();
 
+  // Migration 20 stamps the billing cursor with the real time; as if it ran when this core boots.
+  const migrated = openDatabase(path);
+  migrated.prepare("UPDATE account SET billed_through = '2026-01-07T15:00:00.000Z'").run();
+  migrated.close();
   const { core } = coreAt(new Date("2026-01-07T15:00:00Z"));
 
   expect(core.as("owner").today().waiting).toEqual([

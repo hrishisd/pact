@@ -82,6 +82,10 @@ export function scenario(): Scenario {
   const ouraSource = new FakeOuraSource();
   const photoStore = new InMemoryPhotoStore(clock);
   const logs: string[] = [];
+  // UUID-shaped ids in creation order, so a tie broken by id breaks the same way
+  // every run. Shared across restart(), as the database is.
+  let idCount = 0;
+  const newId = () => `00000000-0000-4000-8000-${(++idCount).toString(16).padStart(12, "0")}`;
 
   const build = () =>
     createPactCore({
@@ -92,6 +96,7 @@ export function scenario(): Scenario {
       photoStore,
       operatorEmail: emailFor(OPERATOR),
       log: (line) => logs.push(line),
+      newId,
     });
   let core = build();
 

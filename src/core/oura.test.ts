@@ -400,7 +400,8 @@ describe("sleep periods", () => {
           init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)),
         )) as typeof fetch,
     });
-    await expect(hanging.sleepPeriods(owner.id, RANGE)).rejects.toThrow();
+    // The timeout itself, not some other failure on the way.
+    await expect(hanging.sleepPeriods(owner.id, RANGE)).rejects.toMatchObject({ name: "TimeoutError" });
     hanging.close();
     adapter.close();
   });

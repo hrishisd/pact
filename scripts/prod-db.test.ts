@@ -7,9 +7,13 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { openDatabase, type Db } from "../src/core/db.ts";
 import { migrations } from "../src/core/migrations.ts";
+
+// Each test starts bash and node (about 1 s alone, 2 s or more on a loaded
+// machine), so the 5 s default would fail a busy CI runner, not a bug.
+vi.setConfig({ testTimeout: 30_000 });
 
 const REPO_ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(REPO_ROOT, "scripts", "prod-db.sh");
@@ -17,7 +21,9 @@ const SCRIPT = join(REPO_ROOT, "scripts", "prod-db.sh");
 const FAKE_FLY = `#!/bin/sh
 [ "$1 $2 $3 $4 $5" = "ssh console -a pact-hrishisd -C" ] || { echo "unexpected fly arguments: $*" >&2; exit 99; }
 printf '%s' "$6" > "$FAKE_FLY_DIR/command"
-exec sh -c "$(printf '%s' "$6" | sed -e "s#cd /app #cd $REPO_ROOT #" -e "s#/data/pact.db#$PACT_DB#")"
+# The paths go in as quoted variables the inner sh expands, so a space or a
+# sed metacharacter in the checkout or temp path can't change the command.
+exec sh -c "$(printf '%s' "$6" | sed -e 's#cd /app #cd "$REPO_ROOT" #' -e 's#/data/pact.db#"$PACT_DB"#')"
 `;
 
 let dir: string;
@@ -113,6 +119,7 @@ test.each(["schema-version", "penalty-totals", "pact-cursors"])(
       const result = spawnSync(process.execPath, ["-", path], {
         cwd: REPO_ROOT,
         encoding: "utf8",
+        env: { PATH: dirname(process.execPath) },
         input: `${program}\n${write}\n`,
       });
       expect(result.status).not.toBe(0);
@@ -131,6 +138,8 @@ test("a missing database fails, and isn't created", () => {
   const result = prodDb("schema-version");
 
   expect(result.status).not.toBe(0);
+  // Failing for this reason, not because the fake fly or cd broke first.
+  expect(result.stderr).toContain("SQLITE_CANTOPEN");
   expect(existsSync(path)).toBe(false);
   db = openDatabase(path); // for afterEach
 });

@@ -97,6 +97,7 @@ export class InMemoryPhotoStore implements PhotoStore {
   /** Every photo id it has handed out, in order. */
   readonly photoIds: string[] = [];
   #nextId = 1;
+  #held: Promise<void> = Promise.resolve();
 
   constructor(clock: Clock) {
     this.#clock = clock;
@@ -104,9 +105,18 @@ export class InMemoryPhotoStore implements PhotoStore {
 
   async store(photo: Photo): Promise<StoredPhoto> {
     const photoId = `photo-${this.#nextId++}`;
+    const receivedAt = this.#clock.now();
+    await this.#held;
     this.photoIds.push(photoId);
     this.#photos.set(photoId, { bytes: photo.bytes.slice(), contentType: photo.contentType });
-    return { photoId, receivedAt: this.#clock.now() };
+    return { photoId, receivedAt };
+  }
+
+  /** Uploads received from now on don't finish until the returned function is called. */
+  hold(): () => void {
+    let release = () => {};
+    this.#held = new Promise((resolve) => (release = resolve));
+    return release;
   }
 
   async fetch(photoId: string): Promise<Photo | null> {

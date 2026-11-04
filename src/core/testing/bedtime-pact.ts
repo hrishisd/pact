@@ -44,7 +44,6 @@ export function bedtimePact(
 }
 
 const REFERENCE_DATES = { Mon: 5, Tue: 6, Wed: 7, Thu: 8, Fri: 9, Sat: 10, Sun: 11 } as const;
-let nextId = 1;
 
 /**
  * A sleep period as Oura reports it, starting at `start` and lasting 7 hours.
@@ -58,7 +57,8 @@ export function sleep(start: string, type: OuraSleepPeriod["type"] = "long_sleep
   const endWall = new Date(startWall.getTime() + 7 * 60 * 60 * 1000);
   const bedtimeEnd = endWall.toISOString().slice(0, 19) + offset;
   return {
-    id: `sleep-${nextId++}`,
+    // From the period itself, so it doesn't depend on which tests ran first.
+    id: `sleep-${type}-${bedtimeStart}`,
     // Oura puts a period on the day it ends: a night's sleep on the morning after.
     day: bedtimeEnd.slice(0, 10),
     bedtime_start: bedtimeStart,

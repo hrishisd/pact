@@ -166,6 +166,11 @@ export interface PactCoreOptions {
   operatorEmail: string;
   /** Where the core writes log lines (including OPERATOR_ALERT). Default: console.log. */
   log?: (line: string) => void;
+  /**
+   * Makes the id of each new row: unique, URL-safe. Default: randomUUID. Ties on
+   * a timestamp fall back to id order, so tests pass ids that rise in creation order.
+   */
+  newId?: () => string;
 }
 
 export interface PactCore {
@@ -532,6 +537,7 @@ class Core implements PactCore {
   readonly #ouraSource: OuraSource;
   readonly #operatorEmailKey: string;
   readonly #log: (line: string) => void;
+  readonly #newId: () => string;
   /** Outbox deliveries run one at a time, in this chain. */
   #delivery: Promise<void> = Promise.resolve();
   /**
@@ -549,6 +555,7 @@ class Core implements PactCore {
     this.#ouraSource = options.ouraSource;
     this.#operatorEmailKey = emailKey(options.operatorEmail);
     this.#log = options.log ?? ((line) => console.log(line));
+    this.#newId = options.newId ?? randomUUID;
   }
 
   /**
@@ -659,7 +666,7 @@ class Core implements PactCore {
       const invited = invite !== undefined && this.#inviteLookup(invite, null).ok;
       if (!isOperator && !invited) return { ok: false, reason: "invite-required" };
 
-      const id = randomUUID();
+      const id = this.#newId();
       this.#db
         .prepare(
           `INSERT INTO account (id, email, email_key, name, is_operator, created_at)
@@ -784,7 +791,7 @@ class Core implements PactCore {
           account();
           const name = recipient.name.trim();
           if (name === "") return { ok: false, reason: "blank-name" };
-          const id = randomUUID();
+          const id = this.#newId();
           this.#db
             .prepare(`INSERT INTO recipient (id, owner_account_id, name, created_at) VALUES (?, ?, ?, ?)`)
             .run(id, accountId, name, this.#clock.now().toISOString());
@@ -801,7 +808,7 @@ class Core implements PactCore {
           const checked = this.#checkedPact(accountId, timezone, pact, now);
           if (!checked.ok) return checked;
 
-          const id = randomUUID();
+          const id = this.#newId();
           this.#db
             .prepare(
               `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, in_bed_by,
@@ -1169,7 +1176,7 @@ class Core implements PactCore {
           this.#db
             .prepare(`INSERT INTO occurrence (pact_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
             .run(pactId, occurrence.date);
-          const evidenceId = randomUUID();
+          const evidenceId = this.#newId();
           this.#db
             .prepare(`INSERT INTO evidence (id, pact_id, occurrence_date, day, submitted_at) VALUES (?, ?, ?, ?, ?)`)
             .run(evidenceId, pactId, occurrence.date, day, submittedAt.toISOString());
@@ -1263,7 +1270,7 @@ class Core implements PactCore {
           const filedAt = this.#clock.now();
           const checked = acceptance(filedAt);
           if (!checked.ok) return checked;
-          const excuseId = randomUUID();
+          const excuseId = this.#newId();
           this.#db
             .prepare(`INSERT INTO excuse (id, pact_id, reason, filed_at) VALUES (?, ?, ?, ?)`)
             .run(excuseId, pactId, reason, filedAt.toISOString());
@@ -1380,7 +1387,7 @@ class Core implements PactCore {
           const acceptance = this.#paymentAcceptance(accountId, payment);
           if (!acceptance.ok) return acceptance;
           const note = payment.note?.trim() ?? "";
-          const paymentId = randomUUID();
+          const paymentId = this.#newId();
           this.#db
             .prepare(
               `INSERT INTO payment (id, owner_account_id, recipient_id, amount_cents, note, photo_id, recorded_at)
@@ -2032,7 +2039,10 @@ class Core implements PactCore {
    */
   #makeBills(t: Date): void {
     const accounts = this.#db
-      .prepare(`SELECT id, timezone, created_at, billed_through FROM account WHERE timezone IS NOT NULL`)
+      .prepare(
+        `SELECT id, timezone, created_at, billed_through FROM account WHERE timezone IS NOT NULL
+                ORDER BY created_at, id`,
+      )
       .all() as { id: AccountId; timezone: string; created_at: string; billed_through: string | null }[];
     for (const account of accounts) {
       const from = new Date(account.billed_through ?? account.created_at);
@@ -2057,7 +2067,7 @@ class Core implements PactCore {
       )
       .all(ownerId, excusableAfter) as { recipient_id: string }[];
     for (const { recipient_id: recipientId } of recipients) {
-      const billId = randomUUID();
+      const billId = this.#newId();
       this.#db
         .prepare(
           `INSERT INTO bill (id, owner_account_id, recipient_id, billed_on, created_at, due_at)
@@ -2954,7 +2964,7 @@ class Core implements PactCore {
   #friendsSortedByName(ids: AccountId[]): Friend[] {
     return ids
       .map((id) => ({ id, name: this.#accountName(id) }))
-      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+      .sort((a, b) => a.name.localeCompare(b.name, "en-US") || a.id.localeCompare(b.id, "en-US"));
   }
 
   /** The id of the pact's change request waiting for a decision, or null. */
@@ -3293,7 +3303,7 @@ class Core implements PactCore {
     after: ChangeableTerms | null,
     note: string | undefined,
   ): string {
-    const id = randomUUID();
+    const id = this.#newId();
     const trimmed = note?.trim() ?? "";
     this.#db
       .prepare(
@@ -3560,7 +3570,9 @@ class Core implements PactCore {
       return { ok: false, reason: "invalid-reminders" };
     }
     // In the order they go off: a night's run from 18:00 to the morning after.
-    reminders.sort((a, b) => (oura ? nightOrder(a).localeCompare(nightOrder(b)) : a.localeCompare(b)));
+    reminders.sort((a, b) =>
+      oura ? nightOrder(a).localeCompare(nightOrder(b), "en-US") : a.localeCompare(b, "en-US"),
+    );
     const name = pact.name.trim();
     // An Oura Ring pact has no photo to describe.
     const description = oura ? "" : pact.description.trim();
@@ -4147,7 +4159,7 @@ class Core implements PactCore {
     toDo.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
     automatic.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
     noOuraData.sort((a, b) => a.closesAt.getTime() - b.closesAt.getTime());
-    comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn));
+    comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn, "en-US"));
     const sections: TodaySection[] = [];
     if (noOuraData.length > 0) sections.push({ kind: "no-oura-data", cards: noOuraData });
     if (toDo.length > 0) sections.push({ kind: "to-do", cards: toDo });
@@ -4470,7 +4482,8 @@ class Core implements PactCore {
         `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
                 pact.owner_account_id, account.timezone
          FROM pact JOIN account ON account.id = pact.owner_account_id
-         WHERE pact.stage = 'active'`,
+         WHERE pact.stage = 'active'
+         ORDER BY pact.created_at, pact.id`,
       )
       .all() as (Pick<PactRow, "id" | "name" | "evidence_kind" | "schedule" | "reminders" | "reminded_through"> & {
       owner_account_id: AccountId;
@@ -4617,7 +4630,8 @@ class Core implements PactCore {
     const rows = this.#db
       .prepare(
         `SELECT pact.id, pact.end_date, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
-         WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL`,
+         WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL
+         ORDER BY pact.created_at, pact.id`,
       )
       .all() as { id: string; end_date: LocalDate; timezone: string | null }[];
     for (const { id, end_date: endDate, timezone } of rows) {
@@ -4765,7 +4779,7 @@ class Core implements PactCore {
       const inBedBy = this.#termsOn(pact.id, night.date).in_bed_by!;
       const period = (sleep.get(pact.owner_account_id) ?? [])
         .filter((p) => p.type === "long_sleep" && nightOf(p.bedtime_start) === night.date)
-        .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start)))[0];
+        .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start), "en-US"))[0];
       const excuse = this.#excuseOn(pact.id, night.date);
       const kept = period !== undefined && wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
       // As for a photo: an on-time bedtime beats an approved excuse, and an approved excuse beats a late one.
@@ -4799,7 +4813,8 @@ class Core implements PactCore {
       .prepare(
         `SELECT ${PACT_TO_JUDGE_COLUMNS}
          FROM pact JOIN account ON account.id = pact.owner_account_id
-         WHERE (? IS NULL AND pact.stage = 'active') OR pact.id = ?`,
+         WHERE (? IS NULL AND pact.stage = 'active') OR pact.id = ?
+         ORDER BY pact.created_at, pact.id`,
       )
       .all(pactId ?? null, pactId ?? null) as PactToJudge[];
   }
@@ -4811,7 +4826,8 @@ class Core implements PactCore {
         `SELECT ${PACT_TO_JUDGE_COLUMNS}
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.stage = 'ended' AND pact.evidence_kind = 'oura' AND pact.ended_at IS NOT NULL
-           AND (pact.judged_through IS NULL OR pact.judged_through < date(pact.ended_at, '+1 day'))`,
+           AND (pact.judged_through IS NULL OR pact.judged_through < date(pact.ended_at, '+1 day'))
+         ORDER BY pact.created_at, pact.id`,
       )
       .all() as PactToJudge[];
   }
@@ -4937,7 +4953,7 @@ class Core implements PactCore {
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
-          randomUUID(),
+          this.#newId(),
           pact.owner_account_id,
           pact.recipient_id,
           pactId,
