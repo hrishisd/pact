@@ -156,6 +156,9 @@ describe("a due-by time", () => {
       },
     ]);
 
+    // Past it, it's no longer To do, even before the scheduler's tick judges it.
+    s.setClockTo("Mon 21:00");
+    expect(owner.today().sections).toEqual([]);
     await s.advanceTo("Mon 21:00");
     expect(owner.today().sections).toEqual([
       {
