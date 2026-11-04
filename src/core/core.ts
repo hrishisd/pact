@@ -2217,6 +2217,7 @@ class Core implements PactCore {
       const overdue = overdueOf(bills, now);
       if (overdue.cents > 0) {
         // Named only once the core has told them in this spell: until the scheduler's next tick, nobody has been.
+        // A reviewer with overdue notifications off is never told, so never named.
         const told = this.#overdueNotice(ownerId, recipientId, overdue.spellStartedAt!).reviewersToldAt !== null;
         alerts.push({
           kind: "bill-overdue",
@@ -2227,6 +2228,7 @@ class Core implements PactCore {
           dueAt: overdue.dueAt!,
           reviewerNames: told
             ? this.#paymentReviewers(ownerId, recipientId)
+                .filter((id) => !this.#settingIsOff(id, "overdue-bill"))
                 .map((id) => this.#accountName(id))
                 .sort()
             : [],

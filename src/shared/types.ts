@@ -727,7 +727,8 @@ export type TodayAlert =
       dueAt: Date;
       /**
        * Who has been told: the reviewers of the owner's pacts with this
-       * recipient, once the core has told them in this Overdue spell. Empty until then.
+       * recipient, once the core has told them in this Overdue spell. Empty until then;
+       * a reviewer with overdue notifications off is never told, so never listed.
        */
       reviewerNames: string[];
     };

@@ -338,6 +338,14 @@ describe("Overdue", () => {
     expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", reviewerNames: ["reviewer", "second"] }]);
   });
 
+  test("a reviewer with overdue notifications off isn't named: the core never tells them", async () => {
+    const s = scenario();
+    const { owner, second } = await missedWeek(s);
+    await second.setNotificationSetting("overdue-bill", false);
+    await s.advanceTo("Wed+2 18:00");
+    expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", reviewerNames: ["reviewer"] }]);
+  });
+
   test("reviewers are told when the owner first goes overdue, not again for six days, and again on day seven", async () => {
     const s = scenario();
     const { reviewer, second } = await missedWeek(s);

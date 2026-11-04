@@ -1,6 +1,6 @@
 # 19 Small copy and screen fixes left from ticket 18
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Split out of ticket 18 at triage on 2026-11-04. Each item changes what the owner sees, so ask the human whether to prototype first (`docs/agents/prototype-first.md`) before building.
@@ -13,9 +13,9 @@ Split out of ticket 18 at triage on 2026-11-04. Each item changes what the owner
 
 ## Acceptance criteria
 
-- [ ] A bill due in 45 hours reads "1d 21h"; one due in 5 hours still reads in hours and minutes.
-- [ ] With Oura not configured, the Oura Ring tile can't be picked and says why (`app.test.ts` covers the new field).
-- [ ] The overdue alert never claims reviewers were told before they were (a scenario covers the core side).
+- [x] A bill due in 45 hours reads "1d 21h"; one due in 5 hours still reads in hours and minutes.
+- [x] With Oura not configured, the Oura Ring tile can't be picked and says why (`app.test.ts` covers the new field).
+- [x] The overdue alert never claims reviewers were told before they were (a scenario covers the core side).
 
 ## Comments
 
@@ -26,3 +26,11 @@ Prototype: `.scratch/pact-v0/prototype/ticket-19.prototype.html` on the branch `
 - **Countdown.** Every Today countdown switches to days from 24 hours up ("1d 21h"), not from 48. Under a day it stays "5h 20m".
 - **Oura tile.** `GET /api/me` (and the other responses that return the profile) carries `ouraAvailable`. When it's false the tile is disabled, greyed, and a chip at its foot reads "Oura isn't set up yet".
 - **Overdue alert.** The alert names the reviewers only once the core has told them in the current Overdue spell. Before that, the line is left out. ("Will be told" was rejected: a reviewer with overdue notifications switched off never is.)
+
+### 2026-11-04: built
+
+On `main` (pushed as `claude/ticket-19`). Notes from review:
+
+- The excuse window's "File excuse · 31h left" keeps whole hours, as the spec writes it (`hoursLeft`). Only `timeLeft` countdowns switch to days.
+- A reviewer with overdue notifications off isn't named in the alert, since the core never tells them.
+- Not handled: a reviewer added to a pact with this recipient after the last notice is named before their first push (the next weekly notice). Fixing it would mean recording each reviewer's notice; the human judged this not worth it.
