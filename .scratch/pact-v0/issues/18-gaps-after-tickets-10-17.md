@@ -1,0 +1,29 @@
+# 18 Gaps left after tickets 08 and 10–17
+
+Status: needs-triage
+Blocked by: none
+
+Things the shipped tickets left out or got slightly wrong, collected from the build notes and the 2026-11-04 code review. Each item is small. Triage may split them into tickets or close them.
+
+## Behavior that misses the spec
+
+- **No rename or add-reviewer while a change request waits.** The core allows both, but the pact page hides Request change while one waits (ticket 11). Reminders have their own Change button (ticket 13); the name and reviewers don't. Code: `src/client/PactPage.tsx`.
+- **Held penalties show no bill marker.** Spec story 80 says held penalties are marked with their bill too. They show only "Held while an excuse waits for approval" (ticket 10). Code: `src/client/Ledgers.tsx` `PenaltyRow`, `LedgerPenalty.bill` in `src/shared/types.ts`.
+- **Oura nights use the account's timezone.** The spec says bedtime pacts use the timezone in Oura's timestamps. The night window and its 18:00 Missed cutoff use the account's timezone; only the kept/late comparison uses Oura's clock. Code: `src/core/occurrences.ts` (~321), `src/core/core.ts` bedtime judging.
+
+## Rough edges
+
+- **Ledgers status line.** One line in priority order (overdue, then bill due, then awaiting approval). The prototype joined several with " · ". Code: `src/client/Ledgers.tsx` `StatusLine`.
+- **Bill card countdown.** Reads "45h 20m" for a bill due in two days; "1d 21h" would read better. Code: `src/client/Today.tsx`.
+- **Oura option in Create pact when Oura isn't set up.** It isn't disabled; the owner learns only after tapping Connect ("Oura isn't set up yet"). Needs the server to tell the client whether Oura is configured. Code: `src/client/CreatePact.tsx`, `src/server/app.ts`.
+- **Overdue alert wording.** "X and Y have been told" shows before the first reviewer push has gone out. Code: `src/client/Today.tsx` `OverdueAlert`.
+- **Overdue reminder timestamps carry across spells.** If an owner clears an overdue bill and goes overdue again within 24 hours, the new spell gets no immediate owner reminder. Code: `src/core/core.ts` `#remindOverdue`, `overdue_notice`.
+
+## Robustness
+
+- **Oura refresh-token loss.** If Oura accepts a refresh but the response is lost (timeout, 5xx after the grant), the new token pair is never stored and the single-use refresh token is dead; the account reads as disconnected until the owner reconnects. A connect during an in-flight refresh can also be overwritten. Code: `src/core/oura.ts` (~198–219).
+
+## Tests
+
+- No dedicated test for a Sunday-night bedtime penalty landing on Wednesday's bill (judged Mon 18:00, window closes exactly Wed 18:00). Code: `src/core/bills.test.ts`.
+- Some scenarios in tickets 15 and 16 were written after the code and never seen failing.

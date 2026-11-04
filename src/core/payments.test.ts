@@ -297,6 +297,53 @@ describe("deciding a payment", () => {
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500, paidCents: 1000 })]);
   });
 
+  test("after an approved change of recipient, the pact's reviewers still decide payments to the old one and hear when it's overdue", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    await s.advanceTo("Tue 12:00"); // Monday Missed: $5 to Sam
+    const redCross = await owner.addRecipient({ name: "Red Cross" });
+    if (!redCross.ok) throw new Error(redCross.reason);
+    const current = owner.pact(gym);
+    if (!current.ok) throw new Error(current.reason);
+    const { pact } = current;
+    const changed = await owner.changePact(gym, {
+      name: pact.name,
+      description: pact.description,
+      schedule: pact.schedule,
+      penaltyCents: pact.penaltyCents,
+      recipientId: redCross.recipient.id,
+      reviewerIds: [reviewer.id],
+    });
+    if (!changed.ok || changed.changeRequestId === null) throw new Error(JSON.stringify(changed));
+    await reviewer.decide(changed.changeRequestId, { kind: "approve" });
+
+    // Unpaid, the $5 to Sam is billed Wed+1 and overdue Wed+2.
+    await s.advanceTo("Wed+2 18:00");
+    const aboutSam = s.notifier
+      .sentTo(reviewer)
+      .filter((n) => n.kind === "overdue-bill" && n.payload.recipientId === sam.id);
+    expect(aboutSam.map((n) => n.payload)).toEqual([
+      expect.objectContaining({ title: "owner is overdue", body: "$5 to Sam, due Wed Jan 21" }),
+    ]);
+    expect(
+      owner.today().alerts.filter((alert) => alert.kind === "bill-overdue" && alert.recipientId === sam.id),
+    ).toEqual([expect.objectContaining({ overdueCents: 500, reviewerNames: ["reviewer"] })]);
+
+    const paymentId = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
+    expect(
+      s.notifier
+        .sentTo(reviewer)
+        .filter((n) => n.kind === "review-item")
+        .at(-1),
+    ).toMatchObject({
+      payload: { itemKind: "payment", itemId: paymentId },
+    });
+    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "payment", id: paymentId })]);
+    expect(await reviewer.decide(paymentId, { kind: "approve" })).toEqual({ ok: true });
+    expect(owner.ledger(sam.id)).toMatchObject({ ok: true, ledger: { summary: { owedCents: 0, paidCents: 500 } } });
+  });
+
   test("a friend who reviews no pact with the recipient can't decide it", async () => {
     const s = scenario();
     const { owner, createPact, paymentId } = await tenRecorded(s);

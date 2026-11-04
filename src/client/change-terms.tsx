@@ -58,8 +58,8 @@ export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">)
       ];
 }
 
-/** A term's value in the pact as it stands. */
-export function currentValue(term: Term, current: Current): string {
+/** A term's value in the pact as it stands. Reminders aren't terms: the pact's own page shows them. */
+export function currentValue(term: Exclude<Term, "reminders">, current: Current): string {
   switch (term) {
     case "name":
       return current.name;
@@ -81,8 +81,6 @@ export function currentValue(term: Term, current: Current): string {
       return current.recipient.name;
     case "reviewers":
       return names(current.reviewers);
-    case "reminders":
-      return remindersText(current.reminders);
   }
 }
 
@@ -184,7 +182,9 @@ export function DiffList({ changes }: { changes: Change[] }) {
 /** The terms a change request leaves alone, folded away. Reminders are the owner's own, so reviewers don't see them. */
 export function EverythingElse({ request }: { request: Json<ChangeRequestView> }) {
   const changed = new Set(request.changes.map((change) => change.term));
-  const rest = termsOfKind(request.current).filter((term) => !changed.has(term) && term !== "reminders");
+  const rest = termsOfKind(request.current).filter(
+    (term): term is Exclude<Term, "reminders"> => !changed.has(term) && term !== "reminders",
+  );
   return (
     <details className="folded">
       <summary className="small">Everything else stays</summary>

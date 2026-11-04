@@ -20,6 +20,15 @@ function night(owner: AccountHandle, pactId: string, date: string) {
   return preview.preview.covered[0]!.status.kind;
 }
 
+/** The night of `date` as the pact's heat map shows it: judged or not, an approved excuse aside. */
+function judged(owner: AccountHandle, pactId: string, date: string) {
+  const result = owner.pact(pactId);
+  if (!result.ok) throw new Error(result.reason);
+  const { history } = result.pact;
+  if (history.kind !== "fixed-days") throw new Error(`a ${history.kind} heat map`);
+  return history.days.find((day) => day.date === date)?.occurrence?.status.kind;
+}
+
 function missedCards(owner: AccountHandle) {
   return owner.today().sections.find((section) => section.kind === "missed")?.cards ?? [];
 }
@@ -223,17 +232,58 @@ describe("judging a night", () => {
     expect(missedCards(owner)).toEqual([expect.objectContaining({ occurrenceDate: TUE, night: { inBedAt: "00:10" } })]);
   });
 
-  test("a night with an approved excuse is Excused at its in-bed-by time", async () => {
+  test("a night with an approved excuse and no sleep is Excused at 6pm the next day", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithOura(s);
     const pactId = await createPact("00:00");
+    s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
     s.setClockTo("Mon 10:00");
     const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Red-eye flight" }, []);
     if (!filed.ok) throw new Error(filed.reason);
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
     await s.advanceTo("Wed 00:00");
-    expect(night(owner, pactId, TUE)).toBe("excused");
+    await s.advanceTo("Wed 17:59");
+    expect(judged(owner, pactId, TUE)).toBe("not-judged");
+    await s.advanceTo("Wed 18:00");
+    expect(judged(owner, pactId, TUE)).toBe("excused");
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([]);
+  });
+
+  test("an on-time bedtime that syncs the morning after beats an approved excuse", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
+    s.setClockTo("Mon 10:00");
+    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Might be late" }, []);
+    if (!filed.ok) throw new Error(filed.reason);
+    await reviewer.decide(filed.excuseId, { kind: "approve" });
+
+    await s.advanceTo("Wed 00:00");
+    s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
+    await s.advanceTo("Wed 07:00");
+
+    expect(judged(owner, pactId, TUE)).toBe("kept");
+  });
+
+  test("an excuse approved after the in-bed-by time leaves the night for Oura until 6pm", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
+    s.setClockTo("Tue 10:00");
+    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Might be late" }, []);
+    if (!filed.ok) throw new Error(filed.reason);
+    await s.advanceTo("Wed 01:00");
+    await reviewer.decide(filed.excuseId, { kind: "approve" });
+    expect(judged(owner, pactId, TUE)).toBe("not-judged");
+
+    s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
+    await s.advanceTo("Wed 07:00");
+
+    expect(judged(owner, pactId, TUE)).toBe("kept");
   });
 
   test("an approved excuse beats a late bedtime Oura reports afterwards; an on-time one is still Kept", async () => {
@@ -300,7 +350,7 @@ describe("polling Oura", () => {
     expect(s.ouraSource.calls).toEqual([]);
   });
 
-  test("the Oura source failing on its third call during advance to T leaves nothing half-applied; the next tick finishes", async () => {
+  test("the Oura source failing on its third call during advance to T: that account has no data this tick, the rest is judged, and the next tick finishes", async () => {
     const s = scenario();
     const first = await ownerWithOura(s);
     const owners = [
@@ -316,12 +366,33 @@ describe("polling Oura", () => {
     s.setClockTo("Tue 07:00");
     failOnCall(s.ouraSource, "sleepPeriods", 3);
 
-    await expect(s.core.advanceTo(s.at("Tue 07:00"))).rejects.toThrow("injected failure");
-    owners.forEach(({ owner }, i) => expect(night(owner, pacts[i]!, MON)).toBe("not-judged"));
-    expect(s.core.lastTick()).toBeNull();
+    await s.core.advanceTo(s.at("Tue 07:00"));
+    expect(owners.map(({ owner }, i) => night(owner, pacts[i]!, MON)).sort()).toEqual(["kept", "kept", "not-judged"]);
+    expect(s.core.lastTick()).toEqual(s.at("Tue 07:00"));
+    expect(s.logs.filter((line) => line.includes("Oura"))).toEqual([
+      expect.stringMatching(/^Oura sleep for account .+ failed, no data this tick: Error: injected failure/),
+    ]);
 
     await s.advanceTo("Tue 07:01");
     owners.forEach(({ owner }, i) => expect(night(owner, pacts[i]!, MON)).toBe("kept"));
+  });
+
+  test("an account whose Oura fails on every call holds up nobody else's judging", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    await createPact("00:00");
+    const theirs = await ownerWithOura(s, reviewer);
+    const theirPact = await theirs.createPact("00:00");
+    s.ouraSource.addSleep(reviewer.id, sleep("Mon 23:00"));
+    const working = s.ouraSource.sleepPeriods.bind(s.ouraSource);
+    s.ouraSource.sleepPeriods = async (account, range) => {
+      if (account === owner.id) throw new Error("Oura sleep request failed: HTTP 503");
+      return working(account, range);
+    };
+
+    await s.advanceTo("Tue 07:00");
+
+    expect(night(reviewer, theirPact, MON)).toBe("kept");
   });
 });
 

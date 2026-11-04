@@ -555,7 +555,7 @@ describe("changing a One-time pact", () => {
     expect(pactOf(owner, dentist).schedule).toEqual(oneTime(FRIDAY));
   });
 
-  test("a change request decided after the occurrence was judged leaves the Ended pact as it was", async () => {
+  test("a change request still waiting when the occurrence is judged is withdrawn, and the Ended pact stays as it was", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
@@ -564,13 +564,34 @@ describe("changing a One-time pact", () => {
     if (!sent.ok || sent.changeRequestId === null) throw new Error("not sent");
     await s.advanceTo("Fri 00:00");
 
-    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({ ok: true });
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({
+      ok: false,
+      reason: "item-not-found",
+    });
+
+    expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(THURSDAY, true), waiting: [] });
+    expect(occurrenceOf(owner, taxes)).toMatchObject({ date: THURSDAY, occurrence: { status: { kind: "missed" } } });
+    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([]);
+  });
+
+  test("a later deadline approved after the old one passed, before the scheduler's tick, doesn't rescue it", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    await pastEditWindow(s);
+    const sent = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
+    if (!sent.ok || sent.changeRequestId === null) throw new Error("not sent");
+    s.setClockTo("Fri 00:00");
+
+    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({
+      ok: false,
+      reason: "item-not-found",
+    });
 
     expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(THURSDAY, true) });
     expect(occurrenceOf(owner, taxes)).toMatchObject({ date: THURSDAY, occurrence: { status: { kind: "missed" } } });
-    expect(s.notifier.sentTo(owner).find((n) => n.kind === "change-request-decided")?.payload.body).toBe(
-      "Taxes is Ended",
-    );
+    expect(owed(owner)).toBe(500);
   });
 
   test("its change request's push names the deadline", async () => {

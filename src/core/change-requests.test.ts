@@ -6,8 +6,8 @@
 
 import { describe, expect, test } from "vitest";
 import type { PactChange, Weekday } from "../shared/types.ts";
-import { bedtimePact } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers } from "./testing/camera-pact.ts";
+import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
+import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
 
@@ -486,6 +486,21 @@ describe("one change request at a time", () => {
     expect(pactOf(owner, gym).penaltyCents).toBe(200);
   });
 
+  test("reviewers don't see the owner's reminders on a change request", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { reminders: ["18:00"] });
+    await s.advanceTo("Tue 12:00");
+
+    await change(owner, gym, { penaltyCents: 200, reminders: ["18:00"] });
+    expect(pactOf(owner, gym).reminders).toEqual(["18:00"]);
+
+    const [item] = reviewer.reviewQueue();
+    expect(item).toMatchObject({ kind: "change-request", current: { penaltyCents: 500 } });
+    expect(JSON.stringify(item)).not.toContain("18:00");
+    expect(item).not.toHaveProperty("current.reminders");
+  });
+
   test("change requests come first in the Review Queue, then everything else oldest first", async () => {
     const s = scenario();
     const { owner, reviewer, gym } = await dailyGym(s);
@@ -613,6 +628,135 @@ describe("ending a pact", () => {
     expect(pactOf(owner, gym)).toMatchObject({ stage: "active", endedAt: null });
     await s.advanceTo("Fri 00:00");
     expect(penalties(owner).map((p) => p.date)).toEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY]);
+  });
+});
+
+describe("once a pact has Ended", () => {
+  test("after an approved end it takes no evidence, nor an excuse for its days after the end; a recent miss can still be excused", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await dailyGym(s);
+    const end = await owner.requestEnd(gym);
+    if (!end.ok) throw new Error(end.reason);
+    await reviewer.decide(end.changeRequestId, { kind: "approve" });
+    await s.advanceTo("Fri 12:00");
+
+    expect(await owner.submitEvidence(gym, [photo()])).toEqual({ ok: false, reason: "not-open" });
+    expect(await owner.fileExcuse(gym, { from: FRIDAY, to: SATURDAY, reason: "Away" }, [])).toEqual({
+      ok: false,
+      reason: "nothing-to-excuse",
+    });
+    // Wednesday, Missed at Thursday 00:00 before the end, is still inside its 48 hours.
+    expect(await owner.fileExcuse(gym, { from: WEDNESDAY, to: FRIDAY, reason: "Sick" }, [])).toMatchObject({
+      ok: true,
+    });
+    await s.advanceTo("Sun 12:00");
+    expect(penaltyDays(owner, "Gym")).toEqual([MONDAY, TUESDAY, WEDNESDAY]);
+  });
+
+  test("evidence waiting for the day open when the end was approved, rejected afterwards, adds no penalty", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await dailyGym(s);
+    const submitted = await owner.submitEvidence(gym, [photo()]);
+    if (!submitted.ok) throw new Error(submitted.reason);
+    const end = await owner.requestEnd(gym);
+    if (!end.ok) throw new Error(end.reason);
+    await reviewer.decide(end.changeRequestId, { kind: "approve" });
+    await s.advanceTo("Fri 12:00");
+
+    await reviewer.decide(submitted.evidenceId, { kind: "reject", reason: "Blurry" });
+
+    expect(penaltyDays(owner, "Gym")).toEqual([MONDAY, TUESDAY, WEDNESDAY]);
+  });
+
+  test("a change request still waiting when the end date passes is withdrawn: it leaves the queue and Today, and can't be decided", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { endDate: THURSDAY } });
+    await s.advanceTo("Tue 12:00");
+    const sent = await change(owner, gym, { penaltyCents: 100, endDate: THURSDAY });
+    await reviewer.askOwner(sent.changeRequestId!, "Why?");
+    expect(owner.today().alerts).toEqual([expect.objectContaining({ kind: "reviewer-question" })]);
+
+    await s.advanceTo("Sat 12:00");
+
+    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endDate: THURSDAY, penaltyCents: 500, waiting: [] });
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(reviewer.waitingOnReply()).toEqual([]);
+    expect(owner.today().alerts.filter((alert) => alert.kind === "reviewer-question")).toEqual([]);
+    expect(owner.changeRequest(sent.changeRequestId!)).toMatchObject({
+      ok: true,
+      changeRequest: { state: { kind: "withdrawn" } },
+    });
+    expect(await reviewer.decide(sent.changeRequestId!, { kind: "approve" })).toEqual({
+      ok: false,
+      reason: "item-not-found",
+    });
+    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endDate: THURSDAY, penaltyCents: 500 });
+    expect(await owner.submitEvidence(gym, [photo()])).toEqual({ ok: false, reason: "not-open" });
+  });
+
+  test("an end request still waiting when the end date passes is withdrawn, and the pact keeps the end it had", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { endDate: THURSDAY } });
+    await s.advanceTo("Tue 12:00");
+    const end = await owner.requestEnd(gym);
+    if (!end.ok) throw new Error(end.reason);
+    await s.advanceTo("Sat 12:00");
+    const { endedAt } = pactOf(owner, gym);
+
+    expect(await reviewer.decide(end.changeRequestId, { kind: "approve" })).toEqual({
+      ok: false,
+      reason: "item-not-found",
+    });
+    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endedAt });
+    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([]);
+  });
+
+  test("an end approved after midnight, before the scheduler's tick, still judges the day before", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await dailyGym(s);
+    const end = await owner.requestEnd(gym);
+    if (!end.ok) throw new Error(end.reason);
+    s.setClockTo("Fri 00:00");
+
+    await reviewer.decide(end.changeRequestId, { kind: "approve" });
+    await s.advanceTo("Sat 12:00");
+
+    expect(penaltyDays(owner, "Gym")).toEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY]);
+  });
+});
+
+describe("ending a bedtime pact", () => {
+  test("a night due before the end was approved is still judged when Oura reports it; later nights never are", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    const bed = await createPact("00:00");
+    await s.advanceTo("Tue 12:00"); // Monday night was due at midnight; Oura hasn't reported it.
+    const end = await owner.requestEnd(bed);
+    if (!end.ok) throw new Error(end.reason);
+    await reviewer.decide(end.changeRequestId, { kind: "approve" });
+
+    s.ouraSource.addSleep(owner.id, sleep("Tue 01:00"));
+    await s.advanceTo("Tue 12:01");
+    expect(penaltyDays(owner, "In bed by midnight")).toEqual([MONDAY]);
+    await s.advanceTo("Fri 12:00");
+    expect(penaltyDays(owner, "In bed by midnight")).toEqual([MONDAY]);
+  });
+
+  test("with no data, that night is Missed at 6pm the next day", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    const bed = await createPact("00:00");
+    await s.advanceTo("Tue 12:00");
+    const end = await owner.requestEnd(bed);
+    if (!end.ok) throw new Error(end.reason);
+    await reviewer.decide(end.changeRequestId, { kind: "approve" });
+
+    await s.advanceTo("Tue 17:59");
+    expect(penaltyDays(owner, "In bed by midnight")).toEqual([]);
+    await s.advanceTo("Tue 18:00");
+    expect(penaltyDays(owner, "In bed by midnight")).toEqual([MONDAY]);
   });
 });
 

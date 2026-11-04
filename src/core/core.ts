@@ -459,15 +459,25 @@ const REMINDER_LATE_MS = 15 * 60 * 1000;
 const EDIT_WINDOW_MS = 10 * 60 * 1000;
 /**
  * SQL: who reviews payments from `owner` to `recipient` (SQL expressions):
- * the reviewers of any of the owner's pacts with that recipient, with repeats.
+ * the reviewers of any of the owner's pacts with that recipient, now or in
+ * earlier terms, or with a penalty to it, with repeats. A pact whose
+ * recipient changed still answers for what it sent the old one.
  */
 function paymentReviewersSql(owner: string, recipient: string): string {
   return `SELECT pact_reviewer.reviewer_account_id FROM pact_reviewer
     JOIN pact ON pact.id = pact_reviewer.pact_id
-    WHERE pact.owner_account_id = ${owner} AND pact.recipient_id = ${recipient}`;
+    WHERE pact.owner_account_id = ${owner}
+      AND (pact.recipient_id = ${recipient}
+           OR EXISTS (SELECT 1 FROM pact_earlier_terms AS earlier
+                      WHERE earlier.pact_id = pact.id AND earlier.recipient_id = ${recipient})
+           OR EXISTS (SELECT 1 FROM penalty AS sent
+                      WHERE sent.pact_id = pact.id AND sent.recipient_id = ${recipient}))`;
 }
 /** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
 const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
+/** SQL: what judging reads of a `pact` row and its owner's `account` row (PactToJudge). */
+const PACT_TO_JUDGE_COLUMNS = `pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
+  pact.judged_through, pact.ended_at, account.timezone, pact.owner_account_id`;
 /** SQL: the `pact` row's schedule is Weekly count. */
 const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
 /**
@@ -1170,6 +1180,7 @@ class Core implements PactCore {
         ).date;
         const { overlapping } = this.#occurrencesOf(pactId, timezone);
         const recentDays = overlapping(earliest ?? today, today)
+          .filter((occurrence) => !this.#dueAfterEnd(pactId, occurrence))
           .map((occurrence) => this.#excuseDay(pactId, occurrence))
           .filter(({ status }) => this.#skipReason(status, now) === null)
           .toReversed();
@@ -1513,6 +1524,15 @@ class Core implements PactCore {
               this.#decidePayment(item.row, decided, accountId);
               break;
             case "change-request":
+              if (decided.outcome === "approved") {
+                // Judging catches up on the pact first, as the scheduler would have: a change never
+                // rescues an occurrence already due. Judging may End it, which withdraws the request.
+                const [pact] = this.#pactsToJudge(item.row.pact_id);
+                this.#judgePactDueBy(pact!, this.#clock.now());
+                if (this.#waitingChangeRequestId(item.row.pact_id) !== item.row.id) {
+                  return { ok: false, reason: "item-not-found" };
+                }
+              }
               if (decided.outcome === "approved" && !this.#approvableNow(item.row.id)) {
                 return { ok: false, reason: "deadline-too-soon" };
               }
@@ -1596,7 +1616,7 @@ class Core implements PactCore {
    * The review item `itemId`, if `reviewerId` may decide it (decided or not):
    * evidence or an excuse for a pact they review (evidence once the pact's
    * edit window has closed), a payment to a recipient of any of the owner's
-   * pacts they review, or a change request not withdrawn.
+   * pacts they review, or a change request not withdrawn, for an Active pact.
    */
   #itemToDecide(reviewerId: AccountId, itemId: string): ItemToDecide | undefined {
     const evidence = this.#db
@@ -1627,11 +1647,12 @@ class Core implements PactCore {
         ? undefined
         : (this.#db
             .prepare(
-              `SELECT change_request.id, change_request.decision, pact.owner_account_id FROM change_request
+              `SELECT change_request.id, change_request.pact_id, change_request.decision, pact.owner_account_id
+                 FROM change_request
                  JOIN pact ON pact.id = change_request.pact_id
                  JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
                                    AND pact_reviewer.reviewer_account_id = ?
-                 WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL`,
+                 WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL AND pact.stage = 'active'`,
             )
             .get(reviewerId, itemId) as ChangeRequestToDecide | undefined);
     if (evidence) return { kind: "evidence", row: evidence };
@@ -1864,7 +1885,10 @@ class Core implements PactCore {
     }[];
     const now = this.#clock.now();
     return rows.map((row) => {
-      const owedCents = row.penalty_cents - row.paid_cents;
+      // An excuse approved after its penalty was paid leaves more paid than
+      // owed. The surplus pays the next penalties (#allocate), and owed is $0
+      // meanwhile, never below.
+      const owedCents = Math.max(0, row.penalty_cents - row.paid_cents);
       const bills = this.#billsOf(ownerId, row.id);
       const due = bills.filter((bill) => bill.dueAt.getTime() > now.getTime() && bill.uncoveredCents > 0);
       return {
@@ -1884,9 +1908,11 @@ class Core implements PactCore {
 
   /**
    * How payments to `recipientId` apply to the owner's penalties, oldest
-   * penalty first: approved payments pay them (`paidCents`), then payments
-   * awaiting approval cover what's left (`coveredCents`). Held penalties
-   * aren't owed, so payments skip them.
+   * first: approved payments pay them (`paidCents`), then payments awaiting
+   * approval cover what's left (`coveredCents`). Billed penalties come first,
+   * oldest bill first, then those not on a bill yet, so a payment that paid a
+   * bill stays on it when an older held penalty is released later. Held
+   * penalties aren't owed, so payments skip them.
    */
   #allocate(ownerId: AccountId, recipientId: string): Map<string, { paidCents: number; coveredCents: number }> {
     const totals = this.#db
@@ -1899,8 +1925,10 @@ class Core implements PactCore {
     const rows = this.#db
       .prepare(
         `SELECT penalty.id, penalty.amount_cents FROM penalty JOIN pact ON pact.id = penalty.pact_id
+         LEFT JOIN bill ON bill.id = penalty.bill_id
          WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ? AND NOT ${PENALTY_HELD}
-         ORDER BY penalty.added_at, penalty.occurrence_date, pact.name DESC, penalty.id DESC`,
+         ORDER BY bill.id IS NULL, bill.created_at, bill.id,
+                  penalty.added_at, penalty.occurrence_date, pact.name DESC, penalty.id DESC`,
       )
       .all(ownerId, recipientId) as { id: string; amount_cents: number }[];
     let approved = totals.approved;
@@ -2210,14 +2238,16 @@ class Core implements PactCore {
       .run(outcome, reviewerId, now.toISOString(), reason, evidence.id);
     // A day ahead with an approved excuse stays for judging at its due time, which makes it Excused.
     const excusedAhead = this.#excuseOn(evidence.pact_id, evidence.occurrence_date) === "approved";
-    if (this.#isWeekly(evidence.pact_id)) {
+    const occurrence = this.#occurrencesOf(evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date);
+    if (occurrence === null || this.#dueAfterEnd(evidence.pact_id, occurrence)) {
+      // The pact Ended before the day fell due: it's never judged.
+    } else if (this.#isWeekly(evidence.pact_id)) {
       // A week waiting on this decision past its due time is judged now; the decision told the owner.
       if (
         !this.#isJudged(evidence.pact_id, evidence.occurrence_date) &&
         this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now)
       ) {
-        const week = this.#occurrencesOf(evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date)!;
-        this.#judgeWeek(evidence.pact_id, week, now, false);
+        this.#judgeWeek(evidence.pact_id, occurrence, now, false);
       }
     } else if (
       !this.#isJudged(evidence.pact_id, evidence.occurrence_date) &&
@@ -2462,8 +2492,9 @@ class Core implements PactCore {
     if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };
     if (to > addDays(from, MAX_EXCUSE_SPAN_DAYS - 1)) return { ok: false, reason: "too-many-days" };
     const preview: ExcusePreview = { covered: [], skipped: [], heldCents: 0 };
-    // On Weekly count, a day of a week covers the whole week.
+    // On Weekly count, a day of a week covers the whole week. An Ended pact has no days after its end.
     for (const occurrence of this.#occurrencesOf(pactId, timezone).overlapping(from, to)) {
+      if (this.#dueAfterEnd(pactId, occurrence)) continue;
       const day = this.#excuseDay(pactId, occurrence);
       const skipped = this.#skipReason(day.status, now);
       if (skipped !== null) {
@@ -2542,8 +2573,10 @@ class Core implements PactCore {
    * the owner. Approved: its Missed days become Excused as of now, without
    * their penalties, and its days not judged yet that judging has reached
    * (their evidence was waiting) are judged Excused now; the rest are judged
-   * Excused at their due time. Rejected: nothing to change, as its holds are
-   * released by no longer waiting and its days are judged as usual.
+   * Excused at their due time. A bedtime night not judged yet is left to
+   * judging, which waits for Oura until it closes. Days the pact no longer
+   * has after it Ended are left alone. Rejected: nothing to change, as its
+   * holds are released by no longer waiting and its days are judged as usual.
    */
   #decideExcuse(excuse: ExcuseToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
     const now = this.#clock.now();
@@ -2557,7 +2590,12 @@ class Core implements PactCore {
       const dates = this.#db.prepare(`SELECT date FROM excuse_day WHERE excuse_id = ?`).all(excuse.id) as {
         date: LocalDate;
       }[];
+      const { timezone, evidence_kind: evidenceKind } = this.#excusePact(excuse.id)!;
+      const { covering } = this.#occurrencesOf(excuse.pact_id, timezone);
       for (const { date } of dates) {
+        const occurrence = covering(date);
+        // The pact Ended before the day fell due: it's never judged.
+        if (occurrence === null || this.#dueAfterEnd(excuse.pact_id, occurrence)) continue;
         const row = this.#db
           .prepare(`SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`)
           .get(excuse.pact_id, date) as { outcome: string | null } | undefined;
@@ -2566,7 +2604,12 @@ class Core implements PactCore {
           this.#db
             .prepare(`UPDATE occurrence SET outcome = 'excused', judged_at = ? WHERE pact_id = ? AND date = ?`)
             .run(now.toISOString(), excuse.pact_id, date);
-        } else if ((row?.outcome ?? null) === null && this.#judgingReached(excuse.pact_id, date, now)) {
+        } else if (
+          (row?.outcome ?? null) === null &&
+          // A bedtime night waits for Oura until it closes: an on-time bedtime beats the excuse.
+          evidenceKind === "camera" &&
+          this.#judgingReached(excuse.pact_id, date, now)
+        ) {
           this.#judge(excuse.pact_id, date, "excused", now);
         }
       }
@@ -2783,7 +2826,7 @@ class Core implements PactCore {
   }
 
   /** The pact's terms as the pact page and a change request show them. */
-  #currentTerms(pact: PactRow): CurrentTerms {
+  #currentTerms(pact: PactRow): CurrentTerms & Pick<PactTerms, "reminders"> {
     const [recipient] = this.#selectRecipients(`id = ?`, pact.recipient_id);
     if (!recipient) throw new Error(`pact ${pact.id} has no recipient ${pact.recipient_id}`);
     return {
@@ -2869,6 +2912,14 @@ class Core implements PactCore {
       reviewerIds: [...checked.reviewerIds].sort(),
       reminders: checked.reminders,
     };
+    // Reminders apply at once, so they go off before the due time in force now as well as the new one.
+    const current = {
+      oneTime: before.schedule.kind === "one-time",
+      inBedBy: pact.in_bed_by,
+      dueBy: pact.due_by,
+      dueAt: this.#occurrencesOf(pact.id, zone).first.dueAt,
+    };
+    if (!remindersGoOffInTime(after.reminders, current, zone)) return { ok: false, reason: "reminder-after-due-time" };
     const diffs = termDiffs(before, after);
     if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
       return { ok: false, reason: "change-request-waiting" };
@@ -3207,7 +3258,8 @@ class Core implements PactCore {
       note: row.note,
       requestedAt: new Date(row.requested_at),
       changes: after === null ? [] : this.#termChanges(before, after, termDiffs(before, after)),
-      current: this.#currentTerms(pact),
+      // Reminders are the owner's own: reviewers don't see them.
+      current: withoutReminders(this.#currentTerms(pact)),
       appliesFrom: start?.appliesFrom ?? null,
       todayKeepsCents: start?.todayKeepsCents ?? null,
     };
@@ -3284,7 +3336,7 @@ class Core implements PactCore {
     const title = `${reviewerName} ${outcome} ${endsPact ? `ending ${pact.name}` : "your change"}`;
     let body = `${pact.name} · “${reason}”`;
     if (outcome === "approved" && endsPact) {
-      this.#db.prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ?`).run(now.toISOString(), pact.id);
+      this.#endPact(pact.id, now);
       body = `${pact.name} is Ended`;
     } else if (outcome === "approved") {
       const before = storedTerms(row.before_terms);
@@ -3297,9 +3349,7 @@ class Core implements PactCore {
       // Every pact's owner has a timezone: creating one needs it.
       const { appliesFrom } = this.#startOfNewTerms(pact, row.timezone!, after, now);
       this.#applyTerms(pact, after, now, row.timezone!);
-      // A One-time pact judged since it was sent has Ended: its terms stay as they were.
-      body =
-        pact.stage === "ended" ? `${pact.name} is Ended` : `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
+      body = `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
     }
     this.#enqueue({
       recipient: row.owner_account_id,
@@ -3418,12 +3468,13 @@ class Core implements PactCore {
       startDate: pact.startDate ?? null,
     });
     if (!timing.ok) return timing;
-    const dueBy = timing.terms.dueBy ?? null;
-    const goesOffInTime = (time: string) => {
-      if (oneTime) return oneTimeReminderAt(time, timezone).getTime() < timing.first.dueAt.getTime();
-      return oura ? nightOrder(time) < nightOrder(pact.inBedBy!) : dueBy === null || time < dueBy;
+    const due = {
+      oneTime,
+      inBedBy: oura ? pact.inBedBy! : null,
+      dueBy: timing.terms.dueBy ?? null,
+      dueAt: timing.first.dueAt,
     };
-    if (!reminders.every(goesOffInTime)) return { ok: false, reason: "reminder-after-due-time" };
+    if (!remindersGoOffInTime(reminders, due, timezone)) return { ok: false, reason: "reminder-after-due-time" };
     const endDate = pact.endDate ?? null;
     // The first occurrence has to end by the end date: a whole week, for Weekly count.
     if (endDate !== null && endDate < lastDayOf(timing.terms.schedule, timing.terms.firstOccurrence)) {
@@ -3568,12 +3619,12 @@ class Core implements PactCore {
       .prepare(
         `SELECT payment.id, owner.name AS owner_name, recipient.name AS recipient_name, payment.amount_cents,
                 payment.note, payment.photo_id, payment.recorded_at,
-                (SELECT COALESCE(SUM(penalty.amount_cents), 0) FROM penalty
-                 WHERE penalty.owner_account_id = payment.owner_account_id
-                   AND penalty.recipient_id = payment.recipient_id AND NOT ${PENALTY_HELD})
-                - (SELECT COALESCE(SUM(approved.amount_cents), 0) FROM payment AS approved
-                   WHERE approved.owner_account_id = payment.owner_account_id
-                     AND approved.recipient_id = payment.recipient_id AND approved.decision = 'approved')
+                MAX(0, (SELECT COALESCE(SUM(penalty.amount_cents), 0) FROM penalty
+                        WHERE penalty.owner_account_id = payment.owner_account_id
+                          AND penalty.recipient_id = payment.recipient_id AND NOT ${PENALTY_HELD})
+                       - (SELECT COALESCE(SUM(approved.amount_cents), 0) FROM payment AS approved
+                          WHERE approved.owner_account_id = payment.owner_account_id
+                            AND approved.recipient_id = payment.recipient_id AND approved.decision = 'approved'))
                   AS owed_cents
          FROM payment
          JOIN account AS owner ON owner.id = payment.owner_account_id
@@ -3611,10 +3662,10 @@ class Core implements PactCore {
     return (
       this.#db
         .prepare(
-          `SELECT DISTINCT reviewer_account_id FROM (${paymentReviewersSql("?", "?")})
+          `SELECT DISTINCT reviewer_account_id FROM (${paymentReviewersSql("@owner", "@recipient")})
            ORDER BY reviewer_account_id`,
         )
-        .all(ownerId, recipientId) as { reviewer_account_id: AccountId }[]
+        .all({ owner: ownerId, recipient: recipientId }) as { reviewer_account_id: AccountId }[]
     ).map((row) => row.reviewer_account_id);
   }
 
@@ -3662,6 +3713,18 @@ class Core implements PactCore {
         url: APP_PATHS.ledger(payment.recipient_id),
       },
     });
+  }
+
+  /**
+   * Whether the pact Ended before `occurrence` fell due and it isn't judged:
+   * it's no longer one of the pact's, so it's never judged or excused.
+   */
+  #dueAfterEnd(pactId: string, occurrence: Occurrence): boolean {
+    const { ended_at: endedAt } = this.#db.prepare(`SELECT ended_at FROM pact WHERE id = ?`).get(pactId) as {
+      ended_at: string | null;
+    };
+    if (endedAt === null || occurrence.dueAt.getTime() <= new Date(endedAt).getTime()) return false;
+    return !this.#isJudged(pactId, occurrence.date);
   }
 
   /**
@@ -3757,8 +3820,10 @@ class Core implements PactCore {
     at: Date,
   ): { ok: true; occurrence: Occurrence; day: LocalDate } | { ok: false; reason: SubmitEvidenceRefusal } {
     const row = this.#db
-      .prepare(`SELECT schedule, first_occurrence, evidence_kind FROM pact WHERE id = ? AND owner_account_id = ?`)
-      .get(pactId, ownerId) as Pick<PactRow, "schedule" | "first_occurrence" | "evidence_kind"> | undefined;
+      .prepare(
+        `SELECT schedule, first_occurrence, evidence_kind, stage FROM pact WHERE id = ? AND owner_account_id = ?`,
+      )
+      .get(pactId, ownerId) as Pick<PactRow, "schedule" | "first_occurrence" | "evidence_kind" | "stage"> | undefined;
     if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
     // Oura reports a bedtime night; there's never a photo to submit.
     if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
@@ -3779,6 +3844,8 @@ class Core implements PactCore {
     if ((weekly && decision === "rejected") || this.#isJudged(pactId, occurrence.date)) {
       return { ok: false, reason: "already-judged" };
     }
+    // An Ended pact has no day open any more.
+    if (row.stage === "ended") return { ok: false, reason: "not-open" };
     return { ok: true, occurrence, day };
   }
 
@@ -4209,7 +4276,7 @@ class Core implements PactCore {
 
   async advanceTo(t: Date): Promise<void> {
     // Before the transaction, never in it: a slow Oura can't hold up other writes.
-    // A call that throws fails the whole tick, which writes nothing; the next one retries.
+    // An account whose call throws has no data this tick; the next one retries.
     const sleep = await this.#fetchSleep(t);
     await this.#command(
       () => {
@@ -4300,6 +4367,8 @@ class Core implements PactCore {
           due.push(...times.map((time) => ({ date, dueAt, time, at: reminderAt(date, time, timezone, night) })));
         }
       }
+      // A reminder sent before the owner moved west comes round again: it went off already.
+      this.#db.prepare(`DELETE FROM reminder_sent WHERE pact_id = ? AND date < ?`).run(pact.id, addDays(fromDate, -1));
       for (const { date, dueAt, time, at } of due) {
         if (at.getTime() <= from.getTime() || at.getTime() > t.getTime()) continue;
         if (at.getTime() >= dueAt.getTime() || !this.#worthReminding(pact, date)) continue;
@@ -4308,7 +4377,10 @@ class Core implements PactCore {
           dropped.push({ pactId: pact.id, date, time, lateMs });
           continue;
         }
-        this.#enqueueReminder(pact, date);
+        const sent = this.#db
+          .prepare(`INSERT INTO reminder_sent (pact_id, date, time) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`)
+          .run(pact.id, date, time);
+        if (sent.changes === 1) this.#enqueueReminder(pact, date);
       }
     }
     const operator = this.#db.prepare(`SELECT id FROM account WHERE is_operator = 1`).get() as
@@ -4376,14 +4448,17 @@ class Core implements PactCore {
    * time (the pact's `judged_through`), so a stopped scheduler catches up.
    */
   #judgeDueBy(t: Date): void {
-    for (const pact of this.#pactsToJudge()) {
-      // Every pact's owner has a timezone: creating one needs it. Oura reports bedtime nights.
-      if (pact.timezone === null || pact.evidence_kind !== "camera") continue;
-      const due = this.#occurrencesOf(pact.id, pact.timezone).dueAfter(pact.judged_through, t);
-      for (const occurrence of due) this.#judgeAtDueTime(pact.id, occurrence);
-      const last = due.at(-1);
-      if (last) this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(last.date, pact.id);
-    }
+    for (const pact of this.#pactsToJudge()) this.#judgePactDueBy(pact, t);
+  }
+
+  /** Judges one Camera pact's occurrences due by `t`, from where judging got to. */
+  #judgePactDueBy(pact: PactToJudge, t: Date): void {
+    // Every pact's owner has a timezone: creating one needs it. Oura reports bedtime nights.
+    if (pact.timezone === null || pact.evidence_kind !== "camera") return;
+    const due = this.#occurrencesOf(pact.id, pact.timezone).dueAfter(pact.judged_through, t);
+    for (const occurrence of due) this.#judgeAtDueTime(pact.id, occurrence);
+    const last = due.at(-1);
+    if (last) this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(last.date, pact.id);
   }
 
   /**
@@ -4407,22 +4482,26 @@ class Core implements PactCore {
       const last = this.#occurrencesOf(id, timezone).between(addDays(endDate, -7), endDate).at(-1);
       const endsAt = last && last.closesAt.getTime() > dayAfter.getTime() ? last.closesAt : dayAfter;
       if (endsAt.getTime() > t.getTime()) continue;
-      this.#db.prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ?`).run(endsAt.toISOString(), id);
+      this.#endPact(id, endsAt);
     }
   }
 
   /**
    * Each night of a bedtime pact that hasn't been judged, from where judging
    * got to, whose window (18:00 that day to 18:00 the next) has started by `t`.
+   * An Ended pact still has the nights that fell due before it Ended.
    */
   #nightsWaiting(t: Date): { pact: PactToJudge & { timezone: string }; night: Occurrence }[] {
     const waiting = [];
-    for (const pact of this.#pactsToJudge()) {
+    for (const pact of [...this.#pactsToJudge(), ...this.#endedBedtimePacts()]) {
       if (pact.evidence_kind !== "oura" || pact.timezone === null) continue;
       const { timezone } = pact;
+      const endedAt = pact.ended_at === null ? null : new Date(pact.ended_at);
+      const until = endedAt !== null && endedAt.getTime() < t.getTime() ? endedAt : t;
       const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
-      for (const night of this.#occurrencesOf(pact.id, timezone).between(from, localDateOf(t, timezone))) {
+      for (const night of this.#occurrencesOf(pact.id, timezone).between(from, localDateOf(until, timezone))) {
         if (nightStartsAt(night.date, timezone).getTime() > t.getTime()) break;
+        if (endedAt !== null && night.dueAt.getTime() > endedAt.getTime()) break;
         if (!this.#isJudged(pact.id, night.date)) waiting.push({ pact: { ...pact, timezone }, night });
       }
     }
@@ -4432,7 +4511,9 @@ class Core implements PactCore {
   /**
    * The sleep periods of each account with a bedtime night waiting on Oura
    * and a connection, for the days those nights could fall on. Accounts with
-   * nothing waiting cause no calls. A "disconnected" result counts as no data.
+   * nothing waiting cause no calls. A "disconnected" result counts as no data,
+   * and so does a call that fails: it's logged, and one account's Oura never
+   * holds up anyone else's tick.
    */
   async #fetchSleep(t: Date): Promise<Map<AccountId, OuraSleepPeriod[]>> {
     const ranges = new Map<AccountId, { startDate: LocalDate; endDate: LocalDate }>();
@@ -4449,8 +4530,12 @@ class Core implements PactCore {
     }
     const sleep = new Map<AccountId, OuraSleepPeriod[]>();
     for (const [account, range] of ranges) {
-      const result = await this.#ouraSource.sleepPeriods(account, range);
-      if (result.ok) sleep.set(account, result.periods);
+      try {
+        const result = await this.#ouraSource.sleepPeriods(account, range);
+        if (result.ok) sleep.set(account, result.periods);
+      } catch (error) {
+        this.#log(`Oura sleep for account ${account} failed, no data this tick: ${errorText(error)}`);
+      }
     }
     return sleep;
   }
@@ -4459,10 +4544,10 @@ class Core implements PactCore {
    * Judges bedtime nights in order, from where judging got to. A night is
    * decided by the first long_sleep Oura reports starting in its window,
    * read on Oura's own clock: Kept if it starts before the in-bed-by time,
-   * else Missed, as of `t`, when it arrived. With an approved excuse and no
-   * on-time period, it's Excused at its in-bed-by time. With neither by 18:00
-   * the next day, it's Missed then. The first night still waiting stops the
-   * cursor.
+   * else Missed, as of `t`, when it arrived. With an approved excuse, a late
+   * period makes it Excused instead, and so does no period by 18:00 the next
+   * day, then. With neither by then, it's Missed then. The first night still
+   * waiting stops the cursor.
    */
   #judgeNights(t: Date, sleep: Map<AccountId, OuraSleepPeriod[]>): void {
     const stopped = new Set<string>();
@@ -4475,8 +4560,9 @@ class Core implements PactCore {
       const excuse = this.#excuseOn(pact.id, night.date);
       const kept = period !== undefined && wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
       // As for a photo: an on-time bedtime beats an approved excuse, and an approved excuse beats a late one.
-      if (excuse === "approved" && !kept && night.dueAt.getTime() <= t.getTime()) {
-        this.#judge(pact.id, night.date, "excused", night.dueAt);
+      // So with no period yet, an approved excuse waits for one until the night closes.
+      if (excuse === "approved" && !kept && (period !== undefined || night.closesAt.getTime() <= t.getTime())) {
+        this.#judge(pact.id, night.date, "excused", period ? t : night.closesAt);
       } else if (period) {
         this.#judge(pact.id, night.date, kept ? "kept" : "missed", t);
         this.#db
@@ -4502,12 +4588,23 @@ class Core implements PactCore {
   #pactsToJudge(pactId?: string): PactToJudge[] {
     return this.#db
       .prepare(
-        `SELECT pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
-                pact.judged_through, account.timezone, pact.owner_account_id
+        `SELECT ${PACT_TO_JUDGE_COLUMNS}
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE (? IS NULL AND pact.stage = 'active') OR pact.id = ?`,
       )
       .all(pactId ?? null, pactId ?? null) as PactToJudge[];
+  }
+
+  /** Ended bedtime pacts with a night not judged that fell due before they Ended, as `#pactsToJudge` reads them. */
+  #endedBedtimePacts(): PactToJudge[] {
+    return this.#db
+      .prepare(
+        `SELECT ${PACT_TO_JUDGE_COLUMNS}
+         FROM pact JOIN account ON account.id = pact.owner_account_id
+         WHERE pact.stage = 'ended' AND pact.evidence_kind = 'oura' AND pact.ended_at IS NOT NULL
+           AND (pact.judged_through IS NULL OR pact.judged_through < date(pact.ended_at, '+1 day'))`,
+      )
+      .all() as PactToJudge[];
   }
 
   /**
@@ -4621,11 +4718,7 @@ class Core implements PactCore {
       )
       .run(pactId, date, outcome, at.toISOString());
     // A One-time pact has no occurrence left once its one is judged.
-    if (isOneTime(pact.schedule)) {
-      this.#db
-        .prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ? AND stage = 'active'`)
-        .run(at.toISOString(), pactId);
-    }
+    if (isOneTime(pact.schedule)) this.#endPact(pactId, at);
     if (outcome === "missed") {
       const schedule = JSON.parse(pact.schedule) as Schedule;
       const short = schedule.kind === "weekly-count" ? schedule.target - this.#weekProgress(pactId, date).sessions : 1;
@@ -4644,6 +4737,21 @@ class Core implements PactCore {
           at.toISOString(),
         );
     }
+  }
+
+  /**
+   * Makes an Active pact Ended as of `at`. A change request still waiting
+   * for it is withdrawn: there's nothing left for it to change.
+   */
+  #endPact(pactId: string, at: Date): void {
+    this.#db
+      .prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ? AND stage = 'active'`)
+      .run(at.toISOString(), pactId);
+    this.#db
+      .prepare(
+        `UPDATE change_request SET withdrawn_at = ? WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`,
+      )
+      .run(at.toISOString(), pactId);
   }
 
   lastTick(): Date | null {
@@ -4811,6 +4919,39 @@ function deadlineWallClock(date: LocalDate, inBedBy: string): string {
 }
 
 /** A clock time "HH:MM" as it sorts in a night, which runs from 18:00 to 17:59 the next day. */
+/**
+ * Whether every reminder goes off before the due time `due` sets: a One-time
+ * pact's deadline (`dueAt`), a bedtime's in-bed-by time (a night running from
+ * 18:00), or else the due-by time, if there is one.
+ */
+function remindersGoOffInTime(
+  reminders: string[],
+  due: { oneTime: boolean; inBedBy: string | null; dueBy: string | null; dueAt: Date },
+  timezone: string,
+): boolean {
+  return reminders.every((time) => {
+    if (due.oneTime) return oneTimeReminderAt(time, timezone).getTime() < due.dueAt.getTime();
+    if (due.inBedBy !== null) return nightOrder(time) < nightOrder(due.inBedBy);
+    return due.dueBy === null || time < due.dueBy;
+  });
+}
+
+/**
+ * An error for the log: its name and message. A SyntaxError's message quotes
+ * the response it couldn't parse, which could hold a token, so it's left out.
+ */
+function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown error";
+  return error.name === "SyntaxError" ? error.name : `${error.name}: ${error.message}`;
+}
+
+function withoutReminders({
+  reminders: _reminders,
+  ...terms
+}: CurrentTerms & Pick<PactTerms, "reminders">): CurrentTerms {
+  return terms;
+}
+
 function nightOrder(time: string): string {
   return `${Number(time.slice(0, 2)) < 18 ? 1 : 0}${time}`;
 }
@@ -4879,6 +5020,7 @@ interface ChangeRequestRow {
 /** A change request a reviewer is deciding on, as `decide` reads it. */
 interface ChangeRequestToDecide {
   id: string;
+  pact_id: string;
   decision: ReviewOutcome | null;
   owner_account_id: AccountId;
 }
@@ -5007,6 +5149,8 @@ function capitalized(text: string): string {
 /** A pact as judging reads it. */
 type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence" | "evidence_kind" | "in_bed_by"> & {
   judged_through: LocalDate | null;
+  /** When it Ended; null while Active. */
+  ended_at: string | null;
   timezone: string | null;
   owner_account_id: AccountId;
 };

@@ -533,6 +533,45 @@ describe("holds and payments", () => {
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500, payableCents: 500 })]);
     await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
   });
+
+  test("an excuse approved after its penalty was paid: owed stays $0, and the payment pays the next penalty", async () => {
+    const { s, owner, reviewer, gym, sam } = await gymMissedMonday();
+    s.setClockTo("Tue 08:00");
+    await reviewer.decide(await recordPayment(owner, { recipientId: sam.id, amountCents: 500 }), { kind: "approve" });
+    await reviewer.decide(await fileExcuse(owner, gym, sick(MONDAY)), { kind: "approve" });
+
+    expect(owner.ledgers()).toEqual([
+      expect.objectContaining({ owedCents: 0, payableCents: 0, paidCents: 500, overdueCents: 0, billDue: null }),
+    ]);
+    expect(await owner.recordPayment({ recipientId: sam.id, amountCents: 1 }, photo())).toEqual({
+      ok: false,
+      reason: "payment-exceeds-owed",
+    });
+
+    // Wednesday's miss is paid already; Friday's is owed.
+    await s.advanceTo("Thu 00:00");
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0 })]);
+    expect(history(s, owner).filter((entry) => entry.kind === "penalty")).toEqual([
+      expect.objectContaining({ occurrenceDate: WEDNESDAY, paidCents: 500 }),
+    ]);
+    await s.advanceTo("Sat 00:00");
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500, payableCents: 500 })]);
+  });
+
+  test("a payment awaiting approval while an excuse holds its penalty, approved: owed doesn't go below $0", async () => {
+    const { s, owner, reviewer, gym, sam } = await gymMissedMonday();
+    s.setClockTo("Tue 08:00");
+    const paymentId = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
+    await fileExcuse(owner, gym, sick(MONDAY));
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, awaitingCents: 500, payableCents: 0 })]);
+    expect(reviewer.reviewQueue()).toContainEqual(
+      expect.objectContaining({ kind: "payment", owedCents: 0, owedAfterApprovalCents: 0 }),
+    );
+
+    await reviewer.decide(paymentId, { kind: "approve" });
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0, paidCents: 500 })]);
+  });
 });
 
 describe("who decides", () => {

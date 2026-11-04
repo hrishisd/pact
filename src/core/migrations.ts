@@ -492,4 +492,18 @@ export const migrations: readonly string[] = [
   WHERE billed_through IS NULL
     AND NOT EXISTS (SELECT 1 FROM bill WHERE bill.owner_account_id = account.id);
   `,
+  // 21: reminders sent
+  `
+  -- Each reminder sent: the pact, the day it was about ("YYYY-MM-DD" in the
+  -- owner's timezone) and its time as the pact lists it. reminded_through
+  -- is an instant, so after the owner moves their timezone west a reminder
+  -- already sent comes round again; this stops it going off twice. Rows for
+  -- days well behind the cursor are deleted as it moves on.
+  CREATE TABLE reminder_sent (
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    date TEXT NOT NULL,
+    time TEXT NOT NULL,
+    PRIMARY KEY (pact_id, date, time)
+  );
+  `,
 ];

@@ -1236,7 +1236,11 @@ export type RequestEndResult =
   | { ok: true; changeRequestId: string }
   | { ok: false; reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" };
 
-/** A pact's terms as they stand, as a change request shows those it leaves alone. */
+/**
+ * A pact's terms as they stand, as a change request shows those it leaves
+ * alone. Reminders aren't terms and are the owner's own, so reviewers never
+ * see them.
+ */
 export type CurrentTerms = Pick<
   PactTerms,
   | "name"
@@ -1250,7 +1254,6 @@ export type CurrentTerms = Pick<
   | "penaltyCents"
   | "recipient"
   | "reviewers"
-  | "reminders"
 >;
 
 /** A change request, as its reviewers and its owner see it. */

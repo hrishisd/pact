@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import { openWithPragmas } from "./db.ts";
 import { ouraAdapter, type OuraClient } from "./oura.ts";
 import { sleep } from "./testing/bedtime-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
@@ -25,6 +26,8 @@ class FakeOura {
   pageSize = Infinity;
   /** What the sleep endpoint answers instead, when set. */
   sleepStatus: number | null = null;
+  /** The body of every sleep page instead, when set: a broken answer. */
+  sleepPage: unknown = null;
   /** Holds token responses until released, so two refreshes can overlap. */
   hold: Promise<void> = Promise.resolve();
   #issued = 0;
@@ -56,6 +59,7 @@ class FakeOura {
       if (!this.#validAccess.has(authorization?.replace("Bearer ", "") ?? "")) {
         return new Response(null, { status: 401 });
       }
+      if (this.sleepPage !== null) return Response.json(this.sleepPage);
       const start = Number(url.searchParams.get("next_token") ?? 0);
       const end = Math.min(this.periods.length, start + this.pageSize);
       return Response.json({
@@ -131,6 +135,22 @@ describe("connecting", () => {
     await s.restart();
   });
 
+  test("a stored token whose authentication tag was cut short is refused", async () => {
+    const s = scenario();
+    const { adapter, owner } = await connected(s);
+    const db = openWithPragmas(s.dbPath);
+    const { access_token: stored } = db.prepare(`SELECT access_token FROM oura_token`).get() as {
+      access_token: string;
+    };
+    const [iv, tag, encrypted] = stored.split(".") as [string, string, string];
+    const shortTag = Buffer.from(tag, "base64url").subarray(0, 4).toString("base64url");
+    db.prepare(`UPDATE oura_token SET access_token = ?`).run([iv, shortTag, encrypted].join("."));
+    db.close();
+
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("Invalid authentication tag length");
+    adapter.close();
+  });
+
   test("a code Oura refuses connects nothing", async () => {
     const s = scenario();
     const { adapter, owner } = await connected(s);
@@ -151,6 +171,33 @@ describe("sleep periods", () => {
       [{ start_date: "2026-01-05", end_date: "2026-01-06" }, "Bearer access-1"],
       [{ start_date: "2026-01-05", end_date: "2026-01-06", next_token: "2" }, "Bearer access-1"],
     ]);
+    adapter.close();
+  });
+
+  test("a next_token Oura gives again, or pages without end, stop the call instead of looping", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    oura.sleepPage = { data: [sleep("Mon 23:00")], next_token: "same" };
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("next_token");
+    expect(oura.sleepRequests).toHaveLength(2);
+
+    let page = 0;
+    oura.sleepPage = {
+      data: [],
+      get next_token() {
+        return `page-${++page}`;
+      },
+    };
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("pages");
+    expect(oura.sleepRequests.length).toBeLessThan(200);
+    adapter.close();
+  });
+
+  test("a page without a data array stops the call", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    oura.sleepPage = { next_token: null };
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("no data");
     adapter.close();
   });
 
@@ -218,7 +265,7 @@ describe("sleep periods", () => {
     adapter.close();
   });
 
-  test("a server error throws, so the tick fails and the next retries", async () => {
+  test("a server error throws, so that account has no data this tick and the next retries", async () => {
     const s = scenario();
     const { oura, adapter, owner } = await connected(s);
     oura.sleepStatus = 500;

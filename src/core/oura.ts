@@ -50,6 +50,8 @@ const DEFAULTS = {
 
 /** An access token this close to expiring is refreshed first. */
 const EXPIRY_MARGIN_MS = 60_000;
+/** A few nights' sleep fits in a page or two; more pages than this means Oura's paging has gone wrong. */
+const MAX_SLEEP_PAGES = 20;
 
 interface Tokens {
   accessToken: string;
@@ -144,8 +146,10 @@ class Oura implements OuraAdapter {
       if (!tokens) return { ok: false, reason: "disconnected" };
     }
     const periods: OuraSleepPeriod[] = [];
+    const seen = new Set<string>();
     let nextToken: string | null = null;
     do {
+      if (seen.size >= MAX_SLEEP_PAGES) throw new Error(`Oura sleep request ran past ${MAX_SLEEP_PAGES} pages`);
       const url = new URL("/v2/usercollection/sleep", this.#urls.apiBase);
       url.search = new URLSearchParams({
         start_date: range.startDate,
@@ -163,9 +167,13 @@ class Oura implements OuraAdapter {
       // A lapsed membership.
       if (response.status === 403) return { ok: false, reason: "disconnected" };
       if (!response.ok) throw new Error(`Oura sleep request failed: HTTP ${response.status}`);
-      const page = (await response.json()) as { data: OuraSleepPeriod[]; next_token: string | null };
-      periods.push(...page.data);
+      const page = (await response.json()) as { data?: unknown; next_token?: string | null };
+      if (!Array.isArray(page.data)) throw new Error("Oura sleep page had no data");
+      periods.push(...(page.data as OuraSleepPeriod[]));
       nextToken = page.next_token ?? null;
+      // A token given again would page round in a circle.
+      if (nextToken !== null && seen.has(nextToken)) throw new Error("Oura sleep request repeated a next_token");
+      if (nextToken !== null) seen.add(nextToken);
     } while (nextToken !== null);
     return { ok: true, periods };
   }
@@ -268,7 +276,8 @@ class Oura implements OuraAdapter {
       Buffer,
       Buffer,
     ];
-    const decipher = createDecipheriv("aes-256-gcm", this.#key, iv);
+    // A tag shorter than the 16 bytes #encrypt writes would weaken the check, so it's refused.
+    const decipher = createDecipheriv("aes-256-gcm", this.#key, iv, { authTagLength: 16 });
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
   }
