@@ -20,7 +20,8 @@ import {
   type Schedule,
   type Weekday,
 } from "../shared/types.ts";
-import { API_PATHS, OURA_RESULT_PARAM, type Json, type OuraResult } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
+import { takeOuraResult } from "./oura.tsx";
 import { api, failureText } from "./api.ts";
 import {
   centsInputText,
@@ -472,20 +473,6 @@ export function CreatePact({
 }
 
 // ---------- steps ----------
-
-/**
- * How connecting Oura went, when Oura's callback just brought the browser
- * back: read once, then taken off the URL so a reload doesn't repeat it.
- */
-function takeOuraResult(): OuraResult | null {
-  const params = new URLSearchParams(window.location.search);
-  const result = params.get(OURA_RESULT_PARAM);
-  if (result === null) return null;
-  params.delete(OURA_RESULT_PARAM);
-  const search = params.toString();
-  window.history.replaceState(window.history.state, "", window.location.pathname + (search ? `?${search}` : ""));
-  return result === "connected" || result === "cancelled" || result === "unavailable" ? result : "failed";
-}
 
 function KindStep({ onPick }: { onPick: (kind: EvidenceKind) => void }) {
   return (

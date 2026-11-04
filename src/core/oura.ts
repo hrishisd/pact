@@ -37,6 +37,8 @@ export interface OuraConnector {
   authorizeUrl(state: string): string;
   /** Exchanges the code Oura's callback carried and stores the account's tokens. */
   connect(account: AccountId, code: string): Promise<{ ok: true } | { ok: false; reason: "exchange-failed" }>;
+  /** Deletes the account's stored tokens, once it has disconnected Oura. */
+  forget(account: AccountId): void;
 }
 
 export type OuraAdapter = OuraSource & OuraConnector & { close(): void };
@@ -82,6 +84,7 @@ export function devOura(dir: string, callbackPath: string): OuraSource & OuraCon
   return {
     authorizeUrl: (state) => `${callbackPath}?code=dev&state=${encodeURIComponent(state)}`,
     connect: async () => ({ ok: true }),
+    forget: () => {},
     async sleepPeriods(_account, range) {
       const periods = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as OuraSleepPeriod[]) : [];
       return { ok: true, periods: periods.filter((p) => p.day >= range.startDate && p.day <= range.endDate) };
@@ -136,6 +139,10 @@ class Oura implements OuraAdapter {
     if (!tokens) return { ok: false as const, reason: "exchange-failed" as const };
     this.#store(account, tokens);
     return { ok: true as const };
+  }
+
+  forget(account: AccountId): void {
+    this.#db.prepare(`DELETE FROM oura_token WHERE account_id = ?`).run(account);
   }
 
   async sleepPeriods(account: AccountId, range: OuraDateRange): Promise<OuraSleepResult> {

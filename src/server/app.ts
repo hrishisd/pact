@@ -31,6 +31,8 @@ import {
   PAYMENT_NOTE_FIELD,
   PHOTO_CONTENT_TYPES,
   type AcceptExcuseRejectionResponse,
+  type CheckOuraResponse,
+  type DisconnectOuraResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientRequest,
@@ -123,6 +125,13 @@ type Upload = "evidence" | "excuse" | "payment";
 
 /** The OAuth state for connecting Oura, between the connect route and Oura's callback. */
 const OURA_STATE_COOKIE = "pact_oura_state";
+
+/** Where Oura's callback sends the browser: the new pact form, or Today after a reconnect. */
+type OuraReturn = "new-pact" | "today";
+
+function ouraReturnPath(then: OuraReturn, result: OuraResult): string {
+  return `${then === "today" ? APP_PATHS.today : APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${result}`;
+}
 
 /** Room for the multipart boundaries and headers around the photos. */
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
@@ -321,10 +330,13 @@ export function createApp({
   // Connecting Oura: to Oura's authorize page with a random state, kept in a
   // short-lived cookie this browser brings back to the callback, where it
   // must match. Lax, so Oura's redirect back (a top-level GET) carries it.
+  // `?then=today` (OURA_RECONNECT_PATH) comes back to Today instead of the new
+  // pact form; it rides in the cookie after the state, so Oura never sees it.
   app.get(API_PATHS.ouraConnect, (c) => {
-    if (!oura) return c.redirect(`${APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${"unavailable" satisfies OuraResult}`);
+    const then: OuraReturn = c.req.query("then") === "today" ? "today" : "new-pact";
+    if (!oura) return c.redirect(ouraReturnPath(then, "unavailable"));
     const state = randomBytes(16).toString("base64url");
-    setCookie(c, OURA_STATE_COOKIE, state, {
+    setCookie(c, OURA_STATE_COOKIE, `${state}.${then}`, {
       httpOnly: true,
       secure: production,
       sameSite: "Lax",
@@ -334,9 +346,10 @@ export function createApp({
     return c.redirect(oura.authorizeUrl(state));
   });
   app.get(API_PATHS.ouraCallback, async (c) => {
-    const back = (result: OuraResult) => c.redirect(`${APP_PATHS.newPact}?${OURA_RESULT_PARAM}=${result}`);
+    const [expected, cookieThen] = getCookie(c, OURA_STATE_COOKIE)?.split(".") ?? [];
+    const then: OuraReturn = cookieThen === "today" ? "today" : "new-pact";
+    const back = (result: OuraResult) => c.redirect(ouraReturnPath(then, result));
     if (!oura) return back("unavailable");
-    const expected = getCookie(c, OURA_STATE_COOKIE);
     deleteCookie(c, OURA_STATE_COOKIE, { path: API_PATHS.ouraCallback });
     const { state, code, error } = c.req.query();
     if (expected === undefined || state !== expected) return back("failed");
@@ -350,6 +363,21 @@ export function createApp({
     if (!connected.ok) return back("failed");
     await core.as(accountId).connectOura();
     return back("connected");
+  });
+
+  app.post(API_PATHS.ouraCheck, async (c) => {
+    await core.as(c.get("accountId")).checkOura();
+    const body: CheckOuraResponse = { ok: true };
+    return c.json(body);
+  });
+
+  // The core first, so a failure leaves the connection as it was; then Oura's tokens go.
+  app.post(API_PATHS.ouraDisconnect, async (c) => {
+    const accountId = c.get("accountId");
+    await core.as(accountId).disconnectOura();
+    oura?.forget(accountId);
+    const body: DisconnectOuraResponse = json(core.as(accountId).profile());
+    return c.json(body);
   });
 
   app.get(API_PATHS.me, (c) => {

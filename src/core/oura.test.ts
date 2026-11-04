@@ -151,6 +151,15 @@ describe("connecting", () => {
     adapter.close();
   });
 
+  test("forgetting an account deletes its tokens: it's disconnected, with no call to Oura", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    adapter.forget(owner.id);
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
+    expect(oura.sleepRequests).toEqual([]);
+    adapter.close();
+  });
+
   test("a code Oura refuses connects nothing", async () => {
     const s = scenario();
     const { adapter, owner } = await connected(s);

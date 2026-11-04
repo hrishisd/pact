@@ -24,6 +24,7 @@ import {
   newOccurrenceTerms,
   oneTimeReminderAt,
   nightStartsAt,
+  noOuraDataPushAt,
   occurrences,
   occurrencesOverTime,
   reminderAt,
@@ -113,6 +114,7 @@ import {
   type OccurrenceRecord,
   type OccurrenceStatus,
   type Connection,
+  type ConnectionProblem,
   type PactTiming,
   type PaymentResult,
   type QuestionThread,
@@ -142,6 +144,7 @@ import {
   type TodayBillCard,
   type TodayComingUpCard,
   type TodayMissedCard,
+  type TodayNoOuraDataCard,
   type TodaySection,
   type TodayToDoCard,
   type TodayWaitingItem,
@@ -270,6 +273,19 @@ export interface AccountView {
    * its tokens. Connecting again marks the connection connected as of now.
    */
   connectOura(): Promise<void>;
+  /**
+   * Checks Oura now for the account's bedtime nights not judged yet, as a
+   * tick would, and judges what it reports. Ignored less than 15 seconds after
+   * the account's last check, with no night waiting, or without a working
+   * connection. A failing call changes nothing; a "disconnected" one marks
+   * the connection Needs reconnecting.
+   */
+  checkOura(): Promise<void>;
+  /**
+   * Removes the account's Oura connection. Its Active bedtime pacts keep
+   * running: their nights count as Missed until the owner connects again.
+   */
+  disconnectOura(): Promise<void>;
   today(): Today;
   /**
    * The owner submits photo evidence for the occurrence of `pactId` open now.
@@ -426,8 +442,13 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "owner-replied": "comment",
   "new-bill": "new-bill",
   "overdue-bill": "overdue-bill",
+  "connection-problem": "connection-problem",
   reminder: null,
 };
+/** The core ignores a check of Oura now this soon after the account's last one. */
+const OURA_CHECK_INTERVAL_MS = 15_000;
+/** What a broken Oura connection means for the owner, in its push and on Today. */
+const RECONNECT_BEFORE_6PM = "A night with no data by 6pm counts as Missed. Reconnect before then.";
 /** The push services browsers use, as domains; a saved endpoint must be on one of them. */
 const PUSH_SERVICE_DOMAINS = [
   "push.apple.com",
@@ -510,6 +531,12 @@ class Core implements PactCore {
   readonly #log: (line: string) => void;
   /** Outbox deliveries run one at a time, in this chain. */
   #delivery: Promise<void> = Promise.resolve();
+  /**
+   * When each account last checked Oura now. In memory: a restart forgets
+   * it, which costs at most one more call. Set before the call, so two
+   * checks at once make one.
+   */
+  readonly #ouraChecks = new Map<AccountId, number>();
 
   constructor(db: Db, options: PactCoreOptions) {
     this.#db = db;
@@ -934,6 +961,8 @@ class Core implements PactCore {
             this.#waitingExcuses(accountId, pactId),
           ) as PactWaitingItem[],
           history,
+          connectionProblem:
+            row.evidence_kind === "oura" && row.stage === "active" ? this.#ouraConnectionProblem(accountId) : null,
         };
         return { ok: true, pact };
       },
@@ -1037,9 +1066,31 @@ class Core implements PactCore {
           this.#db
             .prepare(`SELECT service, status, connected_at FROM connection WHERE account_id = ? ORDER BY service`)
             .all(accountId) as { service: "oura"; status: Connection["status"]; connected_at: string }[]
-        ).map((row) => ({ service: row.service, status: row.status, connectedAt: new Date(row.connected_at) }));
+        ).map((row): Connection => ({
+          service: row.service,
+          status: row.status,
+          connectedAt: new Date(row.connected_at),
+          activePacts: this.#activeOuraPacts(accountId),
+        }));
         return { email, name, timezone, connections };
       },
+      checkOura: async () => {
+        account();
+        const now = this.#clock.now();
+        const last = this.#ouraChecks.get(accountId);
+        if (last !== undefined && now.getTime() - last < OURA_CHECK_INTERVAL_MS) return;
+        this.#ouraChecks.set(accountId, now.getTime());
+        const fetched = await this.#fetchSleep(now, accountId);
+        await this.#command(() => {
+          this.#markDisconnected(fetched);
+          this.#judgeNights(now, fetched.sleep, accountId);
+        });
+      },
+      disconnectOura: () =>
+        this.#command(() => {
+          account();
+          this.#db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = 'oura'`).run(accountId);
+        }),
       connectOura: () =>
         this.#command(() => {
           account();
@@ -3507,6 +3558,24 @@ class Core implements PactCore {
       undefined
     );
   }
+  /** Why Oura can't be read for the account, or null when its connection works. */
+  #ouraConnectionProblem(accountId: AccountId): ConnectionProblem | null {
+    const row = this.#db
+      .prepare(`SELECT status FROM connection WHERE account_id = ? AND service = 'oura'`)
+      .get(accountId) as { status: Connection["status"] } | undefined;
+    if (!row) return "not-connected";
+    return row.status === "connected" ? null : row.status;
+  }
+
+  /** How many of the account's Active pacts are judged from Oura. */
+  #activeOuraPacts(accountId: AccountId): number {
+    const row = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM pact WHERE owner_account_id = ? AND stage = 'active' AND evidence_kind = 'oura'`,
+      )
+      .get(accountId) as { n: number };
+    return row.n;
+  }
 
   #setReviewers(pactId: string, reviewerIds: AccountId[]): void {
     for (const reviewerId of reviewerIds) {
@@ -3944,6 +4013,7 @@ class Core implements PactCore {
     const now = this.#clock.now();
     const toDo: (TodayToDoCard | TodayBillCard)[] = [];
     const automatic: TodayAutomaticCard[] = [];
+    const noOuraData: TodayNoOuraDataCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
       // Each card shows the terms of the occurrence it's about.
@@ -3959,23 +4029,34 @@ class Core implements PactCore {
           comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date, startDate: pact.startDate });
           continue;
         }
-        // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
+        // Nights the owner needn't hear about: judged, or with an excuse filed (it's under Waiting for approval).
         const today = localDateOf(now, timezone);
-        const tonight = between(addDays(today, -1), today).find(
-          (night) =>
-            night.opensAt.getTime() <= now.getTime() &&
-            now.getTime() < night.dueAt.getTime() &&
-            !this.#isJudged(pact.id, night.date) &&
-            this.#excuseOn(pact.id, night.date) === null,
+        const open = (night: Occurrence) =>
+          !this.#isJudged(pact.id, night.date) && this.#excuseOn(pact.id, night.date) === null;
+        const nights = between(addDays(today, -2), today);
+        // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
+        const tonight = nights.find(
+          (night) => night.opensAt.getTime() <= now.getTime() && now.getTime() < night.dueAt.getTime() && open(night),
         );
-        if (tonight) {
-          automatic.push({
-            ...cardOn(tonight.date),
-            editWindowClosesAt,
-            occurrenceDate: tonight.date,
-            dueAt: tonight.dueAt,
-            inBedBy: this.#termsOn(pact.id, tonight.date).in_bed_by!,
+        // Last night: past its deadline, and Oura hasn't reported it before it closes.
+        const lastNight = nights.find(
+          (night) => night.dueAt.getTime() <= now.getTime() && now.getTime() < night.closesAt.getTime() && open(night),
+        );
+        const tonightCard = tonight && {
+          occurrenceDate: tonight.date,
+          dueAt: tonight.dueAt,
+          inBedBy: this.#termsOn(pact.id, tonight.date).in_bed_by!,
+        };
+        if (lastNight) {
+          // Tonight's deadline rides on this card.
+          noOuraData.push({
+            ...cardOn(lastNight.date),
+            occurrenceDate: lastNight.date,
+            closesAt: lastNight.closesAt,
+            tonight: tonightCard ?? null,
           });
+        } else if (tonightCard) {
+          automatic.push({ ...cardOn(tonightCard.occurrenceDate), editWindowClosesAt, ...tonightCard });
         }
         continue;
       }
@@ -4011,8 +4092,10 @@ class Core implements PactCore {
     // Rows come sorted by name, and the sorts are stable.
     toDo.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
     automatic.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+    noOuraData.sort((a, b) => a.closesAt.getTime() - b.closesAt.getTime());
     comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn));
     const sections: TodaySection[] = [];
+    if (noOuraData.length > 0) sections.push({ kind: "no-oura-data", cards: noOuraData });
     if (toDo.length > 0) sections.push({ kind: "to-do", cards: toDo });
     const missed = this.#recentlyMissed(ownerId, timezone, now);
     if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
@@ -4024,8 +4107,13 @@ class Core implements PactCore {
       ...this.#rejectedExcuseAlerts(ownerId, now),
       ...this.#questionAlerts(ownerId),
     ];
+    const connectionProblem = this.#activeOuraPacts(ownerId) > 0 ? this.#ouraConnectionProblem(ownerId) : null;
     return {
-      alerts: [...bills.alerts, ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert)],
+      alerts: [
+        ...(connectionProblem ? [{ kind: "oura-connection" as const, status: connectionProblem }] : []),
+        ...bills.alerts,
+        ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert),
+      ],
       sections,
     };
   }
@@ -4277,12 +4365,14 @@ class Core implements PactCore {
   async advanceTo(t: Date): Promise<void> {
     // Before the transaction, never in it: a slow Oura can't hold up other writes.
     // An account whose call throws has no data this tick; the next one retries.
-    const sleep = await this.#fetchSleep(t);
+    const fetched = await this.#fetchSleep(t);
     await this.#command(
       () => {
         this.#closeEditWindows(t);
         this.#judgeDueBy(t);
-        this.#judgeNights(t, sleep);
+        this.#markDisconnected(fetched);
+        this.#judgeNights(t, fetched.sleep);
+        this.#pushNoOuraData(t);
         const dropped = this.#remind(t);
         this.#endPastEndDate(t);
         this.#makeBills(t);
@@ -4491,10 +4581,11 @@ class Core implements PactCore {
    * got to, whose window (18:00 that day to 18:00 the next) has started by `t`.
    * An Ended pact still has the nights that fell due before it Ended.
    */
-  #nightsWaiting(t: Date): { pact: PactToJudge & { timezone: string }; night: Occurrence }[] {
+  #nightsWaiting(t: Date, owner?: AccountId): { pact: PactToJudge & { timezone: string }; night: Occurrence }[] {
     const waiting = [];
     for (const pact of [...this.#pactsToJudge(), ...this.#endedBedtimePacts()]) {
       if (pact.evidence_kind !== "oura" || pact.timezone === null) continue;
+      if (owner !== undefined && pact.owner_account_id !== owner) continue;
       const { timezone } = pact;
       const endedAt = pact.ended_at === null ? null : new Date(pact.ended_at);
       const until = endedAt !== null && endedAt.getTime() < t.getTime() ? endedAt : t;
@@ -4509,16 +4600,20 @@ class Core implements PactCore {
   }
 
   /**
-   * The sleep periods of each account with a bedtime night waiting on Oura
-   * and a connection, for the days those nights could fall on. Accounts with
-   * nothing waiting cause no calls. A "disconnected" result counts as no data,
-   * and so does a call that fails: it's logged, and one account's Oura never
-   * holds up anyone else's tick.
+   * The sleep periods of each account (or just `owner`) with a bedtime night
+   * waiting on Oura and a working connection, for the days those nights
+   * could fall on. Accounts with nothing waiting, and connections that need
+   * reconnecting, cause no calls. A "disconnected" result is no data, and
+   * the account is listed for `#markDisconnected`. A call that fails (a
+   * timeout, Oura erroring) is no data too, but never disconnected: it's
+   * logged, the next tick tries again, and one account's Oura never holds up
+   * anyone else's tick.
    */
-  async #fetchSleep(t: Date): Promise<Map<AccountId, OuraSleepPeriod[]>> {
+  async #fetchSleep(t: Date, owner?: AccountId): Promise<FetchedSleep> {
+    const askedAt = this.#clock.now();
     const ranges = new Map<AccountId, { startDate: LocalDate; endDate: LocalDate }>();
-    for (const { pact, night } of this.#nightsWaiting(t)) {
-      if (!this.#hasOuraConnection(pact.owner_account_id)) continue;
+    for (const { pact, night } of this.#nightsWaiting(t, owner)) {
+      if (this.#ouraConnectionProblem(pact.owner_account_id) !== null) continue;
       // Oura files a night's sleep under the day it ends, usually the day after;
       // a day more covers a sleep that ends late, whether Oura's end_date is inclusive or not.
       const range = ranges.get(pact.owner_account_id);
@@ -4529,15 +4624,71 @@ class Core implements PactCore {
       });
     }
     const sleep = new Map<AccountId, OuraSleepPeriod[]>();
+    const disconnected: AccountId[] = [];
     for (const [account, range] of ranges) {
       try {
         const result = await this.#ouraSource.sleepPeriods(account, range);
         if (result.ok) sleep.set(account, result.periods);
+        else disconnected.push(account);
       } catch (error) {
         this.#log(`Oura sleep for account ${account} failed, no data this tick: ${errorText(error)}`);
       }
     }
-    return sleep;
+    return { sleep, disconnected, askedAt };
+  }
+
+  /**
+   * Marks each connection Oura answered "disconnected" Needs reconnecting,
+   * once: the owner gets one notification, and the Today and pact alerts
+   * show until they reconnect. A connection made again since the call was
+   * asked is left alone: its new tokens weren't the ones refused.
+   */
+  #markDisconnected({ disconnected, askedAt }: FetchedSleep): void {
+    for (const account of disconnected) {
+      const marked = this.#db
+        .prepare(
+          `UPDATE connection SET status = 'needs-reconnecting'
+           WHERE account_id = ? AND service = 'oura' AND status = 'connected' AND connected_at <= ?`,
+        )
+        .run(account, askedAt.toISOString());
+      if (marked.changes === 0) continue;
+      this.#enqueue({
+        recipient: account,
+        kind: "connection-problem",
+        channel: "push",
+        payload: { title: "Oura needs reconnecting", body: RECONNECT_BEFORE_6PM, url: APP_PATHS.today },
+      });
+    }
+  }
+
+  /**
+   * At 15:00 the day after, a bedtime night still not judged sends its owner
+   * one push, unless an excuse was filed for it. One per owner and night, so
+   * two pacts waiting on the same night send one. A night already closed by
+   * the time the scheduler gets here was just judged, so it sends none.
+   */
+  #pushNoOuraData(t: Date): void {
+    for (const { pact, night } of this.#nightsWaiting(t)) {
+      if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone).getTime()) continue;
+      if (t.getTime() >= night.closesAt.getTime() || this.#isJudged(pact.id, night.date)) continue;
+      if (this.#excuseOn(pact.id, night.date) !== null) continue;
+      const sent = this.#db
+        .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
+        .run(pact.owner_account_id, night.date);
+      if (sent.changes === 0) continue;
+      const fix = this.#ouraConnectionProblem(pact.owner_account_id) === null ? "Sync your ring" : "Reconnect Oura";
+      this.#enqueue({
+        recipient: pact.owner_account_id,
+        kind: "connection-problem",
+        channel: "push",
+        payload: {
+          occurrenceDate: night.date,
+          title: "No Oura data",
+          body: `No Oura data for ${formatDate(night.date).split(" ")[0]} night yet. ${fix} before 6pm or it counts as missed.`,
+          url: APP_PATHS.today,
+        },
+      });
+    }
   }
 
   /**
@@ -4549,9 +4700,9 @@ class Core implements PactCore {
    * day, then. With neither by then, it's Missed then. The first night still
    * waiting stops the cursor.
    */
-  #judgeNights(t: Date, sleep: Map<AccountId, OuraSleepPeriod[]>): void {
+  #judgeNights(t: Date, sleep: Map<AccountId, OuraSleepPeriod[]>, owner?: AccountId): void {
     const stopped = new Set<string>();
-    for (const { pact, night } of this.#nightsWaiting(t)) {
+    for (const { pact, night } of this.#nightsWaiting(t, owner)) {
       if (stopped.has(pact.id)) continue;
       const inBedBy = this.#termsOn(pact.id, night.date).in_bed_by!;
       const period = (sleep.get(pact.owner_account_id) ?? [])
@@ -5147,6 +5298,13 @@ function capitalized(text: string): string {
 }
 
 /** A pact as judging reads it. */
+/** What `#fetchSleep` got from Oura: sleep by account, the accounts it answered "disconnected" for, and when it was asked. */
+interface FetchedSleep {
+  sleep: Map<AccountId, OuraSleepPeriod[]>;
+  disconnected: AccountId[];
+  askedAt: Date;
+}
+
 type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence" | "evidence_kind" | "in_bed_by"> & {
   judged_through: LocalDate | null;
   /** When it Ended; null while Active. */

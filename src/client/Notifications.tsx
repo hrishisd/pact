@@ -21,6 +21,10 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
   "missed-occurrence": { label: "Missed occurrence", hint: "One of your pacts was judged Missed" },
   "new-bill": { label: "New bill", hint: "Your Wednesday bill to a recipient is ready" },
   "overdue-bill": { label: "Overdue bill", hint: "A bill of yours is overdue, or one of a friend's you review" },
+  "connection-problem": {
+    label: "Connection problem",
+    hint: "Oura needs reconnecting, or last night still has no Oura data at 3pm",
+  },
 };
 
 function alertWasCleared(): boolean {

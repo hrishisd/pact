@@ -343,6 +343,11 @@ export function nightStartsAt(date: LocalDate, timezone: string): Date {
   return wallTime(date, NIGHT_STARTS_HOUR, 0, timezone);
 }
 
+/** 15:00 the day after `date`: a night of `date` still not judged then sends its owner one push. */
+export function noOuraDataPushAt(date: LocalDate, timezone: string): Date {
+  return wallTime(addDays(date, 1), NIGHT_STARTS_HOUR - 3, 0, timezone);
+}
+
 /** "HH:MM" as hour and minute. */
 function clockOf(time: string): [number, number] {
   return time.split(":").map(Number) as [number, number];

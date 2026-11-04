@@ -102,6 +102,7 @@ describe("notification settings", () => {
       { setting: "missed-occurrence", enabled: true },
       { setting: "new-bill", enabled: true },
       { setting: "overdue-bill", enabled: true },
+      { setting: "connection-problem", enabled: true },
     ]);
   });
 

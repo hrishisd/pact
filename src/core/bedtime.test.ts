@@ -43,7 +43,7 @@ describe("connecting Oura", () => {
     await owner.connectOura();
 
     expect(owner.profile().connections).toEqual([
-      { service: "oura", status: "connected", connectedAt: s.at("Mon 09:30") },
+      { service: "oura", status: "connected", connectedAt: s.at("Mon 09:30"), activePacts: 0 },
     ]);
   });
 

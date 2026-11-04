@@ -135,6 +135,10 @@ export const API_PATHS = {
   ouraConnect: "/api/oura/connect",
   /** Where Oura sends the browser back; it redirects to the new pact form with OURA_RESULT_PARAM. */
   ouraCallback: "/api/oura/callback",
+  /** POST (no body): check Oura now for the account's nights not judged yet. The core ignores checks that come too fast. */
+  ouraCheck: "/api/oura/check",
+  /** POST (no body): remove the account's Oura connection; answers with the profile. */
+  ouraDisconnect: "/api/oura/disconnect",
   timezone: "/api/me/timezone",
   today: "/api/today",
   invites: "/api/invites",
@@ -195,6 +199,13 @@ export const API_PATHS = {
   notifications: "/api/notifications",
   pushSubscriptions: "/api/push-subscriptions",
 } as const;
+
+/**
+ * Reconnecting Oura (from Today, a pact or Profile) starts at this address
+ * instead of `API_PATHS.ouraConnect`: Oura's callback then brings the browser
+ * back to Today, with OURA_RESULT_PARAM, rather than to the new pact form.
+ */
+export const OURA_RECONNECT_PATH = `${API_PATHS.ouraConnect}?then=today`;
 
 /**
  * The largest photo the server accepts. A shrunk photo is about 100–180 KB and
@@ -416,6 +427,14 @@ export interface SetTimezoneRequest {
   timezone: string;
 }
 export type SetTimezoneResponse = SetTimezoneResult;
+
+/** POST /api/oura/check: always `{ ok: true }`, whether Oura was asked or the check was ignored. */
+export interface CheckOuraResponse {
+  ok: true;
+}
+
+/** POST /api/oura/disconnect: the profile, now without its Oura connection. */
+export type DisconnectOuraResponse = MeResponse;
 
 /** GET /api/today */
 export type TodayResponse = Json<Today>;

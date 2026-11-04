@@ -66,7 +66,9 @@ export type NotificationKind =
   /** To the owner: one of a pact's reminders, at its time. Set per pact, so no setting turns it off. */
   | "reminder"
   /** To the owner, daily while Overdue; to the reviewers of pacts with that recipient, at first and weekly. */
-  | "overdue-bill";
+  | "overdue-bill"
+  /** To the owner: Oura refused its tokens, or at 15:00 a bedtime night still has no sleep data. */
+  | "connection-problem";
 export type NotificationChannel = "push";
 
 export interface NotificationPayload {

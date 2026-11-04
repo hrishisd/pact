@@ -19,6 +19,7 @@ import {
   EVIDENCE_PHOTO_FIELD,
   INVITE_REQUIRED_PATH,
   INVITE_TOKEN_SIGN_IN_KEY,
+  OURA_RECONNECT_PATH,
   invitePath,
   MAX_PHOTO_BYTES,
   PAYMENT_AMOUNT_FIELD,
@@ -42,6 +43,8 @@ import {
   type CreatePactRequest,
   type CreatePactResponse,
   type AcceptExcuseRejectionResponse,
+  type CheckOuraResponse,
+  type DisconnectOuraResponse,
   type DecideRequest,
   type ExcuseOptionsResponse,
   type ExcusePreviewResponse,
@@ -99,6 +102,7 @@ async function server({
 } = {}) {
   const s = scenario();
   const ouraConnects: { account: string; code: string }[] = [];
+  const ouraForgets: string[] = [];
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Pact</title><div id=root></div>");
@@ -127,6 +131,7 @@ async function server({
             ouraConnects.push({ account, code });
             return code === "good-code" ? { ok: true } : { ok: false, reason: "exchange-failed" };
           },
+          forget: (account) => void ouraForgets.push(account),
         }
       : null,
     log: (line) => s.logs.push(line),
@@ -149,6 +154,8 @@ async function server({
     at: s.at,
     clock: s.clock,
     ouraConnects,
+    ouraForgets,
+    ouraSource: s.ouraSource,
     core: s.core,
     logs: s.logs,
     photoStore: s.photoStore,
@@ -705,6 +712,7 @@ describe("pacts", () => {
         editWindowClosesAt,
         newTerms: null,
         waiting: [],
+        connectionProblem: null,
         history: {
           kind: "fixed-days",
           days: ["05", "06", "07", "08", "09", "10", "11"].map((day) => ({
@@ -2218,6 +2226,7 @@ describe("notifications", () => {
         { setting: "missed-occurrence", enabled: true },
         { setting: "new-bill", enabled: true },
         { setting: "overdue-bill", enabled: true },
+        { setting: "connection-problem", enabled: true },
       ],
     });
   });
@@ -2303,7 +2312,9 @@ describe("connecting Oura", () => {
     expect(back.headers.get("Location")).toBe("/pacts/new?oura=connected");
     expect(s.ouraConnects).toEqual([{ account: s.core.accountIdForEmail(OPERATOR), code: "good-code" }]);
     const me = await s.api<MeResponse>(API_PATHS.me, { cookie });
-    expect(me.body.connections).toEqual([{ service: "oura", status: "connected", connectedAt: expect.any(String) }]);
+    expect(me.body.connections).toEqual([
+      { service: "oura", status: "connected", connectedAt: expect.any(String), activePacts: 0 },
+    ]);
   });
 
   test("a state that isn't this browser's connects nothing", async () => {
@@ -2355,5 +2366,78 @@ describe("connecting Oura", () => {
   test("connecting needs a session", async () => {
     const s = await server();
     expect((await s.request(API_PATHS.ouraConnect)).status).toBe(401);
+  });
+
+  test("reconnecting comes back to Today, connected or not", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const response = await s.request(OURA_RECONNECT_PATH, { cookie });
+    const state = new URL(response.headers.get("Location")!).searchParams.get("state")!;
+    const started = `${cookie}; ${cookieFrom(response)}`;
+
+    const back = await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=${state}`, { cookie: started });
+
+    expect(back.headers.get("Location")).toBe("/?oura=connected");
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([
+      expect.objectContaining({ status: "connected" }),
+    ]);
+    const unset = await server({ production: true, ouraSetUp: false });
+    const other = await operatorWithInvite(unset);
+    expect((await unset.request(OURA_RECONNECT_PATH, { cookie: other.cookie })).headers.get("Location")).toBe(
+      "/?oura=unavailable",
+    );
+  });
+
+  /** The operator with Oura connected and a bedtime pact, in bed by midnight from Mon night. */
+  async function ownerWithBedtimePact() {
+    const { s, owner, pact } = await ownerWithFriend();
+    const started = await startConnecting(s, owner.cookie);
+    await s.request(`${API_PATHS.ouraCallback}?code=good-code&state=${started.state}`, { cookie: started.cookie });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { ...pact, evidenceKind: "oura", name: "In bed by midnight", description: "", inBedBy: "00:00" },
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    return { s, cookie: owner.cookie, accountId: s.core.accountIdForEmail(OPERATOR)! };
+  }
+
+  test("checking Oura now asks Oura for a night not judged yet, at most once in 15 seconds", async () => {
+    const { s, cookie, accountId } = await ownerWithBedtimePact();
+    s.clock.set(s.at("Tue 09:00"));
+
+    const first = await s.api<CheckOuraResponse>(API_PATHS.ouraCheck, { cookie, method: "POST" });
+    const again = await s.api<CheckOuraResponse>(API_PATHS.ouraCheck, { cookie, method: "POST" });
+
+    for (const response of [first, again]) expect(response).toEqual({ status: 200, body: { ok: true } });
+    expect(s.ouraSource.calls.map((call) => call.account)).toEqual([accountId]);
+  });
+
+  test("checking Oura now with Oura not set up answers ok and asks nothing", async () => {
+    const s = await server({ production: true, ouraSetUp: false });
+    const { cookie } = await operatorWithInvite(s);
+    expect(await s.api(API_PATHS.ouraCheck, { cookie, method: "POST" })).toEqual({ status: 200, body: { ok: true } });
+    expect(s.ouraSource.calls).toEqual([]);
+  });
+
+  test("disconnecting removes the connection and Oura's tokens, and answers with the profile", async () => {
+    const { s, cookie, accountId } = await ownerWithBedtimePact();
+    const before = await s.api<MeResponse>(API_PATHS.me, { cookie });
+    expect(before.body.connections).toEqual([expect.objectContaining({ activePacts: 1 })]);
+
+    const response = await s.api<DisconnectOuraResponse>(API_PATHS.ouraDisconnect, { cookie, method: "POST" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.connections).toEqual([]);
+    expect(s.ouraForgets).toEqual([accountId]);
+    const today = await s.api<TodayResponse>(API_PATHS.today, { cookie });
+    expect(today.body.alerts).toEqual([{ kind: "oura-connection", status: "not-connected" }]);
+  });
+
+  test("checking and disconnecting need a session", async () => {
+    const s = await server();
+    for (const path of [API_PATHS.ouraCheck, API_PATHS.ouraDisconnect]) {
+      expect((await s.request(path, { method: "POST" })).status).toBe(401);
+    }
   });
 });

@@ -506,4 +506,16 @@ export const migrations: readonly string[] = [
     PRIMARY KEY (pact_id, date, time)
   );
   `,
+  // 22: the 15:00 push for a bedtime night with no sleep data
+  `
+  -- Each 15:00 push sent about a bedtime night still not judged: the owner
+  -- and the night's date ("YYYY-MM-DD" in their timezone). One per night,
+  -- however many of the owner's bedtime pacts wait on it, and never again
+  -- after a restart.
+  CREATE TABLE no_oura_data_push_sent (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    date TEXT NOT NULL,
+    PRIMARY KEY (account_id, date)
+  );
+  `,
 ];

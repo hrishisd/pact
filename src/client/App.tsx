@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { inviteTokenFromPath, type MeResponse } from "../shared/api.ts";
+import { inviteTokenFromPath, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { ChangePact } from "./ChangePact.tsx";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
@@ -465,27 +465,7 @@ function ProfileSheet({
       <NotificationsSection push={push} onSetUp={onSetUpNotifications} />
 
       {profile.connections.length > 0 && (
-        <section className="stack">
-          <div className="label">Connections</div>
-          <div className="list">
-            {profile.connections.map((connection) => (
-              <div key={connection.service} className="rowbtn">
-                <span className="kico k-ring" aria-hidden="true">
-                  <RingIcon />
-                </span>
-                <span className="rt">
-                  <b>Oura Ring</b>
-                  <small>Connected {formatDay(connection.connectedAt, profile.timezone)}</small>
-                </span>
-                {connection.status === "connected" ? (
-                  <span className="chip c-kept">Connected</span>
-                ) : (
-                  <span className="chip c-missed">Needs reconnecting</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
+        <ConnectionsSection connections={profile.connections} timezone={profile.timezone} onProfile={onProfile} />
       )}
 
       <section className="stack">
@@ -527,6 +507,99 @@ function ProfileSheet({
         Sign out
       </button>
     </Sheet>
+  );
+}
+
+/**
+ * The connections the owner has made (Oura only), each with its status.
+ * Reconnect when Oura refused its tokens; Disconnect first warns how many
+ * Active pacts use it, since their nights count as Missed until it's back.
+ */
+function ConnectionsSection({
+  connections,
+  timezone,
+  onProfile,
+}: {
+  connections: ConfirmedProfile["connections"];
+  timezone: string;
+  onProfile: (p: MeResponse) => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const disconnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      onProfile(await api.disconnectOura());
+    } catch (failure) {
+      setError(`Couldn't disconnect. ${failureText(failure, "Check your connection and try again.")}`);
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="stack">
+      <div className="label">Connections</div>
+      {connections.map((connection) => {
+        const n = connection.activePacts;
+        return (
+          <div key={connection.service} className="stack">
+            <div className="list">
+              <div className="rowbtn">
+                <span className="kico k-ring" aria-hidden="true">
+                  <RingIcon />
+                </span>
+                <span className="rt">
+                  <b>Oura Ring</b>
+                  <small>Connected {formatDay(connection.connectedAt, timezone)}</small>
+                </span>
+                {connection.status === "connected" ? (
+                  <span className="chip c-kept">Connected</span>
+                ) : (
+                  <span className="chip c-missed">Needs reconnecting</span>
+                )}
+              </div>
+            </div>
+            {asking ? (
+              <div className="alert amber" role="status">
+                <span>
+                  {n > 0 ? (
+                    <>
+                      <b>
+                        {n} active {n === 1 ? "pact uses" : "pacts use"} Oura.
+                      </b>{" "}
+                      {n === 1 ? "Its" : "Their"} nights will count as Missed until you reconnect.
+                    </>
+                  ) : (
+                    "Disconnect Oura? You can connect it again when you next create an Oura pact."
+                  )}
+                </span>
+                <div className="row2">
+                  <button className="btn sm" disabled={busy} onClick={() => setAsking(false)}>
+                    Keep connected
+                  </button>
+                  <button className="btn sm danger" disabled={busy} onClick={() => void disconnect()}>
+                    {busy ? "Disconnecting…" : "Disconnect"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="row2">
+                {connection.status === "needs-reconnecting" && (
+                  <a className="btn sm primary" href={OURA_RECONNECT_PATH}>
+                    Reconnect
+                  </a>
+                )}
+                <button className="btn sm" onClick={() => setAsking(true)}>
+                  Disconnect
+                </button>
+              </div>
+            )}
+            {error && <p className="error small">{error}</p>}
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
