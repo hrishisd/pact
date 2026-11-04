@@ -158,11 +158,12 @@ test("migration 20: an account made before billing existed gets no bill for any 
   expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500, overdueCents: 0, billDue: null })]);
   expect(billOf()).toMatchObject({ kind: "next-bill" });
 
-  // Billing carries on from there: the penalty goes on the first Wednesday's bill after the migration.
+  // Billing carries on from there: the penalty goes on the first Wednesday bill at or after the
+  // migration (the same day when it runs on a Wednesday before 18:00).
   await core.advanceTo(new Date(migratedAt.getTime() + 8 * DAY_MS));
   await core.deliveriesSettled();
   expect(notifier.sent.filter((n) => n.kind === "new-bill")).toHaveLength(1);
   const bill = billOf();
-  expect(bill?.kind === "on-bill" && bill.billedOn > migratedOn).toBe(true);
+  expect(bill?.kind === "on-bill" && bill.billedOn >= migratedOn).toBe(true);
   await core.close();
 });
