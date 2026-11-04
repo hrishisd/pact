@@ -13,6 +13,7 @@ import {
   startOfDay,
   weekdayOf,
   zonedWallTimeToInstant,
+  zoneOffsetAt,
   type LocalDate,
 } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
@@ -28,9 +29,11 @@ import {
   occurrences,
   occurrencesOverTime,
   reminderAt,
+  utcOffsetMs,
   type Occurrence,
   type Occurrences,
   type OccurrenceTerms,
+  type OuraOffset,
   type TermsEra,
 } from "./occurrences.ts";
 import type {
@@ -1083,6 +1086,7 @@ class Core implements PactCore {
         const fetched = await this.#fetchSleep(now, accountId);
         await this.#command(() => {
           this.#markDisconnected(fetched);
+          this.#noteOuraClock(fetched.sleep);
           this.#judgeNights(now, fetched.sleep, accountId);
         });
       },
@@ -2844,15 +2848,61 @@ class Core implements PactCore {
     ];
   }
 
-  /** The occurrences of pact `pactId` in `timezone`, each dated one on the terms it opened with. */
+  /**
+   * The occurrences of pact `pactId` in `timezone`, each dated one on the
+   * terms it opened with. A bedtime night closes on Oura's clock where the
+   * owner is (`#ouraOffset`).
+   */
   #occurrencesOf(pactId: string, timezone: string): Occurrences {
     const pact = this.#db
-      .prepare(`SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at FROM pact WHERE id = ?`)
+      .prepare(
+        `SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id, evidence_kind
+         FROM pact WHERE id = ?`,
+      )
       .get(pactId) as
-      | Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date" | "created_at">
+      | (Pick<
+          PactRow,
+          "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date" | "created_at" | "evidence_kind"
+        > & { owner_account_id: AccountId })
       | undefined;
     if (!pact) throw new Error(`no pact ${pactId}`);
-    return occurrencesOverTime(this.#erasOf(pact), timezone);
+    const ouraOffset = pact.evidence_kind === "oura" ? this.#ouraOffset(pact.owner_account_id, timezone) : null;
+    return occurrencesOverTime(this.#erasOf(pact), timezone, ouraOffset);
+  }
+
+  /**
+   * The UTC offset a bedtime night with no period yet closes on: the one on
+   * the latest sleep Oura reported for `account`. Null, the account's
+   * `timezone`, when Oura hasn't reported one with an offset, or when that
+   * offset is the timezone's own at that moment: the owner was at home, and
+   * the timezone also knows when its clocks change.
+   */
+  #ouraOffset(account: AccountId, timezone: string): OuraOffset {
+    const row = this.#db.prepare(`SELECT oura_latest_bedtime_start FROM account WHERE id = ?`).get(account) as
+      { oura_latest_bedtime_start: string | null } | undefined;
+    const latest = row?.oura_latest_bedtime_start ?? null;
+    const offset = latest === null ? null : utcOffsetOf(latest);
+    if (latest === null || offset === null) return null;
+    return utcOffsetMs(offset) === zoneOffsetAt(new Date(latest), timezone) ? null : offset;
+  }
+
+  /**
+   * Keeps, for each account in `sleep`, the latest bedtime_start Oura has
+   * reported with a UTC offset, by when it happened: Oura's clock where the
+   * owner is now, for `#ouraOffset`. Deleted periods don't count.
+   */
+  #noteOuraClock(sleep: Map<AccountId, OuraSleepPeriod[]>): void {
+    for (const [account, periods] of sleep) {
+      const row = this.#db.prepare(`SELECT oura_latest_bedtime_start FROM account WHERE id = ?`).get(account) as
+        { oura_latest_bedtime_start: string | null } | undefined;
+      let latest = row?.oura_latest_bedtime_start ?? null;
+      for (const { type, bedtime_start: start } of periods) {
+        if (type === "deleted" || utcOffsetOf(start) === null) continue;
+        if (latest === null || Date.parse(start) > Date.parse(latest)) latest = start;
+      }
+      if (latest === null || latest === row?.oura_latest_bedtime_start) continue;
+      this.#db.prepare(`UPDATE account SET oura_latest_bedtime_start = ? WHERE id = ?`).run(latest, account);
+    }
   }
 
   /** The terms the pact's occurrence dated `date` follows: those in force when it opened. */
@@ -4376,6 +4426,7 @@ class Core implements PactCore {
         this.#closeEditWindows(t);
         this.#judgeDueBy(t);
         this.#markDisconnected(fetched);
+        this.#noteOuraClock(fetched.sleep);
         this.#judgeNights(t, fetched.sleep);
         this.#pushNoOuraData(t);
         const dropped = this.#remind(t);
@@ -4595,8 +4646,10 @@ class Core implements PactCore {
       const endedAt = pact.ended_at === null ? null : new Date(pact.ended_at);
       const until = endedAt !== null && endedAt.getTime() < t.getTime() ? endedAt : t;
       const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
+      // The window is on the clock the night closes on.
+      const ouraOffset = this.#ouraOffset(pact.owner_account_id, timezone);
       for (const night of this.#occurrencesOf(pact.id, timezone).between(from, localDateOf(until, timezone))) {
-        if (nightStartsAt(night.date, timezone).getTime() > t.getTime()) break;
+        if (nightStartsAt(night.date, timezone, ouraOffset).getTime() > t.getTime()) break;
         if (endedAt !== null && night.dueAt.getTime() > endedAt.getTime()) break;
         if (!this.#isJudged(pact.id, night.date)) waiting.push({ pact: { ...pact, timezone }, night });
       }
@@ -4674,7 +4727,8 @@ class Core implements PactCore {
    */
   #pushNoOuraData(t: Date): void {
     for (const { pact, night } of this.#nightsWaiting(t)) {
-      if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone).getTime()) continue;
+      const ouraOffset = this.#ouraOffset(pact.owner_account_id, pact.timezone);
+      if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone, ouraOffset).getTime()) continue;
       if (t.getTime() >= night.closesAt.getTime() || this.#isJudged(pact.id, night.date)) continue;
       if (this.#excuseOn(pact.id, night.date) !== null) continue;
       const sent = this.#db
@@ -5061,6 +5115,15 @@ function isOneTime(schedule: string): boolean {
  */
 function wallClock(timestamp: string): string {
   return timestamp.slice(0, 16);
+}
+
+/**
+ * The UTC offset `timestamp` carries, "+HH:MM" or "-HH:MM" ("Z" is "+00:00"),
+ * or null for a timestamp written without one.
+ */
+function utcOffsetOf(timestamp: string): string | null {
+  if (timestamp.endsWith("Z")) return "+00:00";
+  return /T.*([+-]\d{2}:\d{2})$/.exec(timestamp)?.[1] ?? null;
 }
 
 /** The night a sleep starting at `timestamp` counts for: its day from 18:00, else the day before. */

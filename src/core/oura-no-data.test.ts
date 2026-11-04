@@ -232,6 +232,22 @@ describe("the 15:00 push", () => {
     expect(connectionProblems(s, owner)).toEqual([]);
   });
 
+  test("a traveller gets it at 15:00 on Oura's clock, three hours before the night closes there", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    await createPact("00:00");
+    // Mon night in Paris: 15:00 Wed there is 09:00 in New York.
+    s.ouraSource.addSleep(owner.id, sleep("2026-01-05T23:00:00+01:00"));
+    await s.advanceTo("Tue 07:00");
+
+    await s.advanceTo("Wed 08:59");
+    expect(connectionProblems(s, owner)).toEqual([]);
+    await s.advanceTo("Wed 09:00");
+    expect(connectionProblems(s, owner)).toEqual([
+      expect.objectContaining({ payload: expect.objectContaining({ title: "No Oura data", occurrenceDate: TUE }) }),
+    ]);
+  });
+
   test("the scheduler back after 18:00 judges the night Missed and sends no push", async () => {
     const s = scenario();
     const { owner } = await tueNightWaiting(s);

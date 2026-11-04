@@ -41,3 +41,5 @@ Moved out:
 - Ledgers status line: closed. One line in priority order is what spec story 80 says ("one status line only when ..."), and it's already listed under Decisions to confirm in `manual-checks.md`.
 
 ## Comments
+
+- 2026-11-04: **Oura's timezone for nights: built.** A night with no period yet closes at 18:00 the next day at the UTC offset of the latest sleep Oura reported for the owner (kept on `account.oura_latest_bedtime_start`, migration 24), or in the account's timezone when Oura hasn't reported a timestamp with an offset, or when that offset is the timezone's own at that moment (the owner was at home, so daylight saving changes still land right). The night's window start (when polling begins), its Missed cutoff, the 15:00 push, Today's No Oura data countdown and an Ended pact's end all read the same clock. The in-bed-by due time (Today's "Tonight" countdown, the first night) and reminders stay on the account's clock; Kept vs late already used Oura's wall clock. Scenarios: `bedtime.test.ts` ("a traveller's night closes at 18:00 on Oura's clock"), `oura-no-data.test.ts` (the traveller's 15:00 push), `occurrences.test.ts`.

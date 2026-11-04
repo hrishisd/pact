@@ -533,4 +533,14 @@ export const migrations: readonly string[] = [
   -- an operator alert that the lost answer most likely spent it.
   ALTER TABLE oura_token ADD COLUMN refresh_outcome_unknown_at TEXT;
   `,
+  // 24: Oura's clock for a traveller's bedtime nights
+  `
+  -- The bedtime_start of the latest sleep period Oura reported for the
+  -- account, as Oura wrote it, with its UTC offset: the clock a bedtime night
+  -- with no period yet closes on at 18:00 the next day. Only a timestamp with
+  -- an offset is kept. NULL until Oura reports one, and the night then closes
+  -- on the account's timezone. It outlives the connection, as the owner's
+  -- clock rather than the link's.
+  ALTER TABLE account ADD COLUMN oura_latest_bedtime_start TEXT;
+  `,
 ];

@@ -37,6 +37,8 @@ Oura is off in production until its secrets are set. Connecting shows "Oura isn'
 - [ ] The No Oura data card the morning after, before the ring syncs; "Checking Oura…" when Today opens; the 3pm Connection problem push if it still hasn't synced.
 - [ ] Revoke Pact's access in Oura: the connection shows Needs reconnecting, with Reconnect on Today, the pact page and Profile. Reconnect, and the waiting night is judged. Disconnect warns how many Active pacts use Oura.
 - [ ] **Open Oura link.** On an iPhone with the Oura app, tap `https://cloud.ouraring.com/app/` from a Pact page (typing it in Safari's address bar doesn't trigger universal links). If it opens the app, add the button to the No Oura data card (ticket 09).
+- [ ] **Oura's clock for nights (ticket 18).** From the recorded `sleep` response: if `bedtime_start` ends in `Z` or has no offset, nights close on the account's timezone and Kept vs late reads the raw wall clock, which is wrong for `Z`. File a ticket if so. On a trip, check that the first night after a flight carries the new offset, and that at home the offset matches the account's timezone.
+- [ ] **Oura refresh tokens (ticket 18).** Confirm Oura refuses a spent refresh token with a 400 or 401, and that 30 s is a sensible wait for its token endpoint. If you can force a refresh to time out after Oura grants it, the account should show Needs reconnecting and `scripts/prod-log.sh grep OPERATOR_ALERT` should find the "lost answer most likely spent it" line.
 - [ ] Then mark tickets 08 and 09 done.
 
 ## Decisions to confirm
@@ -51,4 +53,5 @@ Choices made while building where the spec was open. Each is written up in the t
 - Weekly count (14): a short week adds one penalty of (days short × penalty); a rejected day can't take more evidence.
 - One-time (15): no start or end dates; approved evidence is Kept at the deadline.
 - Due-by and dates (16): a pact with an end date Ends the day after it (6pm the next day for a bedtime pact).
+- Oura's clock (18): a bedtime night with no sleep yet closes at 18:00 on the UTC offset of the owner's latest Oura sleep (a nap counts), else the account's timezone. The in-bed-by time, reminders and excuse windows stay on the account's timezone. The 15:00 No Oura data push follows Oura's clock.
 - Money (review fixes): an excuse approved after its penalty was paid leaves owed at $0, and the payment pays the next penalty to that recipient.

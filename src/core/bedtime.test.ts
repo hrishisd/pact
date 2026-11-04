@@ -319,6 +319,83 @@ describe("judging a night", () => {
   });
 });
 
+describe("a traveller's night closes at 18:00 on Oura's clock", () => {
+  // The account is in New York. With no period for the night yet, Oura's clock
+  // is the UTC offset of the latest sleep it reported.
+
+  test("west of the account (Honolulu): a late-afternoon long_sleep that Oura puts in Tue night judges it", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    // Mon night in Honolulu, 23:00 there (04:00 Tue in New York): Kept by Oura's clock.
+    s.ouraSource.addSleep(owner.id, sleep("2026-01-05T23:00:00-10:00"));
+    await s.advanceTo("Tue 12:00");
+    expect(night(owner, pactId, MON)).toBe("kept");
+
+    // 18:00 Wed in New York is 13:00 in Honolulu: Tue night has until 18:00 there.
+    await s.advanceTo("Wed 18:00");
+    expect(night(owner, pactId, TUE)).toBe("not-judged");
+    expect(owner.today().sections[0]).toEqual({
+      kind: "no-oura-data",
+      cards: [expect.objectContaining({ occurrenceDate: TUE, closesAt: s.at("Wed 23:00") })],
+    });
+
+    // Asleep at 15:00 Wed in Honolulu (20:00 in New York), which Oura's clock puts in Tue night.
+    s.ouraSource.addSleep(owner.id, sleep("2026-01-07T15:00:00-10:00"));
+    await s.advanceTo("Wed 22:30");
+    expect(missedCards(owner)).toEqual([
+      expect.objectContaining({ occurrenceDate: TUE, missedAt: s.at("Wed 22:30"), night: { inBedAt: "15:00" } }),
+    ]);
+  });
+
+  test("east of the account (Paris): no period by 18:00 Wed there is Missed then, 12:00 in New York", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    s.ouraSource.addSleep(owner.id, sleep("2026-01-05T23:00:00+01:00"));
+    await s.advanceTo("Tue 07:00");
+    expect(night(owner, pactId, MON)).toBe("kept");
+
+    await s.advanceTo("Wed 11:59");
+    expect(night(owner, pactId, TUE)).toBe("not-judged");
+    await s.advanceTo("Wed 12:00");
+    expect(missedCards(owner)).toEqual([
+      expect.objectContaining({ occurrenceDate: TUE, missedAt: s.at("Wed 12:00"), night: { inBedAt: null } }),
+    ]);
+  });
+
+  test("at home across a daylight saving change, the night closes at 18:00 on the account's clock", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    s.setClockTo("2026-10-30T12:00:00-04:00");
+    const pactId = await createPact("00:00");
+    // Fri and Sat nights in New York, before the clocks go back at 02:00 Sun Nov 1.
+    s.ouraSource.addSleep(owner.id, sleep("2026-10-30T23:00:00-04:00"), sleep("2026-10-31T23:00:00-04:00"));
+    await s.advanceTo("2026-11-01T12:00:00-05:00");
+    expect(night(owner, pactId, "2026-10-31")).toBe("kept");
+
+    // Sun night has no data: it closes at 18:00 EST Mon, not 18:00 at Sat night's -04:00.
+    await s.advanceTo("2026-11-02T17:59:00-05:00");
+    expect(night(owner, pactId, "2026-11-01")).toBe("not-judged");
+    await s.advanceTo("2026-11-02T18:00:00-05:00");
+    expect(night(owner, pactId, "2026-11-01")).toBe("missed");
+  });
+
+  test("Oura timestamps with no UTC offset close the night on the account's clock", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    s.ouraSource.addSleep(owner.id, { ...sleep("Mon 23:00"), bedtime_start: "2026-01-05T23:00:00" });
+    await s.advanceTo("Tue 07:00");
+    expect(night(owner, pactId, MON)).toBe("kept");
+
+    await s.advanceTo("Wed 17:59");
+    expect(night(owner, pactId, TUE)).toBe("not-judged");
+    await s.advanceTo("Wed 18:00");
+    expect(night(owner, pactId, TUE)).toBe("missed");
+  });
+});
+
 describe("polling Oura", () => {
   test("no calls while every night is judged; a call every tick while one isn't", async () => {
     const s = scenario();

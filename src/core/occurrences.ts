@@ -25,7 +25,8 @@ export interface Occurrence {
   dueAt: Date;
   /**
    * The latest it's judged, with no evidence: its due time, or for a bedtime
-   * night 18:00 the next day, when a night Oura never reported counts as missed.
+   * night 18:00 the next day (on Oura's clock, if it's given one), when a night
+   * Oura never reported counts as missed.
    */
   closesAt: Date;
 }
@@ -165,9 +166,19 @@ export interface Occurrences {
   overlapping(from: LocalDate, to: LocalDate): Occurrence[];
 }
 
-/** The occurrences of a pact with `terms`, in its owner's `timezone`. */
-export function occurrences(terms: OccurrenceTerms, timezone: string): Occurrences {
-  return occurrencesOverTime([{ until: null, terms }], timezone);
+/**
+ * The clock a bedtime night's 18:00 is read on, when it isn't the owner's
+ * timezone: a fixed UTC offset, "+01:00" or "-10:00", the one Oura's
+ * timestamps carry where the owner is. Null reads it in the owner's timezone.
+ */
+export type OuraOffset = string | null;
+
+/**
+ * The occurrences of a pact with `terms`, in its owner's `timezone`. A bedtime
+ * night closes at 18:00 the next day on `ouraOffset`'s clock, if there is one.
+ */
+export function occurrences(terms: OccurrenceTerms, timezone: string, ouraOffset: OuraOffset = null): Occurrences {
+  return occurrencesOverTime([{ until: null, terms }], timezone, ouraOffset);
 }
 
 /**
@@ -185,7 +196,11 @@ export interface TermsEra {
  * the era it falls in. `eras` are oldest first, the last with `until` null,
  * and the pact's first occurrence and end date are the last era's.
  */
-export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string): Occurrences {
+export function occurrencesOverTime(
+  eras: readonly TermsEra[],
+  timezone: string,
+  ouraOffset: OuraOffset = null,
+): Occurrences {
   const termsOn = (date: LocalDate) =>
     (eras.find((era) => era.until === null || date < era.until) ?? eras.at(-1)!).terms;
   const current = eras.at(-1)!.terms;
@@ -200,7 +215,7 @@ export function occurrencesOverTime(eras: readonly TermsEra[], timezone: string)
   const occurrence = (date: LocalDate) => {
     if (weekly) return weekOccurrence(mondayOf(date), timezone);
     const terms = termsOn(date);
-    return fixedDaysOccurrence(date, timezone, terms.inBedBy ?? null, terms.dueBy ?? null);
+    return fixedDaysOccurrence(date, timezone, terms.inBedBy ?? null, terms.dueBy ?? null, ouraOffset);
   };
   const ended = (date: LocalDate) => endDate !== null && lastDayOf(termsOn(date).schedule, periodOf(date)) > endDate;
   const scheduled = (date: LocalDate) => {
@@ -300,13 +315,15 @@ const NIGHT_STARTS_HOUR = 18;
  * A Fixed-days occurrence on `date`, open from the start of its day. It's due
  * at its due-by time that day if it has one, else at the midnight ending its
  * day. A bedtime night is due at its in-bed-by time (that evening from 18:00,
- * else the morning after) and closes at 18:00 the next day.
+ * else the morning after) and closes at 18:00 the next day, on Oura's clock
+ * (`ouraOffset`) if there is one.
  */
 function fixedDaysOccurrence(
   date: LocalDate,
   timezone: string,
   inBedBy: string | null,
   dueBy: string | null,
+  ouraOffset: OuraOffset = null,
 ): Occurrence {
   const opensAt = startOfDay(date, timezone);
   if (inBedBy === null) {
@@ -318,7 +335,7 @@ function fixedDaysOccurrence(
     date,
     opensAt,
     dueAt: wallTime(hour < NIGHT_STARTS_HOUR ? addDays(date, 1) : date, hour, minute, timezone),
-    closesAt: nightStartsAt(addDays(date, 1), timezone),
+    closesAt: nightStartsAt(addDays(date, 1), timezone, ouraOffset),
   };
 }
 
@@ -338,14 +355,35 @@ export function oneTimeReminderAt(reminder: string, timezone: string): Date {
   return wallTime(date, ...clockOf(time), timezone);
 }
 
-/** 18:00 on `date` in `timezone`: when the night of `date` starts, and the night before closes. */
-export function nightStartsAt(date: LocalDate, timezone: string): Date {
-  return wallTime(date, NIGHT_STARTS_HOUR, 0, timezone);
+/**
+ * 18:00 on `date`, on Oura's clock (`ouraOffset`) or else in `timezone`: when
+ * the night of `date` starts, and the night before closes.
+ */
+export function nightStartsAt(date: LocalDate, timezone: string, ouraOffset: OuraOffset = null): Date {
+  return nightClockTime(date, NIGHT_STARTS_HOUR, timezone, ouraOffset);
 }
 
-/** 15:00 the day after `date`: a night of `date` still not judged then sends its owner one push. */
-export function noOuraDataPushAt(date: LocalDate, timezone: string): Date {
-  return wallTime(addDays(date, 1), NIGHT_STARTS_HOUR - 3, 0, timezone);
+/**
+ * 15:00 the day after `date`, on the clock the night closes on: a night of
+ * `date` still not judged then sends its owner one push.
+ */
+export function noOuraDataPushAt(date: LocalDate, timezone: string, ouraOffset: OuraOffset = null): Date {
+  return nightClockTime(addDays(date, 1), NIGHT_STARTS_HOUR - 3, timezone, ouraOffset);
+}
+
+/** `hour`:00 on `date` at the UTC offset `ouraOffset`, or in `timezone` with none. */
+function nightClockTime(date: LocalDate, hour: number, timezone: string, ouraOffset: OuraOffset): Date {
+  if (ouraOffset === null) return wallTime(date, hour, 0, timezone);
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  return new Date(Date.UTC(year, month - 1, day, hour) - utcOffsetMs(ouraOffset));
+}
+
+/** A UTC offset "+HH:MM" or "-HH:MM" in ms, negative west of UTC. */
+export function utcOffsetMs(offset: string): number {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(offset);
+  if (!match) throw new Error(`unreadable UTC offset "${offset}"`);
+  const [, sign, hours, minutes] = match as unknown as [string, string, string, string];
+  return (sign === "-" ? -1 : 1) * (Number(hours) * 60 + Number(minutes)) * 60 * 1000;
 }
 
 /** "HH:MM" as hour and minute. */
