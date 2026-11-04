@@ -397,7 +397,7 @@ function DayList({ preview, weekly, now, empty }: { preview: Preview; weekly: bo
   const rows = [
     ...preview.covered.map((d) => ({ date: d.date, covered: true, note: dayNote(d.status, now, weekly) })),
     ...preview.skipped.map((d) => ({ date: d.date, covered: false, note: SKIP_REASON_TEXT[d.reason] })),
-  ].sort((a, b) => a.date.localeCompare(b.date));
+  ].sort((a, b) => a.date.localeCompare(b.date, "en-US"));
   if (rows.length === 0) return <p className="muted small">{empty}</p>;
   return (
     <div className="list">

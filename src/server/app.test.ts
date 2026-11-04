@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { scenario } from "../core/testing/scenario.ts";
 import { MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
 import {
@@ -250,6 +250,13 @@ function cookieFrom(response: Response): string {
     .filter((pair) => !pair.endsWith("="))
     .join("; ");
 }
+
+// Nothing reaches the network: a test that needs Google stubs it with fakeGoogle.
+beforeEach(() => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    throw new Error(`unexpected fetch ${String(input instanceof Request ? input.url : input)}`);
+  });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

@@ -1,7 +1,7 @@
 // The Web Push adapter, at its boundary: what it sends to a push service, and
 // what it makes of the answer. Nothing reaches the network.
 
-import { createECDH, createPublicKey, verify } from "node:crypto";
+import { createECDH, createHash, createPublicKey, verify } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import type { Notification, PushDevice } from "./ports.ts";
 import { FakeClock } from "./testing/fakes.ts";
@@ -9,10 +9,19 @@ import { encryptForDevice, webPushNotifier } from "./web-push.ts";
 
 const NOW = new Date("2026-01-05T23:00:00Z");
 
+/**
+ * The same P-256 key pair every run, from `name`. A generated one is a fresh
+ * key each run, and about 1 in 256 has a private key shorter than 32 bytes.
+ */
+function fixedKeys(name: string) {
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(createHash("sha256").update(name).digest());
+  return ecdh;
+}
+
 // A key pair made for these tests.
 const vapid = (() => {
-  const ecdh = createECDH("prime256v1");
-  ecdh.generateKeys();
+  const ecdh = fixedKeys("vapid");
   return { publicKey: ecdh.getPublicKey("base64url"), privateKey: ecdh.getPrivateKey("base64url") };
 })();
 
@@ -25,8 +34,7 @@ const notification: Notification = {
 
 /** A browser's side of a subscription, able to read what's sent to it. */
 function browserDevice(name: string): PushDevice {
-  const ecdh = createECDH("prime256v1");
-  ecdh.generateKeys();
+  const ecdh = fixedKeys(`device ${name}`);
   return {
     endpoint: `https://web.push.apple.com/${name}`,
     p256dh: ecdh.getPublicKey("base64url"),
