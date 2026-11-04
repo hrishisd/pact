@@ -138,7 +138,7 @@ The penalties an owner owes one recipient, gathered once a week (Wednesday at 6p
 _Avoid_: Invoice, statement, charge
 
 **Overdue**:
-Describes a bill still unpaid after its due date.
+Describes a bill still unpaid after its due date. An **Overdue spell** runs from when a ledger's oldest unpaid bill fell due until its overdue bills are paid off; the owner's daily reminders and the reviewers' weekly notices count from its start, and a new spell starts them again.
 _Avoid_: Late, delinquent, outstanding
 
 **Payment**:

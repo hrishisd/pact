@@ -242,14 +242,24 @@ export function EditPact({
   }
   if (data === null) return null;
   if (!data.ok) return <Empty title="Pact not found" body="It isn't one of your pacts." />;
-  return <CreatePact editing={data.pact} ouraConnected onCancel={onDone} onCreated={onDone} onInvite={onInvite} />;
+  // Editing never shows the kind step, so neither Oura flag changes anything here.
+  return (
+    <CreatePact
+      editing={data.pact}
+      ouraConnected
+      ouraAvailable
+      onCancel={onDone}
+      onCreated={onDone}
+      onInvite={onInvite}
+    />
+  );
 }
 
 /** The form, for a new pact or for `editing`. */
 export function CreatePact({
   editing,
   ouraConnected,
-  ouraAvailable = true,
+  ouraAvailable,
   onCancel,
   onCreated,
   onInvite,
@@ -257,8 +267,8 @@ export function CreatePact({
   editing?: Pact;
   /** Whether the account has an Oura connection: without one, Oura Ring adds the Connect step. */
   ouraConnected: boolean;
-  /** Whether this server has Oura set up: without it, the Oura Ring tile can't be picked. Editing never shows the tile. */
-  ouraAvailable?: boolean;
+  /** Whether this server has Oura set up: without it, the Oura Ring tile can't be picked. */
+  ouraAvailable: boolean;
   onCancel: () => void;
   /** After creating the pact, or saving the edit. */
   onCreated: (pactId: string, name: string) => void;

@@ -2185,9 +2185,12 @@ class Core implements PactCore {
          WHERE owner_account_id = ? AND recipient_id = ?`,
       )
       .get(ownerId, recipientId) as { owner_reminded_at: string | null; reviewers_told_at: string | null } | undefined;
-    const inSpell = (at: string | null | undefined) =>
+    const ifThisSpell = (at: string | null | undefined) =>
       at === null || at === undefined || new Date(at).getTime() < spellStartedAt.getTime() ? null : new Date(at);
-    return { ownerRemindedAt: inSpell(row?.owner_reminded_at), reviewersToldAt: inSpell(row?.reviewers_told_at) };
+    return {
+      ownerRemindedAt: ifThisSpell(row?.owner_reminded_at),
+      reviewersToldAt: ifThisSpell(row?.reviewers_told_at),
+    };
   }
 
   #timezoneOf(accountId: AccountId): string {
@@ -2213,6 +2216,8 @@ class Core implements PactCore {
       const bills = this.#billsOf(ownerId, recipientId);
       const overdue = overdueOf(bills, now);
       if (overdue.cents > 0) {
+        // Named only once the core has told them in this spell: until the scheduler's next tick, nobody has been.
+        const told = this.#overdueNotice(ownerId, recipientId, overdue.spellStartedAt!).reviewersToldAt !== null;
         alerts.push({
           kind: "bill-overdue",
           recipientId,
@@ -2220,13 +2225,11 @@ class Core implements PactCore {
           overdueCents: overdue.cents,
           billedOn: overdue.billedOn!,
           dueAt: overdue.dueAt!,
-          // Named only once the core has told them in this spell: until the scheduler's next tick, nobody has been.
-          reviewerNames:
-            this.#overdueNotice(ownerId, recipientId, overdue.spellStartedAt!).reviewersToldAt === null
-              ? []
-              : this.#paymentReviewers(ownerId, recipientId)
-                  .map((id) => this.#accountName(id))
-                  .sort(),
+          reviewerNames: told
+            ? this.#paymentReviewers(ownerId, recipientId)
+                .map((id) => this.#accountName(id))
+                .sort()
+            : [],
         });
       }
       const due = bills.filter((bill) => bill.dueAt.getTime() > now.getTime() && bill.uncoveredCents > 0);
