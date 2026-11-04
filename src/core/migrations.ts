@@ -492,4 +492,30 @@ export const migrations: readonly string[] = [
   WHERE billed_through IS NULL
     AND NOT EXISTS (SELECT 1 FROM bill WHERE bill.owner_account_id = account.id);
   `,
+  // 21: reminders sent
+  `
+  -- Each reminder sent: the pact, the day it was about ("YYYY-MM-DD" in the
+  -- owner's timezone) and its time as the pact lists it. reminded_through
+  -- is an instant, so after the owner moves their timezone west a reminder
+  -- already sent comes round again; this stops it going off twice. Rows for
+  -- days well behind the cursor are deleted as it moves on.
+  CREATE TABLE reminder_sent (
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    date TEXT NOT NULL,
+    time TEXT NOT NULL,
+    PRIMARY KEY (pact_id, date, time)
+  );
+  `,
+  // 22: the 15:00 push for a bedtime night with no sleep data
+  `
+  -- Each 15:00 push sent about a bedtime night still not judged: the owner
+  -- and the night's date ("YYYY-MM-DD" in their timezone). One per night,
+  -- however many of the owner's bedtime pacts wait on it, and never again
+  -- after a restart.
+  CREATE TABLE no_oura_data_push_sent (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    date TEXT NOT NULL,
+    PRIMARY KEY (account_id, date)
+  );
+  `,
 ];

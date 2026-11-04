@@ -367,6 +367,23 @@ describe("a reminder fires once", () => {
 
     expect(reminders(s, owner)).toHaveLength(1);
   });
+
+  test("also when the owner moves their timezone west after it fired, and across a restart", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    await createPact("Gym", MON_WED_FRI, { reminders: ["18:00"] });
+    await s.advanceTo("Mon 18:00");
+    s.setClockTo("Mon 18:30");
+    await owner.setTimezone("America/Los_Angeles");
+
+    await s.advanceTo("Mon 20:00");
+    await s.restart();
+    await s.advanceTo("Mon 21:00"); // 18:00 Monday again, in Los Angeles
+    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([MONDAY]);
+
+    await s.advanceTo("Wed 21:00");
+    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([MONDAY, WEDNESDAY]);
+  });
 });
 
 describe("changing reminders on an Active pact", () => {
@@ -411,6 +428,22 @@ describe("changing reminders on an Active pact", () => {
     expect(pactOf(owner, gym).reminders).toEqual([]);
     await s.advanceTo("Mon 18:00");
     expect(reminders(s, owner)).toEqual([]);
+  });
+
+  test("set with a later due-by time that needs approval, one after the due-by time in force now is refused", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { dates: { dueBy: "18:00" } });
+    await s.advanceTo("Mon 09:30");
+
+    expect(await owner.changePact(gym, changed(owner, gym, { dueBy: "21:00", reminders: ["19:00"] }))).toEqual({
+      ok: false,
+      reason: "reminder-after-due-time",
+    });
+    expect(await owner.changePact(gym, changed(owner, gym, { dueBy: "21:00", reminders: ["17:00"] }))).toMatchObject({
+      ok: true,
+      outcome: { kind: "needs-approval" },
+    });
   });
 
   test("inside a change that needs approval, they apply at once and aren't part of the request", async () => {

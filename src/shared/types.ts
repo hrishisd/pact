@@ -256,6 +256,8 @@ export interface PactTerms {
   waiting: PactWaitingItem[];
   /** What its heat map shows. */
   history: PactHistory;
+  /** An Active Oura Ring pact whose owner's Oura can't be read: the same alert as on Today. Else null. */
+  connectionProblem: ConnectionProblem | null;
 }
 
 /**
@@ -576,6 +578,7 @@ export const NOTIFICATION_SETTINGS = [
   "missed-occurrence",
   "new-bill",
   "overdue-bill",
+  "connection-problem",
 ] as const;
 export type NotificationSetting = (typeof NOTIFICATION_SETTINGS)[number];
 
@@ -608,7 +611,15 @@ export interface Connection {
   /** Needs reconnecting once the service refuses its tokens; until then, connected. */
   status: "connected" | "needs-reconnecting";
   connectedAt: Date;
+  /** How many of the owner's Active pacts use it: disconnecting leaves their nights to count as Missed. */
+  activePacts: number;
 }
+
+/**
+ * Why the owner's Oura can't be read while an Active bedtime pact needs it:
+ * Oura refused its tokens (Needs reconnecting), or the owner disconnected it.
+ */
+export type ConnectionProblem = "needs-reconnecting" | "not-connected";
 
 /**
  * The Today query, in display order: alerts, then cards in their sections,
@@ -629,6 +640,12 @@ export interface Today {
 
 /** Something that needs the owner, shown first. */
 export type TodayAlert =
+  /**
+   * The owner has an Active bedtime pact but Pact can't read their Oura: a
+   * night with no data by 18:00 the next day counts as Missed. First of all
+   * alerts; it goes once the owner reconnects.
+   */
+  | { kind: "oura-connection"; status: ConnectionProblem }
   /**
    * A reviewer asked about one of the owner's items still waiting for a
    * decision, and the owner hasn't replied yet. One per item, with its latest
@@ -712,6 +729,8 @@ export type TodayAlert =
       reviewerNames: string[];
     };
 export type TodaySection =
+  /** Bedtime nights past their in-bed-by time that Oura hasn't reported yet, soonest cutoff first. */
+  | { kind: "no-oura-data"; cards: TodayNoOuraDataCard[] }
   /** Pacts whose occurrence is open today, and bills to pay, soonest due first. */
   | { kind: "to-do"; cards: (TodayToDoCard | TodayBillCard)[] }
   /**
@@ -794,6 +813,19 @@ export interface TodayMissedCard extends TodayPactCard {
   closed?: { dueBy: string };
   /** Weekly count only: how far the week got. `penaltyCents` is one penalty per day short. */
   week?: WeekProgress;
+}
+
+/**
+ * A bedtime night past its in-bed-by time that Oura hasn't reported yet and
+ * no excuse covers. Syncing the ring before `closesAt` still counts.
+ */
+export interface TodayNoOuraDataCard extends TodayPactCard {
+  /** The night's day, "YYYY-MM-DD" in the owner's timezone. */
+  occurrenceDate: string;
+  /** 18:00 the next day: with no sleep data by then, it's Missed. */
+  closesAt: Date;
+  /** Tonight's night of the same pact, which rides on this card instead of an Automatic one; null when there's none. */
+  tonight: { occurrenceDate: string; dueAt: Date; inBedBy: string } | null;
 }
 
 /** A bedtime pact's night that runs now. */
@@ -1236,7 +1268,11 @@ export type RequestEndResult =
   | { ok: true; changeRequestId: string }
   | { ok: false; reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" };
 
-/** A pact's terms as they stand, as a change request shows those it leaves alone. */
+/**
+ * A pact's terms as they stand, as a change request shows those it leaves
+ * alone. Reminders aren't terms and are the owner's own, so reviewers never
+ * see them.
+ */
 export type CurrentTerms = Pick<
   PactTerms,
   | "name"
@@ -1250,7 +1286,6 @@ export type CurrentTerms = Pick<
   | "penaltyCents"
   | "recipient"
   | "reviewers"
-  | "reminders"
 >;
 
 /** A change request, as its reviewers and its owner see it. */

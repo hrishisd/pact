@@ -16,6 +16,7 @@
   --missed: #ad3227;
   --missed-bg: #f6dfda;
   --due: #b0520a;
+  --due-bg: #f8e6d4;
   --fresh: #1d64c2;
   --fresh-bg: #ddeafb;
   --excused: #8f5c0c;
@@ -425,6 +426,11 @@ p {
 .c-soon {
   background: var(--sunk);
   color: var(--muted);
+}
+/* A bedtime night Oura hasn't reported yet: something the owner can still act on, orange like due times. */
+.c-due {
+  background: var(--due-bg);
+  color: var(--due);
 }
 .c-excused {
   background: var(--excused-bg);

@@ -37,7 +37,7 @@ import {
   ScheduleStep,
   type Form,
 } from "./CreatePact.tsx";
-import { formatDate, money, parseCents } from "./format.ts";
+import { formatDate, money, parseCents, remindersText } from "./format.ts";
 import { RemindersStep } from "./reminders-step.tsx";
 import { Empty, Sheet, useLoad } from "./ui.tsx";
 
@@ -266,6 +266,8 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
                     {changeValue(changed, "after")}
                     <span className={`tagline t-${changed.effect}`}>{effectText(changed)}</span>
                   </>
+                ) : term === "reminders" ? (
+                  remindersText(pact.reminders)
                 ) : (
                   currentValue(term, pact)
                 )}

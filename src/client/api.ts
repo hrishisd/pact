@@ -14,6 +14,8 @@ import {
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   type AcceptExcuseRejectionResponse,
+  type CheckOuraResponse,
+  type DisconnectOuraResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientRequest,
@@ -145,6 +147,8 @@ function postForm<T>(path: string, form: FormData): Promise<T> {
 export const api = {
   me: () => call<MeResponse>(API_PATHS.me),
   today: () => call<TodayResponse>(API_PATHS.today),
+  checkOura: () => post<CheckOuraResponse>(API_PATHS.ouraCheck),
+  disconnectOura: () => post<DisconnectOuraResponse>(API_PATHS.ouraDisconnect),
   setTimezone: (timezone: string) =>
     post<SetTimezoneResponse>(API_PATHS.timezone, { timezone } satisfies SetTimezoneRequest),
   /** Works signed out. */

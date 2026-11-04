@@ -4,8 +4,12 @@
 // in the File excuse sheet, opened from a To do or Missed card or an alert; a
 // payment is recorded in the Record a payment sheet, opened from a bill's To
 // do card or an overdue alert. Last, Yesterday: how each pact due yesterday did.
+//
+// A bedtime night Oura hasn't reported yet comes first, as No Oura data. While
+// that card is on screen, Today checks Oura now: when it opens, when the app
+// comes back to the foreground, and every 30 seconds.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
@@ -16,6 +20,7 @@ import {
   type TodayAlert,
   type TodayBillCard,
   type TodayMissedCard,
+  type TodayNoOuraDataCard,
   type TodaySection,
   type TodayToDoCard,
   type TodayWaitingItem,
@@ -28,6 +33,7 @@ import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
 import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
+import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
 import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
 
@@ -66,6 +72,14 @@ export function Today({
   const { data: today, failed, reload } = useLoad(api.today);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
+  // Back from reconnecting Oura: say so if it didn't work.
+  const [ouraError] = useState(() => ouraResultText(takeOuraResult()));
+  const connectionProblem = today?.alerts.some((alert) => alert.kind === "oura-connection") ?? false;
+  // Checking can't help while the connection is broken.
+  const checking = useCheckOura(
+    !connectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
+    reload,
+  );
   // A reviewer's question opens the page of the item it's about.
   const openItem = (item: Json<TodayWaitingItem>) => {
     switch (item.kind) {
@@ -115,6 +129,7 @@ export function Today({
           alert={alert}
           timezone={timezone}
           now={now}
+          ouraError={ouraError}
           onFileExcuse={setExcusing}
           onOpenItem={openItem}
           onChanged={reload}
@@ -126,6 +141,8 @@ export function Today({
           section={section}
           timezone={timezone}
           now={now}
+          checkingOura={checking}
+          connectionProblem={connectionProblem}
           onOpenPact={onOpenPact}
           onOpenLedger={onOpenLedger}
           onFileExcuse={setExcusing}
@@ -169,13 +186,61 @@ function alertKey(alert: Json<TodayAlert>): string {
       return `overdue:${alert.recipientId}`;
     case "reviewer-question":
       return `question:${alert.item.id}`;
+    case "oura-connection":
+      return "oura";
   }
+}
+
+/** How often Today checks Oura while a No Oura data card is on screen. */
+const CHECK_OURA_EVERY_MS = 30_000;
+
+/**
+ * While `active` (a No Oura data card is on screen), checks Oura now at
+ * once, whenever the app comes back to the foreground, and every 30 seconds
+ * while it's in front; then `onChecked` reloads Today. True while a check
+ * runs. The core ignores checks that come too fast, so overlap is harmless.
+ */
+function useCheckOura(active: boolean, onChecked: () => void): boolean {
+  const [checking, setChecking] = useState(false);
+  const running = useRef(false);
+  const checked = useRef(onChecked);
+  checked.current = onChecked;
+  const check = useCallback(() => {
+    if (running.current || document.visibilityState === "hidden") return;
+    running.current = true;
+    setChecking(true);
+    // A failed check leaves the card as it was; the next one tries again.
+    api
+      .checkOura()
+      .catch(() => {})
+      .finally(() => {
+        running.current = false;
+        setChecking(false);
+        checked.current();
+      });
+  }, []);
+  useEffect(() => {
+    if (!active) return;
+    check();
+    const timer = window.setInterval(check, CHECK_OURA_EVERY_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [active, check]);
+  return checking;
 }
 
 function Section({
   section,
   timezone,
   now,
+  checkingOura,
+  connectionProblem,
   onOpenPact,
   onOpenLedger,
   onFileExcuse,
@@ -184,6 +249,10 @@ function Section({
   section: Json<TodaySection>;
   timezone: string;
   now: number;
+  /** Whether a check of Oura is running now. */
+  checkingOura: boolean;
+  /** Whether Pact can't read the owner's Oura: syncing won't help, reconnecting will. */
+  connectionProblem: boolean;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onFileExcuse: OnFileExcuse;
@@ -191,6 +260,18 @@ function Section({
   onChanged: () => void;
 }) {
   switch (section.kind) {
+    case "no-oura-data":
+      return section.cards.map((card) => (
+        <NoOuraDataCard
+          key={`no-oura-data:${card.pactId}:${card.occurrenceDate}`}
+          card={card}
+          now={now}
+          checking={checkingOura}
+          connectionProblem={connectionProblem}
+          onOpen={() => onOpenPact(card.pactId, card.name)}
+          onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+        />
+      ));
     case "to-do":
       return section.cards.map((card) =>
         card.kind === "bill" ? (
@@ -325,6 +406,57 @@ function WeekToDo({ card, week, timezone }: { card: Json<TodayToDoCard>; week: J
         {card.dueBy !== null && ` · today's photo by ${clockText(card.dueBy)}`}
       </div>
     </>
+  );
+}
+
+/**
+ * Last night's bedtime, which Oura hasn't reported yet: syncing the ring
+ * before 6pm still counts. Tonight's deadline rides on it, and File excuse
+ * covers a night without the ring.
+ */
+function NoOuraDataCard({
+  card,
+  now,
+  checking,
+  connectionProblem,
+  onOpen,
+  onFileExcuse,
+}: {
+  card: Json<TodayNoOuraDataCard>;
+  now: number;
+  checking: boolean;
+  connectionProblem: boolean;
+  onOpen: () => void;
+  onFileExcuse: () => void;
+}) {
+  const night = formatDate(card.occurrenceDate).split(" ")[0];
+  const { tonight } = card;
+  return (
+    <PactCard
+      name={card.name}
+      penaltyCents={card.penaltyCents}
+      chip={
+        checking ? <span className="chip c-soon">Checking…</span> : <span className="chip c-due">No Oura data</span>
+      }
+      onOpen={onOpen}
+    >
+      <div className="meta">
+        {checking
+          ? "Checking Oura…"
+          : `${night} night hasn't synced. ${connectionProblem ? "Reconnect Oura to count it." : "Open the Oura app."}`}
+      </div>
+      <div className="meta due">Counts as missed at 6pm · {timeLeft(Date.parse(card.closesAt) - now)}</div>
+      {tonight && (
+        <div className="meta">
+          Tonight, in bed by {clockText(tonight.inBedBy)} · {timeLeft(Date.parse(tonight.dueAt) - now)}
+        </div>
+      )}
+      <div className="row2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        <button className="btn sm" onClick={onFileExcuse}>
+          File excuse
+        </button>
+      </div>
+    </PactCard>
   );
 }
 
@@ -465,6 +597,7 @@ function Alert({
   alert,
   timezone,
   now,
+  ouraError,
   onFileExcuse,
   onOpenItem,
   onChanged,
@@ -472,6 +605,8 @@ function Alert({
   alert: Json<TodayAlert>;
   timezone: string;
   now: number;
+  /** Why the last reconnect didn't work, if it didn't. */
+  ouraError: string | null;
   onFileExcuse: OnFileExcuse;
   onOpenItem: (item: Json<TodayWaitingItem>) => void;
   onChanged: () => void;
@@ -485,6 +620,8 @@ function Alert({
       return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "bill-overdue":
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
+    case "oura-connection":
+      return <OuraConnectionAlert status={alert.status} error={ouraError} />;
   }
 }
 

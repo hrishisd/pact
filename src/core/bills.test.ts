@@ -113,6 +113,33 @@ describe("Wednesday bills", () => {
     ]);
   });
 
+  test("a payment that paid a bill stays on it when an older held penalty is released afterwards", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { dates: { endDate: "2026-01-09" } });
+    await s.advanceTo("Tue 10:00");
+    // Monday's miss, the oldest penalty, is held by an excuse while Wednesday's and Friday's are billed.
+    const filed = await owner.fileExcuse(gym, { from: "2026-01-05", to: "2026-01-05", reason: "Sick" }, []);
+    if (!filed.ok) throw new Error(filed.reason);
+    await s.advanceTo("Wed+1 18:00");
+    expect(owner.ledgers()[0]!.billDue).toEqual({ amountCents: 1000, dueAt: s.at("Wed+2 18:00") });
+    const paid = await recordPayment(owner, { recipientId: sam.id, amountCents: 1000 });
+    await reviewer.decide(paid, { kind: "approve" });
+
+    s.setClockTo("Thu+1 09:00");
+    await reviewer.decide(filed.excuseId, { kind: "reject", reason: "You were at the gym's party" });
+    await s.advanceTo("Wed+2 18:00");
+
+    // The bill stays paid; Monday's $5 is the new bill's.
+    expect(owner.ledgers()[0]).toMatchObject({
+      owedCents: 500,
+      overdueCents: 0,
+      billDue: { amountCents: 500, dueAt: s.at("Wed+3 18:00") },
+    });
+    expect(owner.today().alerts.filter((alert) => alert.kind === "bill-overdue")).toEqual([]);
+    expect(s.notifier.sentTo(reviewer).filter((n) => n.kind === "overdue-bill")).toEqual([]);
+  });
+
   test("no penalties, no bill and no notification", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
