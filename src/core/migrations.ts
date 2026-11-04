@@ -518,4 +518,19 @@ export const migrations: readonly string[] = [
     PRIMARY KEY (account_id, date)
   );
   `,
+  // 23: Oura token generations and lost refreshes
+  `
+  -- Counts the stored token pairs: every connect and refresh adds one. A
+  -- refresh stores its new pair only if the generation is still the one
+  -- whose refresh token it spent, so a reconnect (or a forget) made while
+  -- the refresh waited on Oura isn't overwritten. The tokens themselves are
+  -- encrypted with a fresh IV each time, so they can't be compared instead.
+  ALTER TABLE oura_token ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;
+
+  -- When a refresh of this pair got no usable answer (a timeout, a network
+  -- error, a 5xx): Oura may have spent the refresh token anyway. NULL once a
+  -- pair is stored. If Oura then refuses the refresh token, the adapter logs
+  -- an operator alert that the lost answer most likely spent it.
+  ALTER TABLE oura_token ADD COLUMN refresh_outcome_unknown_at TEXT;
+  `,
 ];

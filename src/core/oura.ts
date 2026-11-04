@@ -5,7 +5,10 @@
 //
 // Oura's refresh tokens are single-use, so every refresh goes through
 // `#refresh`, one at a time per account, and the new pair is stored before
-// anything uses it. Each HTTP call gives up after `timeoutMs`.
+// anything uses it, unless a connect (or a forget) changed the stored pair
+// while Oura answered. A sleep request gives up after `timeoutMs`; a token
+// request waits longer (`tokenTimeoutMs`), because giving up on a refresh
+// Oura has granted loses the new pair, and the old refresh token is spent.
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -29,7 +32,12 @@ export interface OuraAdapterOptions {
   authorizeUrl?: string;
   tokenUrl?: string;
   apiBase?: string;
+  /** For sleep requests. */
   timeoutMs?: number;
+  /** For token requests: longer, since a refresh abandoned after Oura granted it can't be recovered. */
+  tokenTimeoutMs?: number;
+  /** Where the adapter writes log lines (an OPERATOR_ALERT for a refresh token a lost answer spent). Default: console.log. */
+  log?: (line: string) => void;
 }
 
 export interface OuraConnector {
@@ -48,6 +56,7 @@ const DEFAULTS = {
   tokenUrl: "https://api.ouraring.com/oauth/token",
   apiBase: "https://api.ouraring.com",
   timeoutMs: 10_000,
+  tokenTimeoutMs: 30_000,
 };
 
 /** An access token this close to expiring is refreshed first. */
@@ -59,6 +68,12 @@ interface Tokens {
   accessToken: string;
   refreshToken: string;
   expiresAt: Date;
+}
+
+/** Tokens as stored: which pair they are, and whether a refresh of them went unanswered. */
+interface StoredTokens extends Tokens {
+  generation: number;
+  refreshOutcomeUnknownAt: string | null;
 }
 
 export function ouraAdapter(dbPath: string, client: OuraClient, clock: Clock, options: OuraAdapterOptions = {}) {
@@ -99,6 +114,8 @@ class Oura implements OuraAdapter {
   readonly #fetch: typeof fetch;
   readonly #urls: { authorizeUrl: string; tokenUrl: string; apiBase: string };
   readonly #timeoutMs: number;
+  readonly #tokenTimeoutMs: number;
+  readonly #log: (line: string) => void;
   readonly #key: Buffer;
   /** Refreshes in progress, by account: a second caller waits for the first's result. */
   readonly #refreshing = new Map<AccountId, Promise<Tokens | null>>();
@@ -114,6 +131,8 @@ class Oura implements OuraAdapter {
       apiBase: options.apiBase ?? DEFAULTS.apiBase,
     };
     this.#timeoutMs = options.timeoutMs ?? DEFAULTS.timeoutMs;
+    this.#tokenTimeoutMs = options.tokenTimeoutMs ?? DEFAULTS.tokenTimeoutMs;
+    this.#log = options.log ?? console.log;
     this.#key = Buffer.from(client.tokenKey, "base64");
     if (this.#key.length !== 32) throw new Error("the Oura token key must be 32 bytes, base64");
   }
@@ -137,7 +156,7 @@ class Oura implements OuraAdapter {
       redirect_uri: this.#client.redirectUri,
     });
     if (!tokens) return { ok: false as const, reason: "exchange-failed" as const };
-    this.#store(account, tokens);
+    this.#connect(account, tokens);
     return { ok: true as const };
   }
 
@@ -146,7 +165,7 @@ class Oura implements OuraAdapter {
   }
 
   async sleepPeriods(account: AccountId, range: OuraDateRange): Promise<OuraSleepResult> {
-    let tokens = this.#load(account);
+    let tokens: Tokens | null = this.#load(account);
     if (!tokens) return { ok: false, reason: "disconnected" };
     if (tokens.expiresAt.getTime() - this.#clock.now().getTime() <= EXPIRY_MARGIN_MS) {
       tokens = await this.#refresh(account, tokens.accessToken);
@@ -201,7 +220,14 @@ class Oura implements OuraAdapter {
    * while one runs gets its result. `stale` is the access token the caller
    * found wanting; if the stored one has changed since, another refresh
    * already replaced it, so that one is used instead of spending the refresh
-   * token again. Null when Oura refuses the refresh token, or there is none.
+   * token again. The new pair is stored only over the pair whose refresh
+   * token it spent; if a connect or a forget changed that while Oura
+   * answered, whatever is stored now is used instead. Null when Oura refuses
+   * the refresh token, or there is none.
+   *
+   * A refresh that throws (a timeout, a network error, a 5xx) may still have
+   * spent the refresh token, so it's marked; if Oura then refuses that
+   * refresh token, an operator alert says the lost answer most likely spent it.
    */
   #refresh(account: AccountId, stale: string): Promise<Tokens | null> {
     const running = this.#refreshing.get(account);
@@ -210,9 +236,29 @@ class Oura implements OuraAdapter {
       const current = this.#load(account);
       if (!current) return null;
       if (current.accessToken !== stale) return current;
-      const tokens = await this.#tokenRequest({ grant_type: "refresh_token", refresh_token: current.refreshToken });
-      if (tokens) this.#store(account, tokens);
-      return tokens;
+      let tokens: Tokens | null;
+      try {
+        tokens = await this.#tokenRequest({ grant_type: "refresh_token", refresh_token: current.refreshToken });
+      } catch (error) {
+        this.#db
+          .prepare(`UPDATE oura_token SET refresh_outcome_unknown_at = ? WHERE account_id = ? AND generation = ?`)
+          .run(this.#clock.now().toISOString(), account, current.generation);
+        throw error;
+      }
+      if (tokens && this.#replace(account, current.generation, tokens)) return tokens;
+      const latest = this.#load(account);
+      if (latest && latest.generation !== current.generation) return latest;
+      if (!tokens && latest?.refreshOutcomeUnknownAt) {
+        this.#log(
+          `OPERATOR_ALERT Oura refresh token for account ${account} was refused after a refresh at ` +
+            `${latest.refreshOutcomeUnknownAt} got no answer; that lost answer most likely spent it, ` +
+            `so the owner has to reconnect Oura`,
+        );
+        this.#db
+          .prepare(`UPDATE oura_token SET refresh_outcome_unknown_at = NULL WHERE account_id = ? AND generation = ?`)
+          .run(account, current.generation);
+      }
+      return null;
     })().finally(() => this.#refreshing.delete(account));
     this.#refreshing.set(account, refreshing);
     return refreshing;
@@ -228,7 +274,7 @@ class Oura implements OuraAdapter {
         client_id: this.#client.clientId,
         client_secret: this.#client.clientSecret,
       }).toString(),
-      signal: AbortSignal.timeout(this.#timeoutMs),
+      signal: AbortSignal.timeout(this.#tokenTimeoutMs),
     });
     if (response.status === 400 || response.status === 401) return null;
     if (!response.ok) throw new Error(`Oura token request failed: HTTP ${response.status}`);
@@ -240,25 +286,40 @@ class Oura implements OuraAdapter {
     };
   }
 
-  #load(account: AccountId): Tokens | null {
+  #load(account: AccountId): StoredTokens | null {
     const row = this.#db
-      .prepare(`SELECT access_token, refresh_token, expires_at FROM oura_token WHERE account_id = ?`)
-      .get(account) as { access_token: string; refresh_token: string; expires_at: string } | undefined;
+      .prepare(
+        `SELECT access_token, refresh_token, expires_at, generation, refresh_outcome_unknown_at
+         FROM oura_token WHERE account_id = ?`,
+      )
+      .get(account) as
+      | {
+          access_token: string;
+          refresh_token: string;
+          expires_at: string;
+          generation: number;
+          refresh_outcome_unknown_at: string | null;
+        }
+      | undefined;
     if (!row) return null;
     return {
       accessToken: this.#decrypt(row.access_token),
       refreshToken: this.#decrypt(row.refresh_token),
       expiresAt: new Date(row.expires_at),
+      generation: row.generation,
+      refreshOutcomeUnknownAt: row.refresh_outcome_unknown_at,
     };
   }
 
-  #store(account: AccountId, tokens: Tokens): void {
+  /** A connect's tokens replace whatever is stored. */
+  #connect(account: AccountId, tokens: Tokens): void {
     this.#db
       .prepare(
-        `INSERT INTO oura_token (account_id, access_token, refresh_token, expires_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO oura_token (account_id, access_token, refresh_token, expires_at, updated_at, generation)
+         VALUES (?, ?, ?, ?, ?, 1)
          ON CONFLICT (account_id) DO UPDATE SET access_token = excluded.access_token,
-           refresh_token = excluded.refresh_token, expires_at = excluded.expires_at, updated_at = excluded.updated_at`,
+           refresh_token = excluded.refresh_token, expires_at = excluded.expires_at, updated_at = excluded.updated_at,
+           generation = oura_token.generation + 1, refresh_outcome_unknown_at = NULL`,
       )
       .run(
         account,
@@ -267,6 +328,25 @@ class Oura implements OuraAdapter {
         tokens.expiresAt.toISOString(),
         this.#clock.now().toISOString(),
       );
+  }
+
+  /** A refresh's tokens replace the pair `generation`, if that is still the one stored. True if they did. */
+  #replace(account: AccountId, generation: number, tokens: Tokens): boolean {
+    const replaced = this.#db
+      .prepare(
+        `UPDATE oura_token SET access_token = ?, refresh_token = ?, expires_at = ?, updated_at = ?,
+           generation = generation + 1, refresh_outcome_unknown_at = NULL
+         WHERE account_id = ? AND generation = ?`,
+      )
+      .run(
+        this.#encrypt(tokens.accessToken),
+        this.#encrypt(tokens.refreshToken),
+        tokens.expiresAt.toISOString(),
+        this.#clock.now().toISOString(),
+        account,
+        generation,
+      );
+    return replaced.changes === 1;
   }
 
   /** AES-256-GCM: "iv.tag.ciphertext", each base64url. */

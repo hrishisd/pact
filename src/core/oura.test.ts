@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { openWithPragmas } from "./db.ts";
-import { ouraAdapter, type OuraClient } from "./oura.ts";
+import { ouraAdapter, type OuraAdapterOptions, type OuraClient } from "./oura.ts";
 import { sleep } from "./testing/bedtime-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 import type { OuraSleepPeriod } from "./ports.ts";
@@ -30,6 +30,12 @@ class FakeOura {
   sleepPage: unknown = null;
   /** Holds token responses until released, so two refreshes can overlap. */
   hold: Promise<void> = Promise.resolve();
+  /**
+   * The next refresh's answer goes missing: "after-grant" spends the refresh
+   * token and issues a pair that never arrives; "before-grant" is a 502
+   * that spends nothing.
+   */
+  loseNextRefresh: "after-grant" | "before-grant" | null = null;
   #issued = 0;
   #validAccess = new Set<string>();
   #validRefresh = new Set<string>();
@@ -47,8 +53,15 @@ class FakeOura {
         return Response.json({ error: "invalid_grant" }, { status: 400 });
       }
       if (body.get("grant_type") === "refresh_token") {
+        const lose = this.loseNextRefresh;
+        this.loseNextRefresh = null;
+        if (lose === "before-grant") return new Response(null, { status: 502 });
         const refresh = body.get("refresh_token")!;
         if (!this.#validRefresh.delete(refresh)) return Response.json({ error: "invalid_grant" }, { status: 400 });
+        if (lose === "after-grant") {
+          this.issue();
+          throw new TypeError("fetch failed");
+        }
       }
       return Response.json(this.issue());
     }
@@ -83,10 +96,11 @@ class FakeOura {
   }
 }
 
-async function connected(s: Scenario, options: { timeoutMs?: number } = {}) {
+async function connected(s: Scenario, options: OuraAdapterOptions = {}) {
   const oura = new FakeOura();
   const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock, {
     fetch: oura.fetch as typeof fetch,
+    log: (line) => s.logs.push(line),
     authorizeUrl: "https://cloud.oura.test/oauth/authorize",
     tokenUrl: "https://api.oura.test/oauth/token",
     apiBase: "https://api.oura.test",
@@ -245,6 +259,99 @@ describe("sleep periods", () => {
       { ok: true, periods: oura.periods },
     ]);
     expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([null, "refresh-1"]);
+    adapter.close();
+  });
+
+  test("a reconnect while a refresh is in flight keeps the reconnect's tokens", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    let release!: () => void;
+    oura.hold = new Promise((resolve) => (release = resolve));
+    const reading = adapter.sleepPeriods(owner.id, RANGE);
+    oura.hold = Promise.resolve();
+    expect(await adapter.connect(owner.id, "good-code")).toEqual({ ok: true });
+    release();
+
+    // The reconnect's pair (2) is used, not the refresh's (3), now and at the next expiry.
+    expect(await reading).toEqual({ ok: true, periods: oura.periods });
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    await adapter.sleepPeriods(owner.id, RANGE);
+    expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([null, "refresh-1", null, "refresh-2"]);
+    expect(oura.sleepRequests.map((r) => r.authorization)).toEqual(["Bearer access-2", "Bearer access-4"]);
+    adapter.close();
+  });
+
+  test("forgetting an account while a refresh is in flight stores nothing: it stays disconnected", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    let release!: () => void;
+    oura.hold = new Promise((resolve) => (release = resolve));
+    const reading = adapter.sleepPeriods(owner.id, RANGE);
+    adapter.forget(owner.id);
+    release();
+
+    expect(await reading).toEqual({ ok: false, reason: "disconnected" });
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
+    expect(oura.sleepRequests).toEqual([]);
+    adapter.close();
+  });
+
+  test("a refresh whose answer was lost, then refused, is disconnected with one operator alert", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    oura.loseNextRefresh = "after-grant";
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("fetch failed");
+    expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([]);
+
+    // Not stuck on the failed refresh: the next call asks again, and Oura refuses the spent token.
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
+    expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([null, "refresh-1", "refresh-1"]);
+    expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([
+      expect.stringMatching(new RegExp(`OPERATOR_ALERT Oura refresh token for account ${owner.id} .*lost`)),
+    ]);
+    adapter.close();
+  });
+
+  test("a refresh that failed and then worked raises no alert when a later one is refused", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    oura.loseNextRefresh = "before-grant";
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("HTTP 502");
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    // Spent elsewhere: Oura no longer takes it.
+    await oura.fetch("https://api.oura.test/oauth/token", {
+      method: "POST",
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "refresh-2", ...secret() }).toString(),
+    });
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
+    expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([]);
+    adapter.close();
+  });
+
+  test("the token request waits longer than a sleep request before giving up", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    const slow = ouraAdapter(s.dbPath, CLIENT, s.clock, {
+      tokenUrl: "https://api.oura.test/oauth/token",
+      apiBase: "https://api.oura.test",
+      timeoutMs: 20,
+      fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+        if (new URL(String(input)).pathname === "/oauth/token") {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          if (init?.signal?.aborted) throw init.signal.reason;
+        }
+        return oura.fetch(input, init);
+      }) as typeof fetch,
+    });
+    expect(await slow.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+    slow.close();
     adapter.close();
   });
 
