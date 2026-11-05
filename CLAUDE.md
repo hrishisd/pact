@@ -22,6 +22,8 @@ Running the app locally, signing in without Google, dev logs, resetting the dev 
 
 Before building a change the human will see or feel (screens, copy, behaviour), ask whether to prototype first; prototyping is the default. See `docs/agents/prototype-first.md`.
 
+To show the human what a screen looks like, send screenshots in the chat. Don't ask them to open a page or a prototype themselves unless they need to interact with it.
+
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

@@ -1,6 +1,6 @@
 # 01 Rename Kept to Satisfied
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Decided in the Anki grilling session on 2026-11-05 (see `../spec.md`). The outcomes become **Satisfied / Missed / Excused**. "Kept" read oddly as a bare chip label. "Done" collides with the sheets' Done button and "Approved" with reviewers' decisions, so both were rejected.
