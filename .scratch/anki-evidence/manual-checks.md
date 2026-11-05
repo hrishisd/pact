@@ -5,13 +5,16 @@ Things that need a real AnkiWeb account, AnkiMobile or the Mac. Steps marked **(
 ## After ticket 03
 
 - [ ] **(human)** Set the Fly secret `ANKI_TOKEN_KEY`: `flyctl secrets set -a pact-hrishisd ANKI_TOKEN_KEY=$(openssl rand -base64 32)`. Setting it restarts the machine. Production starts without it, with Anki off. Keep it only in Fly: losing it means every owner reconnects.
-- [ ] The Docker image builds, and on Fly `/opt/anki/bin/python3 -c "import anki"` works. The session that built ticket 03 had no Docker daemon, so the build is untried.
+- [x] The Docker image builds and deploys. 2026-11-05: CI run 88 built 48c908f on Fly, and `/health` reported it live with a fresh tick, so migration 26 ran.
+- [ ] On Fly, `/opt/anki/bin/python3 -c "import anki"` works: `flyctl ssh console -a pact-hrishisd -C '/opt/anki/bin/python3 -c "import anki; print(anki.version)"'`, which should print 26.9.4. Not yet run: the session that deployed had no `flyctl`.
+- [ ] `scripts/prod-log.sh tail 200` shows no errors since the 2026-11-05 deploy. Not yet run, for the same reason.
 - [ ] **(human)** Connect AnkiWeb in Pact with the real account, the first real login. The connection shows Connected, and `anki_connection` holds a host key but no password.
 - [ ] The Goal step's deck tree matches the deck list in AnkiMobile, subdecks included.
 - [ ] The counts Pact shows for a deck match AnkiMobile's deck list at the same moment.
 - [ ] **(human)** Finish the deck on the iPhone and let it sync. Today shows the day Satisfied within 10 minutes, or at once after reopening Today.
 - [ ] **(human)** After a day of Pact checking, AnkiMobile and the Mac still sync normally, with no full-sync prompt.
-- [ ] `scripts/prod-log.sh grep OPERATOR_ALERT` shows no Anki protocol errors.
+- [ ] The log shows a collection download only after the phone synced, not on every check. If every check downloads, reading the deck tree marks the local copy as changed (untested without AnkiWeb).
+- [ ] `scripts/prod-log.sh grep OPERATOR_ALERT` shows no Anki protocol errors. If AnkiWeb has an outage, see whether its 5xx answers raise a protocol alert. If they do, `anki_check.py` should map them to "network".
 
 ## After ticket 04
 
