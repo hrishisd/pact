@@ -264,23 +264,109 @@ describe("judging an Anki day", () => {
     expect(status(owner, pactId, TUE)).toBe("satisfied");
   });
 
-  test("a day an approved excuse covers is Excused at its due time, unless the deck is finished first", async () => {
+  test("a day an approved excuse covers is Excused at its due time, and AnkiWeb isn't checked for it", async () => {
     const s = scenario();
     const { owner, reviewer, createPact, deckShows } = await ownerWithAnki(s);
-    const pactId = await createPact({ days: ["tue", "wed"] });
+    const pactId = await createPact({ days: ["tue"] });
     await s.advanceTo("Mon 09:11");
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: WED, reason: "Travelling" }, []);
+    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Travelling" }, []);
     if (!filed.ok) throw new Error(filed.reason);
     expect(await reviewer.decide(filed.excuseId, { kind: "approve" })).toEqual({ ok: true });
 
-    deckShows({ review: 5 }, TUE, "Tue 22:00");
-    await s.advanceTo("Tue 22:00");
+    deckShows({}, TUE, "Tue 04:00");
+    await s.advanceTo("Tue 04:00");
+    await s.advanceTo("Tue 12:00");
+    await owner.checkAnki();
     await s.advanceTo("Wed 00:00");
+    expect(s.ankiSource.countCalls).toEqual([]);
     expect(status(owner, pactId, TUE)).toBe("excused");
+  });
 
-    deckShows({}, WED, "Wed 20:00");
-    await s.advanceTo("Wed 20:00");
-    expect(status(owner, pactId, WED)).toBe("satisfied");
+  test("a check still running at the due time can still satisfy the day", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    deckShows({ review: 3 }, TUE, "Tue 23:45");
+    await s.advanceTo("Tue 23:50");
+
+    // Check now at 23:59 is still downloading the collection at midnight.
+    deckShows({}, TUE, "Tue 23:58");
+    s.setClockTo("Tue 23:59");
+    const download = s.ankiSource.holdDeckCounts(owner.id);
+    const checking = owner.checkAnki();
+    await download.started;
+    await s.advanceTo("Wed 00:00");
+    expect(status(owner, pactId, TUE)).toBe("not-judged");
+
+    download.release();
+    await checking;
+    await s.advanceTo("Wed 00:01");
+    expect(day(owner, pactId, TUE)).toMatchObject({
+      status: { kind: "satisfied" },
+      anki: { cardsLeft: 0, checkedAt: s.at("Tue 23:59") },
+    });
+  });
+
+  test("a check still running at the due time that finds cards left lets the next tick judge the day Missed", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    deckShows({ review: 2 }, TUE, "Tue 23:58");
+    s.setClockTo("Tue 23:59");
+    const download = s.ankiSource.holdDeckCounts(owner.id);
+    const checking = owner.checkAnki();
+    await download.started;
+    await s.advanceTo("Wed 00:00");
+    download.release();
+    await checking;
+    await s.advanceTo("Wed 00:01");
+    expect(missedCards(owner)).toEqual([
+      expect.objectContaining({
+        pactId,
+        missedAt: s.at("Wed 00:00"),
+        anki: { cardsLeft: 2, checkedAt: s.at("Tue 23:59") },
+      }),
+    ]);
+  });
+
+  test("a check still running at the due time of a pact's last day can still satisfy it", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, deckShows } = await ownerWithAnki(s);
+    const created = await owner.createPact({ ...ankiPact(sam.id, reviewer, { days: ["tue"] }), endDate: TUE });
+    if (!created.ok) throw new Error(created.reason);
+
+    deckShows({}, TUE, "Tue 23:58");
+    s.setClockTo("Tue 23:59");
+    const download = s.ankiSource.holdDeckCounts(owner.id);
+    const checking = owner.checkAnki();
+    await download.started;
+    await s.advanceTo("Wed 00:00");
+    download.release();
+    await checking;
+    await s.advanceTo("Wed 00:01");
+    expect(status(owner, created.pactId, TUE)).toBe("satisfied");
+  });
+
+  test("a check stuck past AnkiWeb's timeout no longer holds the day open", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.setClockTo("Tue 23:59");
+    const download = s.ankiSource.holdDeckCounts(owner.id);
+    const checking = owner.checkAnki();
+    await download.started;
+    await s.advanceTo("Wed 00:00");
+    await s.advanceTo("Wed 00:01");
+    expect(status(owner, pactId, TUE)).toBe("not-judged");
+    await s.advanceTo("Wed 00:03");
+    expect(status(owner, pactId, TUE)).toBe("missed");
+
+    deckShows({}, TUE, "Tue 23:58");
+    download.release();
+    await checking;
+    expect(status(owner, pactId, TUE)).toBe("missed");
   });
 });
 
@@ -362,6 +448,26 @@ describe("checking AnkiWeb", () => {
     expect(s.ankiSource.countCalls).toEqual([{ account: owner.id, deckIds: [SPANISH, ITALIAN] }]);
     expect(status(owner, spanish, TUE)).toBe("not-judged");
     expect(status(owner, italian, TUE)).toBe("satisfied");
+  });
+
+  test("one account's slow AnkiWeb doesn't hold up checking another's", async () => {
+    const s = scenario();
+    s.setClockTo("Mon 10:00");
+    const first = await ownerWithAnki(s);
+    await first.createPact({ days: ["tue"] });
+    s.setClockTo("Mon 10:01");
+    const second = await ownerWithAnki(s, await s.befriend(first.owner, "second"));
+    const pactId = await second.createPact({ days: ["tue"] });
+    first.deckShows({ review: 3 }, TUE, "Tue 20:00");
+    second.deckShows({}, TUE, "Tue 20:00");
+
+    const slow = s.ankiSource.holdDeckCounts(first.owner.id);
+    const ticking = s.advanceTo("Tue 20:00");
+    await slow.started;
+    expect(s.ankiSource.countCalls.map((call) => call.account)).toEqual([first.owner.id, second.owner.id]);
+    slow.release();
+    await ticking;
+    expect(status(second.owner, pactId, TUE)).toBe("satisfied");
   });
 
   test("a failed check is logged, judges nothing, and is tried again on the next tick", async () => {

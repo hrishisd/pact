@@ -490,6 +490,12 @@ const OURA_CHECK_INTERVAL_MS = 15_000;
 const ANKI_CHECK_INTERVAL_MS = 15_000;
 /** While an account has an Anki day open and not judged, the scheduler checks AnkiWeb this often. */
 const ANKI_POLL_INTERVAL_MS = 10 * 60 * 1000;
+/**
+ * How long a check of AnkiWeb still running can hold judging the account's
+ * Anki days due after it started: the adapter gives up after 2 minutes
+ * (anki.ts), plus a margin.
+ */
+const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
 /** What a broken Oura connection means for the owner, in its push and on Today. */
 const RECONNECT_BEFORE_6PM = "A night with no data by 6pm counts as Missed. Reconnect before then.";
 /** The push services browsers use, as domains; a saved endpoint must be on one of them. */
@@ -590,6 +596,11 @@ class Core implements PactCore {
    * forgotten, so the next tick tries again.
    */
   readonly #ankiPolls = new Map<AccountId, number>();
+  /**
+   * When each check of AnkiWeb still running started, by account, from a tick
+   * or check now. In memory: a check doesn't outlive the process.
+   */
+  readonly #ankiChecksRunning = new Map<AccountId, Set<{ startedAt: number }>>();
 
   constructor(db: Db, options: PactCoreOptions) {
     this.#db = db;
@@ -3278,6 +3289,7 @@ class Core implements PactCore {
           firstOccurrence,
           inBedBy: after.inBedBy,
           dueBy: after.dueBy,
+          ankiRollover: pact.anki_rollover_hour,
           endDate: after.endDate,
         },
       },
@@ -3710,7 +3722,7 @@ class Core implements PactCore {
     | { ok: false; reason: CreatePactRefusal } {
     const oura = pact.evidenceKind === "oura";
     const anki = pact.evidenceKind === "anki";
-    if (oura && !this.#hasOuraConnection(ownerId)) return { ok: false, reason: "oura-not-connected" };
+    if (oura && !this.#hasConnection(ownerId, "oura")) return { ok: false, reason: "oura-not-connected" };
     let ankiDeckId: string | null = null;
     let ankiRollover: number | null = null;
     if (anki) {
@@ -3850,12 +3862,6 @@ class Core implements PactCore {
     return row.n;
   }
 
-  #hasOuraConnection(accountId: AccountId): boolean {
-    return (
-      this.#db.prepare(`SELECT 1 FROM connection WHERE account_id = ? AND service = 'oura'`).get(accountId) !==
-      undefined
-    );
-  }
   /** Why Oura can't be read for the account, or null when its connection works. */
   #ouraConnectionProblem(accountId: AccountId): ConnectionProblem | null {
     const row = this.#db
@@ -4898,19 +4904,35 @@ class Core implements PactCore {
   /**
    * Judges one Camera or Anki pact's occurrences due by `t`, from where
    * judging got to. An Anki day still not judged is Missed then, with the
-   * last check that counted for it.
+   * last check that counted for it, unless a check that started before its
+   * due time is still running: judging stops there, and a later tick judges
+   * it once the check is recorded.
    */
   #judgePactDueBy(pact: PactToJudge, t: Date): void {
     // Every pact's owner has a timezone: creating one needs it. Oura reports bedtime nights.
     if (pact.timezone === null || pact.evidence_kind === "oura") return;
     const due = this.#occurrencesOf(pact.id, pact.timezone).dueAfter(pact.judged_through, t);
+    let through: LocalDate | null = null;
     for (const occurrence of due) {
       const judged = this.#isJudged(pact.id, occurrence.date);
+      if (pact.evidence_kind === "anki" && !judged && this.#ankiCheckHolds(pact.owner_account_id, occurrence, t)) {
+        break;
+      }
       this.#judgeAtDueTime(pact.id, occurrence);
       if (pact.evidence_kind === "anki" && !judged) this.#noteAnkiMiss(pact, occurrence);
+      through = occurrence.date;
     }
-    const last = due.at(-1);
-    if (last) this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(last.date, pact.id);
+    if (through !== null) this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(through, pact.id);
+  }
+
+  /**
+   * Whether a check of the account's AnkiWeb that started before `day`'s due
+   * time is still running at `t`, and not for so long it's given up.
+   */
+  #ankiCheckHolds(account: AccountId, day: Occurrence, t: Date): boolean {
+    return [...(this.#ankiChecksRunning.get(account) ?? [])].some(
+      ({ startedAt }) => startedAt < day.dueAt.getTime() && t.getTime() - startedAt < ANKI_CHECK_HOLDS_JUDGING_MS,
+    );
   }
 
   /**
@@ -4918,23 +4940,32 @@ class Core implements PactCore {
    * the next day, or once its last occurrence closes if that's later (a
    * bedtime night closes at 18:00 the next day). Judging has had its turn
    * first, so the last occurrence is judged unless its evidence still waits
-   * for a decision, which judges it then.
+   * for a decision, which judges it then. A pact whose last Anki day a running
+   * check holds (`#ankiCheckHolds`) ends on a later tick, once it's judged.
    */
   #endPastEndDate(t: Date): void {
     const rows = this.#db
       .prepare(
-        `SELECT pact.id, pact.end_date, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
+        `SELECT pact.id, pact.end_date, pact.evidence_kind, pact.owner_account_id, account.timezone
+         FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL
          ORDER BY pact.created_at, pact.id`,
       )
-      .all() as { id: string; end_date: LocalDate; timezone: string | null }[];
-    for (const { id, end_date: endDate, timezone } of rows) {
+      .all() as {
+      id: string;
+      end_date: LocalDate;
+      evidence_kind: PactRow["evidence_kind"];
+      owner_account_id: AccountId;
+      timezone: string | null;
+    }[];
+    for (const { id, end_date: endDate, evidence_kind: kind, owner_account_id: owner, timezone } of rows) {
       // Every pact's owner has a timezone: creating one needs it.
       if (timezone === null) continue;
       const dayAfter = startOfDay(addDays(endDate, 1), timezone);
       const last = this.#occurrencesOf(id, timezone).between(addDays(endDate, -7), endDate).at(-1);
       const endsAt = last && last.closesAt.getTime() > dayAfter.getTime() ? last.closesAt : dayAfter;
       if (endsAt.getTime() > t.getTime()) continue;
+      if (kind === "anki" && last && !this.#isJudged(id, last.date) && this.#ankiCheckHolds(owner, last, t)) continue;
       this.#endPact(id, endsAt);
     }
   }
@@ -5100,8 +5131,8 @@ class Core implements PactCore {
 
   /**
    * Each Active Anki pact (of `owner`, or everyone's) whose day is open at
-   * `t`, before its due time and not judged yet, with a working AnkiWeb
-   * connection: what a check is for.
+   * `t`, before its due time, not judged yet and not covered by an approved
+   * excuse, with a working AnkiWeb connection: what a check is for.
    */
   #ankiDaysWaiting(t: Date, owner?: AccountId): { pactId: string; account: AccountId; deckId: string }[] {
     const pacts = this.#db
@@ -5125,6 +5156,8 @@ class Core implements PactCore {
       if (pact.timezone === null) return [];
       const open = this.#occurrencesOf(pact.id, pact.timezone).openAt(t);
       if (!open || t.getTime() >= open.dueAt.getTime() || this.#isJudged(pact.id, open.date)) return [];
+      // An approved excuse covers it: it's Excused at its due time whatever the deck shows.
+      if (this.#excuseOn(pact.id, open.date) === "approved") return [];
       return [{ pactId: pact.id, account: pact.owner_account_id, deckId: pact.anki_deck_id }];
     });
   }
@@ -5133,9 +5166,11 @@ class Core implements PactCore {
    * Checks AnkiWeb for each account (or just `owner`) with an Anki day
    * waiting: one call per account, for every deck its waiting pacts are on.
    * A tick checks an account at most every 10 minutes; `owner`'s check now
-   * always does. A call that throws is logged and forgotten, so the next tick
-   * tries again; one account's AnkiWeb never holds up anyone else's tick. A
-   * "disconnected" answer checks nothing.
+   * always does. Accounts are checked at once, so a slow AnkiWeb delays the
+   * tick by its own call only, never by the sum of everyone's. A call that
+   * throws is logged and forgotten, so the next tick tries again. A
+   * "disconnected" answer checks nothing. While a call runs, it holds judging
+   * the days it may still satisfy (`#ankiCheckHolds`).
    */
   async #fetchAnki(t: Date, owner?: AccountId): Promise<FetchedAnki[]> {
     const decks = new Map<AccountId, string[]>();
@@ -5144,20 +5179,27 @@ class Core implements PactCore {
       if (!list.includes(deckId)) list.push(deckId);
       decks.set(account, list);
     }
-    const fetched: FetchedAnki[] = [];
-    for (const [account, deckIds] of decks) {
+    const check = async (account: AccountId, deckIds: string[]): Promise<FetchedAnki | null> => {
       const last = this.#ankiPolls.get(account);
-      if (owner === undefined && last !== undefined && t.getTime() - last < ANKI_POLL_INTERVAL_MS) continue;
+      if (owner === undefined && last !== undefined && t.getTime() - last < ANKI_POLL_INTERVAL_MS) return null;
       this.#ankiPolls.set(account, t.getTime());
+      const running = { startedAt: t.getTime() };
+      const checks = this.#ankiChecksRunning.get(account) ?? new Set();
+      this.#ankiChecksRunning.set(account, checks.add(running));
       try {
         const result = await this.#ankiSource.deckCounts(account, deckIds);
-        if (result.ok) fetched.push({ account, result, checkedAt: t });
+        return result.ok ? { account, result, checkedAt: t } : null;
       } catch (error) {
         this.#ankiPolls.delete(account);
         this.#log(`AnkiWeb check for account ${account} failed, nothing checked: ${errorText(error)}`);
+        return null;
+      } finally {
+        checks.delete(running);
+        if (checks.size === 0) this.#ankiChecksRunning.delete(account);
       }
-    }
-    return fetched;
+    };
+    const settled = await Promise.allSettled([...decks].map(([account, deckIds]) => check(account, deckIds)));
+    return settled.flatMap((outcome) => (outcome.status === "fulfilled" && outcome.value ? [outcome.value] : []));
   }
 
   /**
@@ -5850,8 +5892,7 @@ function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** A pact as judging reads it. */
-/** One check AnkiWeb answered: whose collection, what it found, and when Pact checked. */
+/** One check `#fetchAnki` got an answer to: whose collection, what AnkiWeb found, and when Pact checked. */
 interface FetchedAnki {
   account: AccountId;
   result: Extract<AnkiCountsResult, { ok: true }>;
@@ -5865,6 +5906,7 @@ interface FetchedSleep {
   askedAt: Date;
 }
 
+/** A pact as judging reads it. */
 type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence" | "evidence_kind" | "in_bed_by"> & {
   judged_through: LocalDate | null;
   /** When it Ended; null while Active. */

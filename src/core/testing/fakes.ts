@@ -175,6 +175,7 @@ export class FakeAnkiSource implements AnkiSource {
   rolloverHour = 4;
   /** Every deckCounts call, in order. */
   readonly countCalls: { account: AccountId; deckIds: string[] }[] = [];
+  readonly #holds = new Map<AccountId, { started: () => void; released: Promise<void> }>();
 
   /** Adds or replaces a deck. */
   setDeck(
@@ -203,6 +204,18 @@ export class FakeAnkiSource implements AnkiSource {
     this.#disconnected.add(account);
   }
 
+  /**
+   * Holds `account`'s next deckCounts call open, as a slow AnkiWeb would:
+   * `started` resolves once it's called, and it answers once `release` is called.
+   */
+  holdDeckCounts(account: AccountId): { started: Promise<void>; release: () => void } {
+    let started = () => {};
+    let release = () => {};
+    const called = new Promise<void>((resolve) => (started = resolve));
+    this.#holds.set(account, { started, released: new Promise((resolve) => (release = resolve)) });
+    return { started: called, release };
+  }
+
   async decks(account: AccountId): Promise<AnkiDeckListResult> {
     if (this.#disconnected.has(account)) return { ok: false, reason: "disconnected" };
     return { ok: true, decks: structuredClone(this.#decks.get(account) ?? []), rolloverHour: this.rolloverHour };
@@ -210,6 +223,12 @@ export class FakeAnkiSource implements AnkiSource {
 
   async deckCounts(account: AccountId, deckIds: readonly string[]): Promise<AnkiCountsResult> {
     this.countCalls.push({ account, deckIds: [...deckIds] });
+    const hold = this.#holds.get(account);
+    if (hold) {
+      this.#holds.delete(account);
+      hold.started();
+      await hold.released;
+    }
     if (this.#disconnected.has(account)) return { ok: false, reason: "disconnected" };
     const day = this.#days.get(account);
     if (!day) throw new Error(`FakeAnkiSource: no Anki day set for ${account}`);
