@@ -55,6 +55,8 @@ export type AnkiCountsResult =
       asOf: Date;
       /** By deck id: its counts, or null for a deck no longer in the collection. */
       decks: Record<string, AnkiCounts | null>;
+      /** By deck id: its current full name, "Spanish::Verbs" for a subdeck, for each deck still in the collection. */
+      names: Record<string, string>;
     }
   | { ok: false; reason: "disconnected" };
 

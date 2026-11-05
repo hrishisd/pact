@@ -71,7 +71,30 @@ test("a login AnkiWeb can't answer is unreachable", async () => {
   adapter.close();
 });
 
-test("decks and counts send the host key and the account's own copy, and follow a new endpoint", async () => {
+test("a login that fails is logged; a protocol error also alerts the operator", async () => {
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  let answer: () => unknown = () => ({ ok: false, error: "network", message: "NetworkError: timed out" });
+  const { adapter } = adapterFor(s, fakeScript(() => answer()).run);
+
+  expect(await adapter.login(owner.id, "owner@example.test", "right")).toEqual({ ok: false, reason: "unreachable" });
+  expect(s.logs).toEqual([expect.stringMatching(/^AnkiWeb login failed for account .*NetworkError: timed out/)]);
+
+  s.logs.length = 0;
+  answer = () => ({ ok: false, error: "protocol", message: "SyncError: client too old" });
+  expect(await adapter.login(owner.id, "owner@example.test", "right")).toEqual({ ok: false, reason: "unreachable" });
+  expect(s.logs).toEqual([expect.stringMatching(/^OPERATOR_ALERT AnkiWeb protocol error.*client too old/)]);
+
+  s.logs.length = 0;
+  answer = () => {
+    throw new Error("the Anki script failed: python3 not found");
+  };
+  expect(await adapter.login(owner.id, "owner@example.test", "right")).toEqual({ ok: false, reason: "unreachable" });
+  expect(s.logs).toEqual([expect.stringMatching(/^AnkiWeb login failed for account .*python3 not found/)]);
+  adapter.close();
+});
+
+test("decks and counts send the host key and the account's own copy, follow a new endpoint, and name each deck", async () => {
   const s = scenario();
   const owner = await s.signIn("owner");
   const script = fakeScript(
@@ -84,6 +107,7 @@ test("decks and counts send the host key and the account's own copy, and follow 
             ankiDate: "2026-01-06",
             asOf: Date.parse("2026-01-07T02:05:00Z"),
             decks: { "1": { new: 0, learn: 0, review: 0 }, "2": null },
+            names: { "1": "Languages::Spanish" },
             endpoint: "https://sync2.ankiweb.net/",
           }),
   );
@@ -97,6 +121,7 @@ test("decks and counts send the host key and the account's own copy, and follow 
     ankiDate: "2026-01-06",
     asOf: new Date("2026-01-07T02:05:00Z"),
     decks: { "1": { new: 0, learn: 0, review: 0 }, "2": null },
+    names: { "1": "Languages::Spanish" },
   });
   const collection = join(collectionsDir, `${owner.id}.anki2`);
   expect(script.requests.slice(1)).toEqual([
@@ -164,10 +189,43 @@ test("forgetting deletes the host key and the collection copy", async () => {
   writeFileSync(copy, "collection");
   writeFileSync(`${copy}-wal`, "wal");
 
-  adapter.forget(owner.id);
+  await adapter.forget(owner.id);
 
   expect(existsSync(copy)).toBe(false);
   expect(existsSync(`${copy}-wal`)).toBe(false);
+  expect(await adapter.decks(owner.id)).toEqual({ ok: false, reason: "disconnected" });
+  adapter.close();
+});
+
+test("forgetting waits for a check already running, so its download can't bring the copy back", async () => {
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let started = () => {};
+  const checkStarted = new Promise<void>((resolve) => (started = resolve));
+  const { adapter } = adapterFor(
+    s,
+    fakeScript(async (request) => {
+      if (request.op === "login") return okLogin(request);
+      if (request.op !== "counts") throw new Error(`unexpected ${request.op}`);
+      started();
+      await held;
+      // The download finishes after the disconnect: the copy is written now.
+      mkdirSync(join(request.collection, ".."), { recursive: true });
+      writeFileSync(request.collection, "collection");
+      return { ok: true, ankiDate: "2026-01-06", asOf: 0, decks: {}, endpoint: null };
+    }).run,
+  );
+  await adapter.login(owner.id, "owner@example.test", "right");
+  const check = adapter.deckCounts(owner.id, ["1"]);
+  await checkStarted;
+
+  const forgotten = adapter.forget(owner.id);
+  release();
+  await Promise.all([check, forgotten]);
+
+  expect(existsSync(join(s.dbPath, "..", "anki", `${owner.id}.anki2`))).toBe(false);
   expect(await adapter.decks(owner.id)).toEqual({ ok: false, reason: "disconnected" });
   adapter.close();
 });
@@ -192,5 +250,6 @@ test("the dev stand-in reads decks from a file, and refuses the password 'wrong'
     ankiDate: "2026-01-05",
     asOf: s.at("Mon 09:00"),
     decks: { "1": DECKS[0]!.counts, "9": null },
+    names: { "1": "Spanish" },
   });
 });

@@ -528,6 +528,23 @@ describe("Today", () => {
     ]);
   });
 
+  test("a deck renamed in Anki shows its new name after the next check, on Today and the pact page", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.ankiSource.setDeck(owner.id, { id: SPANISH, name: "Languages::Spanish", review: 42 });
+    s.ankiSource.setAnkiDay(owner.id, TUE, s.at("Tue 20:00"));
+    s.setClockTo("Tue 19:59");
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckName: "Spanish" })]);
+
+    await s.advanceTo("Tue 20:00");
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckName: "Languages::Spanish" })]);
+    const result = owner.pact(pactId);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.pact.anki).toMatchObject({ deckId: SPANISH, deckName: "Languages::Spanish" });
+  });
+
   test("an Anki day is still open past midnight when it's due later", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithAnki(s);

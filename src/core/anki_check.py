@@ -9,7 +9,8 @@ and writes one on stdout:
   {"op": "decks", "hostKey": ..., "endpoint": ..., "collection": path}
       -> {"ok": true, "decks": [...], "rolloverHour": n, "endpoint": ...}
   {"op": "counts", "hostKey": ..., "endpoint": ..., "collection": path, "deckIds": [...]}
-      -> {"ok": true, "ankiDate": "YYYY-MM-DD", "asOf": ms, "decks": {id: counts or null}, "endpoint": ...}
+      -> {"ok": true, "ankiDate": "YYYY-MM-DD", "asOf": ms, "decks": {id: counts or null},
+          "names": {id: full name, for each deck still there}, "endpoint": ...}
 
 or {"ok": false, "error": "auth" | "network" | "protocol", "message": ...}.
 
@@ -79,14 +80,20 @@ def run(request: dict) -> dict:
             as_of = last_answer_today(col) or time.time()
             tree = col._backend.deck_tree(now=int(as_of))
             decks = {}
+            names = {}
             for deck_id in request["deckIds"]:
                 node = col.decks.find_deck_in_tree(tree, int(deck_id))
                 decks[deck_id] = None if node is None else counts(node)
+                # The tree node has only the last part of the name; the deck itself has the full one.
+                name = None if node is None else col.decks.name_if_exists(int(deck_id))
+                if name is not None:
+                    names[deck_id] = name
             return {
                 "ok": True,
                 "ankiDate": anki_date(col, as_of),
                 "asOf": int(as_of * 1000),
                 "decks": decks,
+                "names": names,
                 "endpoint": auth.endpoint or None,
             }
         raise ValueError(f"unknown op {op!r}")
@@ -148,7 +155,13 @@ def anki_date(col, at: float) -> str:
 
 
 def failure(error: Exception) -> dict:
-    """AnkiWeb refusing the login, AnkiWeb or the network failing (a timeout, a 429, a 5xx), or anything else."""
+    """AnkiWeb refusing the login, the network failing (a timeout, no connection), or anything else.
+
+    The pinned anki package raises NetworkError when the request didn't get
+    through, and SyncError with kind AUTH or OTHER when AnkiWeb answered: OTHER
+    covers every sync failure that isn't a refused login (a server error, a
+    client too old, a conflict), so it's treated as a protocol error.
+    """
     message = f"{type(error).__name__}: {error}"
     try:
         from anki.errors import NetworkError, SyncError, SyncErrorKind
@@ -156,7 +169,7 @@ def failure(error: Exception) -> dict:
         return {"ok": False, "error": "protocol", "message": message}
     if isinstance(error, SyncError) and error.kind == SyncErrorKind.AUTH:
         return {"ok": False, "error": "auth", "message": message}
-    if isinstance(error, (NetworkError, SyncError)):
+    if isinstance(error, NetworkError):
         return {"ok": False, "error": "network", "message": message}
     # Anything else usually means AnkiWeb changed its sync protocol and the pinned package needs updating.
     return {"ok": False, "error": "protocol", "message": message}

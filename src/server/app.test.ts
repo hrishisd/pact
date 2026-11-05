@@ -152,7 +152,7 @@ async function server({
             if (password === "down") return { ok: false, reason: "unreachable" };
             return password === "right" ? { ok: true } : { ok: false, reason: "wrong-login" };
           },
-          forget: (account) => void ankiForgets.push(account),
+          forget: async (account) => void ankiForgets.push(account),
         }
       : null,
     log: (line) => s.logs.push(line),

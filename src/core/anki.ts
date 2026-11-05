@@ -53,8 +53,11 @@ export type AnkiLoginResult = { ok: true } | { ok: false; reason: "wrong-login" 
 export interface AnkiConnector {
   /** Trades the AnkiWeb email and password for a host key and stores it. The password is dropped. */
   login(account: AccountId, username: string, password: string): Promise<AnkiLoginResult>;
-  /** Deletes the account's host key and its collection copy, once it has disconnected AnkiWeb. */
-  forget(account: AccountId): void;
+  /**
+   * Deletes the account's host key and its collection copy, once it has
+   * disconnected AnkiWeb. Waits for an operation already running for it.
+   */
+  forget(account: AccountId): Promise<void>;
 }
 
 export type AnkiAdapter = AnkiSource & AnkiConnector & { close(): void };
@@ -113,7 +116,7 @@ export function devAnki(dir: string, clock: Clock): AnkiSource & AnkiConnector {
         : password === "unreachable"
           ? { ok: false, reason: "unreachable" }
           : { ok: true },
-    forget: () => {},
+    forget: async () => {},
     decks: async () => {
       const { decks, rolloverHour } = read();
       return { ok: true, decks, rolloverHour };
@@ -121,11 +124,13 @@ export function devAnki(dir: string, clock: Clock): AnkiSource & AnkiConnector {
     deckCounts: async (_account, deckIds) => {
       const { decks, rolloverHour, timezone } = read();
       const asOf = clock.now();
+      const asked = decks.filter((deck) => deckIds.includes(deck.id));
       return {
         ok: true,
         ankiDate: localDateOf(new Date(asOf.getTime() - rolloverHour * 60 * 60 * 1000), timezone),
         asOf,
-        decks: Object.fromEntries(deckIds.map((id) => [id, decks.find((deck) => deck.id === id)?.counts ?? null])),
+        decks: Object.fromEntries(deckIds.map((id) => [id, asked.find((deck) => deck.id === id)?.counts ?? null])),
+        names: Object.fromEntries(asked.map((deck) => [deck.id, deck.name])),
       };
     },
   };
@@ -140,6 +145,7 @@ type ScriptAnswer =
       ankiDate: string;
       asOf: number;
       decks: Record<string, AnkiDeck["counts"] | null>;
+      names: Record<string, string>;
       endpoint: string | null;
     }
   | { ok: false; error: "auth" | "network" | "protocol"; message: string };
@@ -166,33 +172,46 @@ class Anki implements AnkiAdapter {
   }
 
   async login(account: AccountId, username: string, password: string): Promise<AnkiLoginResult> {
-    const answer = await this.#oneAtATime(account, () =>
-      this.#ask({
-        op: "login",
-        username,
-        password,
-        ...(this.#loginEndpoint !== undefined && { endpoint: this.#loginEndpoint }),
-      }).catch(() => null),
-    );
-    if (answer === null || !answer.ok) {
-      return { ok: false, reason: answer?.ok === false && answer.error === "auth" ? "wrong-login" : "unreachable" };
-    }
-    if (!("hostKey" in answer)) throw new Error("AnkiWeb login answered without a host key");
-    this.#db
-      .prepare(
-        `INSERT INTO anki_connection (account_id, host_key, endpoint, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (account_id) DO UPDATE SET host_key = excluded.host_key, endpoint = excluded.endpoint,
-           updated_at = excluded.updated_at`,
-      )
-      .run(account, this.#box.encrypt(answer.hostKey), answer.endpoint, this.#clock.now().toISOString());
-    // A new login may be another AnkiWeb account: its collection is downloaded afresh.
-    this.#removeCopy(account);
-    return { ok: true };
+    // The whole login, storing included, holds the account's turn: a disconnect or check waits for it.
+    return this.#oneAtATime(account, async () => {
+      let answer: ScriptAnswer;
+      try {
+        answer = await this.#ask({
+          op: "login",
+          username,
+          password,
+          ...(this.#loginEndpoint !== undefined && { endpoint: this.#loginEndpoint }),
+        });
+      } catch (error) {
+        this.#log(`AnkiWeb login failed for account ${account}: ${error instanceof Error ? error.message : error}`);
+        return { ok: false, reason: "unreachable" };
+      }
+      if (!answer.ok) {
+        if (answer.error === "auth") return { ok: false, reason: "wrong-login" };
+        if (answer.error === "protocol") this.#alertProtocolError(account, answer.message);
+        else this.#log(`AnkiWeb login failed for account ${account}: ${answer.error} error: ${answer.message}`);
+        return { ok: false, reason: "unreachable" };
+      }
+      if (!("hostKey" in answer)) throw new Error("AnkiWeb login answered without a host key");
+      this.#db
+        .prepare(
+          `INSERT INTO anki_connection (account_id, host_key, endpoint, updated_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT (account_id) DO UPDATE SET host_key = excluded.host_key, endpoint = excluded.endpoint,
+             updated_at = excluded.updated_at`,
+        )
+        .run(account, this.#box.encrypt(answer.hostKey), answer.endpoint, this.#clock.now().toISOString());
+      // A new login may be another AnkiWeb account: its collection is downloaded afresh.
+      this.#removeCopy(account);
+      return { ok: true };
+    });
   }
 
-  forget(account: AccountId): void {
-    this.#db.prepare(`DELETE FROM anki_connection WHERE account_id = ?`).run(account);
-    this.#removeCopy(account);
+  /** Waits for any operation running for the account, so its download can't bring the copy back afterwards. */
+  forget(account: AccountId): Promise<void> {
+    return this.#oneAtATime(account, async () => {
+      this.#db.prepare(`DELETE FROM anki_connection WHERE account_id = ?`).run(account);
+      this.#removeCopy(account);
+    });
   }
 
   async decks(account: AccountId): Promise<AnkiDeckListResult> {
@@ -208,7 +227,13 @@ class Anki implements AnkiAdapter {
     );
     if (answer === null) return { ok: false, reason: "disconnected" };
     if (!("ankiDate" in answer)) throw new Error("AnkiWeb counts answered without counts");
-    return { ok: true, ankiDate: answer.ankiDate, asOf: new Date(answer.asOf), decks: answer.decks };
+    return {
+      ok: true,
+      ankiDate: answer.ankiDate,
+      asOf: new Date(answer.asOf),
+      decks: answer.decks,
+      names: answer.names,
+    };
   }
 
   close(): void {
@@ -233,12 +258,7 @@ class Anki implements AnkiAdapter {
       const answer = await operation({ hostKey, endpoint: row.endpoint, collection: this.#copyOf(account) });
       if (!answer.ok) {
         if (answer.error === "auth") return null;
-        if (answer.error === "protocol") {
-          this.#log(
-            `OPERATOR_ALERT AnkiWeb protocol error for account ${account}: ${answer.message}. ` +
-              `AnkiWeb may have changed its sync protocol; the pinned anki package may need updating.`,
-          );
-        }
+        if (answer.error === "protocol") this.#alertProtocolError(account, answer.message);
         throw new Error(`AnkiWeb ${answer.error} error: ${answer.message}`);
       }
       if (answer.endpoint !== row.endpoint && answer.endpoint !== null) {
@@ -246,6 +266,13 @@ class Anki implements AnkiAdapter {
       }
       return answer;
     });
+  }
+
+  #alertProtocolError(account: AccountId, message: string): void {
+    this.#log(
+      `OPERATOR_ALERT AnkiWeb protocol error for account ${account}: ${message}. ` +
+        `AnkiWeb may have changed its sync protocol; the pinned anki package may need updating.`,
+    );
   }
 
   /** The script's answer to `request`, checked to be one. */

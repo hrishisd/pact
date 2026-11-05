@@ -436,11 +436,12 @@ export function createApp({
     return c.json(body);
   });
 
-  // The core first, so a failure leaves the connection as it was; then the host key and the collection copy go.
+  // The core first, so a failure leaves the connection as it was; then the host key and the collection copy go,
+  // once any check already running for the account has finished.
   app.post(API_PATHS.ankiDisconnect, async (c) => {
     const accountId = c.get("accountId");
     await core.as(accountId).disconnectAnki();
-    anki?.forget(accountId);
+    await anki?.forget(accountId);
     const body: DisconnectAnkiResponse = me(accountId);
     return c.json(body);
   });

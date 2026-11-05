@@ -165,8 +165,8 @@ export class FakeOuraSource implements OuraSource {
 /**
  * Serves each account's decks and counts as a test sets them, or
  * "disconnected" for an account the test disconnected. Counts are as of the
- * Anki day and moment the test last set (`setAnkiDay`); a deck the test removed
- * answers null.
+ * Anki day and moment the test last set (`setAnkiDay`), with each deck's name
+ * as last set; a deck the test removed answers null.
  */
 export class FakeAnkiSource implements AnkiSource {
   readonly #decks = new Map<AccountId, AnkiDeck[]>();
@@ -232,7 +232,7 @@ export class FakeAnkiSource implements AnkiSource {
     if (this.#disconnected.has(account)) return { ok: false, reason: "disconnected" };
     const day = this.#days.get(account);
     if (!day) throw new Error(`FakeAnkiSource: no Anki day set for ${account}`);
-    const decks = this.#decks.get(account) ?? [];
+    const decks = (this.#decks.get(account) ?? []).filter((d) => deckIds.includes(d.id));
     return {
       ok: true,
       ankiDate: day.ankiDate,
@@ -240,6 +240,7 @@ export class FakeAnkiSource implements AnkiSource {
       decks: Object.fromEntries(
         deckIds.map((id) => [id, structuredClone(decks.find((d) => d.id === id)?.counts ?? null)]),
       ),
+      names: Object.fromEntries(decks.map((d) => [d.id, d.name])),
     };
   }
 }

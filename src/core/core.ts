@@ -3837,7 +3837,7 @@ class Core implements PactCore {
     return row ? { decks: JSON.parse(row.decks) as AnkiDeck[], rolloverHour: row.rollover_hour } : null;
   }
 
-  /** The deck's name as the owner's deck list has it, or null once it's gone from it. */
+  /** The deck's name as the last deck list or check found it, or null once it's gone from the list. */
   #ankiDeckName(accountId: AccountId, deckId: string): string | null {
     return this.#ankiDeckList(accountId)?.decks.find((deck) => deck.id === deckId)?.name ?? null;
   }
@@ -5211,6 +5211,7 @@ class Core implements PactCore {
    */
   #recordAnkiChecks(fetched: FetchedAnki[]): void {
     for (const { account, result, checkedAt } of fetched) {
+      this.#renameAnkiDecks(account, result.names);
       const { ankiDate, asOf } = result;
       for (const [deckId, counts] of Object.entries(result.decks)) {
         if (counts === null) continue;
@@ -5249,6 +5250,25 @@ class Core implements PactCore {
         this.#noteAnkiResult(pact.id, day.date, { cardsLeft: 0, checkedAt });
       }
     }
+  }
+
+  /**
+   * Gives the checked decks in the account's stored deck list the names the
+   * check found, so a deck renamed in Anki shows its new name before the deck
+   * picker loads again.
+   */
+  #renameAnkiDecks(accountId: AccountId, names: Record<string, string>): void {
+    const list = this.#ankiDeckList(accountId);
+    if (!list) return;
+    let renamed = false;
+    const decks = list.decks.map((deck) => {
+      const name = names[deck.id];
+      if (name === undefined || name === deck.name) return deck;
+      renamed = true;
+      return { ...deck, name };
+    });
+    if (!renamed) return;
+    this.#db.prepare(`UPDATE anki_deck_list SET decks = ? WHERE account_id = ?`).run(JSON.stringify(decks), accountId);
   }
 
   /** On an Anki day just judged Missed at its due time: why, from the last check that counted for it. */
