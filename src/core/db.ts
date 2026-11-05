@@ -64,12 +64,27 @@ function migrate(db: Db, migrations: readonly string[]): void {
     }
   }
 
-  for (let version = applied + 1; version <= migrations.length; version++) {
-    db.transaction(() => {
-      db.exec(migrations[version - 1]!);
-      recordFingerprint(db, version, migrations[version - 1]!);
-      db.pragma(`user_version = ${version}`);
-    })();
+  // Foreign keys are off while migrations run, so one can rebuild a table
+  // others reference (SQLite's 12-step procedure: dropping the old table would
+  // otherwise fail). PRAGMA foreign_keys does nothing inside a transaction, so
+  // it's set around them, and each migration checks every reference before it
+  // commits.
+  const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
+  db.pragma("foreign_keys = OFF");
+  try {
+    for (let version = applied + 1; version <= migrations.length; version++) {
+      db.transaction(() => {
+        db.exec(migrations[version - 1]!);
+        const dangling = db.pragma("foreign_key_check") as unknown[];
+        if (dangling.length > 0) {
+          throw new Error(`migration ${version} leaves foreign keys dangling: ${JSON.stringify(dangling.slice(0, 5))}`);
+        }
+        recordFingerprint(db, version, migrations[version - 1]!);
+        db.pragma(`user_version = ${version}`);
+      })();
+    }
+  } finally {
+    db.pragma(`foreign_keys = ${foreignKeys === 1 ? "ON" : "OFF"}`);
   }
 }
 

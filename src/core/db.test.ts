@@ -96,6 +96,42 @@ describe("a database migrated before fingerprints existed", () => {
   });
 });
 
+describe("a migration that rebuilds a table other tables reference", () => {
+  // SQLite's 12-step table rebuild: make the new table, copy, drop the old one
+  // and rename. Dropping a referenced table needs foreign keys off.
+  const parent = "CREATE TABLE parent (id TEXT PRIMARY KEY, n INTEGER CHECK (n > 0));";
+  const child = "CREATE TABLE child (parent_id TEXT NOT NULL REFERENCES parent (id));";
+  const seed = "INSERT INTO parent (id, n) VALUES ('p', 1); INSERT INTO child (parent_id) VALUES ('p');";
+  const rebuild = `
+    CREATE TABLE parent_new (id TEXT PRIMARY KEY, n INTEGER CHECK (n > 1));
+    INSERT INTO parent_new (id, n) SELECT id, n + 1 FROM parent;
+    DROP TABLE parent;
+    ALTER TABLE parent_new RENAME TO parent;
+  `;
+
+  test("is applied, keeping the references, and foreign keys are on again after", () => {
+    open([parent, child, seed]);
+    open([parent, child, seed, rebuild]);
+    const db = openWithPragmas(path);
+    expect(db.prepare("SELECT id, n FROM parent").all()).toEqual([{ id: "p", n: 2 }]);
+    expect(db.pragma("foreign_key_check")).toEqual([]);
+    db.close();
+
+    const reopened = openDatabase(path, [parent, child, seed, rebuild]);
+    expect(reopened.pragma("foreign_keys", { simple: true })).toBe(1);
+    expect(() => reopened.prepare("INSERT INTO child (parent_id) VALUES ('none')").run()).toThrow(/FOREIGN KEY/);
+    reopened.close();
+  });
+
+  test("that leaves a reference dangling is refused, naming it, and changes nothing", () => {
+    open([parent, child, seed]);
+    const before = snapshot();
+    const dropsTheRow = `${rebuild} DELETE FROM parent;`;
+    expect(() => open([parent, child, seed, dropsTheRow])).toThrow(/migration 4\b.*foreign key/);
+    expect(snapshot()).toEqual(before);
+  });
+});
+
 test("a database newer than the code still refuses to open", () => {
   open([one, two]);
   expect(() => open([one])).toThrow("database is at schema version 2, newer than this code knows (1)");
