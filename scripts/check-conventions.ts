@@ -1,5 +1,6 @@
 // Repo conventions a linter can't express, checked over src/:
 //   - words GLOSSARY.md says to avoid (its `_Avoid_:` lines), in code and copy;
+//   - the old outcome Kept as a value, class or label (it's Satisfied now);
 //   - the core reads time only from the Clock port;
 //   - tests never read the real clock, so none passes or fails by the day, the
 //     hour, the year or the machine's timezone;
@@ -40,6 +41,12 @@ const avoidedWords = readFileSync("GLOSSARY.md", "utf8")
   )
   .filter((word) => word !== "" && !EVERYDAY_WORDS.has(word));
 
+// Kept is in EVERYDAY_WORDS, so this catches it only as the outcome: a "kept"
+// string, the c-kept class, or a Kept label. Shipped migrations name the old
+// value and can't change.
+const keptOutcomePattern = /["'`]kept["'`]|\bc-kept\b|["'`>]\s*Kept\b/;
+const MIGRATIONS = "src/core/migrations.ts";
+
 const avoidedPattern = new RegExp(`\\b(${avoidedWords.map(escapeRegExp).join("|")})s?\\b`, "i");
 
 // Reading the real clock: Date.now, a Date made with no arguments, Date() as a
@@ -76,6 +83,8 @@ for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
         if (avoided && !ALLOWED_PHRASES.some((phrase) => line.includes(phrase)))
           findings.push(`${where}: "${avoided[0]}" is a word GLOSSARY.md says to avoid`);
       }
+      if (file.startsWith("src/") && !isTest && file !== MIGRATIONS && keptOutcomePattern.test(line))
+        findings.push(`${where}: the outcome is Satisfied, not Kept`);
       const systemTime = systemTimePattern.test(line);
       const systemClock = systemClockPattern.test(line);
       if (inCore && (systemTime || (systemClock && file !== SYSTEM_CLOCK_EXPORT)))

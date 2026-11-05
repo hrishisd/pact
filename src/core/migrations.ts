@@ -5,7 +5,15 @@
 // applied migrations no longer match (see docs/agents/local-dev.md to reset a
 // dev database). Times are stored as ISO 8601 UTC strings.
 
-export const migrations: readonly string[] = [
+/**
+ * A migration's SQL, run in one transaction with foreign keys on. A table
+ * rebuild (SQLite's 12-step procedure) drops a table others reference, which
+ * needs foreign keys off: it says so with `foreignKeysOff`, and db.ts then
+ * refuses it if it leaves a reference dangling that wasn't before.
+ */
+export type Migration = string | { sql: string; foreignKeysOff: true };
+
+export const migrations: readonly Migration[] = [
   // 1: walking skeleton
   `
   CREATE TABLE account (
@@ -544,10 +552,12 @@ export const migrations: readonly string[] = [
   ALTER TABLE account ADD COLUMN oura_latest_bedtime_start TEXT;
   `,
   // 25: the outcome Kept is now Satisfied
-  `
+  {
+    foreignKeysOff: true,
+    sql: `
   -- SQLite can't change a CHECK constraint, so this rebuilds occurrence by
-  -- SQLite's 12-step procedure: db.ts runs migrations with foreign keys off
-  -- and checks them before each commits. The table had no indexes but its
+  -- SQLite's 12-step procedure, with foreign keys off so the old table can be
+  -- dropped while evidence and penalty reference it. The table had no indexes but its
   -- primary key's, and no triggers or views. evidence and penalty reference it
   -- by name, so they reference the new table once it's renamed.
   CREATE TABLE occurrence_new (
@@ -567,4 +577,5 @@ export const migrations: readonly string[] = [
   DROP TABLE occurrence;
   ALTER TABLE occurrence_new RENAME TO occurrence;
   `,
+  },
 ];

@@ -3,12 +3,12 @@
 
 import { createHash } from "node:crypto";
 import Database from "better-sqlite3";
-import { migrations as appMigrations } from "./migrations.ts";
+import { migrations as appMigrations, type Migration } from "./migrations.ts";
 
 export type Db = Database.Database;
 
 /** `migrations` is for tests; the app always runs its own. */
-export function openDatabase(path: string, migrations: readonly string[] = appMigrations): Db {
+export function openDatabase(path: string, migrations: readonly Migration[] = appMigrations): Db {
   const db = openWithPragmas(path);
   try {
     migrate(db, migrations);
@@ -34,7 +34,7 @@ export function openWithPragmas(path: string): Db {
 // database ran it refuses to open rather than failing later on a missing
 // column. db.ts owns this table, not a numbered migration, because it guards
 // the migrations themselves.
-function migrate(db: Db, migrations: readonly string[]): void {
+function migrate(db: Db, migrations: readonly Migration[]): void {
   const applied = db.pragma("user_version", { simple: true }) as number;
   if (applied > migrations.length) {
     throw new Error(`database is at schema version ${applied}, newer than this code knows (${migrations.length})`);
@@ -49,12 +49,12 @@ function migrate(db: Db, migrations: readonly string[]): void {
     db.transaction(() => {
       db.exec("CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL)");
       for (let version = 1; version <= applied; version++) {
-        recordFingerprint(db, version, migrations[version - 1]!);
+        recordFingerprint(db, version, sqlOf(migrations[version - 1]!));
       }
     })();
   } else {
     for (let version = 1; version <= applied; version++) {
-      if (recorded.get(version) !== fingerprint(migrations[version - 1]!)) {
+      if (recorded.get(version) !== fingerprint(sqlOf(migrations[version - 1]!))) {
         throw new Error(
           `migration ${version} has changed since this database applied it. ` +
             `In development, reset the dev database (docs/agents/local-dev.md). ` +
@@ -64,28 +64,57 @@ function migrate(db: Db, migrations: readonly string[]): void {
     }
   }
 
-  // Foreign keys are off while migrations run, so one can rebuild a table
-  // others reference (SQLite's 12-step procedure: dropping the old table would
-  // otherwise fail). PRAGMA foreign_keys does nothing inside a transaction, so
-  // it's set around them, and each migration checks every reference before it
-  // commits.
+  for (let version = applied + 1; version <= migrations.length; version++) {
+    const migration = migrations[version - 1]!;
+    if (typeof migration === "string") {
+      db.transaction(() => apply(db, version, migration))();
+    } else {
+      applyWithForeignKeysOff(db, version, migration.sql);
+    }
+  }
+}
+
+function apply(db: Db, version: number, sql: string): void {
+  db.exec(sql);
+  recordFingerprint(db, version, sql);
+  db.pragma(`user_version = ${version}`);
+}
+
+/**
+ * For a table rebuild. PRAGMA foreign_keys does nothing inside a transaction,
+ * so it's set around it. The migration is refused and rolled back if it leaves
+ * a reference dangling that wasn't dangling before, so a reference something
+ * else already broke doesn't block it.
+ */
+function applyWithForeignKeysOff(db: Db, version: number, sql: string): void {
   const foreignKeys = db.pragma("foreign_keys", { simple: true }) as number;
   db.pragma("foreign_keys = OFF");
   try {
-    for (let version = applied + 1; version <= migrations.length; version++) {
-      db.transaction(() => {
-        db.exec(migrations[version - 1]!);
-        const dangling = db.pragma("foreign_key_check") as unknown[];
-        if (dangling.length > 0) {
-          throw new Error(`migration ${version} leaves foreign keys dangling: ${JSON.stringify(dangling.slice(0, 5))}`);
-        }
-        recordFingerprint(db, version, migrations[version - 1]!);
-        db.pragma(`user_version = ${version}`);
-      })();
-    }
+    db.transaction(() => {
+      const before = new Set(danglingReferences(db));
+      apply(db, version, sql);
+      const added = danglingReferences(db).filter((reference) => !before.has(reference));
+      if (added.length > 0) {
+        throw new Error(`migration ${version} leaves foreign keys dangling: ${added.slice(0, 5).join(", ")}`);
+      }
+    })();
   } finally {
     db.pragma(`foreign_keys = ${foreignKeys === 1 ? "ON" : "OFF"}`);
   }
+}
+
+function sqlOf(migration: Migration): string {
+  return typeof migration === "string" ? migration : migration.sql;
+}
+
+function danglingReferences(db: Db): string[] {
+  const rows = db.pragma("foreign_key_check") as {
+    table: string;
+    rowid: number | null;
+    parent: string;
+    fkid: number;
+  }[];
+  return rows.map((row) => `${row.table} row ${row.rowid} -> ${row.parent} (fk ${row.fkid})`);
 }
 
 /** Fingerprints by version; empty when the table doesn't exist yet. */

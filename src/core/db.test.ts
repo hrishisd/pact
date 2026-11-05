@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { openDatabase, openWithPragmas } from "./db.ts";
+import type { Migration } from "./migrations.ts";
 
 const one = "CREATE TABLE one (x INTEGER);";
 const two = "CREATE TABLE two (y INTEGER);";
@@ -20,7 +21,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function open(migrations: readonly string[]): void {
+function open(migrations: readonly Migration[]): void {
   openDatabase(path, migrations).close();
 }
 
@@ -102,12 +103,13 @@ describe("a migration that rebuilds a table other tables reference", () => {
   const parent = "CREATE TABLE parent (id TEXT PRIMARY KEY, n INTEGER CHECK (n > 0));";
   const child = "CREATE TABLE child (parent_id TEXT NOT NULL REFERENCES parent (id));";
   const seed = "INSERT INTO parent (id, n) VALUES ('p', 1); INSERT INTO child (parent_id) VALUES ('p');";
-  const rebuild = `
+  const rebuildSql = `
     CREATE TABLE parent_new (id TEXT PRIMARY KEY, n INTEGER CHECK (n > 1));
     INSERT INTO parent_new (id, n) SELECT id, n + 1 FROM parent;
     DROP TABLE parent;
     ALTER TABLE parent_new RENAME TO parent;
   `;
+  const rebuild: Migration = { sql: rebuildSql, foreignKeysOff: true };
 
   test("is applied, keeping the references, and foreign keys are on again after", () => {
     open([parent, child, seed]);
@@ -126,9 +128,26 @@ describe("a migration that rebuilds a table other tables reference", () => {
   test("that leaves a reference dangling is refused, naming it, and changes nothing", () => {
     open([parent, child, seed]);
     const before = snapshot();
-    const dropsTheRow = `${rebuild} DELETE FROM parent;`;
+    const dropsTheRow: Migration = { sql: `${rebuildSql} DELETE FROM parent;`, foreignKeysOff: true };
     expect(() => open([parent, child, seed, dropsTheRow])).toThrow(/migration 4\b.*foreign key/);
     expect(snapshot()).toEqual(before);
+  });
+
+  test("isn't blocked by a reference that was already dangling", () => {
+    open([parent, child, seed]);
+    const db = openWithPragmas(path);
+    db.pragma("foreign_keys = OFF");
+    db.prepare("INSERT INTO child (parent_id) VALUES ('gone')").run();
+    db.close();
+    open([parent, child, seed, rebuild]);
+    const after = openWithPragmas(path);
+    expect(after.prepare("SELECT id, n FROM parent").all()).toEqual([{ id: "p", n: 2 }]);
+    after.close();
+  });
+
+  test("without foreignKeysOff runs with foreign keys on, so dropping the parent fails", () => {
+    open([parent, child, seed]);
+    expect(() => open([parent, child, seed, rebuildSql])).toThrow(/FOREIGN KEY/);
   });
 });
 

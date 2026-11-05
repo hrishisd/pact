@@ -556,7 +556,7 @@ function ConnectionsSection({
                   <small>Connected {formatDay(connection.connectedAt, timezone)}</small>
                 </span>
                 {connection.status === "connected" ? (
-                  <span className="chip c-satisfied">Connected</span>
+                  <span className="chip c-ok">Connected</span>
                 ) : (
                   <span className="chip c-missed">Needs reconnecting</span>
                 )}

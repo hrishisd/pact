@@ -36,7 +36,7 @@ export function DayChip({
   if (compact && status.kind === "not-judged") return null;
   switch (status.kind) {
     case "satisfied":
-      return <span className="chip c-satisfied">Satisfied</span>;
+      return <span className="chip c-ok">Satisfied</span>;
     case "excused":
       return <span className="chip c-excused">Excused</span>;
     case "missed":

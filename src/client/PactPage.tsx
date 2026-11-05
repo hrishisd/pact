@@ -26,7 +26,7 @@ type State =
   { kind: "loading" } | { kind: "loaded"; pact: Pact } | { kind: "not-found" } | { kind: "failed"; error: unknown };
 
 const STAGE_CHIPS: Record<Pact["stage"], { label: string; className: string }> = {
-  active: { label: "Active", className: "c-satisfied" },
+  active: { label: "Active", className: "c-ok" },
   ended: { label: "Ended", className: "c-ended" },
 };
 
