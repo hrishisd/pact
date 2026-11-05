@@ -1,8 +1,8 @@
 # 03 Anki deck pact: connect, create and judge
 
-Status: ready-for-agent
+Status: done
 
-Built in af6f053 on `claude/anki-ticket-03`, waiting for review. It becomes done once it's on `main`.
+Built in af6f053, with the review fixes in 13d6f33, 8896645 and 48c908f. On `main` and deployed on 2026-11-05. Anki stays off in production until the `ANKI_TOKEN_KEY` secret is set. The checks that need real AnkiWeb are in `../manual-checks.md` under "After ticket 03".
 Blocked by: 01, 02
 
 Spec: `../spec.md` stories 1 to 9, 11 and 15, and the Terms, Judging, Checking AnkiWeb, Connection and Adapter sections. The screens follow ticket 02's prototype.
