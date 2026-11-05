@@ -179,6 +179,7 @@ function ExcuseForm({
   // "Gym is Mon, Wed, Fri", "Read is every day", or "Piano is 3× per week".
   const schedule = scheduleText(pact.schedule).replace("Every day", "every day");
   const weekly = pact.schedule.kind === "weekly-count";
+  const oura = pact.evidenceKind === "oura";
   const noDays = (from: string, to: string) =>
     `No ${pact.name} ${weekly ? "week" : "day"} ${from === to ? `on ${formatDate(from)}` : `between ${formatDate(from)} and ${formatDate(to)}`}. It's ${schedule}.`;
   const refusal = current && !current.ok ? DATES_REFUSAL_TEXT[current.reason] : null;
@@ -190,7 +191,7 @@ function ExcuseForm({
     const later = shown ? onlyAfter(shown, day) : null;
     days = (
       <>
-        <DayCard day={day} weekly={weekly} preview={shown} reviewers={reviewers} now={now} />
+        <DayCard day={day} weekly={weekly} oura={oura} preview={shown} reviewers={reviewers} now={now} />
         {more ? (
           <>
             <label className="field">
@@ -207,7 +208,15 @@ function ExcuseForm({
               through > day &&
               (refusal ??
                 previewFailed ??
-                (later && <DayList preview={later} weekly={weekly} now={now} empty={noDays(nextDay(day), through)} />))}
+                (later && (
+                  <DayList
+                    preview={later}
+                    weekly={weekly}
+                    oura={oura}
+                    now={now}
+                    empty={noDays(nextDay(day), through)}
+                  />
+                )))}
             {through !== "" && through < day && <p className="error small">Pick {formatDate(day)} or a later day.</p>}
           </>
         ) : (
@@ -229,9 +238,9 @@ function ExcuseForm({
                 <input type="radio" name="excuse-day" checked={choice === d.date} onChange={() => setChoice(d.date)} />
                 <span className="rt">
                   <b>{excuseDayText(d)}</b>
-                  <small>{recentNote(d, now, weekly)}</small>
+                  <small>{recentNote(d, now, weekly, oura)}</small>
                 </span>
-                <DayChip status={d.status} now={now} week={weekly} />
+                <DayChip status={d.status} now={now} week={weekly} oura={oura} />
               </label>
             ))}
             <label className="opt">
@@ -275,7 +284,9 @@ function ExcuseForm({
               aheadTo !== "" &&
               (refusal ??
                 previewFailed ??
-                (shown && <DayList preview={shown} weekly={weekly} now={now} empty={noDays(aheadFrom, aheadTo)} />))}
+                (shown && (
+                  <DayList preview={shown} weekly={weekly} oura={oura} now={now} empty={noDays(aheadFrom, aheadTo)} />
+                )))}
           </>
         )}
       </>
@@ -354,6 +365,7 @@ function ExcuseForm({
 function DayCard({
   day,
   weekly,
+  oura,
   preview,
   reviewers,
   now,
@@ -361,6 +373,8 @@ function DayCard({
   day: string;
   /** A Weekly count pact: the day stands for its week, which the preview dates by its Monday. */
   weekly: boolean;
+  /** A bedtime pact: a night not judged yet is waiting on Oura. */
+  oura: boolean;
   preview: Preview | null;
   reviewers: string;
   now: number;
@@ -374,7 +388,7 @@ function DayCard({
     <div className="card excuse-day">
       <div className="spread">
         <b>{weekly && week !== undefined ? `Week of ${formatDate(week)}` : formatDate(day)}</b>
-        {status && <DayChip status={status} now={now} week={weekly} />}
+        {status && <DayChip status={status} now={now} week={weekly} oura={oura} />}
       </div>
       {status?.kind === "missed" ? (
         <>
@@ -384,7 +398,7 @@ function DayCard({
           <span className="meta due">{hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse</span>
         </>
       ) : status ? (
-        <span className="meta">{dayNote(status, now, weekly)}</span>
+        <span className="meta">{dayNote(status, now, weekly, oura)}</span>
       ) : skipped ? (
         <span className="meta">{SKIP_REASON_TEXT[skipped.reason]}</span>
       ) : null}
@@ -393,9 +407,21 @@ function DayCard({
 }
 
 /** A date range's days (or a Weekly count pact's weeks), in date order: Covered ones with their note, Skipped ones with why. */
-function DayList({ preview, weekly, now, empty }: { preview: Preview; weekly: boolean; now: number; empty: string }) {
+function DayList({
+  preview,
+  weekly,
+  oura,
+  now,
+  empty,
+}: {
+  preview: Preview;
+  weekly: boolean;
+  oura: boolean;
+  now: number;
+  empty: string;
+}) {
   const rows = [
-    ...preview.covered.map((d) => ({ date: d.date, covered: true, note: dayNote(d.status, now, weekly) })),
+    ...preview.covered.map((d) => ({ date: d.date, covered: true, note: dayNote(d.status, now, weekly, oura) })),
     ...preview.skipped.map((d) => ({ date: d.date, covered: false, note: SKIP_REASON_TEXT[d.reason] })),
   ].sort((a, b) => a.date.localeCompare(b.date, "en-US"));
   if (rows.length === 0) return <p className="muted small">{empty}</p>;
@@ -415,11 +441,11 @@ function DayList({ preview, weekly, now, empty }: { preview: Preview; weekly: bo
 }
 
 /** The small line on a recent day's radio row: the time left to file for a miss, else the day's note. */
-function recentNote(d: Day, now: number, weekly: boolean): string {
+function recentNote(d: Day, now: number, weekly: boolean, oura: boolean): string {
   const { status } = d;
   if (status.kind === "missed")
     return `${money(status.penaltyCents)} · ${hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse`;
-  return dayNote(status, now, weekly);
+  return dayNote(status, now, weekly, oura);
 }
 
 /** `preview` without `day` and the days before it: the later days a run-on adds. */

@@ -54,8 +54,10 @@ Make the gap between waking up and Oura syncing visible and cheap to fix, and ha
 - **Reconnect** starts at `/api/oura/connect?then=today` and Oura's callback returns to Today (`/?oura=…`), where a failed or unavailable reconnect shows under the alert.
 - The tonight line on the card uses the Automatic card's wording ("Tonight, in bed by 12:00am · 3h 12m"), not the prototype's "Tonight: in bed by".
 
-**Left as is:** the File excuse sheet opened from the card labels the night "Not judged yet" (its existing day chip), not "No Oura data" as the spec's Occurrence labels say. The pact page's heat map already says "No Oura data".
+**Fixed 2026-11-05:** the File excuse sheet opened from the card used to label the night "Not judged yet". It now says "No Oura data", as the spec's Occurrence labels and the heat map do.
 
 - 2026-11-04: Built on branch claude/unblocked-tickets-prototypes-361pre. Pending human review and a real-ring check together with ticket 08, so Status stays ready-for-agent. Core scenarios are in src/core/oura-no-data.test.ts.
 
 - 2026-11-04: The real-ring and Open Oura link checks are in `.scratch/pact-v0/manual-checks.md` (Oura Ring section).
+
+- 2026-11-05: `DayChip` and `dayNote` take an `oura` flag, so a bedtime night past its in-bed-by time with no excuse reads "No Oura data" in the File excuse sheet (day card, Which day? rows, covered-day lists). The heat map uses the same chip instead of its own special case.

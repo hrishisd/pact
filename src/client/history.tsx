@@ -46,16 +46,7 @@ function OccurrenceChip({
   evidenceKind: EvidenceKind;
   now: number;
 }) {
-  const { status } = record;
-  if (
-    evidenceKind === "oura" &&
-    status.kind === "not-judged" &&
-    status.excuse === null &&
-    Date.parse(status.dueAt) <= now
-  ) {
-    return <span className="chip c-soon">No Oura data</span>;
-  }
-  return <DayChip status={status} now={now} />;
+  return <DayChip status={record.status} now={now} oura={evidenceKind === "oura"} />;
 }
 
 /**

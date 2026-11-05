@@ -12,20 +12,24 @@ type Status = Json<OccurrenceStatus>;
  * A day's chip as of `now` (ms): Kept, Excused, Missed (with "· excuse
  * waiting for approval" while one is), "Excuse waiting for approval" for a
  * day not judged yet with one waiting, and otherwise Due today (This week,
- * for a Weekly count `week`), Coming up or Not judged yet. A day ahead with
- * an approved excuse already reads Excused. `compact` drops the excuse
- * wording, and the chip of a day not judged yet.
+ * for a Weekly count `week`), Coming up or Not judged yet (No Oura data for
+ * an `oura` night). A day ahead with an approved excuse already reads
+ * Excused. `compact` drops the excuse wording, and the chip of a day not
+ * judged yet.
  */
 export function DayChip({
   status,
   now,
   compact = false,
   week = false,
+  oura = false,
 }: {
   status: Status;
   now: number;
   compact?: boolean;
   week?: boolean;
+  /** A bedtime pact's night: one past its in-bed-by time is waiting on Oura. */
+  oura?: boolean;
 }) {
   // Compact, as in a review item's rows, where the line under the day says what's held.
   if (compact && status.kind === "missed") return <span className="chip c-missed">Missed</span>;
@@ -44,22 +48,23 @@ export function DayChip({
       if (Date.parse(status.opensAt) > now) return <span className="chip c-soon">Coming up</span>;
       if (Date.parse(status.dueAt) > now)
         return <span className="chip c-todo">{week ? "This week" : "Due today"}</span>;
-      return <span className="chip c-soon">Not judged yet</span>;
+      return <span className="chip c-soon">{oura ? "No Oura data" : "Not judged yet"}</span>;
   }
 }
 
 /**
  * The small line under a covered day: "$5 held", "Not open yet", "Due at
- * midnight" ("Due by Sunday" for a Weekly count `week`), or nothing.
+ * midnight" ("Due by Sunday" for a Weekly count `week`), "Not judged yet"
+ * ("No Oura data" for an `oura` night), or nothing.
  */
-export function dayNote(status: Status, now: number, week = false): string {
+export function dayNote(status: Status, now: number, week = false, oura = false): string {
   switch (status.kind) {
     case "missed":
       return status.held ? `${money(status.penaltyCents)} held` : `${money(status.penaltyCents)} to be held`;
     case "not-judged":
       if (Date.parse(status.opensAt) > now) return "Not open yet";
       if (Date.parse(status.dueAt) > now) return week ? "Due by Sunday" : "Due at midnight";
-      return "Not judged yet";
+      return oura ? "No Oura data" : "Not judged yet";
     default:
       return "";
   }
