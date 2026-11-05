@@ -336,19 +336,50 @@ function weekOccurrence(date: LocalDate, timezone: string): Occurrence {
 /** A bedtime night starts, and the night before closes, at this hour. */
 const NIGHT_STARTS_HOUR = 18;
 
-/** On an Anki pact, a due-by time before this hour is the morning after. */
+/** An Anki day can't be due on its own day before this hour. */
 const ANKI_EVENING_HOUR = 12;
 
+const MINUTES_PER_DAY = 24 * 60;
+
 /**
- * Whether an Anki pact can be due by `dueBy` ("HH:MM", after 00:00) with
- * its Anki day starting at `rolloverHour`: from noon through the evening, or
- * the morning after up to the rollover hour, while it's still that Anki day.
- * Anki's rollover is an early-morning hour (4am unless the owner changed it).
+ * When an Anki day of `date` is due by `dueBy` ("HH:MM"), with its Anki day
+ * starting at `rolloverHour`: that day, from noon and after the rollover
+ * hour; else the morning after, up to the rollover hour, while it's still
+ * that Anki day. Null for a time that's neither, such as 09:00 with Anki's
+ * usual 4am rollover. "00:00" is the midnight ending its day.
  */
-export function ankiDueByFits(dueBy: string, rolloverHour: number): boolean {
+function ankiDueByDayAfter(dueBy: string, rolloverHour: number): 0 | 1 | null {
   const [hour, minute] = clockOf(dueBy);
-  if (hour >= ANKI_EVENING_HOUR) return true;
-  return hour < rolloverHour || (hour === rolloverHour && minute === 0);
+  const time = hour * 60 + minute;
+  if (hour >= ANKI_EVENING_HOUR && time > rolloverHour * 60) return 0;
+  return time <= rolloverHour * 60 ? 1 : null;
+}
+
+/** Whether an Anki pact can be due by `dueBy` with its Anki day starting at `rolloverHour`; see `ankiDueByDayAfter`. */
+export function ankiDueByFits(dueBy: string, rolloverHour: number): boolean {
+  return ankiDueByDayAfter(dueBy, rolloverHour) !== null;
+}
+
+/**
+ * Minutes from when an Anki day opens (its rollover hour) to `time`
+ * ("HH:MM"), reading a time before the rollover hour as the morning after:
+ * how a reminder sorts in its Anki day.
+ */
+export function ankiReminderOrder(time: string, rolloverHour: number): number {
+  const [hour, minute] = clockOf(time);
+  return (hour * 60 + minute - rolloverHour * 60 + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+}
+
+/**
+ * Minutes from when an Anki day opens to its due-by time `dueBy` ("HH:MM",
+ * "00:00" for midnight), read as `ankiDueByDayAfter` reads it: how due-by
+ * times sort, the later the looser. Null for a time it can't be due by.
+ */
+export function ankiDueByOrder(dueBy: string, rolloverHour: number): number | null {
+  const dayAfter = ankiDueByDayAfter(dueBy, rolloverHour);
+  if (dayAfter === null) return null;
+  const [hour, minute] = clockOf(dueBy);
+  return dayAfter * MINUTES_PER_DAY + hour * 60 + minute - rolloverHour * 60;
 }
 
 /**
@@ -357,7 +388,7 @@ export function ankiDueByFits(dueBy: string, rolloverHour: number): boolean {
  * day. A bedtime night is due at its in-bed-by time (that evening from 18:00,
  * else the morning after) and closes at 18:00 the next day, on Oura's clock
  * (`ouraOffset`) if there is one. An Anki day opens at its rollover hour, and
- * a due-by time before noon is the morning after.
+ * its due-by time is read as `ankiDueByDayAfter` reads it.
  */
 function fixedDaysOccurrence(
   date: LocalDate,
@@ -372,7 +403,8 @@ function fixedDaysOccurrence(
     let dueAt = startOfDay(addDays(date, 1), timezone);
     if (dueBy !== null) {
       const [hour, minute] = clockOf(dueBy);
-      dueAt = wallTime(hour < ANKI_EVENING_HOUR ? addDays(date, 1) : date, hour, minute, timezone);
+      // A due-by time that can't fit is refused before this; read it as the morning after.
+      dueAt = wallTime(addDays(date, ankiDueByDayAfter(dueBy, ankiRollover) ?? 1), hour, minute, timezone);
     }
     return { date, opensAt, dueAt, closesAt: dueAt };
   }
@@ -394,11 +426,17 @@ function fixedDaysOccurrence(
  * When a reminder set for `time` ("HH:MM") goes off for the occurrence dated
  * `date`: that time on its day, or for a bedtime night, that evening from
  * 18:00, else the morning after, as an in-bed-by time is read; for an Anki
- * day, that day from noon, else the morning after, as its due-by time is read.
+ * day, that day from its rollover hour (`kind.ankiRollover`), else the
+ * morning after.
  */
-export function reminderAt(date: LocalDate, time: string, timezone: string, kind: "day" | "night" | "anki"): Date {
+export function reminderAt(
+  date: LocalDate,
+  time: string,
+  timezone: string,
+  kind: "day" | "night" | { ankiRollover: number },
+): Date {
   const [hour, minute] = clockOf(time);
-  const eveningFrom = kind === "night" ? NIGHT_STARTS_HOUR : kind === "anki" ? ANKI_EVENING_HOUR : 0;
+  const eveningFrom = kind === "night" ? NIGHT_STARTS_HOUR : kind === "day" ? 0 : kind.ankiRollover;
   return wallTime(hour < eveningFrom ? addDays(date, 1) : date, hour, minute, timezone);
 }
 

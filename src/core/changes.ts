@@ -4,6 +4,7 @@
 // what counts (applies at once), like the name and the reminders.
 
 import type { AccountId, ChangeEffect, Schedule } from "../shared/types.ts";
+import { ankiDueByOrder } from "./occurrences.ts";
 
 /** A pact's terms an owner can change: everything but its evidence kind. */
 export interface ChangeableTerms {
@@ -11,7 +12,7 @@ export interface ChangeableTerms {
   description: string;
   /** Oura Ring only, "HH:MM"; null for Camera. */
   inBedBy: string | null;
-  /** Camera only, "HH:MM", or null for midnight. */
+  /** Camera and Anki, "HH:MM", or null for midnight. */
   dueBy: string | null;
   /** "YYYY-MM-DD", or null. */
   startDate: string | null;
@@ -43,8 +44,12 @@ export interface TermDiff {
   effect: ChangeEffect;
 }
 
-/** Each term that differs between `before` and `after`, and what changing it does. */
-export function termDiffs(before: ChangeableTerms, after: ChangeableTerms): TermDiff[] {
+/**
+ * Each term that differs between `before` and `after`, and what changing it
+ * does. `ankiRollover` is an Anki pact's rollover hour, null for any other
+ * pact: an Anki pact's due-by times are ordered by where they fall in its Anki day.
+ */
+export function termDiffs(before: ChangeableTerms, after: ChangeableTerms, ankiRollover: number | null): TermDiff[] {
   const diffs: TermDiff[] = [];
   const add = (term: TermDiff["term"], effect: ChangeEffect) => diffs.push({ term, effect });
   // The name doesn't change what counts.
@@ -56,9 +61,9 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms): Term
   }
   const schedule = scheduleEffect(before.schedule, after.schedule);
   if (schedule !== null) add("schedule", schedule);
-  // Midnight is the latest a day can be due, so no due-by time is the latest.
   if (after.dueBy !== before.dueBy) {
-    add("due-by", (after.dueBy ?? "24:00") > (before.dueBy ?? "24:00") ? "needs-approval" : "stricter");
+    const later = dueByOrder(after.dueBy, ankiRollover) > dueByOrder(before.dueBy, ankiRollover);
+    add("due-by", later ? "needs-approval" : "stricter");
   }
   // No start date is the earliest start, and no end date the latest end.
   if (after.startDate !== before.startDate) {
@@ -108,6 +113,20 @@ function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null 
     return after.deadline > before.deadline ? "needs-approval" : "stricter";
   }
   return "needs-approval";
+}
+
+/**
+ * How late a due-by time (null for midnight) is in its day, in minutes. A
+ * Camera day ends at midnight, so no due-by time is the latest. An Anki day
+ * runs from its rollover hour, so a time the morning after is later than midnight.
+ */
+function dueByOrder(dueBy: string | null, ankiRollover: number | null): number {
+  if (ankiRollover !== null) {
+    // Both sides passed ankiDueByFits before this.
+    return ankiDueByOrder(dueBy ?? "00:00", ankiRollover) ?? 0;
+  }
+  const [hour, minute] = (dueBy ?? "24:00").split(":").map(Number) as [number, number];
+  return hour * 60 + minute;
 }
 
 /**

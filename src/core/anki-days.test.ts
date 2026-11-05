@@ -9,9 +9,10 @@
 // York, the scenario's timezone.
 
 import { describe, expect, test } from "vitest";
+import { WEEKDAYS } from "../shared/types.ts";
 import { ankiPact, ownerWithAnki, SPANISH } from "./testing/anki-pact.ts";
 import { failOnCall } from "./testing/fakes.ts";
-import { scenario, type AccountHandle } from "./testing/scenario.ts";
+import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
 const TUE = "2026-01-06";
 const WED = "2026-01-07";
@@ -496,5 +497,71 @@ describe("the edit window", () => {
     expect(await owner.editPact(pactId, ankiPact(sam.id, reviewer, { dueBy: "03:30" }))).toEqual({ ok: true });
     const result = owner.pact(pactId);
     expect(result.ok && result.pact.dueBy).toBe("03:30");
+  });
+});
+
+describe("a rollover hour after noon", () => {
+  test("a due-by time before the rollover hour is the next day's, and one after it is that day's", async () => {
+    const s = scenario();
+    s.ankiSource.rolloverHour = 14;
+    const { owner, createPact } = await ownerWithAnki(s);
+    const tuesday = (dueBy: string) =>
+      owner.firstOccurrence({ evidenceKind: "anki", schedule: { kind: "fixed-days", days: ["tue"] }, dueBy });
+    expect(tuesday("13:00")).toEqual({ ok: true, firstOccurrence: { date: TUE, dueAt: s.at("Wed 13:00") } });
+    expect(tuesday("14:00")).toEqual({ ok: true, firstOccurrence: { date: TUE, dueAt: s.at("Wed 14:00") } });
+    expect(tuesday("14:30")).toEqual({ ok: true, firstOccurrence: { date: TUE, dueAt: s.at("Tue 14:30") } });
+
+    // Due at 13:00, Tuesday's Anki day, open from 14:00, is still to do on Wednesday morning.
+    await createPact({ days: ["tue"], dueBy: "13:00" });
+    s.setClockTo("Wed 12:00");
+    expect(toDo(owner)).toEqual([expect.objectContaining({ occurrenceDate: TUE, dueAt: s.at("Wed 13:00") })]);
+  });
+});
+
+describe("changing an Anki pact after its edit window", () => {
+  /** A daily Spanish pact due by `dueBy` (or midnight), and a way to change its due-by time on Tuesday. */
+  async function dailySpanish(s: Scenario, dueBy?: string) {
+    const { owner, reviewer, sam, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact(dueBy === undefined ? {} : { dueBy });
+    await s.advanceTo("Tue 09:00");
+    return (newDueBy: string) =>
+      owner.changePact(pactId, {
+        name: "Spanish",
+        description: "",
+        dueBy: newDueBy,
+        schedule: { kind: "fixed-days", days: [...WEEKDAYS] },
+        penaltyCents: 500,
+        recipientId: sam.id,
+        reviewerIds: [reviewer.id],
+      });
+  }
+
+  test("moving the due-by time from midnight to 3am the morning after needs approval", async () => {
+    const s = scenario();
+    const changeDueBy = await dailySpanish(s);
+    expect(await changeDueBy("03:00")).toMatchObject({ ok: true, outcome: { kind: "needs-approval" } });
+  });
+
+  test("moving the due-by time from 2am the morning after to 11pm is stricter", async () => {
+    const s = scenario();
+    const changeDueBy = await dailySpanish(s, "02:00");
+    expect(await changeDueBy("23:00")).toMatchObject({ ok: true, outcome: { kind: "stricter" } });
+  });
+});
+
+describe("a reminder from the rollover hour", () => {
+  test("goes off that day: 9am, with the day due at midnight", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await ownerWithAnki(s);
+    const created = await owner.createPact({ ...ankiPact(sam.id, reviewer, { days: ["tue"] }), reminders: ["09:00"] });
+    if (!created.ok) throw new Error(created.reason);
+    const reminders = () => s.notifier.sentTo(owner).filter((n) => n.kind === "reminder");
+
+    await s.advanceTo("Tue 08:59");
+    expect(reminders()).toEqual([]);
+    await s.advanceTo("Tue 09:00");
+    expect(reminders()).toHaveLength(1);
+    await s.advanceTo("Wed 10:00");
+    expect(reminders()).toHaveLength(1);
   });
 });

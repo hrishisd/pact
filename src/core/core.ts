@@ -20,6 +20,8 @@ import { openDatabase, type Db } from "./db.ts";
 import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
   ankiDueByFits,
+  ankiDueByOrder,
+  ankiReminderOrder,
   dueSoonEnough,
   firstWeekFrom,
   lastDayOf,
@@ -3187,13 +3189,13 @@ class Core implements PactCore {
     // Reminders apply at once, so they go off before the due time in force now as well as the new one.
     const current = {
       oneTime: before.schedule.kind === "one-time",
-      anki: pact.evidence_kind === "anki",
+      ankiRollover: pact.anki_rollover_hour,
       inBedBy: pact.in_bed_by,
       dueBy: pact.due_by,
       dueAt: this.#occurrencesOf(pact.id, zone).first.dueAt,
     };
     if (!remindersGoOffInTime(after.reminders, current, zone)) return { ok: false, reason: "reminder-after-due-time" };
-    const diffs = termDiffs(before, after);
+    const diffs = termDiffs(before, after, pact.anki_rollover_hour);
     if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
       return { ok: false, reason: "change-request-waiting" };
     }
@@ -3480,7 +3482,7 @@ class Core implements PactCore {
     const what =
       after === null
         ? []
-        : termDiffs(before, after).map(({ term }) =>
+        : termDiffs(before, after, pact.anki_rollover_hour).map(({ term }) =>
             term === "schedule" && after.schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term],
           );
     const body = [...what, ...(trimmed === "" ? [] : [`“${trimmed}”`])].join(" · ");
@@ -3530,7 +3532,8 @@ class Core implements PactCore {
       endsPact: row.ends_pact === 1,
       note: row.note,
       requestedAt: new Date(row.requested_at),
-      changes: after === null ? [] : this.#termChanges(before, after, termDiffs(before, after)),
+      changes:
+        after === null ? [] : this.#termChanges(before, after, termDiffs(before, after, pact.anki_rollover_hour)),
       // Reminders are the owner's own: reviewers don't see them.
       current: withoutReminders(this.#currentTerms(pact)),
       appliesFrom: start?.appliesFrom ?? null,
@@ -3751,9 +3754,14 @@ class Core implements PactCore {
     if (reminders.length > MAX_REMINDERS || !reminders.every(oneTime ? isDatedReminder : isClockTime)) {
       return { ok: false, reason: "invalid-reminders" };
     }
-    // In the order they go off: a night's run from 18:00 to the morning after, an Anki day's from noon.
-    const order = oura ? nightOrder : anki ? ankiOrder : (time: string) => time;
-    reminders.sort((a, b) => order(a).localeCompare(order(b), "en-US"));
+    // In the order they go off: a night's run from 18:00 to the morning after, an Anki day's from its rollover hour.
+    if (ankiRollover !== null) {
+      const rollover = ankiRollover;
+      reminders.sort((a, b) => ankiReminderOrder(a, rollover) - ankiReminderOrder(b, rollover));
+    } else {
+      const order = oura ? nightOrder : (time: string) => time;
+      reminders.sort((a, b) => order(a).localeCompare(order(b), "en-US"));
+    }
     const name = pact.name.trim();
     // Oura Ring and Anki pacts have no photo to describe.
     const description = oura || anki ? "" : pact.description.trim();
@@ -3769,7 +3777,7 @@ class Core implements PactCore {
     if (!timing.ok) return timing;
     const due = {
       oneTime,
-      anki,
+      ankiRollover,
       inBedBy: oura ? pact.inBedBy! : null,
       dueBy: timing.terms.dueBy ?? null,
       dueAt: timing.first.dueAt,
@@ -4744,12 +4752,15 @@ class Core implements PactCore {
     const pacts = this.#db
       .prepare(
         `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
-                pact.owner_account_id, account.timezone
+                pact.anki_rollover_hour, pact.owner_account_id, account.timezone
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.stage = 'active'
          ORDER BY pact.created_at, pact.id`,
       )
-      .all() as (Pick<PactRow, "id" | "name" | "evidence_kind" | "schedule" | "reminders" | "reminded_through"> & {
+      .all() as (Pick<
+      PactRow,
+      "id" | "name" | "evidence_kind" | "schedule" | "reminders" | "reminded_through" | "anki_rollover_hour"
+    > & {
       owner_account_id: AccountId;
       timezone: string | null;
     })[];
@@ -4762,7 +4773,12 @@ class Core implements PactCore {
       // Every pact's owner has a timezone: creating one needs it.
       if (times.length === 0 || pact.timezone === null) continue;
       const timezone = pact.timezone;
-      const kind = pact.evidence_kind === "oura" ? "night" : pact.evidence_kind === "anki" ? "anki" : "day";
+      const kind =
+        pact.evidence_kind === "oura"
+          ? "night"
+          : pact.anki_rollover_hour !== null
+            ? { ankiRollover: pact.anki_rollover_hour }
+            : "day";
       const occurrences = this.#occurrencesOf(pact.id, timezone);
       // A night's or an Anki day's reminder can go off the morning after, so start a day early.
       const fromDate = addDays(localDateOf(from, timezone), -1);
@@ -5605,14 +5621,18 @@ function deadlineWallClock(date: LocalDate, inBedBy: string): string {
  */
 function remindersGoOffInTime(
   reminders: string[],
-  due: { oneTime: boolean; anki: boolean; inBedBy: string | null; dueBy: string | null; dueAt: Date },
+  due: { oneTime: boolean; ankiRollover: number | null; inBedBy: string | null; dueBy: string | null; dueAt: Date },
   timezone: string,
 ): boolean {
+  const { ankiRollover } = due;
   return reminders.every((time) => {
     if (due.oneTime) return oneTimeReminderAt(time, timezone).getTime() < due.dueAt.getTime();
     if (due.inBedBy !== null) return nightOrder(time) < nightOrder(due.inBedBy);
-    // Without a due-by time an Anki day is due at midnight, the first of the morning after.
-    if (due.anki) return ankiOrder(time) < ankiOrder(due.dueBy ?? "00:00");
+    // Without a due-by time an Anki day is due at midnight. A due-by time that can't fit is refused before this.
+    if (ankiRollover !== null) {
+      const dueOrder = ankiDueByOrder(due.dueBy ?? "00:00", ankiRollover) ?? 0;
+      return ankiReminderOrder(time, ankiRollover) < dueOrder;
+    }
     return due.dueBy === null || time < due.dueBy;
   });
 }
@@ -5635,11 +5655,6 @@ function withoutReminders({
 
 function nightOrder(time: string): string {
   return `${Number(time.slice(0, 2)) < 18 ? 1 : 0}${time}`;
-}
-
-/** A clock time "HH:MM" as it sorts in an Anki pact's evening, from noon to the morning after. */
-function ankiOrder(time: string): string {
-  return `${Number(time.slice(0, 2)) < 12 ? 1 : 0}${time}`;
 }
 
 /** "HH:MM" on a 24-hour clock. */

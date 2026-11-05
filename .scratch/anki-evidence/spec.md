@@ -38,7 +38,7 @@ This spec uses **Satisfied** for what v0 calls Kept. Ticket 01 renames it everyw
 
 - **Deck:** one deck per pact, stored by Anki's deck id, shown by its current name. Subdecks count in their parent, which is how Anki's deck list counts them.
 - **Schedule:** Fixed days only.
-- **Due-by time:** optional, default midnight. Allowed values run from noon through the collection's rollover hour (Anki's "next day starts at", default 4am). A time before noon is the morning after, counted as the evening's day. See Screens for the exact rule.
+- **Due-by time:** optional, default midnight. Allowed values run from noon through the collection's rollover hour (Anki's "next day starts at", default 4am). A time up to the rollover hour is the morning after, counted as the evening's day. See Screens for the exact rule.
 - **Finished:** New, Learn and Due are all 0, as Anki's deck list shows them for the deck, with the deck's daily limits applied.
 - A later version can add "at most X cards left today", with X = 0 being v1's rule. Pact records all three counts on every check, so X will be a new term, not a data migration.
 - Changing the deck after the edit window always needs a change request, because Pact can't tell whether another deck is stricter. An earlier due-by time is a stricter change and applies at once, as on Camera pacts.
@@ -103,9 +103,10 @@ The human picked these from the prototype:
 - **Chip:** the open Anki card's chip is "To do", not "Automatic".
 
 The due-by rule was decided while building ticket 03:
-- A due-by time is allowed from noon through the collection's rollover hour.
-- A time before noon is the morning after. 00:00 is midnight, the default.
-- A time after the rollover hour and before noon is refused.
+- A due-by time is due after the Anki day opens and no later than it ends: after max(noon, the rollover hour) on D, or by the rollover hour on D+1. 00:00 is midnight, the default.
+- A time from noon and after the rollover hour is on D. A time up to the rollover hour is the morning after, D+1.
+- Any other time is refused, such as 9am with a 4am rollover. With a rollover after noon, such as 2pm, no time is refused: 1pm is 1pm on D+1.
+- A reminder before the rollover hour goes off the morning after. One from the rollover hour on goes off on D, so a 9am reminder with a 4am rollover goes off at 9am on D.
 
 ## Testing decisions
 

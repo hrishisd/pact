@@ -56,7 +56,7 @@ An optional time of day, such as 9:00am, that a Camera pact's evidence, or an An
 The Anki deck an Anki pact's owner must finish each scheduled day, picked from their own deck tree. Its subdecks count in it, as in Anki's deck list. It's finished when Anki shows no new, learning or due cards left in it.
 
 **Anki day**:
-An Anki pact's occurrence. The Anki day of Tue Nov 3 runs from the collection's rollover hour (Anki's "next day starts at", usually 4am) on Tuesday to the same hour on Wednesday. Its due-by time can be from noon through the rollover hour; a time before noon is the morning after.
+An Anki pact's occurrence. The Anki day of Tue Nov 3 runs from the collection's rollover hour (Anki's "next day starts at", usually 4am) on Tuesday to the same hour on Wednesday. Its due-by time can be from noon through the rollover hour: a time up to the rollover hour is the morning after, and a later one that day.
 
 **Start date / End date**:
 Optional days that bound a recurring pact. The start date can only push its first occurrence later. The end date is its last day: once that day's occurrence closes, the pact has no more and is Ended.

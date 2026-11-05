@@ -85,8 +85,9 @@ export interface NewPact {
    * Camera and Anki, optional: the due-by time, "HH:MM" on a 24-hour clock
    * after 00:00. Evidence is due by it each day instead of midnight, and the
    * day is judged then. On an Anki pact it runs from noon through the
-   * collection's rollover hour: a time from 00:01 to the rollover hour is the
-   * morning after, still the evening's Anki day.
+   * collection's rollover hour: a time up to the rollover hour is the morning
+   * after, still the evening's Anki day, and a later one, from noon, is that
+   * day once its Anki day has opened.
    */
   dueBy?: string;
   /** Anki only: the deck's id, from the owner's deck list (`AnkiDecksResult`). Its subdecks count in it. */
@@ -1254,7 +1255,7 @@ export interface PactChange {
   description: string;
   /** Oura Ring only: see `NewPact.inBedBy`. */
   inBedBy?: string;
-  /** Camera only: see `NewPact.dueBy`. Left out to have none. */
+  /** Camera and Anki: see `NewPact.dueBy`. Left out to have none. */
   dueBy?: string;
   /** See `NewPact.startDate`. It can change only before the first occurrence opens. Left out to have none. */
   startDate?: string;
