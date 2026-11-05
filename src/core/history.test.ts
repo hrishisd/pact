@@ -33,8 +33,8 @@ async function excused(owner: AccountHandle, reviewer: AccountHandle, pactId: st
   await reviewer.decide(filed.excuseId, { kind: "approve" });
 }
 
-const kept = (reviewerName: string): OccurrenceRecord => ({
-  status: { kind: "kept" },
+const satisfied = (reviewerName: string): OccurrenceRecord => ({
+  status: { kind: "satisfied" },
   decidedBy: { kind: "evidence-approved", reviewerName },
   recipientName: null,
 });
@@ -80,7 +80,7 @@ describe("the heat map", () => {
     await s.advanceTo("Thu+1 10:00");
 
     expect(historyOf(owner, gym)).toEqual([
-      { date: "2026-01-05", occurrence: kept("reviewer") },
+      { date: "2026-01-05", occurrence: satisfied("reviewer") },
       { date: "2026-01-06", occurrence: null },
       {
         date: "2026-01-07",
@@ -200,7 +200,12 @@ describe("the heat map", () => {
     expect(historyOf(owner, bed).slice(0, 3)).toEqual([
       {
         date: "2026-01-05",
-        occurrence: { status: { kind: "kept" }, decidedBy: null, recipientName: null, night: { inBedAt: "23:40" } },
+        occurrence: {
+          status: { kind: "satisfied" },
+          decidedBy: null,
+          recipientName: null,
+          night: { inBedAt: "23:40" },
+        },
       },
       { date: "2026-01-06", occurrence: { ...missed(s, "Thu 18:00"), night: { inBedAt: "01:10" } } },
       { date: "2026-01-07", occurrence: { ...missed(s, "Thu 18:00"), night: { inBedAt: null } } },
@@ -209,7 +214,7 @@ describe("the heat map", () => {
 });
 
 describe("Yesterday on Today", () => {
-  test("lists yesterday's Kept, Missed and Excused occurrences by pact name, and leaves out pacts not due yesterday", async () => {
+  test("lists yesterday's Satisfied, Missed and Excused occurrences by pact name, and leaves out pacts not due yesterday", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const read = await createPact("Read", ["mon"]);
@@ -222,7 +227,13 @@ describe("Yesterday on Today", () => {
     await s.advanceTo("Tue 10:00");
 
     expect(owner.today().yesterday).toEqual([
-      { pactId: gym, name: "Gym", evidenceKind: "camera", occurrenceDate: "2026-01-05", occurrence: kept("reviewer") },
+      {
+        pactId: gym,
+        name: "Gym",
+        evidenceKind: "camera",
+        occurrenceDate: "2026-01-05",
+        occurrence: satisfied("reviewer"),
+      },
       {
         pactId: piano,
         name: "Piano",
@@ -276,7 +287,12 @@ describe("Yesterday on Today", () => {
         name: "In bed by midnight",
         evidenceKind: "oura",
         occurrenceDate: "2026-01-05",
-        occurrence: { status: { kind: "kept" }, decidedBy: null, recipientName: null, night: { inBedAt: "23:40" } },
+        occurrence: {
+          status: { kind: "satisfied" },
+          decidedBy: null,
+          recipientName: null,
+          night: { inBedAt: "23:40" },
+        },
       },
     ]);
   });

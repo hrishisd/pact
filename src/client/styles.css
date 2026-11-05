@@ -11,8 +11,8 @@
   --accent: #22457a;
   --accent-ink: #ffffff;
   --accent-soft: #e1e8f3;
-  --kept: #2b7347;
-  --kept-bg: #dceee2;
+  --satisfied: #2b7347;
+  --satisfied-bg: #dceee2;
   --missed: #ad3227;
   --missed-bg: #f6dfda;
   --due: #b0520a;
@@ -411,16 +411,16 @@ p {
   font-weight: 600;
   white-space: nowrap;
 }
-.c-kept {
-  background: var(--kept-bg);
-  color: var(--kept);
+.c-satisfied {
+  background: var(--satisfied-bg);
+  color: var(--satisfied);
 }
 .c-missed {
   background: var(--missed-bg);
   color: var(--missed);
 }
 .c-todo {
-  background: var(--kept);
+  background: var(--satisfied);
   color: var(--paper);
 }
 .c-soon {
@@ -549,7 +549,7 @@ p {
 }
 /* What approved payments have paid, in a ledger's history. */
 .paid {
-  color: var(--kept);
+  color: var(--satisfied);
   font-weight: 700;
 }
 /* A rejected payment's amount: it never counted. */
@@ -651,8 +651,8 @@ p {
   color: var(--accent);
 }
 .alert.ok {
-  background: var(--kept-bg);
-  border-color: var(--kept);
+  background: var(--satisfied-bg);
+  border-color: var(--satisfied);
 }
 .switch-row {
   display: flex;
@@ -698,7 +698,7 @@ p {
   transition: transform 0.15s;
 }
 .switch:checked {
-  background: var(--kept);
+  background: var(--satisfied);
 }
 .switch:checked::after {
   transform: translateX(18px);
@@ -884,11 +884,11 @@ textarea.inp {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 1.5px solid var(--kept);
+  border: 1.5px solid var(--satisfied);
   display: block;
 }
 .dots i.on {
-  background: var(--kept);
+  background: var(--satisfied);
 }
 .dots i.wait {
   border-color: var(--slate);
@@ -1053,8 +1053,8 @@ textarea.inp {
   height: 20px;
 }
 .k-evidence {
-  background: var(--kept-bg);
-  color: var(--kept);
+  background: var(--satisfied-bg);
+  color: var(--satisfied);
 }
 .k-payment {
   background: var(--missed-bg);
@@ -1149,8 +1149,8 @@ textarea.inp {
   font-size: 11.5px;
 }
 .btn.ok {
-  background: var(--kept);
-  border-color: var(--kept);
+  background: var(--satisfied);
+  border-color: var(--satisfied);
   color: var(--surface);
 }
 
@@ -1288,7 +1288,7 @@ a.btn.primary {
   background: var(--amber-bg);
 }
 .termrow.changed.stricter {
-  background: var(--kept-bg);
+  background: var(--satisfied-bg);
 }
 .termrow.changed.at-once {
   background: var(--sunk);
@@ -1308,7 +1308,7 @@ a.btn.primary {
   color: var(--amber);
 }
 .t-stricter {
-  color: var(--kept);
+  color: var(--satisfied);
 }
 .t-at-once {
   color: var(--muted);
@@ -1356,8 +1356,8 @@ a.btn.primary {
 }
 .verdict.stricter,
 .verdict.at-once {
-  background: var(--kept-bg);
-  border-color: var(--kept);
+  background: var(--satisfied-bg);
+  border-color: var(--satisfied);
 }
 .verdict.nothing {
   background: var(--sunk);
@@ -1425,8 +1425,8 @@ details.folded .kv {
   outline: 1px solid var(--sunk);
   outline-offset: -1px;
 }
-.cell.kept {
-  background: var(--kept);
+.cell.satisfied {
+  background: var(--satisfied);
 }
 .cell.missed {
   background: var(--missed);

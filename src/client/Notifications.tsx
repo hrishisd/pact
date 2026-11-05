@@ -266,7 +266,7 @@ function DeviceLine({ state, onSetUp }: { state: Push["state"]; onSetUp: () => v
     case "on":
       return (
         <div>
-          <span className="chip c-kept">On for this {device}</span>
+          <span className="chip c-satisfied">On for this {device}</span>
         </div>
       );
     case "unsupported":

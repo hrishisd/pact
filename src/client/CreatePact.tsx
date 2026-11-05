@@ -525,7 +525,9 @@ function ConnectStep() {
           </span>
           <b>Oura asks you to sign in and allow Pact.</b>
         </div>
-        <p>Pact checks when your main sleep each night starts. Your reviewers see only Kept or Missed and that time.</p>
+        <p>
+          Pact checks when your main sleep each night starts. Your reviewers see only Satisfied or Missed and that time.
+        </p>
       </div>
       <small className="muted">You'll come back here to set your bedtime.</small>
     </>

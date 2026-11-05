@@ -24,7 +24,7 @@ function connectionProblems(s: Scenario, owner: AccountHandle) {
   return s.notifier.sentTo(owner).filter((n) => n.kind === "connection-problem");
 }
 
-/** An owner whose Mon night was Kept, so Tue night is the one waiting on Oura. */
+/** An owner whose Mon night was Satisfied, so Tue night is the one waiting on Oura. */
 async function tueNightWaiting(s: Scenario) {
   const setUp = await ownerWithOura(s);
   const pactId = await setUp.createPact("00:00");
@@ -115,7 +115,7 @@ describe("checking Oura now", () => {
     s.setClockTo("2026-01-07T09:00:20-05:00");
     await owner.checkOura();
 
-    expect(judged(owner, pactId, TUE)).toBe("kept");
+    expect(judged(owner, pactId, TUE)).toBe("satisfied");
     expect(owner.today().sections.map((section) => section.kind)).toEqual(["automatic"]);
   });
 
@@ -293,7 +293,7 @@ describe("a disconnected connection", () => {
     await owner.connectOura();
     await s.advanceTo("Wed 12:01");
 
-    expect(judged(owner, pactId, TUE)).toBe("kept");
+    expect(judged(owner, pactId, TUE)).toBe("satisfied");
     expect(owner.today().alerts).toEqual([]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: null } });
     expect(connectionProblems(s, owner)).toHaveLength(1);

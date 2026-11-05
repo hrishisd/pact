@@ -27,7 +27,7 @@ When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. 
 _Avoid_: Frequency, recurrence, cadence
 
 **Target**:
-How many days of a Weekly count week need approved evidence for the week to be Kept, e.g. 3 for "3× per week". At most one day of evidence counts per calendar day, and a week adds one penalty for each day it falls short.
+How many days of a Weekly count week need approved evidence for the week to be Satisfied, e.g. 3 for "3× per week". At most one day of evidence counts per calendar day, and a week adds one penalty for each day it falls short.
 
 **Deadline**:
 When a One-time pact is due: a date, plus its due-by time if one is set, or else midnight.
@@ -58,14 +58,14 @@ Optional days that bound a recurring pact. The start date can only push its firs
 **Closed**:
 How Today shows a Camera pact's day once its due-by time has passed: Missed, and no evidence counts for it any more.
 
-**Kept / Missed / Excused**:
-The three ways an occurrence can end: the owner met the pact, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**.
-_Avoid_: Passed, failed, success, failure, pending
+**Satisfied / Missed / Excused**:
+The three ways an occurrence can end: the owner met the pact for that occurrence, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**. An occurrence is Satisfied, never a pact; a pact ends as Ended.
+_Avoid_: Passed, failed, success, failure, pending, Kept, Done, Approved
 
 ### Proof and review
 
 **Evidence**:
-Proof that an occurrence was kept. It's either pulled automatically (e.g. sleep data) or submitted by the owner (e.g. a photo).
+Proof that an occurrence was Satisfied. It's either pulled automatically (e.g. sleep data) or submitted by the owner (e.g. a photo).
 _Avoid_: Proof, submission, check-in
 
 **Evidence kind**:

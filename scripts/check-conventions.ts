@@ -12,14 +12,16 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // Avoided words that are fine in their everyday sense, so checking them
-// would mostly flag correct code ("every day", "integration test").
+// would mostly flag correct code ("every day", "integration test"). Kept,
+// Done and Approved are avoided only as an occurrence's outcome: "an offset
+// is kept", the Done button and approved evidence are right.
 // prettier-ignore
 const EVERYDAY_WORDS = new Set([
   "task", "goal", "user", "pending", "live", "day", "session", "passed", "failed",
   "success", "failure", "source", "link", "pass", "contact", "connection", "edit",
   "charge", "balance", "tab", "statement", "late", "outstanding", "instance",
   "judge", "integration", "connector", "data source", "submission", "proof", "fine",
-  "transaction",
+  "transaction", "kept", "done", "approved",
 ]);
 
 // Copy that uses an avoided word on purpose. The tagline explains what a pact

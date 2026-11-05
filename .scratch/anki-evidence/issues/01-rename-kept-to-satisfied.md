@@ -20,10 +20,21 @@ Leave plain-English uses of "kept" alone, such as "an offset is kept" or "Kept i
 
 ## Acceptance criteria
 
-- [ ] `grep -rniw kept src GLOSSARY.md .scratch/pact-v0/spec.md` finds only plain-English uses.
-- [ ] A migration test opens a database at the previous schema version with `'kept'`, `'missed'` and `'excused'` rows, and after migrating finds `'satisfied'`, `'missed'` and `'excused'` with every other column unchanged.
-- [ ] Inserting `'kept'` after the migration fails the CHECK constraint.
-- [ ] The full test suite, typecheck and lint pass.
-- [ ] The Today, pact page, history heat map and File excuse sheet show "Satisfied" (screenshot at 390×844).
+- [x] `grep -rniw kept src GLOSSARY.md .scratch/pact-v0/spec.md` finds only plain-English uses.
+- [x] A migration test opens a database at the previous schema version with `'kept'`, `'missed'` and `'excused'` rows, and after migrating finds `'satisfied'`, `'missed'` and `'excused'` with every other column unchanged.
+- [x] Inserting `'kept'` after the migration fails the CHECK constraint.
+- [x] The full test suite, typecheck and lint pass.
+- [x] The Today, pact page, history heat map and File excuse sheet show "Satisfied" (screenshot at 390×844).
 
 ## Comments
+
+### 2026-11-05: built
+
+- **Migration 25** rebuilds `occurrence` by SQLite's 12-step procedure: create `occurrence_new` with the new CHECK, copy the rows mapping `'kept'` to `'satisfied'`, drop `occurrence`, rename. At version 24 the table had only its primary key's index, its foreign key to `pact`, and its two CHECKs; no other index, trigger or view. `evidence` and `penalty` reference it by name, so they carry over untouched (the test compares every other table's schema text before and after).
+- **Foreign keys during migrations.** Migrations ran inside a transaction with `foreign_keys = ON`, where `PRAGMA foreign_keys` does nothing, so `DROP TABLE occurrence` failed on the rows `evidence` and `penalty` hold. `db.ts` now turns foreign keys off around the pending migrations, runs `PRAGMA foreign_key_check` inside each migration's transaction (a dangling reference refuses the migration, naming it, and rolls it back), and turns them back on after. Tested in `db.test.ts`.
+- **Nothing else stored `'kept'`.** Outbox payloads hold only title, body and url text (none said Kept); `ExcuseSkipReason` is worked out per request, never stored; notification kinds and settings never had it.
+- **Lint.** Kept, Done and Approved are on the glossary's _Avoid_ line, and also in `check-conventions.ts`'s `EVERYDAY_WORDS`, like Passed and failed: "approved" evidence, the Done button and plain-English "kept" are right everywhere else, so checking them would flag correct code. The grep in the first criterion is the check for Kept.
+- **What the grep still finds besides plain English:** migration 4's old CHECK (shipped, can't change), and migration 25 and its test, which have to name the old value.
+- **CSS:** `c-kept` is now `c-satisfied`, and `--kept`/`--kept-bg` are `--satisfied`/`--satisfied-bg`. It's the green used for other chips too (Active, Connected, Approved by).
+- **Spec:** user story 29 said "prove I kept the pact"; it now says "met the pact", the glossary's definition, since an occurrence is Satisfied, never a pact. Stories 49 and the closing note use "kept" in plain English and stay.
+- **Screens:** checked at 390×844 on a seeded dev database: Today's Yesterday row, the pact page's history legend, and the File excuse sheet's skipped day all say Satisfied.

@@ -159,12 +159,12 @@ describe("making a One-time pact", () => {
     await s.advanceTo("Mon 09:11");
     await reviewer.decide(evidenceId, { kind: "approve" });
     await s.advanceTo("Sat 00:00");
-    expect(occurrenceOf(owner, taxes)).toMatchObject({ date: FRIDAY, occurrence: { status: { kind: "kept" } } });
+    expect(occurrenceOf(owner, taxes)).toMatchObject({ date: FRIDAY, occurrence: { status: { kind: "satisfied" } } });
   });
 });
 
 describe("Submit anytime off", () => {
-  test("deadline Thursday: evidence on Tuesday is refused; on Thursday at 15:00, approved, it's Kept and the pact Ended", async () => {
+  test("deadline Thursday: evidence on Tuesday is refused; on Thursday at 15:00, approved, it's Satisfied and the pact Ended", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const dentist = await createPact("Dentist", oneTime(THURSDAY));
@@ -180,7 +180,7 @@ describe("Submit anytime off", () => {
     expect(occurrenceOf(owner, dentist)).toEqual({
       date: THURSDAY,
       occurrence: {
-        status: { kind: "kept" },
+        status: { kind: "satisfied" },
         decidedBy: { kind: "evidence-approved", reviewerName: "reviewer" },
         recipientName: null,
       },
@@ -219,7 +219,7 @@ describe("Submit anytime off", () => {
 });
 
 describe("Submit anytime on", () => {
-  test("evidence three days before the deadline, approved, is Kept at the deadline and the pact Ended", async () => {
+  test("evidence three days before the deadline, approved, is Satisfied at the deadline and the pact Ended", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
@@ -235,7 +235,7 @@ describe("Submit anytime on", () => {
     expect(pactOf(owner, taxes).stage).toBe("active");
     await s.advanceTo("Fri 00:00");
 
-    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({ kind: "kept" });
+    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({ kind: "satisfied" });
     expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", endedAt: s.at("Fri 00:00") });
   });
 
@@ -449,7 +449,7 @@ describe("changing a One-time pact", () => {
     expect(pactOf(owner, taxes)).toMatchObject({ schedule: oneTime(THURSDAY), newTerms: null });
     await reviewer.decide(evidenceId, { kind: "approve" });
     await s.advanceTo("Fri 00:00");
-    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({ kind: "kept" });
+    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({ kind: "satisfied" });
   });
 
   test("Submit anytime off: moving the date earlier or later needs approval", async () => {
@@ -525,7 +525,7 @@ describe("changing a One-time pact", () => {
       occurrence: { status: { kind: "missed", penaltyCents: 500 } },
     });
     await reviewer.decide(evidenceId, { kind: "approve" });
-    expect(occurrenceOf(owner, forms)).toMatchObject({ date: SATURDAY, occurrence: { status: { kind: "kept" } } });
+    expect(occurrenceOf(owner, forms)).toMatchObject({ date: SATURDAY, occurrence: { status: { kind: "satisfied" } } });
   });
 
   test("an earlier deadline under an hour away is refused; one further off applies at once", async () => {

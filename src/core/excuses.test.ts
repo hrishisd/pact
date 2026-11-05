@@ -242,11 +242,11 @@ describe("an excuse covering today", () => {
 });
 
 describe("which days an excuse covers", () => {
-  test("a range with a Kept day and a day Missed 3 days ago covers only the days that can be excused, and reports the others as skipped", async () => {
+  test("a range with a Satisfied day and a day Missed 3 days ago covers only the days that can be excused, and reports the others as skipped", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
-    // Monday Missed (Tue 00:00); Wednesday Kept; Friday not judged yet.
+    // Monday Missed (Tue 00:00); Wednesday Satisfied; Friday not judged yet.
     s.setClockTo("Wed 12:00");
     const evidence = await owner.submitEvidence(gym, [photo()]);
     if (!evidence.ok) throw new Error(evidence.reason);
@@ -266,7 +266,7 @@ describe("which days an excuse covers", () => {
         ],
         skipped: [
           { date: MONDAY, reason: "window-closed" },
-          { date: WEDNESDAY, reason: "kept" },
+          { date: WEDNESDAY, reason: "satisfied" },
         ],
         heldCents: 0,
       },
@@ -276,7 +276,7 @@ describe("which days an excuse covers", () => {
     expect(owed(owner)).toBe(500);
   });
 
-  test("a range with no day that can be excused is refused: Kept, Missed too long ago, or no pact day at all", async () => {
+  test("a range with no day that can be excused is refused: Satisfied, Missed too long ago, or no pact day at all", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);

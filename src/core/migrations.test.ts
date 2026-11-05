@@ -216,3 +216,89 @@ test.each([
     await core.close();
   },
 );
+
+test("migration 25: a Kept occurrence becomes Satisfied, and the rebuilt table keeps its keys and its references", () => {
+  // At migration 24: a daily pact with one occurrence of each outcome and one not judged yet,
+  // the Kept one with approved evidence and the Missed one with its penalty.
+  const seeded = openDatabase(path, migrations.slice(0, 24));
+  seeded.exec(`
+    INSERT INTO account (id, email, email_key, name, timezone, created_at)
+      VALUES ('owner', 'owner@example.test', 'owner@example.test', 'owner', 'America/New_York', '2026-01-01T00:00:00Z'),
+             ('reviewer', 'reviewer@example.test', 'reviewer@example.test', 'reviewer', 'America/New_York',
+              '2026-01-01T00:00:00Z');
+    INSERT INTO recipient (id, owner_account_id, name, created_at)
+      VALUES ('sam', 'owner', 'Sam', '2026-01-01T00:00:00Z');
+    INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                      recipient_id, stage, first_occurrence, created_at)
+      VALUES ('gym', 'owner', 'Gym', 'A photo of Gym', 'camera',
+              '{"kind":"fixed-days","days":["mon","tue","wed","thu","fri","sat","sun"]}', 500,
+              'sam', 'active', '2026-01-05', '2026-01-01T00:00:00Z');
+    INSERT INTO occurrence (pact_id, date, outcome, judged_at, miss_accepted_at, bedtime_start)
+      VALUES ('gym', '2026-01-05', 'kept', '2026-01-06T05:00:00Z', NULL, '2026-01-05T22:40:00-05:00'),
+             ('gym', '2026-01-06', 'missed', '2026-01-07T05:00:00Z', '2026-01-07T12:00:00Z', NULL),
+             ('gym', '2026-01-07', 'excused', '2026-01-08T05:00:00Z', NULL, NULL),
+             ('gym', '2026-01-08', NULL, NULL, NULL, NULL);
+    INSERT INTO evidence (id, pact_id, occurrence_date, day, submitted_at, decision, decided_by_account_id, decided_at)
+      VALUES ('monday', 'gym', '2026-01-05', '2026-01-05', '2026-01-05T15:00:00Z', 'approved', 'reviewer',
+              '2026-01-05T16:00:00Z');
+    INSERT INTO penalty (id, owner_account_id, recipient_id, pact_id, occurrence_date, amount_cents, added_at)
+      VALUES ('tuesday', 'owner', 'sam', 'gym', '2026-01-06', 500, '2026-01-07T05:00:00Z');
+  `);
+  const rowsBefore = occurrences(seeded);
+  const shapeBefore = shape(seeded);
+  seeded.close();
+
+  const db = openDatabase(path);
+
+  // Only the outcome changes, and only Kept's.
+  expect(occurrences(db)).toEqual(
+    rowsBefore.map((row) => (row.outcome === "kept" ? { ...row, outcome: "satisfied" } : row)),
+  );
+  expect(occurrences(db).map((row) => row.outcome)).toEqual(["satisfied", "missed", "excused", null]);
+  // Its columns, primary key, foreign key and indexes are the same, and so is every other table,
+  // including evidence and penalty, which still reference it.
+  expect(shape(db)).toEqual(shapeBefore);
+  expect(db.pragma("foreign_key_check")).toEqual([]);
+
+  // Both CHECKs hold: the old outcome is refused, and an outcome still needs a judged_at.
+  const insert = db.prepare("INSERT INTO occurrence (pact_id, date, outcome, judged_at) VALUES ('gym', ?, ?, ?)");
+  expect(() => insert.run("2026-01-09", "kept", "2026-01-10T05:00:00Z")).toThrow(/CHECK constraint failed/);
+  expect(() => insert.run("2026-01-09", "satisfied", null)).toThrow(/CHECK constraint failed/);
+  insert.run("2026-01-09", "satisfied", "2026-01-10T05:00:00Z");
+  // The references are enforced: evidence for an occurrence with no row, or one for a pact that doesn't exist, is refused.
+  expect(() =>
+    db
+      .prepare(
+        "INSERT INTO evidence (id, pact_id, occurrence_date, day, submitted_at) VALUES ('x', 'gym', '2026-02-01', '2026-02-01', '2026-02-01T15:00:00Z')",
+      )
+      .run(),
+  ).toThrow(/FOREIGN KEY constraint failed/);
+  expect(() => db.prepare("INSERT INTO occurrence (pact_id, date) VALUES ('none', '2026-01-05')").run()).toThrow(
+    /FOREIGN KEY constraint failed/,
+  );
+  db.close();
+});
+
+/** Every occurrence row, in date order. */
+function occurrences(db: ReturnType<typeof openDatabase>): Record<string, unknown>[] {
+  return db.prepare("SELECT * FROM occurrence ORDER BY date").all() as Record<string, unknown>[];
+}
+
+/**
+ * The schema as SQLite reports it: occurrence's columns, foreign keys and indexes
+ * (whose definitions change with its CHECK), and every other table, index,
+ * trigger and view by its text.
+ */
+function shape(db: ReturnType<typeof openDatabase>): unknown {
+  const indexes = db.pragma("index_list(occurrence)") as { name: string }[];
+  return {
+    columns: db.pragma("table_info(occurrence)"),
+    foreignKeys: db.pragma("foreign_key_list(occurrence)"),
+    indexes: indexes.map((index) => ({ ...index, columns: db.pragma(`index_info(${index.name})`) })),
+    rest: db
+      .prepare(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE tbl_name NOT IN ('occurrence', 'schema_migration') ORDER BY name",
+      )
+      .all(),
+  };
+}

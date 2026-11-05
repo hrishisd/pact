@@ -9,7 +9,7 @@ import { formatDate, money } from "./format.ts";
 type Status = Json<OccurrenceStatus>;
 
 /**
- * A day's chip as of `now` (ms): Kept, Excused, Missed (with "· excuse
+ * A day's chip as of `now` (ms): Satisfied, Excused, Missed (with "· excuse
  * waiting for approval" while one is), "Excuse waiting for approval" for a
  * day not judged yet with one waiting, and otherwise Due today (This week,
  * for a Weekly count `week`), Coming up or Not judged yet (No Oura data for
@@ -35,8 +35,8 @@ export function DayChip({
   if (compact && status.kind === "missed") return <span className="chip c-missed">Missed</span>;
   if (compact && status.kind === "not-judged") return null;
   switch (status.kind) {
-    case "kept":
-      return <span className="chip c-kept">Kept</span>;
+    case "satisfied":
+      return <span className="chip c-satisfied">Satisfied</span>;
     case "excused":
       return <span className="chip c-excused">Excused</span>;
     case "missed":
@@ -72,7 +72,7 @@ export function dayNote(status: Status, now: number, week = false, oura = false)
 
 /** Why a day in the dates is skipped, as the sheet's Skipped rows say it. */
 export const SKIP_REASON_TEXT: Record<ExcuseSkipReason, string> = {
-  kept: "Kept",
+  satisfied: "Satisfied",
   excused: "Already Excused",
   "on-waiting-excuse": "Already on an excuse waiting for approval",
   "window-closed": "Missed more than 48 hours ago",

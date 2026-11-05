@@ -190,7 +190,7 @@ export interface PactCore {
   /**
    * Runs everything due by `t`, records the tick, then delivers the outbox.
    * Judges every occurrence due by `t` that isn't judged yet, catching up on
-   * any it missed while stopped: approved evidence makes it Kept; evidence
+   * any it missed while stopped: approved evidence makes it Satisfied; evidence
    * still waiting leaves it for the decision; none makes it Missed and adds
    * the pact's penalty to the owner's ledger for its recipient. (Rejected
    * evidence already judged it.) Each is judged as of its due time. Running
@@ -322,7 +322,7 @@ export interface AccountView {
    * `excuse`'s dates as Excused. It covers the days that can be excused now,
    * fixed at filing: any day not judged yet, and a Missed day within 48 hours
    * of being judged Missed (a rejection judges it then). It skips the rest:
-   * Kept, already Excused or approved ahead, on another excuse waiting for
+   * Satisfied, already Excused or approved ahead, on another excuse waiting for
    * approval, or Missed more than 48 hours ago. While it waits, the
    * penalties of its Missed days are held. Refused when no day is left, the
    * reason is blank, the dates are reversed or span more than 62 days, in the
@@ -361,7 +361,7 @@ export interface AccountView {
    * neither. For evidence, a rejection is final: it judges the occurrence Missed
    * there and then, with its penalty, whether it's still open or past its
    * due time, and it takes no more evidence. An approval after the due time
-   * judges it Kept there and then; before it, judging at the due time does.
+   * judges it Satisfied there and then; before it, judging at the due time does.
    * For an excuse, the decision covers all its days. Approved, its Missed days
    * become Excused there and then and their penalties are removed; its days
    * not judged yet are judged Excused at their due time (or at once, if that
@@ -2314,7 +2314,7 @@ class Core implements PactCore {
   /**
    * Records a reviewer's decision on waiting evidence and tells the owner.
    * A rejection is final: it judges the occurrence Missed as of now, open or
-   * not. An approval judges it Kept as of now once judging has reached it,
+   * not. An approval judges it Satisfied as of now once judging has reached it,
    * since it was waiting on this decision; before that, judging at the due
    * time will.
    */
@@ -2344,7 +2344,7 @@ class Core implements PactCore {
       ((outcome === "rejected" && !excusedAhead) ||
         this.#judgingReached(evidence.pact_id, evidence.occurrence_date, now))
     ) {
-      const judged = outcome === "approved" ? "kept" : excusedAhead ? "excused" : "missed";
+      const judged = outcome === "approved" ? "satisfied" : excusedAhead ? "excused" : "missed";
       this.#judge(evidence.pact_id, evidence.occurrence_date, judged, now);
     }
     this.#enqueue({
@@ -2379,10 +2379,10 @@ class Core implements PactCore {
          WHERE occurrence.pact_id = ? AND occurrence.date = ?`,
       )
       .get(pactId, date) as
-      | { outcome: "kept" | "missed" | "excused" | null; judged_at: string | null; amount_cents: number | null }
+      | { outcome: "satisfied" | "missed" | "excused" | null; judged_at: string | null; amount_cents: number | null }
       | undefined;
     const excuse = this.#excuseOn(pactId, date);
-    if (row?.outcome === "kept") return { kind: "kept" };
+    if (row?.outcome === "satisfied") return { kind: "satisfied" };
     if (row?.outcome === "excused") return { kind: "excused" };
     if (row?.outcome === "missed") {
       return {
@@ -2491,7 +2491,7 @@ class Core implements PactCore {
       decidedBy: this.#decidedBy(pact.id, occurrence.date, status),
       recipientName: status.kind === "missed" ? (row?.recipient_name ?? null) : null,
     };
-    if (pact.evidence_kind === "oura" && (status.kind === "kept" || status.kind === "missed")) {
+    if (pact.evidence_kind === "oura" && (status.kind === "satisfied" || status.kind === "missed")) {
       const bedtimeStart = row?.bedtime_start ?? null;
       record.night = { inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
     }
@@ -2500,13 +2500,13 @@ class Core implements PactCore {
 
   /**
    * The decision that settled an occurrence with `status`: its approved
-   * evidence (Kept), its rejected evidence (Missed), or the approved excuse
+   * evidence (Satisfied), its rejected evidence (Missed), or the approved excuse
    * that covers it (Excused, or a day not judged yet it already excuses).
    */
   #decidedBy(pactId: string, date: LocalDate, status: OccurrenceStatus): OccurrenceDecision | null {
-    // A Weekly count week is Kept or Missed by its days, not by any one decision.
-    if ((status.kind === "kept" || status.kind === "missed") && this.#isWeekly(pactId)) return null;
-    if (status.kind === "kept") {
+    // A Weekly count week is Satisfied or Missed by its days, not by any one decision.
+    if ((status.kind === "satisfied" || status.kind === "missed") && this.#isWeekly(pactId)) return null;
+    if (status.kind === "satisfied") {
       const row = this.#db
         .prepare(
           `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
@@ -2551,8 +2551,8 @@ class Core implements PactCore {
   /** Why a day with `status` can't be excused at `now`, or null if it can. */
   #skipReason(status: OccurrenceStatus, now: Date): ExcuseSkipReason | null {
     switch (status.kind) {
-      case "kept":
-        return "kept";
+      case "satisfied":
+        return "satisfied";
       case "excused":
         return "excused";
       case "missed":
@@ -4787,7 +4787,7 @@ class Core implements PactCore {
   /**
    * Judges bedtime nights in order, from where judging got to. A night is
    * decided by the first long_sleep Oura reports starting in its window,
-   * read on Oura's own clock: Kept if it starts before the in-bed-by time,
+   * read on Oura's own clock: Satisfied if it starts before the in-bed-by time,
    * else Missed, as of `t`, when it arrived. With an approved excuse, a late
    * period makes it Excused instead, and so does no period by 18:00 the next
    * day, then. With neither by then, it's Missed then. The first night still
@@ -4802,17 +4802,18 @@ class Core implements PactCore {
         .filter((p) => p.type === "long_sleep" && nightOf(p.bedtime_start) === night.date)
         .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start), "en-US"))[0];
       const excuse = this.#excuseOn(pact.id, night.date);
-      const kept = period !== undefined && wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
+      const satisfied =
+        period !== undefined && wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
       // As for a photo: an on-time bedtime beats an approved excuse, and an approved excuse beats a late one.
       // So with no period yet, an approved excuse waits for one until the night closes.
-      if (excuse === "approved" && !kept && (period !== undefined || night.closesAt.getTime() <= t.getTime())) {
+      if (excuse === "approved" && !satisfied && (period !== undefined || night.closesAt.getTime() <= t.getTime())) {
         this.#judge(pact.id, night.date, "excused", period ? t : night.closesAt);
       } else if (period) {
-        this.#judge(pact.id, night.date, kept ? "kept" : "missed", t);
+        this.#judge(pact.id, night.date, satisfied ? "satisfied" : "missed", t);
         this.#db
           .prepare(`UPDATE occurrence SET bedtime_start = ? WHERE pact_id = ? AND date = ?`)
           .run(period.bedtime_start, pact.id, night.date);
-        if (!kept && excuse === null) this.#enqueueMissed(pact.id, night.date);
+        if (!satisfied && excuse === null) this.#enqueueMissed(pact.id, night.date);
       } else if (night.closesAt.getTime() <= t.getTime()) {
         this.#judge(pact.id, night.date, "missed", night.closesAt);
         if (excuse === null) this.#enqueueMissed(pact.id, night.date);
@@ -4855,7 +4856,7 @@ class Core implements PactCore {
 
   /**
    * Judges an occurrence as of its due time, unless a decision after that
-   * already judged it or its evidence is still waiting for one: Kept with
+   * already judged it or its evidence is still waiting for one: Satisfied with
    * approved evidence, else Excused with an approved excuse, else Missed. A
    * Missed day on an excuse waiting for approval has its penalty held, and the
    * owner, who asked for it to be excused, isn't told it's Missed.
@@ -4869,14 +4870,14 @@ class Core implements PactCore {
       return this.#judge(pactId, occurrence.date, "excused", occurrence.dueAt);
     }
     if (decision === "waiting") return;
-    const outcome = decision === "approved" ? "kept" : "missed";
+    const outcome = decision === "approved" ? "satisfied" : "missed";
     this.#judge(pactId, occurrence.date, outcome, occurrence.dueAt);
     if (outcome === "missed" && excuse === null) this.#enqueueMissed(pactId, occurrence.date);
   }
 
   /**
    * Judges a Weekly count week at `at`, unless its evidence still waits for a
-   * decision that could change it: Kept once enough days have approved
+   * decision that could change it: Satisfied once enough days have approved
    * evidence, else Excused with an approved excuse, else Missed, with one
    * penalty per day short. `tell` the owner it's Missed, unless a decision
    * judged it (that told them) or they asked for it to be excused.
@@ -4884,7 +4885,7 @@ class Core implements PactCore {
   #judgeWeek(pactId: string, week: Occurrence, at: Date, tell: boolean): void {
     const { sessions, waiting, target } = this.#weekProgress(pactId, week.date);
     const excuse = this.#excuseOn(pactId, week.date);
-    if (sessions >= target) return this.#judge(pactId, week.date, "kept", at);
+    if (sessions >= target) return this.#judge(pactId, week.date, "satisfied", at);
     if (excuse === "approved") return this.#judge(pactId, week.date, "excused", at);
     if (waiting > 0) return;
     this.#judge(pactId, week.date, "missed", at);
@@ -4935,7 +4936,7 @@ class Core implements PactCore {
     });
   }
 
-  /** Whether the occurrence already has an outcome: Kept, Missed or Excused. */
+  /** Whether the occurrence already has an outcome: Satisfied, Missed or Excused. */
   #isJudged(pactId: string, date: LocalDate): boolean {
     return (
       this.#db
@@ -4950,7 +4951,7 @@ class Core implements PactCore {
    * the occurrence opened (held, while an excuse for it waits for approval):
    * for a Weekly count week, one penalty for each day short of its target.
    */
-  #judge(pactId: string, date: LocalDate, outcome: "kept" | "missed" | "excused", at: Date): void {
+  #judge(pactId: string, date: LocalDate, outcome: "satisfied" | "missed" | "excused", at: Date): void {
     const pact = {
       ...(this.#db.prepare(`SELECT owner_account_id FROM pact WHERE id = ?`).get(pactId) as {
         owner_account_id: AccountId;

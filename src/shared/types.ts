@@ -51,7 +51,7 @@ export type Schedule =
   /** Each listed weekday, in the owner's timezone, is its own occurrence. Listed Monday first, no repeats. */
   | { kind: "fixed-days"; days: Weekday[] }
   /**
-   * Camera only: each Mon–Sun week is one occurrence, Kept once `target` days
+   * Camera only: each Mon–Sun week is one occurrence, Satisfied once `target` days
    * of it have approved evidence (at most one counts per day): a whole number
    * from 1 to `MAX_WEEKLY_TARGET`.
    */
@@ -321,7 +321,7 @@ export interface HeatMapDay {
 export interface OccurrenceRecord {
   status: OccurrenceStatus;
   /**
-   * The reviewer's decision that settled it: approved evidence (Kept), rejected
+   * The reviewer's decision that settled it: approved evidence (Satisfied), rejected
    * evidence (Missed), or an approved excuse (Excused, or a day ahead it already
    * covers). Null for anything else, such as a day Missed with no evidence.
    */
@@ -329,7 +329,7 @@ export interface OccurrenceRecord {
   /** Missed only: the recipient its penalty went to. */
   recipientName: string | null;
   /**
-   * Bedtime pacts only, once judged Kept or Missed: when the owner got into
+   * Bedtime pacts only, once judged Satisfied or Missed: when the owner got into
    * bed, "HH:MM" on Oura's clock, or null when Oura reported no sleep by
    * 18:00 the next day.
    */
@@ -374,7 +374,7 @@ export type SubmitEvidenceResult = { ok: true; evidenceId: string } | { ok: fals
 export type AcceptMissRefusal =
   /** Not this owner's pact, or no pact. */
   | "pact-not-found"
-  /** The occurrence isn't Missed (not judged yet, Kept, or not on the schedule), or the miss was already accepted. */
+  /** The occurrence isn't Missed (not judged yet, Satisfied, or not on the schedule), or the miss was already accepted. */
   | "nothing-to-accept";
 
 export type AcceptMissResult = { ok: true } | { ok: false; reason: AcceptMissRefusal };
@@ -1051,7 +1051,7 @@ export interface NewExcuse extends ExcuseDates {
  * waiting for approval, or an approved one, covers a day not judged yet.
  */
 export type OccurrenceStatus =
-  | { kind: "kept" }
+  | { kind: "satisfied" }
   | { kind: "excused" }
   | {
       kind: "missed";
@@ -1081,11 +1081,11 @@ export interface ExcuseDay {
 }
 
 /**
- * Why a day in an excuse's dates can't be excused now: Kept, already Excused
+ * Why a day in an excuse's dates can't be excused now: Satisfied, already Excused
  * (or approved ahead), already on an excuse waiting for approval, or Missed
  * more than 48 hours ago.
  */
-export type ExcuseSkipReason = "kept" | "excused" | "on-waiting-excuse" | "window-closed";
+export type ExcuseSkipReason = "satisfied" | "excused" | "on-waiting-excuse" | "window-closed";
 
 /** The days an excuse with some dates would cover, and those it would skip. */
 export interface ExcusePreview {

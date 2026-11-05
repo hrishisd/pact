@@ -78,7 +78,7 @@ function StateChip({ payment }: { payment: Json<PaymentDetail> }) {
     case "waiting":
       return <WaitingChip thread={payment.thread} />;
     case "approved":
-      return <span className="chip c-kept">Approved by {state.reviewerName}</span>;
+      return <span className="chip c-satisfied">Approved by {state.reviewerName}</span>;
     case "rejected":
       return <span className="chip c-missed">Rejected by {state.reviewerName}</span>;
   }

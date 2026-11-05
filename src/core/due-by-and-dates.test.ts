@@ -107,7 +107,7 @@ describe("a due-by time", () => {
     await s.advanceTo("Wed 09:01");
 
     const days = heatMapDays(owner, gym);
-    expect(days.find((d) => d.date === TUESDAY)?.occurrence?.status).toEqual({ kind: "kept" });
+    expect(days.find((d) => d.date === TUESDAY)?.occurrence?.status).toEqual({ kind: "satisfied" });
     expect(days.find((d) => d.date === WEDNESDAY)?.occurrence?.status).toEqual({
       kind: "missed",
       penaltyCents: 500,

@@ -1,6 +1,6 @@
 // When a pact's occurrences open and fall due. Pure timing, worked out from
 // the pact's schedule, its first occurrence and the owner's timezone. Whether
-// an occurrence is Kept, Missed or Excused is judging's to decide.
+// an occurrence is Satisfied, Missed or Excused is judging's to decide.
 
 import { WEEKDAYS, type Schedule } from "../shared/types.ts";
 import {

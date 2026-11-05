@@ -177,7 +177,7 @@ describe("the spec's examples", () => {
     await s.advanceTo("Mon+3 00:00");
     expect(weekOf(owner, piano, WEEK_2)).toMatchObject({
       progress: { sessions: 2, target: 2 },
-      occurrence: { status: { kind: "kept" } },
+      occurrence: { status: { kind: "satisfied" } },
     });
     expect(owed(owner)).toBe(500);
   });
@@ -349,7 +349,7 @@ describe("evidence", () => {
     expect(weekOf(owner, piano, WEEK_1).occurrence?.status.kind).toBe("not-judged");
     await s.advanceTo("Mon+2 00:00");
 
-    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "kept" });
+    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "satisfied" });
   });
 
   test("evidence waiting for a decision at the end of Sunday holds the outcome until it's decided", async () => {
@@ -379,7 +379,7 @@ describe("evidence", () => {
     expect(owner.today().alerts).toEqual([]);
   });
 
-  test("approved after Sunday, the late evidence makes the week Kept", async () => {
+  test("approved after Sunday, the late evidence makes the week Satisfied", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(1));
@@ -389,7 +389,7 @@ describe("evidence", () => {
 
     await reviewer.decide(late, { kind: "approve" });
 
-    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "kept" });
+    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "satisfied" });
     expect(owed(owner)).toBe(0);
   });
 });
@@ -433,7 +433,7 @@ describe("a rejected photo", () => {
     await s.advanceTo("Mon+2 00:00");
     expect(weekOf(owner, piano, WEEK_1)).toMatchObject({
       progress: { sessions: 1, target: 1 },
-      occurrence: { status: { kind: "kept" } },
+      occurrence: { status: { kind: "satisfied" } },
     });
     expect(owed(owner)).toBe(0);
   });
@@ -749,7 +749,7 @@ describe("dates, bills and the heat map", () => {
       {
         date: WEEK_1,
         progress: { sessions: 2, waiting: 0, target: 2 },
-        occurrence: { status: { kind: "kept" }, decidedBy: null, recipientName: null },
+        occurrence: { status: { kind: "satisfied" }, decidedBy: null, recipientName: null },
       },
       {
         date: WEEK_2,

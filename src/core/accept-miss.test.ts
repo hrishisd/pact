@@ -41,7 +41,7 @@ describe("accepting a miss is refused", () => {
     expect(today.sections).toEqual([{ kind: "missed", cards: [expect.objectContaining({ pactId: gym })] }]);
   });
 
-  test("with nothing to accept: an occurrence not judged yet, Kept, or off the schedule", async () => {
+  test("with nothing to accept: an occurrence not judged yet, Satisfied, or off the schedule", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
@@ -53,7 +53,7 @@ describe("accepting a miss is refused", () => {
     const submitted = await owner.submitEvidence(gym, [photo()]);
     if (!submitted.ok) throw new Error(submitted.reason);
     expect(await owner.acceptMiss(gym, MONDAY)).toEqual(nothing);
-    // Monday, Kept.
+    // Monday, Satisfied.
     await reviewer.decide(submitted.evidenceId, { kind: "approve" });
     await s.advanceTo("Tue 08:00");
     expect(await owner.acceptMiss(gym, MONDAY)).toEqual(nothing);

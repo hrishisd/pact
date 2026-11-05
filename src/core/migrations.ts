@@ -543,4 +543,28 @@ export const migrations: readonly string[] = [
   -- clock rather than the link's.
   ALTER TABLE account ADD COLUMN oura_latest_bedtime_start TEXT;
   `,
+  // 25: the outcome Kept is now Satisfied
+  `
+  -- SQLite can't change a CHECK constraint, so this rebuilds occurrence by
+  -- SQLite's 12-step procedure: db.ts runs migrations with foreign keys off
+  -- and checks them before each commits. The table had no indexes but its
+  -- primary key's, and no triggers or views. evidence and penalty reference it
+  -- by name, so they reference the new table once it's renamed.
+  CREATE TABLE occurrence_new (
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    date TEXT NOT NULL, -- "YYYY-MM-DD" in the owner's timezone
+    outcome TEXT CHECK (outcome IN ('satisfied', 'missed', 'excused')),
+    judged_at TEXT,
+    miss_accepted_at TEXT,
+    bedtime_start TEXT,
+    PRIMARY KEY (pact_id, date),
+    CHECK ((outcome IS NULL) = (judged_at IS NULL))
+  );
+  INSERT INTO occurrence_new (pact_id, date, outcome, judged_at, miss_accepted_at, bedtime_start)
+    SELECT pact_id, date, CASE outcome WHEN 'kept' THEN 'satisfied' ELSE outcome END,
+           judged_at, miss_accepted_at, bedtime_start
+    FROM occurrence;
+  DROP TABLE occurrence;
+  ALTER TABLE occurrence_new RENAME TO occurrence;
+  `,
 ];

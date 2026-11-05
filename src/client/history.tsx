@@ -22,7 +22,7 @@ type Day = Json<HeatMapDay>;
 type Week = Json<HeatMapWeek>;
 
 /** How a square looks: an outcome, or for a day not judged yet whether it's ahead, open now or past due. */
-type Square = "kept" | "missed" | "excused" | "not-judged" | "open" | "ahead" | "none";
+type Square = "satisfied" | "missed" | "excused" | "not-judged" | "open" | "ahead" | "none";
 
 function squareOf(record: Occurrence | null, now: number): Square {
   if (record === null) return "none";
@@ -58,7 +58,7 @@ function occurrenceLine(record: Occurrence, reviewerNames: string[] = []): strin
   const { status, decidedBy, recipientName, night } = record;
   const bed = night && (night.inBedAt === null ? "No sleep data by 6pm." : `In bed at ${clockText(night.inBedAt)}.`);
   switch (status.kind) {
-    case "kept":
+    case "satisfied":
       if (bed) return bed;
       return decidedBy?.kind === "evidence-approved" ? `Photo approved by ${decidedBy.reviewerName}.` : "";
     case "missed": {
@@ -119,7 +119,7 @@ function monthLabels(weeks: (Day | null)[][]): string[] {
 }
 
 const SQUARE_TEXT: Record<Exclude<Square, "none">, string> = {
-  kept: "Kept",
+  satisfied: "Satisfied",
   missed: "Missed",
   excused: "Excused",
   "not-judged": "Not judged yet",
@@ -266,8 +266,8 @@ function Legend() {
   return (
     <div className="legend">
       <span>
-        <i className="cell kept" />
-        Kept
+        <i className="cell satisfied" />
+        Satisfied
       </span>
       <span>
         <i className="cell missed" />

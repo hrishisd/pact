@@ -115,7 +115,7 @@ function StateChip({ request }: { request: Json<ChangeRequestDetail> }) {
     case "waiting":
       return <WaitingChip thread={request.thread} />;
     case "approved":
-      return <span className="chip c-kept">Approved by {state.reviewerName}</span>;
+      return <span className="chip c-satisfied">Approved by {state.reviewerName}</span>;
     case "rejected":
       return <span className="chip c-missed">Rejected by {state.reviewerName}</span>;
     case "withdrawn":
