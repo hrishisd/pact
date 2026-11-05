@@ -38,7 +38,7 @@ This spec uses **Satisfied** for what v0 calls Kept. Ticket 01 renames it everyw
 
 - **Deck:** one deck per pact, stored by Anki's deck id, shown by its current name. Subdecks count in their parent, which is how Anki's deck list counts them.
 - **Schedule:** Fixed days only.
-- **Due-by time:** optional, default midnight. Allowed values run up to the collection's rollover hour (Anki's "next day starts at", default 4am), counted as the evening's day.
+- **Due-by time:** optional, default midnight. Allowed values run from noon through the collection's rollover hour (Anki's "next day starts at", default 4am). A time before noon is the morning after, counted as the evening's day. See Screens for the exact rule.
 - **Finished:** New, Learn and Due are all 0, as Anki's deck list shows them for the deck, with the deck's daily limits applied.
 - A later version can add "at most X cards left today", with X = 0 being v1's rule. Pact records all three counts on every check, so X will be a new term, not a data migration.
 - Changing the deck after the edit window always needs a change request, because Pact can't tell whether another deck is stricter. An earlier due-by time is a stricter change and applies at once, as on Camera pacts.
@@ -75,6 +75,7 @@ This spec uses **Satisfied** for what v0 calls Kept. Ticket 01 renames it everyw
 - A new `AnkiSource` port in the core:
   - `decks(account)` returns `{ id, name, parentId }[]` plus the collection's rollover hour, or "disconnected".
   - `deckCounts(account, deckId)` returns `{ new, learn, review, ankiDate, asOf }`, or "disconnected", or "deck-missing". `ankiDate` is the calendar date the Anki day started on, and `asOf` is the moment the counts were evaluated at.
+  - As built, `deckCounts` takes several decks at once and `decks` returns each deck's counts. Ticket 03's Comments say why.
 - The production adapter runs a small Python script with Node's async `execFile`, with a timeout and an `AbortSignal`. It sends JSON on stdin and reads JSON from stdout.
 - The script uses the `anki` package and follows these rules:
   - Open the collection with `server=True`. Otherwise Anki writes the server's UTC offset into the collection's config.
@@ -87,13 +88,24 @@ This spec uses **Satisfied** for what v0 calls Kept. Ticket 01 renames it everyw
 
 ### Screens
 
-These are settled by the prototype in ticket 02. The fixed points are:
+These are settled by the prototype in ticket 02, published as the private artifact "Pact Anki Prototype". The fixed points are:
 - **Source:** a third tile, Anki.
 - **Connect AnkiWeb step:** after Source when there's no connection.
 - **Goal step:** a deck picker that shows deck names only, with the pact's name filled in from the deck until the owner changes it.
 - **Reviewers and Reminders text:** an Anki pact has nothing to review, and its reminders fire while the deck isn't finished.
 - **Today:** an Anki card showing cards left, when Pact last checked, the due countdown, and "Checking AnkiWeb…" while a check runs.
 - **Missed reason:** for example "Tue Nov 3 · 12 cards left at 11:50pm" or "· AnkiWeb not reached".
+
+The human picked these from the prototype:
+- **Deck picker:** an indented tree with every deck visible, not drilling down one level at a time.
+- **Today counts:** one total ("42 cards left"), not Anki's New, Learn and Due columns.
+- **Finished day:** it leaves Today at once, as a Camera card does once its evidence is in. The next day it shows under Yesterday.
+- **Chip:** the open Anki card's chip is "To do", not "Automatic".
+
+The due-by rule was decided while building ticket 03:
+- A due-by time is allowed from noon through the collection's rollover hour.
+- A time before noon is the morning after. 00:00 is midnight, the default.
+- A time after the rollover hour and before noon is refused.
 
 ## Testing decisions
 

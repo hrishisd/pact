@@ -30,3 +30,9 @@ Spec: `../spec.md` stories 10, 12, 13 and 14, and the Checking AnkiWeb and Conne
 - [ ] The disconnect query reports the number of Active Anki pacts.
 
 ## Comments
+
+### 2026-11-05: parts done early in ticket 03
+
+- **Reminders:** the push already fires while the day isn't judged and names the count ("42 cards left, due at midnight").
+- **Profile:** the AnkiWeb row and its Disconnect are built, sharing Oura's row. It shows the status chip and warns how many Active pacts use the connection, and disconnecting deletes the host key and the collection copy. Reconnect is still to do here.
+- Ticket 03 ignores a "disconnected" answer for now, and its change form shows the deck as fixed. Both are left for this ticket.

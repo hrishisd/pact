@@ -50,7 +50,13 @@ The time an Oura Ring pact's owner must be in bed by each scheduled night, such 
 A bedtime pact's occurrence: the night of Tue Oct 21 runs from 6pm Tuesday to 6pm Wednesday. Oura's first main sleep starting in it decides it; with none by 6pm Wednesday, it's Missed.
 
 **Due-by time**:
-An optional time of day, such as 9:00am, that a Camera pact's evidence is due by instead of midnight. On a recurring pact it applies each day; on a One-time pact it's the time of the deadline.
+An optional time of day, such as 9:00am, that a Camera pact's evidence, or an Anki pact's deck, is due by instead of midnight. On a recurring pact it applies each day; on a One-time pact it's the time of the deadline.
+
+**Deck**:
+The Anki deck an Anki pact's owner must finish each scheduled day, picked from their own deck tree. Its subdecks count in it, as in Anki's deck list. It's finished when Anki shows no new, learning or due cards left in it.
+
+**Anki day**:
+An Anki pact's occurrence. The Anki day of Tue Nov 3 runs from the collection's rollover hour (Anki's "next day starts at", usually 4am) on Tuesday to the same hour on Wednesday. Its due-by time can be from noon through the rollover hour; a time before noon is the morning after.
 
 **Start date / End date**:
 Optional days that bound a recurring pact. The start date can only push its first occurrence later. The end date is its last day: once that day's occurrence closes, the pact has no more and is Ended.
@@ -69,11 +75,11 @@ Proof that an occurrence was Satisfied. It's either pulled automatically (e.g. s
 _Avoid_: Proof, submission, check-in
 
 **Evidence kind**:
-How a pact's evidence is gathered. It's the first thing picked when creating a pact and never changes. v0 has two: **Camera** (the owner takes a photo and a reviewer checks it) and **Oura Ring** (the ring reports when the owner got into bed, so there's nothing to submit or review).
+How a pact's evidence is gathered. It's the first thing picked when creating a pact and never changes. There are three: **Camera** (the owner takes a photo and a reviewer checks it), **Oura Ring** (the ring reports when the owner got into bed, so there's nothing to submit or review) and **Anki** (the owner finishes a deck each day and Pact checks AnkiWeb, so there's nothing to submit or review).
 _Avoid_: Evidence type, data source, source
 
 **Connection**:
-A link between a Pact account and an outside service that supplies evidence, such as Oura. Some evidence kinds need one; Camera doesn't.
+A link between a Pact account and an outside service that supplies evidence, such as Oura or AnkiWeb. Some evidence kinds need one; Camera doesn't.
 _Avoid_: Integration, connector, link
 
 **Excuse**:

@@ -36,7 +36,7 @@ Each scheduled **occurrence** is judged as **Satisfied**, **Missed** or **Excuse
 
 ### Creating a pact
 
-10. As an owner, I want to start a new pact by picking its evidence kind (Camera or Oura Ring), so that the rest of the form only asks what makes sense for that kind.
+10. As an owner, I want to start a new pact by picking its evidence kind (Camera or Oura Ring; Anki came later, in `../anki-evidence/spec.md`), so that the rest of the form only asks what makes sense for that kind.
 11. As an owner of a Camera pact, I want to give it a name and describe what my photo will show, so that my reviewer knows exactly what to accept.
 12. As an owner, I want picking Oura Ring to take me straight to connecting my ring when I haven't yet, and back to the source picker if I cancel, so that sleep data can be checked automatically.
 13. As an owner of an Oura Ring pact, I want to set an in-bed-by time (e.g. 12:00am), with the pact's name filled in from it until I change it, so that the app knows what counts as on time.
@@ -177,7 +177,7 @@ Each scheduled **occurrence** is judged as **Satisfied**, **Missed** or **Excuse
 - **Connection**: account, service (Oura in v0), tokens, status (Connected | Needs reconnecting). Exists only once the owner has connected the service.
 - **Friendship**: two accounts. Either can pick the other as a reviewer; accepting an invite is agreeing to that. **Invite**: creator, single-use token, expires 7 days after creation, accepted by.
 - **Recipient**: owned by an account; just a name.
-- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation), schedule, optional start date (recurring pacts), optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Active | Ended), created-at time (starts the edit window).
+- **Pact**: owner, name, description, evidence kind (Camera | Oura Ring, fixed at creation; Anki is specified in `../anki-evidence/spec.md`), schedule, optional start date (recurring pacts), optional end date, optional due-by time (Camera only), in-bed-by time (Oura Ring only), penalty amount (USD), recipient, reviewers (one or more), reminders (time and channel; One-time pacts add a date, and each fires once), stage (Active | Ended), created-at time (starts the edit window).
 - **Schedule**: one of three kinds:
   - **Fixed days**: a set of weekdays.
   - **Weekly count**: a target per Mon–Sun week.
@@ -397,7 +397,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - Late fees on overdue balances, or blocking new pacts while overdue.
 - AI review, and auto-approving review items after a timeout.
 - Reviewers viewing an owner's pact pages.
-- Evidence kinds other than Camera and Oura Ring, Oura goals other than in-bed-by, and Oura schedules other than Fixed days (see Future Ideas).
+- Evidence kinds other than Camera and Oura Ring (Anki is now covered by `../anki-evidence/spec.md`), Oura goals other than in-bed-by, and Oura schedules other than Fixed days (see Future Ideas).
 - Showing reviewers evidence metadata such as capture time or notes.
 - Oura webhooks (see Future Ideas), and re-judging a night when later Oura data arrives.
 - Weekly count excuses that cover only part of a week.

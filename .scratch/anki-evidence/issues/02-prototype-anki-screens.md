@@ -1,6 +1,6 @@
 # 02 Prototype the Anki screens
 
-Status: ready-for-agent
+Status: done
 Type: prototype
 Blocked by: 01
 
@@ -31,8 +31,18 @@ Follows `docs/agents/prototype-first.md`: a throwaway HTML file on branch `proto
 
 ## Acceptance criteria
 
-- [ ] Every moment and option above renders at phone width, and every button does what its option claims.
-- [ ] Published as a private Artifact, with screenshots of each moment sent in the chat and a recommendation.
-- [ ] After the human picks, `../spec.md` (Screens) and ticket 03 are updated before implementation starts.
+- [x] Every moment and option above renders at phone width, and every button does what its option claims.
+- [x] Published as a private Artifact, with screenshots of each moment sent in the chat and a recommendation.
+- [x] After the human picks, `../spec.md` (Screens) and ticket 03 are updated before implementation starts.
 
 ## Comments
+
+### 2026-11-05: picked
+
+The prototype is published as the private artifact "Pact Anki Prototype". The human picked:
+- **Deck picker:** the indented tree with every deck visible, not drilling down.
+- **Today counts:** one total ("42 cards left"), not New, Learn and Due columns.
+- **Finished day:** it leaves Today at once, as Camera cards do, and shows under Yesterday the next day.
+- **Chip:** the open Anki card's chip is "To do", not "Automatic".
+
+`../spec.md` (Screens) records these picks.
