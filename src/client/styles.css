@@ -1533,3 +1533,104 @@ details.folded .kv {
   align-items: center;
   gap: 10px;
 }
+
+/* Anki (ticket 02 prototype): the third Source tile, the Connect AnkiWeb step, the deck tree and Today's count. */
+.k-anki {
+  background: var(--sunk);
+  color: var(--muted);
+}
+.kind-tiles.three {
+  grid-template-columns: 1fr 1fr;
+}
+.kind-tiles.three .kind-tile:last-child {
+  grid-column: 1 / -1;
+  min-height: 0;
+}
+.tos {
+  border-left: 3px solid var(--due);
+  padding: 2px 0 2px 10px;
+  font-size: 13.5px;
+}
+.keeps {
+  font-size: 13px;
+  color: var(--muted);
+}
+.deck-tree {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.deck-tree > * + * {
+  border-top: 1px solid var(--line);
+}
+.deck {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: 0;
+  text-align: left;
+  padding: 10px 14px;
+  min-height: 46px;
+}
+.deck .nm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck[aria-checked="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+.deck .radio {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.deck[aria-checked="true"] .radio {
+  border-color: var(--accent);
+}
+.deck[aria-checked="true"] .radio::after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.leftbig {
+  font-family: var(--f-mono);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+.spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  vertical-align: -1px;
+  margin-right: 4px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spin {
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}

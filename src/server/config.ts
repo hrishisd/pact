@@ -49,6 +49,14 @@ export interface Config {
    * file (see devOura).
    */
   oura: { clientId: string; clientSecret: string; tokenKey: string } | null;
+  /**
+   * Anki: the key that encrypts AnkiWeb host keys in the database, and the
+   * Python with the pinned `anki` package (ANKI_PYTHON, default python3).
+   * Optional: without ANKI_TOKEN_KEY it is null. Null in production means Anki
+   * isn't set up: connecting is refused and nothing is checked. Null in
+   * development: any login works, and decks come from a file (see devAnki).
+   */
+  anki: { tokenKey: string; python: string } | null;
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
   restored: boolean;
   /** The commit CI built the image from, reported by /health. Null when built without one; never required. */
@@ -111,6 +119,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           tokenKey: read("OURA_TOKEN_KEY", DEV_OURA_TOKEN_KEY),
         }
       : null,
+    anki: env.ANKI_TOKEN_KEY?.trim()
+      ? { tokenKey: env.ANKI_TOKEN_KEY.trim(), python: env.ANKI_PYTHON?.trim() || "python3" }
+      : null,
     restored: env.PACT_RESTORED === "1",
     commit: env.PACT_COMMIT?.trim() || null,
   };
@@ -122,6 +133,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!Number.isInteger(port) || port <= 0) throw new Error(`PORT is not a port number: ${env.PORT}`);
   if (config.oura && Buffer.from(config.oura.tokenKey, "base64").length !== 32) {
     throw new Error("OURA_TOKEN_KEY must be 32 bytes, base64");
+  }
+  if (config.anki && Buffer.from(config.anki.tokenKey, "base64").length !== 32) {
+    throw new Error("ANKI_TOKEN_KEY must be 32 bytes, base64");
   }
   if (production && config.auth.secret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");

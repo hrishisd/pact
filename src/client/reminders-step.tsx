@@ -93,11 +93,13 @@ export function RemindersStep({
       <small className="muted">
         {oura
           ? `They go off every scheduled night before ${due}, even if you're already in bed. Pact can't tell until your ring syncs, usually the next morning.`
-          : dated
-            ? `Each goes off once, on its date, before ${due} on the deadline, only if you haven't submitted a photo yet.`
-            : form.weekly
-              ? `They go off each day before ${due} that you haven't submitted a photo, until the week's target is met.`
-              : `They go off on scheduled days before ${due}, only if you haven't submitted a photo yet.`}
+          : form.kind === "anki"
+            ? `They go off on scheduled days before ${due}, only while the deck isn't finished as of Pact's last check, and say how many cards are left.`
+            : dated
+              ? `Each goes off once, on its date, before ${due} on the deadline, only if you haven't submitted a photo yet.`
+              : form.weekly
+                ? `They go off each day before ${due} that you haven't submitted a photo, until the week's target is met.`
+                : `They go off on scheduled days before ${due}, only if you haven't submitted a photo yet.`}
         {hint && ` ${hint}`}
       </small>
     </>

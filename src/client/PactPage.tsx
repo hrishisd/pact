@@ -391,6 +391,7 @@ function Terms({ pact, onSaved, onInvite }: { pact: Pact; onSaved: () => void; o
       <h3>Terms</h3>
       <TermsList
         terms={pact}
+        deckName={pact.anki ? pact.anki.deckName : undefined}
         name={pact.name}
         onRename={changeable ? () => setChanging("name") : undefined}
         onAddReviewer={changeable ? () => setChanging("reviewers") : undefined}
@@ -607,6 +608,7 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
 /** A pact's terms as a list. The create form's Check step shows the same list before the pact exists. */
 export function TermsList({
   terms,
+  deckName,
   name,
   onRename,
   onAddReviewer,
@@ -626,6 +628,8 @@ export function TermsList({
   > & {
     reviewers: { name: string }[];
   };
+  /** Anki only: the deck's name, or null once it's gone from the deck list. */
+  deckName?: string | null;
   /** The pact's name, as a row of its own: on the pact page, where it can change. */
   name?: string;
   /** Offers Change on the name, when it can change on its own. */
@@ -648,7 +652,13 @@ export function TermsList({
         </>
       )}
       <dt>Evidence</dt>
-      <dd>{terms.evidenceKind === "camera" ? "Camera photo, checked by a reviewer" : "Oura Ring"}</dd>
+      <dd>{EVIDENCE_TEXT[terms.evidenceKind]}</dd>
+      {deckName !== undefined && (
+        <>
+          <dt>Deck</dt>
+          <dd>{deckName ?? "Gone from your deck list"}</dd>
+        </>
+      )}
       {terms.inBedBy !== null && (
         <>
           <dt>In bed by</dt>
@@ -692,6 +702,12 @@ export function TermsList({
     </dl>
   );
 }
+
+const EVIDENCE_TEXT: Record<Pact["evidenceKind"], string> = {
+  camera: "Camera photo, checked by a reviewer",
+  oura: "Oura Ring",
+  anki: "Anki, checked on AnkiWeb",
+};
 
 /** A term row's own Change or Add, after its value; nothing without `onClick`. */
 function RowAction({ label, ariaLabel, onClick }: { label: string; ariaLabel: string; onClick?: () => void }) {

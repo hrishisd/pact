@@ -34,6 +34,11 @@ import {
   type ReplyResponse,
   type WaitingOnReplyResponse,
   type AddRecipientResponse,
+  type AnkiDecksResponse,
+  type CheckAnkiResponse,
+  type ConnectAnkiRequest,
+  type ConnectAnkiResponse,
+  type DisconnectAnkiResponse,
   type ChangePactRequest,
   type ChangePactResponse,
   type ChangePreviewResponse,
@@ -86,6 +91,7 @@ const OURA_AUTHORIZE = "https://cloud.oura.test/oauth/authorize";
  * `commit` is the config's: null unless the image was built with one.
  * `diskUsedFraction` stands in for the volume's disk use: half full unless a test says otherwise.
  * `ouraSetUp: false` is production without Oura credentials: no connector.
+ * `ankiSetUp: false` is production without an Anki token key: no connector.
  */
 async function server({
   canonicalOrigin = null,
@@ -93,16 +99,20 @@ async function server({
   diskUsedFraction = () => 0.5,
   production = false,
   ouraSetUp = true,
+  ankiSetUp = true,
 }: {
   canonicalOrigin?: string | null;
   commit?: string | null;
   diskUsedFraction?: () => number;
   production?: boolean;
   ouraSetUp?: boolean;
+  ankiSetUp?: boolean;
 } = {}) {
   const s = scenario();
   const ouraConnects: { account: string; code: string }[] = [];
   const ouraForgets: string[] = [];
+  const ankiLogins: { account: string; username: string; password: string }[] = [];
+  const ankiForgets: string[] = [];
   // The scenario's temporary directory doubles as the built SPA.
   const staticDir = dirname(s.dbPath);
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Pact</title><div id=root></div>");
@@ -134,6 +144,17 @@ async function server({
           forget: (account) => void ouraForgets.push(account),
         }
       : null,
+    anki: ankiSetUp
+      ? {
+          // AnkiWeb, faked: "right" is the password, and "down" stands for AnkiWeb not answering.
+          async login(account, username, password) {
+            ankiLogins.push({ account, username, password });
+            if (password === "down") return { ok: false, reason: "unreachable" };
+            return password === "right" ? { ok: true } : { ok: false, reason: "wrong-login" };
+          },
+          forget: (account) => void ankiForgets.push(account),
+        }
+      : null,
     log: (line) => s.logs.push(line),
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
@@ -156,6 +177,9 @@ async function server({
     ouraConnects,
     ouraForgets,
     ouraSource: s.ouraSource,
+    ankiLogins,
+    ankiForgets,
+    ankiSource: s.ankiSource,
     core: s.core,
     logs: s.logs,
     photoStore: s.photoStore,
@@ -337,6 +361,7 @@ describe("sign-in", () => {
       timezone: null,
       connections: [],
       ouraAvailable: true,
+      ankiAvailable: true,
     } satisfies MeResponse);
 
     const set = await s.setTimezone(cookie, "America/Los_Angeles");
@@ -520,7 +545,14 @@ describe("dev sign-in", () => {
     const me = await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(response) });
     expect(me).toEqual({
       status: 200,
-      body: { email: OPERATOR, name: "owner", timezone: null, connections: [], ouraAvailable: true },
+      body: {
+        email: OPERATOR,
+        name: "owner",
+        timezone: null,
+        connections: [],
+        ouraAvailable: true,
+        ankiAvailable: true,
+      },
     });
   });
 
@@ -710,6 +742,7 @@ describe("pacts", () => {
         evidenceKind: "camera",
         inBedBy: null,
         dueBy: null,
+        anki: null,
         startDate: null,
         endDate: null,
         schedule: pact.schedule,
@@ -2297,6 +2330,101 @@ describe("notifications", () => {
     const response = await s.api(API_PATHS.pushSubscriptions, { cookie, method: "POST", body });
 
     expect(response).toMatchObject({ status: 400, body: { error: "invalid-request" } });
+  });
+});
+
+describe("connecting AnkiWeb", () => {
+  const login = (s: Awaited<ReturnType<typeof server>>, cookie: string, password: string) =>
+    s.api<ConnectAnkiResponse>(API_PATHS.ankiConnect, {
+      cookie,
+      method: "POST",
+      body: { email: "me@example.test", password } satisfies ConnectAnkiRequest,
+    });
+
+  test("good credentials connect; bad ones and an AnkiWeb that doesn't answer don't", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+
+    expect((await login(s, cookie, "wrong")).body).toEqual({ ok: false, reason: "wrong-login" });
+    expect((await login(s, cookie, "down")).body).toEqual({ ok: false, reason: "unreachable" });
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+
+    expect(await login(s, cookie, "right")).toMatchObject({ status: 200, body: { ok: true } });
+    expect(s.ankiLogins.at(-1)).toEqual({
+      account: s.core.accountIdForEmail(OPERATOR),
+      username: "me@example.test",
+      password: "right",
+    });
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([
+      { service: "anki", status: "connected", connectedAt: expect.any(String), activePacts: 0 },
+    ]);
+  });
+
+  test("a connect without an email and password is a 400", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    for (const body of [{}, { email: "me@example.test" }, { email: 1, password: "right" }]) {
+      expect(await s.api(API_PATHS.ankiConnect, { cookie, method: "POST", body })).toMatchObject({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+  });
+
+  test("the deck list comes from AnkiWeb once connected", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const accountId = s.core.accountIdForEmail(OPERATOR)!;
+    expect((await s.api<AnkiDecksResponse>(API_PATHS.ankiDecks, { cookie })).body).toEqual({
+      ok: false,
+      reason: "not-connected",
+    });
+    await login(s, cookie, "right");
+    s.ankiSource.setDeck(accountId, { id: "1", name: "Spanish", review: 3 });
+
+    expect((await s.api<AnkiDecksResponse>(API_PATHS.ankiDecks, { cookie })).body).toEqual({
+      ok: true,
+      rolloverHour: 4,
+      decks: [{ id: "1", name: "Spanish", parentId: null, counts: { new: 0, learn: 0, review: 3 } }],
+    });
+  });
+
+  test("check now asks AnkiWeb for a day waiting, and disconnecting forgets the host key", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const accountId = s.core.accountIdForEmail(OPERATOR)!;
+    await login(s, owner.cookie, "right");
+    s.ankiSource.setDeck(accountId, { id: "1", name: "Spanish", review: 3 });
+    await s.api(API_PATHS.ankiDecks, { cookie: owner.cookie });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { ...pact, evidenceKind: "anki", name: "Spanish", description: "", ankiDeckId: "1" },
+    });
+    expect(created.body).toMatchObject({ ok: true });
+
+    s.clock.set(s.at("Wed 20:00"));
+    s.ankiSource.setAnkiDay(accountId, "2026-01-07", s.at("Wed 20:00"));
+    expect(await s.api<CheckAnkiResponse>(API_PATHS.ankiCheck, { cookie: owner.cookie, method: "POST" })).toMatchObject(
+      { status: 200, body: { ok: true } },
+    );
+    expect(s.ankiSource.countCalls).toEqual([{ account: accountId, deckIds: ["1"] }]);
+
+    const after = await s.api<DisconnectAnkiResponse>(API_PATHS.ankiDisconnect, {
+      cookie: owner.cookie,
+      method: "POST",
+    });
+    expect(after.body.connections).toEqual([]);
+    expect(s.ankiForgets).toEqual([accountId]);
+  });
+
+  test("with Anki not set up, connecting is refused and the profile says so", async () => {
+    const s = await server({ production: true, ankiSetUp: false });
+    const { cookie } = await operatorWithInvite(s);
+    expect((await login(s, cookie, "right")).body).toEqual({ ok: false, reason: "unavailable" });
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body).toMatchObject({
+      ankiAvailable: false,
+      connections: [],
+    });
   });
 });
 

@@ -95,3 +95,13 @@ export function clockTime(instant: string): string {
 export function initial(name: string): string {
   return (name.trim()[0] ?? "?").toUpperCase();
 }
+
+/**
+ * Why an Anki day is Missed: how many cards were left at Pact's last check
+ * that counted for it ("12 cards left at 11:50pm"), or that no check reached
+ * AnkiWeb that day.
+ */
+export function ankiMissText({ cardsLeft, checkedAt }: { cardsLeft: number | null; checkedAt: string | null }): string {
+  if (cardsLeft === null || checkedAt === null) return "AnkiWeb not reached";
+  return `${cardsLeft} ${cardsLeft === 1 ? "card" : "cards"} left at ${clockTime(checkedAt)}`;
+}

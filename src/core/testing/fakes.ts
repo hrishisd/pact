@@ -1,7 +1,12 @@
-// Fakes for the four ports. Used only by tests.
+// Fakes for the five ports. Used only by tests.
 
 import type { AccountId } from "../../shared/types.ts";
 import type {
+  AnkiCounts,
+  AnkiCountsResult,
+  AnkiDeck,
+  AnkiDeckListResult,
+  AnkiSource,
   Clock,
   DeliveryReport,
   Notification,
@@ -154,6 +159,69 @@ export class FakeOuraSource implements OuraSource {
       (p) => p.day >= range.startDate && p.day <= range.endDate,
     );
     return { ok: true, periods: structuredClone(periods) };
+  }
+}
+
+/**
+ * Serves each account's decks and counts as a test sets them, or
+ * "disconnected" for an account the test disconnected. Counts are as of the
+ * Anki day and moment the test last set (`setAnkiDay`); a deck the test removed
+ * answers null.
+ */
+export class FakeAnkiSource implements AnkiSource {
+  readonly #decks = new Map<AccountId, AnkiDeck[]>();
+  readonly #days = new Map<AccountId, { ankiDate: string; asOf: Date }>();
+  readonly #disconnected = new Set<AccountId>();
+  rolloverHour = 4;
+  /** Every deckCounts call, in order. */
+  readonly countCalls: { account: AccountId; deckIds: string[] }[] = [];
+
+  /** Adds or replaces a deck. */
+  setDeck(
+    account: AccountId,
+    deck: { id: string; name: string; parentId?: string | null } & Partial<AnkiCounts>,
+  ): void {
+    const decks = (this.#decks.get(account) ?? []).filter((d) => d.id !== deck.id);
+    const { id, name, parentId = null, new: fresh = 0, learn = 0, review = 0 } = deck;
+    decks.push({ id, name, parentId, counts: { new: fresh, learn, review } });
+    this.#decks.set(account, decks);
+  }
+
+  removeDeck(account: AccountId, deckId: string): void {
+    this.#decks.set(
+      account,
+      (this.#decks.get(account) ?? []).filter((d) => d.id !== deckId),
+    );
+  }
+
+  /** The Anki day and evaluation moment the next counts are for. */
+  setAnkiDay(account: AccountId, ankiDate: string, asOf: Date): void {
+    this.#days.set(account, { ankiDate, asOf: new Date(asOf.getTime()) });
+  }
+
+  disconnect(account: AccountId): void {
+    this.#disconnected.add(account);
+  }
+
+  async decks(account: AccountId): Promise<AnkiDeckListResult> {
+    if (this.#disconnected.has(account)) return { ok: false, reason: "disconnected" };
+    return { ok: true, decks: structuredClone(this.#decks.get(account) ?? []), rolloverHour: this.rolloverHour };
+  }
+
+  async deckCounts(account: AccountId, deckIds: readonly string[]): Promise<AnkiCountsResult> {
+    this.countCalls.push({ account, deckIds: [...deckIds] });
+    if (this.#disconnected.has(account)) return { ok: false, reason: "disconnected" };
+    const day = this.#days.get(account);
+    if (!day) throw new Error(`FakeAnkiSource: no Anki day set for ${account}`);
+    const decks = this.#decks.get(account) ?? [];
+    return {
+      ok: true,
+      ankiDate: day.ankiDate,
+      asOf: new Date(day.asOf.getTime()),
+      decks: Object.fromEntries(
+        deckIds.map((id) => [id, structuredClone(decks.find((d) => d.id === id)?.counts ?? null)]),
+      ),
+    };
   }
 }
 

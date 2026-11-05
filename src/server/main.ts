@@ -5,14 +5,19 @@ import { mkdirSync, readFileSync, statfsSync, type StatsFs } from "node:fs";
 import { dirname, join } from "node:path";
 import { serve } from "@hono/node-server";
 import {
+  ankiAdapter,
   createPactCore,
+  devAnki,
   devOura,
   localDiskPhotoStore,
   ouraAdapter,
   r2PhotoStore,
   systemClock,
+  unavailableAnki,
   unavailableOura,
   webPushNotifier,
+  type AnkiConnector,
+  type AnkiSource,
   type OuraConnector,
   type OuraSource,
 } from "../core/index.ts";
@@ -63,11 +68,22 @@ const oura: (OuraSource & OuraConnector & { close?: () => void }) | null = confi
     ? null
     : devOura(dataDir, API_PATHS.ouraCallback);
 
+// As for Oura: production without an Anki token key gets no connector and nothing to check;
+// only development falls back to the stand-in. Collection copies live on the volume, outside pact.db.
+const anki: (AnkiSource & AnkiConnector & { close?: () => void }) | null = config.anki
+  ? ankiAdapter(config.dbPath, { tokenKey: config.anki.tokenKey, collectionsDir: join(dataDir, "anki") }, systemClock, {
+      python: config.anki.python,
+    })
+  : config.production
+    ? null
+    : devAnki(dataDir, systemClock);
+
 const core = createPactCore({
   dbPath: config.dbPath,
   clock: systemClock,
   notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, systemClock),
   ouraSource: oura ?? unavailableOura,
+  ankiSource: anki ?? unavailableAnki,
   photoStore:
     config.photos.kind === "r2"
       ? r2PhotoStore(config.photos, systemClock)
@@ -104,6 +120,7 @@ const app = createApp({
   operatorEmail: config.operatorEmail,
   vapidPublicKey: config.vapid.publicKey,
   oura,
+  anki,
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(
@@ -124,6 +141,7 @@ async function shutdown(signal: string): Promise<void> {
   await scheduler.stop();
   await core.close();
   oura?.close?.();
+  anki?.close?.();
   closeAuth();
   process.exit(0);
 }

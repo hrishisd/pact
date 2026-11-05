@@ -81,6 +81,15 @@ export const CameraIcon = () => (
   </svg>
 );
 
+/** A stack of cards, for Anki: Anki's own icon is a star, which would read as a brand mark. */
+export const CardsIcon = () => (
+  <svg {...common}>
+    <rect x="7" y="4" width="12" height="16" rx="2.2" />
+    <path d="M4.5 7.5v10.3A2.2 2.2 0 0 0 6.7 20" />
+    <path d="M10.5 10h5M10.5 13.5h5" />
+  </svg>
+);
+
 export const RingIcon = () => (
   <svg {...common}>
     <circle cx="12" cy="12" r="8" />

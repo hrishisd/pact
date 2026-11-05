@@ -7,7 +7,9 @@
 //
 // A bedtime night Oura hasn't reported yet comes first, as No Oura data. While
 // that card is on screen, Today checks Oura now: when it opens, when the app
-// comes back to the foreground, and every 30 seconds.
+// comes back to the foreground, and every 30 seconds. While an Anki day not
+// judged yet is on screen, Today checks AnkiWeb now when it opens and when the
+// app comes back to the foreground, so a deck just finished and synced clears.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
@@ -18,6 +20,7 @@ import {
   type LedgerSummary,
   type SubmitEvidenceRefusal,
   type TodayAlert,
+  type TodayAnkiCard,
   type TodayBillCard,
   type TodayMissedCard,
   type TodayNoOuraDataCard,
@@ -27,7 +30,18 @@ import {
   type WeekProgress,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
-import { clockText, formatDate, formatDay, formatDueAt, minutesLeft, money, timeLeft, hoursLeft } from "./format.ts";
+import {
+  ankiMissText,
+  clockText,
+  clockTime,
+  formatDate,
+  formatDay,
+  formatDueAt,
+  minutesLeft,
+  money,
+  timeLeft,
+  hoursLeft,
+} from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
@@ -76,9 +90,18 @@ export function Today({
   const [ouraError] = useState(() => ouraResultText(takeOuraResult()));
   const connectionProblem = today?.alerts.some((alert) => alert.kind === "oura-connection") ?? false;
   // Checking can't help while the connection is broken.
-  const checking = useCheckOura(
+  const checking = useCheckNow(
     !connectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
+    api.checkOura,
     reload,
+    CHECK_OURA_EVERY_MS,
+  );
+  const checkingAnki = useCheckNow(
+    today?.sections.some((section) => section.kind === "to-do" && section.cards.some((c) => c.kind === "anki")) ??
+      false,
+    api.checkAnki,
+    reload,
+    null,
   );
   // A reviewer's question opens the page of the item it's about.
   const openItem = (item: Json<TodayWaitingItem>) => {
@@ -142,6 +165,7 @@ export function Today({
           timezone={timezone}
           now={now}
           checkingOura={checking}
+          checkingAnki={checkingAnki}
           connectionProblem={connectionProblem}
           onOpenPact={onOpenPact}
           onOpenLedger={onOpenLedger}
@@ -195,12 +219,18 @@ function alertKey(alert: Json<TodayAlert>): string {
 const CHECK_OURA_EVERY_MS = 30_000;
 
 /**
- * While `active` (a No Oura data card is on screen), checks Oura now at
- * once, whenever the app comes back to the foreground, and every 30 seconds
- * while it's in front; then `onChecked` reloads Today. True while a check
- * runs. The core ignores checks that come too fast, so overlap is harmless.
+ * While `active` (a No Oura data card, or an Anki day not judged, is on
+ * screen), checks now at once, whenever the app comes back to the
+ * foreground, and every `everyMs` while it's in front, if set; then
+ * `onChecked` reloads Today. True while a check runs. The core ignores
+ * checks that come too fast, so overlap is harmless.
  */
-function useCheckOura(active: boolean, onChecked: () => void): boolean {
+function useCheckNow(
+  active: boolean,
+  checkNow: () => Promise<unknown>,
+  onChecked: () => void,
+  everyMs: number | null,
+): boolean {
   const [checking, setChecking] = useState(false);
   const running = useRef(false);
   const checked = useRef(onChecked);
@@ -210,19 +240,18 @@ function useCheckOura(active: boolean, onChecked: () => void): boolean {
     running.current = true;
     setChecking(true);
     // A failed check leaves the card as it was; the next one tries again.
-    api
-      .checkOura()
+    checkNow()
       .catch(() => {})
       .finally(() => {
         running.current = false;
         setChecking(false);
         checked.current();
       });
-  }, []);
+  }, [checkNow]);
   useEffect(() => {
     if (!active) return;
     check();
-    const timer = window.setInterval(check, CHECK_OURA_EVERY_MS);
+    const timer = everyMs === null ? undefined : window.setInterval(check, everyMs);
     const onVisible = () => {
       if (document.visibilityState === "visible") check();
     };
@@ -231,7 +260,7 @@ function useCheckOura(active: boolean, onChecked: () => void): boolean {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [active, check]);
+  }, [active, check, everyMs]);
   return checking;
 }
 
@@ -240,6 +269,7 @@ function Section({
   timezone,
   now,
   checkingOura,
+  checkingAnki,
   connectionProblem,
   onOpenPact,
   onOpenLedger,
@@ -251,6 +281,8 @@ function Section({
   now: number;
   /** Whether a check of Oura is running now. */
   checkingOura: boolean;
+  /** Whether a check of AnkiWeb is running now. */
+  checkingAnki: boolean;
   /** Whether Pact can't read the owner's Oura: syncing won't help, reconnecting will. */
   connectionProblem: boolean;
   onOpenPact: (id: string, name: string) => void;
@@ -282,6 +314,15 @@ function Section({
             now={now}
             onOpenLedger={onOpenLedger}
             onPaid={onChanged}
+          />
+        ) : card.kind === "anki" ? (
+          <AnkiCard
+            key={`anki:${card.pactId}`}
+            card={card}
+            now={now}
+            checking={checkingAnki}
+            onOpen={() => onOpenPact(card.pactId, card.name)}
+            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
           />
         ) : (
           <PactCard
@@ -461,8 +502,70 @@ function NoOuraDataCard({
 }
 
 /**
+ * An Anki day open now: the cards left as of Pact's last check of the deck,
+ * and when that was, then the due time. It leaves Today once Pact sees the
+ * deck finished. File excuse covers a day without Anki.
+ */
+function AnkiCard({
+  card,
+  now,
+  checking,
+  onOpen,
+  onFileExcuse,
+}: {
+  card: Json<TodayAnkiCard>;
+  now: number;
+  /** Whether a check of AnkiWeb is running now. */
+  checking: boolean;
+  onOpen: () => void;
+  onFileExcuse: () => void;
+}) {
+  const { lastCheck } = card;
+  return (
+    <PactCard
+      name={card.name}
+      penaltyCents={card.penaltyCents}
+      editWindowClosesAt={card.editWindowClosesAt}
+      now={now}
+      chip={<span className="chip c-todo">To do</span>}
+      onOpen={onOpen}
+    >
+      {lastCheck ? (
+        <>
+          <div>
+            <span className="leftbig">{lastCheck.cardsLeft}</span>{" "}
+            <span className="muted">{lastCheck.cardsLeft === 1 ? "card" : "cards"} left</span>
+          </div>
+          <div className="meta">{checking ? <CheckingAnkiWeb /> : `Checked ${clockTime(lastCheck.checkedAt)}`}</div>
+        </>
+      ) : (
+        <div className="meta">{checking ? <CheckingAnkiWeb /> : "Not checked yet today."}</div>
+      )}
+      <div className="meta due">
+        Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} · {timeLeft(Date.parse(card.dueAt) - now)}
+      </div>
+      <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
+      <div className="row2" onClick={(e) => e.stopPropagation()}>
+        <button className="btn" onClick={onFileExcuse}>
+          File excuse
+        </button>
+      </div>
+    </PactCard>
+  );
+}
+
+function CheckingAnkiWeb() {
+  return (
+    <>
+      <span className="spin" aria-hidden="true" />
+      Checking AnkiWeb…
+    </>
+  );
+}
+
+/**
  * A Missed card's day, and for a bedtime night when Oura saw the owner get
- * into bed. Today's day past its due-by time says when evidence was due. A
+ * into bed, or for an Anki day why. Today's day past its due-by time says when evidence was due. A
  * Weekly count week says how far it got.
  */
 function missedLine(card: Json<TodayMissedCard>): string {
@@ -471,6 +574,7 @@ function missedLine(card: Json<TodayMissedCard>): string {
     const { sessions, target } = card.week;
     return `Week of ${formatDate(card.occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
   }
+  if (card.anki) return `${formatDate(card.occurrenceDate)} · ${ankiMissText(card.anki)}`;
   if (!card.night) return formatDate(card.occurrenceDate);
   const { inBedAt } = card.night;
   return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;

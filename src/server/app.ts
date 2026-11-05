@@ -10,7 +10,16 @@ import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { AccountId, NewPayment, OuraConnector, PactCore, Photo, Schedule, Weekday } from "../core/index.ts";
+import type {
+  AccountId,
+  AnkiConnector,
+  NewPayment,
+  OuraConnector,
+  PactCore,
+  Photo,
+  Schedule,
+  Weekday,
+} from "../core/index.ts";
 import { MAX_EVIDENCE_PHOTOS, MAX_EXCUSE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
 import {
   API_PATHS,
@@ -31,7 +40,12 @@ import {
   PAYMENT_NOTE_FIELD,
   PHOTO_CONTENT_TYPES,
   type AcceptExcuseRejectionResponse,
+  type AnkiDecksResponse,
+  type CheckAnkiResponse,
   type CheckOuraResponse,
+  type ConnectAnkiRequest,
+  type ConnectAnkiResponse,
+  type DisconnectAnkiResponse,
   type DisconnectOuraResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
@@ -113,6 +127,12 @@ export interface AppOptions {
    * up, so connecting returns to the form as `unavailable`.
    */
   oura: OuraConnector | null;
+  /**
+   * AnkiWeb's login: the real adapter, or in development without an Anki
+   * token key a stand-in. Null in production without one: Anki isn't set up,
+   * so connecting is refused as `unavailable`.
+   */
+  anki: AnkiConnector | null;
   /** Where the app writes log lines. Default: console.log. */
   log?: (line: string) => void;
 }
@@ -157,6 +177,7 @@ export function createApp({
   operatorEmail,
   vapidPublicKey,
   oura,
+  anki,
   log = (line) => console.log(line),
 }: AppOptions) {
   const app = new Hono<Env>();
@@ -165,6 +186,7 @@ export function createApp({
   const me = (accountId: AccountId): MeResponse => ({
     ...json(core.as(accountId).profile()),
     ouraAvailable: oura !== null,
+    ankiAvailable: anki !== null,
   });
 
   /**
@@ -386,6 +408,43 @@ export function createApp({
     return c.json(body);
   });
 
+  // Connecting AnkiWeb: the adapter trades the email and password for a host key, and the password goes no further.
+  app.post(API_PATHS.ankiConnect, async (c) => {
+    const request = (await c.req.json().catch(() => null)) as Partial<Record<keyof ConnectAnkiRequest, unknown>> | null;
+    if (typeof request?.email !== "string" || typeof request.password !== "string") {
+      return apiError(c, 400, "invalid-request");
+    }
+    const accountId = c.get("accountId");
+    if (!anki) return c.json({ ok: false, reason: "unavailable" } satisfies ConnectAnkiResponse);
+    const connected = await anki.login(accountId, request.email.trim(), request.password).catch((failure: unknown) => {
+      log(`anki connect failed: ${failure instanceof Error ? failure.message : String(failure)}`);
+      return { ok: false as const, reason: "unreachable" as const };
+    });
+    if (connected.ok) await core.as(accountId).connectAnki();
+    const body: ConnectAnkiResponse = connected;
+    return c.json(body);
+  });
+
+  app.get(API_PATHS.ankiDecks, async (c) => {
+    const body: AnkiDecksResponse = await core.as(c.get("accountId")).ankiDecks();
+    return c.json(body);
+  });
+
+  app.post(API_PATHS.ankiCheck, async (c) => {
+    await core.as(c.get("accountId")).checkAnki();
+    const body: CheckAnkiResponse = { ok: true };
+    return c.json(body);
+  });
+
+  // The core first, so a failure leaves the connection as it was; then the host key and the collection copy go.
+  app.post(API_PATHS.ankiDisconnect, async (c) => {
+    const accountId = c.get("accountId");
+    await core.as(accountId).disconnectAnki();
+    anki?.forget(accountId);
+    const body: DisconnectAnkiResponse = me(accountId);
+    return c.json(body);
+  });
+
   app.get(API_PATHS.me, (c) => {
     const body: MeResponse = me(c.get("accountId"));
     return c.json(body);
@@ -453,8 +512,12 @@ export function createApp({
     if (editing !== undefined && typeof editing !== "string") return apiError(c, 400, "invalid-request");
     const timing = parseOptionalStrings(request ?? {}, ["inBedBy", "dueBy", "startDate"]);
     if (!timing) return apiError(c, 400, "invalid-request");
+    const evidenceKind = request?.evidenceKind;
+    if (evidenceKind !== undefined && !isEvidenceKind(evidenceKind)) return apiError(c, 400, "invalid-request");
     const body: FirstOccurrenceResponse = json(
-      core.as(c.get("accountId")).firstOccurrence({ schedule, ...timing }, editing),
+      core
+        .as(c.get("accountId"))
+        .firstOccurrence({ schedule, ...timing, ...(evidenceKind !== undefined && { evidenceKind }) }, editing),
     );
     return c.json(body);
   });
@@ -822,6 +885,10 @@ function parseOptionalStrings<Key extends string>(
 /** A pact's optional times: the in-bed-by and due-by times, and the start and end dates. */
 const PACT_TIMES = ["inBedBy", "dueBy", "startDate", "endDate"] as const;
 
+function isEvidenceKind(value: unknown): value is CreatePactRequest["evidenceKind"] {
+  return value === "camera" || value === "oura" || value === "anki";
+}
+
 /** A pact's reminders, if sent: a list of strings, or undefined for none. False when malformed. */
 function parseReminders(value: Record<string, unknown>): { reminders?: string[] } | false {
   if (value.reminders === undefined) return {};
@@ -832,10 +899,10 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
   if (!isRecord(value)) return null;
   const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
   const schedule = parseSchedule(value.schedule);
-  const times = parseOptionalStrings(value, PACT_TIMES);
+  const times = parseOptionalStrings(value, [...PACT_TIMES, "ankiDeckId"]);
   const reminders = parseReminders(value);
   if (
-    (evidenceKind !== "camera" && evidenceKind !== "oura") ||
+    !isEvidenceKind(evidenceKind) ||
     !times ||
     !reminders ||
     typeof name !== "string" ||

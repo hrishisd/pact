@@ -2,6 +2,8 @@
 // request and response bodies. Domain shapes come from ./types.ts.
 
 import type {
+  AnkiDecksResult,
+  EvidenceKind,
   AcceptExcuseRejectionResult,
   AcceptInviteResult,
   AcceptMissResult,
@@ -139,6 +141,14 @@ export const API_PATHS = {
   ouraCheck: "/api/oura/check",
   /** POST (no body): remove the account's Oura connection; answers with the profile. */
   ouraDisconnect: "/api/oura/disconnect",
+  /** POST the AnkiWeb email and password: Pact trades them for AnkiWeb's host key and drops the password. */
+  ankiConnect: "/api/anki/connect",
+  /** GET: the account's deck list from AnkiWeb, for the deck picker. */
+  ankiDecks: "/api/anki/decks",
+  /** POST (no body): check AnkiWeb now for the account's Anki days not judged yet. The core ignores checks that come too fast. */
+  ankiCheck: "/api/anki/check",
+  /** POST (no body): remove the account's AnkiWeb connection; answers with the profile. */
+  ankiDisconnect: "/api/anki/disconnect",
   timezone: "/api/me/timezone",
   today: "/api/today",
   invites: "/api/invites",
@@ -263,9 +273,11 @@ export type DeletePactResponse = DeletePactResult;
 /** POST /api/pacts/first-occurrence: the form's Check step, before the pact exists or its edit is saved. */
 export interface FirstOccurrenceRequest {
   schedule: Schedule;
+  /** Anki days open at the collection's rollover hour. Default Camera. */
+  evidenceKind?: EvidenceKind;
   /** Oura Ring only: the in-bed-by time, "HH:MM". */
   inBedBy?: string;
-  /** Camera only: the due-by time, "HH:MM". */
+  /** Camera and Anki: the due-by time, "HH:MM". */
   dueBy?: string;
   /** The start date, "YYYY-MM-DD". */
   startDate?: string;
@@ -417,9 +429,9 @@ export interface RemovePushSubscriptionRequest {
 
 /**
  * GET /api/me: the signed-in account's profile, and whether this server has
- * Oura set up. Without it, Create pact can't offer Oura Ring.
+ * Oura and Anki set up. Without one, Create pact can't offer it.
  */
-export type MeResponse = Json<Profile> & { ouraAvailable: boolean };
+export type MeResponse = Json<Profile> & { ouraAvailable: boolean; ankiAvailable: boolean };
 
 /**
  * POST /api/me/timezone. Answers 200 with the core's result whether the zone
@@ -438,6 +450,28 @@ export interface CheckOuraResponse {
 
 /** POST /api/oura/disconnect: the profile, now without its Oura connection. */
 export type DisconnectOuraResponse = MeResponse;
+
+/** POST /api/anki/connect. Pact keeps AnkiWeb's host key, never the password. */
+export interface ConnectAnkiRequest {
+  email: string;
+  password: string;
+}
+/**
+ * AnkiWeb refused the email and password (wrong-login), didn't answer
+ * (unreachable), or this server has no Anki set up (unavailable).
+ */
+export type ConnectAnkiResponse = { ok: true } | { ok: false; reason: "wrong-login" | "unreachable" | "unavailable" };
+
+/** GET /api/anki/decks */
+export type AnkiDecksResponse = AnkiDecksResult;
+
+/** POST /api/anki/check: always `{ ok: true }`, whether AnkiWeb was asked or the check was ignored. */
+export interface CheckAnkiResponse {
+  ok: true;
+}
+
+/** POST /api/anki/disconnect: the profile, now without its AnkiWeb connection. */
+export type DisconnectAnkiResponse = MeResponse;
 
 /** GET /api/today */
 export type TodayResponse = Json<Today>;

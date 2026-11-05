@@ -30,6 +30,29 @@ Development only: `GET /api/dev/sign-in` signs in and redirects. It doesn't exis
 - To switch person in one browser, visit the URL for the other person; the new session cookie replaces the old one.
 - With curl, keep a cookie jar in your scratchpad: `curl -c JAR "http://localhost:5173/api/dev/sign-in?as=operator"`, then `curl -b JAR http://localhost:5173/api/me`.
 
+## Anki without AnkiWeb
+
+Without `ANKI_TOKEN_KEY` set, development uses a stand-in for AnkiWeb (`devAnki` in `src/core/anki.ts`), as Oura has one:
+
+- Connect AnkiWeb accepts any email and password, except the password `wrong` (shows the wrong-password state) and `unreachable` (shows AnkiWeb not answering).
+- Decks and their counts come from `anki-decks.json` next to the database (`.dev-data.nosync/anki-decks.json`), read on every check, so editing it is "studying". Each check counts for the Anki day the current time falls in, at `timezone`:
+
+```json
+{
+  "rolloverHour": 4,
+  "timezone": "America/New_York",
+  "decks": [
+    { "id": "1", "name": "Spanish", "parentId": null, "counts": { "new": 10, "learn": 2, "review": 30 } },
+    { "id": "2", "name": "Spanish::Verbs", "parentId": "1", "counts": { "new": 0, "learn": 0, "review": 5 } }
+  ]
+}
+```
+
+- Set every count of a deck to 0 to finish it: Today's next check (open Today, or wait up to 10 minutes) makes the day Satisfied.
+- With no file there are no decks. In Anki a parent's counts include its subdecks'; the stand-in shows what the file says, so keep them consistent.
+
+To try the real adapter, set `ANKI_TOKEN_KEY` and `ANKI_PYTHON` (a Python with `pip install -r src/core/anki-requirements.txt`). Anki's own sync server (`python -m anki.syncserver`, from the same package) can stand in for AnkiWeb: `ankiAdapter`'s `loginEndpoint` option points the login at it.
+
 ## Server log
 
 The server writes its output (and crash traces) to `logs/pact.log` next to the database: `.dev-data.nosync/logs/pact.log` with the defaults (its directory is `PACT_DB_PATH`'s). When a screen shows a load error, read the end of it: `tail -n 100 .dev-data.nosync/logs/pact.log`. It rotates to `pact.log.1` at 10 MB.

@@ -578,4 +578,113 @@ export const migrations: readonly Migration[] = [
   ALTER TABLE occurrence_new RENAME TO occurrence;
   `,
   },
+  // 26: Anki pacts
+  {
+    foreignKeysOff: true,
+    sql: `
+  -- The evidence kind Anki, and AnkiWeb as a connection's service. SQLite
+  -- can't change a CHECK constraint, so pact and connection are rebuilt by
+  -- SQLite's 12-step procedure, as migration 25 rebuilt occurrence. pact had
+  -- one index (pact_owner) and no triggers or views; connection had only its
+  -- primary key's. The tables that reference pact do so by name, so they
+  -- reference the new one once it's renamed.
+  --
+  -- anki_deck_id: Anki pacts only, the deck's id in the owner's collection,
+  -- as text (Anki's ids are 64-bit). anki_rollover_hour: Anki pacts only,
+  -- the collection's "next day starts at" hour when the pact was made. Each
+  -- Anki day runs from it to the same hour the next day.
+  CREATE TABLE pact_new (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    evidence_kind TEXT NOT NULL CHECK (evidence_kind IN ('camera', 'oura', 'anki')),
+    schedule TEXT NOT NULL, -- JSON, the shared Schedule type
+    penalty_cents INTEGER NOT NULL CHECK (penalty_cents > 0),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    stage TEXT NOT NULL CHECK (stage IN ('active', 'ended')),
+    first_occurrence TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    judged_through TEXT,
+    reviewers_notified_at TEXT,
+    in_bed_by TEXT,
+    ended_at TEXT,
+    due_by TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    reminders TEXT NOT NULL DEFAULT '[]',
+    reminded_through TEXT,
+    anki_deck_id TEXT,
+    anki_rollover_hour INTEGER CHECK (anki_rollover_hour BETWEEN 0 AND 23),
+    CHECK ((evidence_kind = 'anki') = (anki_deck_id IS NOT NULL)),
+    CHECK ((evidence_kind = 'anki') = (anki_rollover_hour IS NOT NULL))
+  );
+  INSERT INTO pact_new (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                        recipient_id, stage, first_occurrence, created_at, judged_through,
+                        reviewers_notified_at, in_bed_by, ended_at, due_by, start_date, end_date, reminders,
+                        reminded_through)
+    SELECT id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents, recipient_id, stage,
+           first_occurrence, created_at, judged_through, reviewers_notified_at, in_bed_by, ended_at, due_by,
+           start_date, end_date, reminders, reminded_through
+    FROM pact;
+  DROP TABLE pact;
+  ALTER TABLE pact_new RENAME TO pact;
+  CREATE INDEX pact_owner ON pact (owner_account_id);
+
+  CREATE TABLE connection_new (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    service TEXT NOT NULL CHECK (service IN ('oura', 'anki')),
+    status TEXT NOT NULL CHECK (status IN ('connected', 'needs-reconnecting')),
+    connected_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, service)
+  );
+  INSERT INTO connection_new (account_id, service, status, connected_at)
+    SELECT account_id, service, status, connected_at FROM connection;
+  DROP TABLE connection;
+  ALTER TABLE connection_new RENAME TO connection;
+
+  -- An Anki day judged from AnkiWeb: how many cards were left (new, learning
+  -- and due together) at the last check that counted for it, and when that
+  -- check was. Both NULL on a Missed day no check reached. NULL otherwise.
+  ALTER TABLE occurrence ADD COLUMN anki_cards_left INTEGER;
+  ALTER TABLE occurrence ADD COLUMN anki_checked_at TEXT;
+
+  -- The owner's deck list as AnkiWeb last gave it, for the deck picker and
+  -- for checking a new pact's deck: JSON, the AnkiDeck[] the AnkiSource port
+  -- returns, and the collection's rollover hour then.
+  CREATE TABLE anki_deck_list (
+    account_id TEXT PRIMARY KEY REFERENCES account (id),
+    decks TEXT NOT NULL,
+    rollover_hour INTEGER NOT NULL CHECK (rollover_hour BETWEEN 0 AND 23),
+    fetched_at TEXT NOT NULL
+  );
+
+  -- Every check of a deck that AnkiWeb answered: its counts as Anki's deck
+  -- list shows them, the Anki day they're for (anki_date, "YYYY-MM-DD", the
+  -- day it started on), the moment they were evaluated at (as_of: the
+  -- owner's last answer that day, or the check time), and when Pact checked.
+  CREATE TABLE anki_check (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL REFERENCES account (id),
+    deck_id TEXT NOT NULL,
+    new_count INTEGER NOT NULL CHECK (new_count >= 0),
+    learn_count INTEGER NOT NULL CHECK (learn_count >= 0),
+    review_count INTEGER NOT NULL CHECK (review_count >= 0),
+    anki_date TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    checked_at TEXT NOT NULL
+  );
+  CREATE INDEX anki_check_day ON anki_check (account_id, deck_id, anki_date);
+
+  -- AnkiWeb's host key and sync endpoint, encrypted. Only the Anki adapter
+  -- (anki.ts) reads and writes this table; the core never does. Never the
+  -- password, which is traded for the host key and discarded.
+  CREATE TABLE anki_connection (
+    account_id TEXT PRIMARY KEY REFERENCES account (id),
+    host_key TEXT NOT NULL,
+    endpoint TEXT,
+    updated_at TEXT NOT NULL
+  );
+  `,
+  },
 ];

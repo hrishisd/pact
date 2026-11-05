@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # One image: the Node server (TypeScript run directly with type stripping),
-# the built SPA, and Litestream, which restores and replicates /data/pact.db.
+# the built SPA, Litestream, which restores and replicates /data/pact.db, and
+# Python with Anki's own package, which reads owners' decks from AnkiWeb.
 
 ARG NODE_VERSION=24.22.2
 ARG LITESTREAM_VERSION=0.5.17
@@ -30,13 +31,20 @@ RUN echo "${LITESTREAM_SHA256}  /tmp/litestream.tar.gz" | sha256sum -c - \
 
 # ---- runtime ----
 FROM node:${NODE_VERSION}-bookworm-slim
+# Python 3 (bookworm's 3.11) for the AnkiWeb reader. Anki's wheel needs glibc 2.35 or later; bookworm has 2.36.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates python3 python3-venv \
  && rm -rf /var/lib/apt/lists/*
+# The pinned anki package, in its own venv. Its version lives in src/core/anki-requirements.txt only.
+COPY src/core/anki-requirements.txt /tmp/anki-requirements.txt
+RUN python3 -m venv /opt/anki \
+ && /opt/anki/bin/pip install --no-cache-dir --require-virtualenv -r /tmp/anki-requirements.txt \
+ && rm /tmp/anki-requirements.txt
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=8080 \
-    PACT_DB_PATH=/data/pact.db
+    PACT_DB_PATH=/data/pact.db \
+    ANKI_PYTHON=/opt/anki/bin/python3
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist/client ./dist/client
 COPY package.json ./

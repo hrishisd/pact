@@ -15,7 +15,7 @@ import { localDateOf } from "./calendar.ts";
 import { createPactCore, type PactCore } from "./core.ts";
 import { openDatabase } from "./db.ts";
 import { migrations } from "./migrations.ts";
-import { FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./testing/fakes.ts";
+import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./testing/fakes.ts";
 
 let dir: string;
 let path: string;
@@ -34,6 +34,7 @@ function coreAt(start: Date): { core: PactCore; clock: FakeClock; notifier: Reco
     clock,
     notifier,
     ouraSource: new FakeOuraSource(),
+    ankiSource: new FakeAnkiSource(),
     photoStore: new InMemoryPhotoStore(clock),
     operatorEmail: "owner@example.test",
     log: () => {},
@@ -248,7 +249,7 @@ test("migration 25: a Kept occurrence becomes Satisfied, and the rebuilt table k
   const shapeBefore = shape(seeded);
   seeded.close();
 
-  const db = openDatabase(path);
+  const db = openDatabase(path, migrations.slice(0, 25));
 
   // Only the outcome changes, and only Kept's.
   expect(occurrences(db)).toEqual(
@@ -273,6 +274,77 @@ test("migration 25: a Kept occurrence becomes Satisfied, and the rebuilt table k
       )
       .run(),
   ).toThrow(/FOREIGN KEY constraint failed/);
+  expect(() => db.prepare("INSERT INTO occurrence (pact_id, date) VALUES ('none', '2026-01-05')").run()).toThrow(
+    /FOREIGN KEY constraint failed/,
+  );
+  db.close();
+});
+
+test("migration 26: pacts and connections keep their rows and references, and take Anki", () => {
+  // At migration 25: a Camera pact with a reviewer, a judged day, a penalty and earlier terms, and an Oura connection.
+  const seeded = openDatabase(path, migrations.slice(0, 25));
+  seeded.exec(`
+    INSERT INTO account (id, email, email_key, name, timezone, created_at)
+      VALUES ('owner', 'owner@example.test', 'owner@example.test', 'owner', 'America/New_York', '2026-01-01T00:00:00Z'),
+             ('reviewer', 'reviewer@example.test', 'reviewer@example.test', 'reviewer', 'America/New_York',
+              '2026-01-01T00:00:00Z');
+    INSERT INTO recipient (id, owner_account_id, name, created_at)
+      VALUES ('sam', 'owner', 'Sam', '2026-01-01T00:00:00Z');
+    INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                      recipient_id, stage, first_occurrence, created_at, judged_through, due_by, reminders)
+      VALUES ('gym', 'owner', 'Gym', 'A photo of Gym', 'camera',
+              '{"kind":"fixed-days","days":["mon","tue","wed","thu","fri","sat","sun"]}', 500,
+              'sam', 'active', '2026-01-05', '2026-01-01T00:00:00Z', '2026-01-05', '09:00', '["08:00"]');
+    INSERT INTO pact_reviewer (pact_id, reviewer_account_id) VALUES ('gym', 'reviewer');
+    INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, penalty_cents, recipient_id)
+      VALUES ('gym', '2026-01-04', 'A photo', '{"kind":"fixed-days","days":["mon"]}', 300, 'sam');
+    INSERT INTO occurrence (pact_id, date, outcome, judged_at) VALUES ('gym', '2026-01-05', 'missed', '2026-01-05T14:00:00Z');
+    INSERT INTO penalty (id, owner_account_id, recipient_id, pact_id, occurrence_date, amount_cents, added_at)
+      VALUES ('monday', 'owner', 'sam', 'gym', '2026-01-05', 500, '2026-01-05T14:00:00Z');
+    INSERT INTO connection (account_id, service, status, connected_at)
+      VALUES ('owner', 'oura', 'needs-reconnecting', '2026-01-02T00:00:00Z');
+  `);
+  const pactBefore = seeded.prepare("SELECT * FROM pact").get() as Record<string, unknown>;
+  const connectionBefore = seeded.prepare("SELECT * FROM connection").all();
+  seeded.close();
+
+  const db = openDatabase(path, migrations.slice(0, 26));
+
+  expect(db.prepare("SELECT * FROM pact").get()).toEqual({
+    ...pactBefore,
+    anki_deck_id: null,
+    anki_rollover_hour: null,
+  });
+  expect(db.prepare("SELECT * FROM connection").all()).toEqual(connectionBefore);
+  expect(db.pragma("index_list(pact)")).toEqual([
+    expect.objectContaining({ name: "pact_owner" }),
+    expect.objectContaining({ name: "sqlite_autoindex_pact_1" }),
+  ]);
+  expect(db.pragma("foreign_key_check")).toEqual([]);
+
+  // An Anki pact needs its deck and rollover hour, and only an Anki pact has them.
+  const insertPact = db.prepare(
+    `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                       recipient_id, stage, first_occurrence, created_at, anki_deck_id, anki_rollover_hour)
+     VALUES (?, 'owner', 'Spanish', '', ?, '{"kind":"fixed-days","days":["tue"]}', 500, 'sam', 'active',
+             '2026-01-06', '2026-01-01T00:00:00Z', ?, ?)`,
+  );
+  expect(() => insertPact.run("a", "anki", null, 4)).toThrow(/CHECK constraint failed/);
+  expect(() => insertPact.run("b", "anki", "1700000000000", null)).toThrow(/CHECK constraint failed/);
+  expect(() => insertPact.run("c", "camera", "1700000000000", 4)).toThrow(/CHECK constraint failed/);
+  expect(() => insertPact.run("d", "anki", "1700000000000", 24)).toThrow(/CHECK constraint failed/);
+  insertPact.run("spanish", "anki", "1700000000000", 4);
+  db.prepare(
+    "INSERT INTO connection (account_id, service, status, connected_at) VALUES ('owner', 'anki', 'connected', ?)",
+  ).run("2026-01-03T00:00:00Z");
+  expect(() =>
+    db
+      .prepare(
+        "INSERT INTO connection (account_id, service, status, connected_at) VALUES ('reviewer', 'fitbit', 'connected', ?)",
+      )
+      .run("2026-01-03T00:00:00Z"),
+  ).toThrow(/CHECK constraint failed/);
+  // The references to the rebuilt pact are enforced.
   expect(() => db.prepare("INSERT INTO occurrence (pact_id, date) VALUES ('none', '2026-01-05')").run()).toThrow(
     /FOREIGN KEY constraint failed/,
   );

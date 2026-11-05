@@ -3,7 +3,9 @@
 // pacts the start date and end date), penalty, reviewers, reminders,
 // then a check before Create pact. Picking Oura Ring with no connection adds
 // a Connect step, which leaves for Oura's page; Oura's callback brings the
-// browser back here (`?oura=connected`) at Goal. Editing a pact in its edit
+// browser back here (`?oura=connected`) at Goal. Picking Anki with no
+// connection adds a Connect AnkiWeb step, which signs in on the spot and goes
+// on to Goal, where the owner picks the deck. Editing a pact in its edit
 // window reuses the form without the evidence kind step. The core decides every rule; the steps only
 // stop the owner moving on with a field left empty.
 
@@ -11,6 +13,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MAX_WEEKLY_TARGET,
   WEEKDAYS,
+  type AnkiDeck,
   type EditPactRefusal,
   type EvidenceKind,
   type FirstOccurrence,
@@ -33,7 +36,7 @@ import {
   minutesLeft,
   parseCents,
 } from "./format.ts";
-import { CameraIcon, RingIcon } from "./icons.tsx";
+import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { TermsList } from "./PactPage.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { Empty, useLoad, useNow } from "./ui.tsx";
@@ -44,10 +47,11 @@ const AFTER_KIND: Step[] = ["goal", "schedule", "penalty", "reviewers", "reminde
 /** The form's steps. A pact's evidence kind never changes, so editing skips that step. */
 function stepsFor(
   kind: EvidenceKind,
-  { editing, ouraConnected }: { editing: boolean; ouraConnected: boolean },
+  { editing, ouraConnected, ankiConnected }: { editing: boolean; ouraConnected: boolean; ankiConnected: boolean },
 ): Step[] {
   if (editing) return AFTER_KIND;
-  return ["kind", ...(kind === "oura" && !ouraConnected ? (["connect"] as const) : []), ...AFTER_KIND];
+  const connect = (kind === "oura" && !ouraConnected) || (kind === "anki" && !ankiConnected);
+  return ["kind", ...(connect ? (["connect"] as const) : []), ...AFTER_KIND];
 }
 
 type Pact = Json<PactTerms>;
@@ -67,7 +71,10 @@ export interface Form {
   kind: EvidenceKind;
   /** Oura Ring: "HH:MM" as the time field gives it, or "" until picked. */
   inBedBy: string;
-  /** Whether the owner typed the name; until then a bedtime pact's name follows its in-bed-by time. */
+  /** Anki only: the deck's id, or null until picked, and its full name as the deck list gave it. */
+  ankiDeckId: string | null;
+  ankiDeckName: string;
+  /** Whether the owner typed the name; until then a bedtime pact's name follows its in-bed-by time, an Anki pact's its deck. */
   named: boolean;
   name: string;
   description: string;
@@ -81,7 +88,7 @@ export interface Form {
   deadline: string;
   /** One-time only: evidence counts from creation until the deadline, rather than on its date only. */
   submitAnytime: boolean;
-  /** Camera only: whether evidence is due by a set time instead of midnight. */
+  /** Camera and Anki: whether evidence is due by a set time instead of midnight. */
   dueByOn: boolean;
   /** "HH:MM" as the time field gives it, or "" until picked. */
   dueBy: string;
@@ -99,6 +106,8 @@ export interface Form {
 const EMPTY_FORM: Form = {
   kind: "camera",
   inBedBy: "",
+  ankiDeckId: null,
+  ankiDeckName: "",
   named: false,
   name: "",
   description: "",
@@ -133,11 +142,14 @@ export function formOf(
     | "recipient"
     | "reviewers"
     | "reminders"
-  >,
+  > &
+    Partial<Pick<Pact, "anki">>,
 ): Form {
   return {
     kind: pact.evidenceKind,
     inBedBy: pact.inBedBy ?? "",
+    ankiDeckId: pact.anki?.deckId ?? null,
+    ankiDeckName: pact.anki?.deckName ?? "",
     named: true,
     name: pact.name,
     description: pact.description,
@@ -162,10 +174,14 @@ export function formOf(
  * What's wrong, in the owner's words: the core's refusals at Create or Save,
  * and the steps' own checks that a field is filled in.
  */
-type Problem = EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "oura-failed" | "oura-unavailable";
+type Problem =
+  EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "oura-failed" | "oura-unavailable" | "anki-due-by";
 
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
+  "anki-not-connected": "Connect AnkiWeb first.",
+  "unknown-deck": "Pick a deck.",
+  "anki-due-by": "Pick a time from noon until your Anki day ends, or turn off Due by a set time.",
   "invalid-in-bed-by": "Pick a time.",
   "blank-name": "Give it a name.",
   "blank-description": "Say what your photo will show.",
@@ -197,14 +213,15 @@ function stepProblem(step: Step, form: Form): Problem | null {
   switch (step) {
     case "goal":
       if (form.kind === "oura" && form.inBedBy === "") return "invalid-in-bed-by";
+      if (form.kind === "anki" && form.ankiDeckId === null) return "unknown-deck";
       if (form.name.trim() === "") return "blank-name";
-      if (form.kind === "oura") return null;
+      if (form.kind !== "camera") return null;
       if (form.description.trim() === "") return "blank-description";
       return null;
     case "schedule":
       if (isOneTime(form) && form.deadline === "") return "no-deadline";
       if (!isWeekly(form) && !isOneTime(form) && form.days.length === 0) return "no-days";
-      return form.kind === "camera" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
+      return form.kind !== "oura" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
     case "penalty": {
       const penaltyCents = parseCents(form.penalty);
       if (penaltyCents === null) return "no-amount";
@@ -242,12 +259,14 @@ export function EditPact({
   }
   if (data === null) return null;
   if (!data.ok) return <Empty title="Pact not found" body="It isn't one of your pacts." />;
-  // Editing never shows the kind step, so neither Oura flag changes anything here.
+  // Editing never shows the kind step, so neither the Oura nor the Anki flags change anything here.
   return (
     <CreatePact
       editing={data.pact}
       ouraConnected
       ouraAvailable
+      ankiConnected
+      ankiAvailable
       onCancel={onDone}
       onCreated={onDone}
       onInvite={onInvite}
@@ -260,6 +279,8 @@ export function CreatePact({
   editing,
   ouraConnected,
   ouraAvailable,
+  ankiConnected: ankiConnectedBefore,
+  ankiAvailable,
   onCancel,
   onCreated,
   onInvite,
@@ -269,6 +290,10 @@ export function CreatePact({
   ouraConnected: boolean;
   /** Whether this server has Oura set up: without it, the Oura Ring tile can't be picked. */
   ouraAvailable: boolean;
+  /** Whether the account has an AnkiWeb connection: without one, Anki adds the Connect AnkiWeb step. */
+  ankiConnected: boolean;
+  /** Whether this server has Anki set up: without it, the Anki tile can't be picked. */
+  ankiAvailable: boolean;
   onCancel: () => void;
   /** After creating the pact, or saving the edit. */
   onCreated: (pactId: string, name: string) => void;
@@ -281,7 +306,10 @@ export function CreatePact({
   const [form, setForm] = useState<Form>(
     editing ? formOf(editing) : { ...EMPTY_FORM, kind: ouraResult === "connected" ? "oura" : "camera" },
   );
-  const steps = stepsFor(form.kind, { editing: editing !== undefined, ouraConnected });
+  // Connecting AnkiWeb happens on this page, so the Connect step goes once it has.
+  const [ankiConnected, setAnkiConnected] = useState(ankiConnectedBefore);
+  const [ankiLogin, setAnkiLogin] = useState<AnkiLogin>({ email: "", password: "", busy: false, failed: null });
+  const steps = stepsFor(form.kind, { editing: editing !== undefined, ouraConnected, ankiConnected });
   const [stepIndex, setStepIndex] = useState(ouraResult === "connected" ? steps.indexOf("goal") : 0);
   const [tried, setTried] = useState(false);
   const [friends, setFriends] = useState<Friend[] | null>(null);
@@ -328,6 +356,22 @@ export function CreatePact({
     goTo(stepIndex + 1);
   };
 
+  const connectAnki = async () => {
+    setAnkiLogin((login) => ({ ...login, busy: true, failed: null }));
+    try {
+      const result = await api.connectAnki({ email: ankiLogin.email, password: ankiLogin.password });
+      if (result.ok) {
+        // The password goes no further than that request.
+        setAnkiLogin({ email: ankiLogin.email, password: "", busy: false, failed: null });
+        setAnkiConnected(true);
+        return goTo(stepsFor("anki", { editing: false, ouraConnected, ankiConnected: true }).indexOf("goal"));
+      }
+      setAnkiLogin((login) => ({ ...login, busy: false, failed: result.reason }));
+    } catch (error) {
+      setAnkiLogin((login) => ({ ...login, busy: false, failed: { error } }));
+    }
+  };
+
   const create = async () => {
     const recipientId = form.recipientId;
     const penaltyCents = parseCents(form.penalty);
@@ -338,8 +382,9 @@ export function CreatePact({
       const pact = {
         evidenceKind: form.kind,
         name: form.name.trim(),
-        description: form.kind === "oura" ? "" : form.description.trim(),
+        description: form.kind === "camera" ? form.description.trim() : "",
         ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
+        ...(form.kind === "anki" && form.ankiDeckId !== null && { ankiDeckId: form.ankiDeckId }),
         ...optionalTimes(form),
         schedule: scheduleOf(form),
         penaltyCents,
@@ -351,11 +396,11 @@ export function CreatePact({
         const result = await api.editPact(editing.id, pact);
         if (result.ok) return onCreated(editing.id, pact.name);
         if (result.reason === "edit-window-closed") setWindowClosed(true);
-        setCreateError(PROBLEMS[result.reason]);
+        setCreateError(problemText(result.reason, form));
       } else {
         const result = await api.createPact(pact);
         if (result.ok) return onCreated(result.pactId, pact.name);
-        setCreateError(PROBLEMS[result.reason]);
+        setCreateError(problemText(result.reason, form));
       }
     } catch (error) {
       const action = editing ? "save" : "create";
@@ -370,6 +415,7 @@ export function CreatePact({
       body = (
         <KindStep
           ouraAvailable={ouraAvailable}
+          ankiAvailable={ankiAvailable}
           onPick={(kind) => {
             update({ kind });
             goTo(1);
@@ -378,7 +424,12 @@ export function CreatePact({
       );
       break;
     case "connect":
-      body = <ConnectStep />;
+      body =
+        form.kind === "anki" ? (
+          <ConnectAnkiStep login={ankiLogin} onChange={(change) => setAnkiLogin((l) => ({ ...l, ...change }))} />
+        ) : (
+          <ConnectStep />
+        );
       break;
     case "goal":
       body = <GoalStep form={form} update={update} />;
@@ -453,7 +504,7 @@ export function CreatePact({
         </p>
       )}
       {body}
-      {tried && problem && <p className="error">{PROBLEMS[problem]}</p>}
+      {tried && problem && <p className="error">{problemText(problem, form)}</p>}
       {createError && <p className="error">{createError}</p>}
       <div className="footbar">
         {stepIndex === 0 ? (
@@ -468,6 +519,14 @@ export function CreatePact({
         {step === "check" ? (
           <button className="btn primary grow" disabled={creating} onClick={() => void create()}>
             {editing ? "Save changes" : "Create pact"}
+          </button>
+        ) : step === "connect" && form.kind === "anki" ? (
+          <button
+            className="btn primary grow"
+            disabled={ankiLogin.busy || ankiLogin.email.trim() === "" || ankiLogin.password === ""}
+            onClick={() => void connectAnki()}
+          >
+            {ankiLogin.busy ? "Connecting…" : "Connect AnkiWeb"}
           </button>
         ) : step === "connect" ? (
           // A full page load: Oura's page, then its callback, which brings the browser back here.
@@ -488,11 +547,19 @@ export function CreatePact({
 
 // ---------- steps ----------
 
-function KindStep({ ouraAvailable, onPick }: { ouraAvailable: boolean; onPick: (kind: EvidenceKind) => void }) {
+function KindStep({
+  ouraAvailable,
+  ankiAvailable,
+  onPick,
+}: {
+  ouraAvailable: boolean;
+  ankiAvailable: boolean;
+  onPick: (kind: EvidenceKind) => void;
+}) {
   return (
     <>
       <h2>How will you prove it?</h2>
-      <div className="kind-tiles">
+      <div className="kind-tiles three">
         <button className="kind-tile" onClick={() => onPick("camera")}>
           <span className="tico">
             <CameraIcon />
@@ -507,6 +574,14 @@ function KindStep({ ouraAvailable, onPick }: { ouraAvailable: boolean; onPick: (
           <b>Oura Ring</b>
           <small>Your ring reports when you got into bed. Nothing to submit.</small>
           {!ouraAvailable && <span className="chip c-soon">Oura isn't set up yet</span>}
+        </button>
+        <button className="kind-tile" disabled={!ankiAvailable} onClick={() => onPick("anki")}>
+          <span className="tico">
+            <CardsIcon />
+          </span>
+          <b>Anki</b>
+          <small>Finish a deck each day. Pact checks AnkiWeb after you sync. Nothing to submit.</small>
+          {!ankiAvailable && <span className="chip c-soon">Anki isn't set up yet</span>}
         </button>
       </div>
       <small className="muted">You can't change this later.</small>
@@ -534,7 +609,206 @@ function ConnectStep() {
   );
 }
 
-export function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+/** The Connect AnkiWeb step's fields, and why the last try didn't connect. */
+interface AnkiLogin {
+  email: string;
+  password: string;
+  busy: boolean;
+  failed: "wrong-login" | "unreachable" | "unavailable" | { error: unknown } | null;
+}
+
+function ConnectAnkiStep({ login, onChange }: { login: AnkiLogin; onChange: (change: Partial<AnkiLogin>) => void }) {
+  const { failed } = login;
+  return (
+    <>
+      <h2>Connect AnkiWeb</h2>
+      <p>Sign in with your AnkiWeb account, the one your phone and computer sync to.</p>
+      <label className="field">
+        <span>AnkiWeb email</span>
+        <input
+          className="inp"
+          type="email"
+          autoComplete="username"
+          value={login.email}
+          placeholder="you@example.com"
+          onChange={(e) => onChange({ email: e.target.value })}
+        />
+      </label>
+      <label className="field">
+        <span>Password</span>
+        <input
+          className="inp"
+          type="password"
+          autoComplete="current-password"
+          value={login.password}
+          onChange={(e) => onChange({ password: e.target.value })}
+        />
+      </label>
+      {failed === "wrong-login" && <p className="error">AnkiWeb didn't accept that email and password.</p>}
+      {failed === "unreachable" && <p className="error">Couldn't reach AnkiWeb. Try again in a minute.</p>}
+      {failed === "unavailable" && <p className="error">Anki isn't set up yet.</p>}
+      {typeof failed === "object" && failed !== null && (
+        <p className="error">Couldn't connect. {failureText(failed.error, "Check your connection and try again.")}</p>
+      )}
+      <p className="tos">AnkiWeb doesn't officially allow other apps to sign in, and could suspend your account.</p>
+      <p className="keeps">
+        Pact trades your password for an AnkiWeb sign-in key, then forgets the password. It keeps the key, encrypted,
+        and only ever reads your decks. Disconnect on Profile to delete it.
+      </p>
+    </>
+  );
+}
+
+/** The last part of a deck's full name: "Verbs" for "Spanish::Verbs". */
+function deckLeaf(name: string): string {
+  return name.split("::").at(-1) ?? name;
+}
+
+/** Anki's Goal step: the deck tree, indented, with the picked deck's counts now, then the name. */
+function AnkiGoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+  const { data, failed, reload } = useLoad(() => api.ankiDecks());
+  let picker: ReactNode = <small className="muted">Loading your decks from AnkiWeb…</small>;
+  if (failed || (data !== null && !data.ok)) {
+    const reason = data !== null && !data.ok ? data.reason : null;
+    picker = (
+      <div className="alert bad" role="status">
+        <span>
+          {reason === "disconnected"
+            ? "AnkiWeb didn't accept Pact's sign-in. Connect AnkiWeb again from Profile."
+            : reason === "not-connected"
+              ? "Connect AnkiWeb first."
+              : `Couldn't load your decks. ${failed ? failureText(failed.error, "Check your connection.") : "AnkiWeb didn't answer."}`}
+        </span>
+        <button className="btn sm self-start" onClick={reload}>
+          Try again
+        </button>
+      </div>
+    );
+  } else if (data?.ok && data.decks.length === 0) {
+    picker = <small className="muted">AnkiWeb has no decks for this account yet. Make one in Anki and sync.</small>;
+  } else if (data?.ok) {
+    const depth = depthsOf(data.decks);
+    picker = (
+      <div className="deck-tree" role="radiogroup" aria-label="Deck">
+        {data.decks.map((deck) => (
+          <button
+            key={deck.id}
+            className="deck"
+            role="radio"
+            aria-checked={form.ankiDeckId === deck.id}
+            style={{ paddingLeft: 14 + depth.get(deck.id)! * 20 }}
+            onClick={() =>
+              update({
+                ankiDeckId: deck.id,
+                ankiDeckName: deck.name,
+                ...(!form.named && { name: deckLeaf(deck.name) }),
+              })
+            }
+          >
+            <span className="radio" />
+            <span className="nm">{deckLeaf(deck.name)}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+  const picked = data?.ok ? data.decks.find((deck) => deck.id === form.ankiDeckId) : undefined;
+  return (
+    <>
+      <h2>Goal</h2>
+      <div className="field">
+        <span>Deck to finish each day</span>
+        {picker}
+        <small>
+          Subdecks count in their parent, as in Anki's deck list. Renaming or moving the deck in Anki doesn't break the
+          pact.
+        </small>
+      </div>
+      {picked && (
+        <div className="card">
+          <b>{picked.name} today</b>
+          <div>
+            <span className="leftbig">{left(picked)}</span>{" "}
+            <span className="muted">{left(picked) === 1 ? "card" : "cards"} left</span>
+          </div>
+          <p className="small muted">
+            Finished means New, Learn and Due all at 0, Anki's "Congratulations! You have finished this deck for now."
+          </p>
+        </div>
+      )}
+      <NameField form={form} update={update} placeholder="e.g. Spanish" />
+    </>
+  );
+}
+
+/** The pact's name; once the owner types one, it no longer follows the deck or the in-bed-by time. */
+function NameField({
+  form,
+  update,
+  placeholder,
+}: {
+  form: Form;
+  update: (change: Partial<Form>) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="field">
+      <span>Name</span>
+      <input
+        className="inp"
+        value={form.name}
+        placeholder={placeholder}
+        onChange={(e) => update({ name: e.target.value, named: e.target.value.trim() !== "" })}
+      />
+      <small>Shown on Today.</small>
+    </label>
+  );
+}
+
+/** The cards left in a deck: new, learning and due together. */
+function left(deck: Pick<AnkiDeck, "counts">): number {
+  return deck.counts.new + deck.counts.learn + deck.counts.review;
+}
+
+/** How deep each deck sits in the tree: 0 at the top. The list comes parents first. */
+function depthsOf(decks: AnkiDeck[]): Map<string, number> {
+  const depth = new Map<string, number>();
+  for (const deck of decks) depth.set(deck.id, deck.parentId === null ? 0 : (depth.get(deck.parentId) ?? -1) + 1);
+  return depth;
+}
+
+/** A problem in the owner's words; a due-by time an Anki pact refuses says what an Anki pact takes. */
+function problemText(problem: Problem, form: Pick<Form, "kind">): string {
+  return PROBLEMS[problem === "invalid-due-by" && form.kind === "anki" ? "anki-due-by" : problem];
+}
+
+export function GoalStep({
+  form,
+  update,
+  deckFixed = false,
+}: {
+  form: Form;
+  update: (change: Partial<Form>) => void;
+  /** After the edit window, an Anki pact's deck shows but can't change here. */
+  deckFixed?: boolean;
+}) {
+  if (form.kind === "anki" && deckFixed) {
+    return (
+      <>
+        <h2>Goal</h2>
+        <div className="field">
+          <span>Deck to finish each day</span>
+          <div className="opt static">
+            <span className="rt">
+              <b>{form.ankiDeckName === "" ? "Gone from your deck list" : form.ankiDeckName}</b>
+            </span>
+          </div>
+        </div>
+        <NameField form={form} update={update} placeholder="e.g. Spanish" />
+      </>
+    );
+  }
+  if (form.kind === "anki") return <AnkiGoalStep form={form} update={update} />;
   if (form.kind === "oura") {
     return (
       <>
@@ -612,7 +886,7 @@ export function scheduleOf(form: Form): Schedule {
 export function optionalTimes(form: Form): { dueBy?: string; startDate?: string; endDate?: string } {
   const dated = !isOneTime(form);
   return {
-    ...(form.kind === "camera" && form.dueByOn && { dueBy: form.dueBy }),
+    ...(form.kind !== "oura" && form.dueByOn && { dueBy: form.dueBy }),
     ...(dated && form.startDate !== "" && { startDate: form.startDate }),
     ...(dated && form.endDate !== "" && { endDate: form.endDate }),
   };
@@ -640,6 +914,7 @@ export function ScheduleStep({
 }) {
   const { days } = form;
   const oura = form.kind === "oura";
+  const anki = form.kind === "anki";
   const weekly = isWeekly(form);
   const oneTime = isOneTime(form);
   const pick = (kind: "fixed" | "weekly" | "one-time") =>
@@ -657,7 +932,7 @@ export function ScheduleStep({
   return (
     <>
       <h2>Schedule</h2>
-      {!oura && !kindFixed && (
+      {form.kind === "camera" && !kindFixed && (
         <div className="seg" role="group" aria-label="Schedule type">
           <button aria-pressed={!weekly && !oneTime} onClick={() => pick("fixed")}>
             Fixed days
@@ -738,13 +1013,15 @@ export function ScheduleStep({
       <small className="muted">
         {oura
           ? "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed."
-          : oneTime
-            ? form.submitAnytime
-              ? `You can submit any day until the deadline, until ${until} on its date.`
-              : `You can submit on the deadline's date only, until ${until}.`
-            : weekly
-              ? `You can submit on any day of the week, until ${until}.`
-              : `You can submit on scheduled days only, until ${until}.`}
+          : anki
+            ? `Each day is judged from AnkiWeb. Finish the deck and sync before ${until}. A day Pact hasn't seen finished by then counts as missed.`
+            : oneTime
+              ? form.submitAnytime
+                ? `You can submit any day until the deadline, until ${until} on its date.`
+                : `You can submit on the deadline's date only, until ${until}.`
+              : weekly
+                ? `You can submit on any day of the week, until ${until}.`
+                : `You can submit on scheduled days only, until ${until}.`}
       </small>
       {!oura && (
         <>
@@ -772,6 +1049,11 @@ export function ScheduleStep({
                 value={form.dueBy}
                 onChange={(e) => update({ dueBy: e.target.value })}
               />
+              {anki && (
+                <small>
+                  Up to when your Anki day ends, usually 4:00am. A time after midnight counts for the evening before.
+                </small>
+              )}
             </label>
           )}
         </>
@@ -1061,7 +1343,9 @@ export function ReviewersStep({
         {hint ??
           (kind === "oura"
             ? "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses."
-            : "Any reviewer you pick can check your photos.")}
+            : kind === "anki"
+              ? "AnkiWeb decides each day, so there's nothing to review. Reviewers decide on your excuses and change requests."
+              : "Any reviewer you pick can check your photos.")}
       </small>
     </>
   );
@@ -1097,7 +1381,7 @@ function CheckStep({
       if (current) setFirst(state);
     };
     const load = () =>
-      api.firstOccurrence({ schedule, inBedBy, dueBy, startDate, editing: editing?.id }).then(
+      api.firstOccurrence({ schedule, evidenceKind: form.kind, inBedBy, dueBy, startDate, editing: editing?.id }).then(
         (result) =>
           show(
             result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
@@ -1110,7 +1394,7 @@ function CheckStep({
       current = false;
       window.clearInterval(timer);
     };
-  }, [scheduleKey, inBedBy, dueBy, startDate, editing?.id]);
+  }, [scheduleKey, form.kind, inBedBy, dueBy, startDate, editing?.id]);
 
   const recipient = recipients.find((r) => r.id === form.recipientId);
   return (
@@ -1121,6 +1405,7 @@ function CheckStep({
         {form.kind === "camera" && <p className="muted">{form.description.trim()}</p>}
         {recipient && (
           <TermsList
+            deckName={form.kind === "anki" ? form.ankiDeckName : undefined}
             terms={{
               evidenceKind: form.kind,
               inBedBy: inBedBy ?? null,

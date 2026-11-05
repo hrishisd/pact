@@ -1,9 +1,9 @@
-// The four ports outside the Pact core. Each has a production adapter
+// The five ports outside the Pact core. Each has a production adapter
 // (adapters.ts, photo-stores.ts, web-push.ts) and a fake for tests (testing/fakes.ts).
 
-import type { AccountId, PushDevice } from "../shared/types.ts";
+import type { AccountId, AnkiCounts, AnkiDeck, PushDevice } from "../shared/types.ts";
 
-export type { PushDevice };
+export type { AnkiCounts, AnkiDeck, PushDevice };
 
 /** The current time. The core never reads system time any other way. */
 export interface Clock {
@@ -39,6 +39,33 @@ export type OuraSleepResult =
 
 export interface OuraSource {
   sleepPeriods(account: AccountId, range: OuraDateRange): Promise<OuraSleepResult>;
+}
+
+export type AnkiDeckListResult =
+  | { ok: true; decks: AnkiDeck[]; rolloverHour: number }
+  /** AnkiWeb refused the stored login, or there is none. */
+  | { ok: false; reason: "disconnected" };
+
+export type AnkiCountsResult =
+  | {
+      ok: true;
+      /** The Anki day the counts are for: the calendar day it started on, "YYYY-MM-DD", on the collection's clock. */
+      ankiDate: string;
+      /** The moment they were evaluated at: the owner's last answer that Anki day, or the check time with none. */
+      asOf: Date;
+      /** By deck id: its counts, or null for a deck no longer in the collection. */
+      decks: Record<string, AnkiCounts | null>;
+    }
+  | { ok: false; reason: "disconnected" };
+
+/**
+ * The owner's Anki collection, as AnkiWeb has it. One call is one check of
+ * the collection, however many decks it asks about. Throwing (a timeout, a
+ * 5xx, a protocol error) is a failed check.
+ */
+export interface AnkiSource {
+  decks(account: AccountId): Promise<AnkiDeckListResult>;
+  deckCounts(account: AccountId, deckIds: readonly string[]): Promise<AnkiCountsResult>;
 }
 
 export type NotificationKind =

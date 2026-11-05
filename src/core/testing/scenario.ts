@@ -1,7 +1,7 @@
 // The scenario harness: every core test is written with it.
 //
 // A scenario is one Pact core on its own temporary SQLite file (production
-// pragmas, WAL), with fakes for the four ports. Tests act as named accounts,
+// pragmas, WAL), with fakes for the five ports. Tests act as named accounts,
 // issue commands, move time with `advanceTo`, and assert only on query
 // results, on what `s.notifier` recorded, and on `s.logs`. Never on storage.
 //
@@ -23,7 +23,7 @@ import { onTestFinished } from "vitest";
 import { zonedWallTimeToInstant } from "../calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
 import type { AccountId, SignInResult } from "../../shared/types.ts";
-import { FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
+import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
 
 /** A named account. Every AccountView query and command, plus its id. */
 export type AccountHandle = AccountView & { readonly id: AccountId; readonly name: string };
@@ -39,6 +39,7 @@ export interface Scenario {
   readonly clock: FakeClock;
   readonly notifier: RecordingNotifier;
   readonly ouraSource: FakeOuraSource;
+  readonly ankiSource: FakeAnkiSource;
   readonly photoStore: InMemoryPhotoStore;
   /** Lines the core logged, in order. */
   readonly logs: string[];
@@ -80,6 +81,7 @@ export function scenario(): Scenario {
   const clock = new FakeClock(at("Mon 09:00"));
   const notifier = new RecordingNotifier();
   const ouraSource = new FakeOuraSource();
+  const ankiSource = new FakeAnkiSource();
   const photoStore = new InMemoryPhotoStore(clock);
   const logs: string[] = [];
   // UUID-shaped ids in creation order, so a tie broken by id breaks the same way
@@ -93,6 +95,7 @@ export function scenario(): Scenario {
       clock,
       notifier,
       ouraSource,
+      ankiSource,
       photoStore,
       operatorEmail: emailFor(OPERATOR),
       log: (line) => logs.push(line),
@@ -129,6 +132,7 @@ export function scenario(): Scenario {
     clock,
     notifier,
     ouraSource,
+    ankiSource,
     photoStore,
     logs,
     dbPath,

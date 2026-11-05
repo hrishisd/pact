@@ -1,0 +1,16 @@
+# The anki package Pact's AnkiWeb reader (anki_check.py) runs on, and what it needs, pinned.
+# To bump: change anki's version, install it in a fresh venv, replace the other lines with its
+# pip freeze, and run the manual checks in .scratch/anki-evidence/manual-checks.md.
+anki==26.9.4
+certifi==2026.10.23
+charset-normalizer==3.5.2
+decorator==5.3.1
+distro==1.9.0
+idna==3.20
+Markdown==3.11.2
+orjson==3.13.0
+protobuf==7.36.2
+PySocks==1.7.1
+requests==2.34.2
+typing_extensions==4.16.0
+urllib3==2.8.0

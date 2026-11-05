@@ -68,7 +68,7 @@ export type Schedule =
 export const MAX_WEEKLY_TARGET = 7;
 
 /** How a pact's evidence is gathered. Picked at creation and never changes. */
-export type EvidenceKind = "camera" | "oura";
+export type EvidenceKind = "camera" | "oura" | "anki";
 
 export interface NewPact {
   evidenceKind: EvidenceKind;
@@ -82,11 +82,15 @@ export interface NewPact {
    */
   inBedBy?: string;
   /**
-   * Camera only, optional: the due-by time, "HH:MM" on a 24-hour clock after
-   * 00:00. Evidence is due by it each day instead of midnight, and the day is
-   * judged then.
+   * Camera and Anki, optional: the due-by time, "HH:MM" on a 24-hour clock
+   * after 00:00. Evidence is due by it each day instead of midnight, and the
+   * day is judged then. On an Anki pact it runs from noon through the
+   * collection's rollover hour: a time from 00:01 to the rollover hour is the
+   * morning after, still the evening's Anki day.
    */
   dueBy?: string;
+  /** Anki only: the deck's id, from the owner's deck list (`AnkiDecksResult`). Its subdecks count in it. */
+  ankiDeckId?: string;
   /**
    * Optional, "YYYY-MM-DD": the pact starts no earlier than this day. It can
    * only push the first occurrence later. Recurring pacts only: One-time has none.
@@ -114,9 +118,16 @@ export interface NewPact {
 export type CreatePactRefusal =
   /** An Oura Ring pact needs the owner's Oura connection first. */
   | "oura-not-connected"
+  /** An Anki pact needs the owner's AnkiWeb connection first. */
+  | "anki-not-connected"
+  /** An Anki pact's deck is missing, or isn't in the owner's deck list as AnkiWeb last gave it. */
+  | "unknown-deck"
   /** An Oura Ring pact's in-bed-by time is missing or isn't "HH:MM". */
   | "invalid-in-bed-by"
-  /** A due-by time on an Oura Ring pact, at midnight, or not "HH:MM". */
+  /**
+   * A due-by time on an Oura Ring pact, at midnight, or not "HH:MM"; on an
+   * Anki pact, one after the collection's rollover hour and before noon.
+   */
   | "invalid-due-by"
   /** A start date that isn't "YYYY-MM-DD", or one on a One-time pact. */
   | "invalid-start-date"
@@ -132,7 +143,7 @@ export type CreatePactRefusal =
   | "blank-description"
   | "no-days"
   /**
-   * A Weekly count or One-time on an Oura Ring pact, a target that isn't a
+   * A Weekly count or One-time on an Oura Ring or Anki pact, a target that isn't a
    * whole number from 1 to `MAX_WEEKLY_TARGET`, or a deadline that isn't "YYYY-MM-DD".
    */
   | "invalid-schedule"
@@ -168,9 +179,11 @@ export type DeletePactResult = { ok: true } | { ok: false; reason: "pact-not-fou
 /** What a pact's occurrences follow from, as the create form has it so far. */
 export interface PactTiming {
   schedule: Schedule;
+  /** Anki pacts open and fall due on the Anki day, which starts at the collection's rollover hour. Default Camera. */
+  evidenceKind?: EvidenceKind;
   /** Oura Ring only: see `NewPact.inBedBy`. */
   inBedBy?: string;
-  /** Camera only: see `NewPact.dueBy`. */
+  /** Camera and Anki: see `NewPact.dueBy`. */
   dueBy?: string;
   /** See `NewPact.startDate`. */
   startDate?: string;
@@ -214,8 +227,10 @@ export interface PactTerms {
   evidenceKind: EvidenceKind;
   /** Oura Ring only: the in-bed-by time, "HH:MM". Null for Camera. */
   inBedBy: string | null;
-  /** Camera only: the due-by time, "HH:MM", or null for midnight. */
+  /** Camera and Anki: the due-by time, "HH:MM", or null for midnight. */
   dueBy: string | null;
+  /** Anki only, else null: the pact's deck and the Anki day it's judged on. */
+  anki: AnkiTerms | null;
   /** "YYYY-MM-DD", or null: see `NewPact.startDate`. */
   startDate: string | null;
   /** "YYYY-MM-DD", or null: see `NewPact.endDate`. */
@@ -258,6 +273,41 @@ export interface PactTerms {
   history: PactHistory;
   /** An Active Oura Ring pact whose owner's Oura can't be read: the same alert as on Today. Else null. */
   connectionProblem: ConnectionProblem | null;
+}
+
+/** Cards in a deck as Anki's deck list counts them, the deck's daily limits applied and its subdecks included. */
+export interface AnkiCounts {
+  new: number;
+  learn: number;
+  /** Anki's Due column. */
+  review: number;
+}
+
+/** One deck in the owner's Anki collection. */
+export interface AnkiDeck {
+  /** Anki's deck id, as text. */
+  id: string;
+  /** Its full name as Anki shows it, "Spanish::Verbs" for a subdeck. */
+  name: string;
+  /** The deck it's a subdeck of, or null at the top. */
+  parentId: string | null;
+  /** As of when the list was fetched. */
+  counts: AnkiCounts;
+}
+
+/** The deck picker's list: every deck, parents before their subdecks, and when the Anki day starts. */
+export type AnkiDecksResult =
+  | { ok: true; decks: AnkiDeck[]; rolloverHour: number }
+  /** Not connected, AnkiWeb refused the login, or AnkiWeb couldn't be reached. */
+  | { ok: false; reason: "not-connected" | "disconnected" | "unreachable" };
+
+/** An Anki pact's deck, and when its Anki day starts. */
+export interface AnkiTerms {
+  deckId: string;
+  /** The deck's name as AnkiWeb last gave it ("Spanish::Verbs" for a subdeck), or null once it's gone from the list. */
+  deckName: string | null;
+  /** The collection's "next day starts at" hour, 0–23, when the pact was made: each Anki day starts then. */
+  rolloverHour: number;
 }
 
 /**
@@ -334,6 +384,18 @@ export interface OccurrenceRecord {
    * 18:00 the next day.
    */
   night?: { inBedAt: string | null };
+  /** Anki pacts only, once judged Satisfied or Missed: the check that decided it. */
+  anki?: AnkiResult;
+}
+
+/**
+ * How the last check that counted for an Anki day found its deck: cards
+ * left (new, learning and due together) and when Pact checked; both null
+ * when no check reached AnkiWeb that day.
+ */
+export interface AnkiResult {
+  cardsLeft: number | null;
+  checkedAt: Date | null;
 }
 
 /** A reviewer's decision that settled an occurrence. `reason` is the rejection's, or the excuse's. */
@@ -605,13 +667,13 @@ export interface Profile {
   connections: Connection[];
 }
 
-/** A link to an outside service that supplies evidence. Oura only, in v0. */
+/** A link to an outside service that supplies evidence: Oura or AnkiWeb. */
 export interface Connection {
-  service: "oura";
+  service: "oura" | "anki";
   /** Needs reconnecting once the service refuses its tokens; until then, connected. */
   status: "connected" | "needs-reconnecting";
   connectedAt: Date;
-  /** How many of the owner's Active pacts use it: disconnecting leaves their nights to count as Missed. */
+  /** How many of the owner's Active pacts use it: disconnecting leaves their days to count as Missed. */
   activePacts: number;
 }
 
@@ -736,7 +798,7 @@ export type TodaySection =
   /** Bedtime nights past their in-bed-by time that Oura hasn't reported yet, soonest cutoff first. */
   | { kind: "no-oura-data"; cards: TodayNoOuraDataCard[] }
   /** Pacts whose occurrence is open today, and bills to pay, soonest due first. */
-  | { kind: "to-do"; cards: (TodayToDoCard | TodayBillCard)[] }
+  | { kind: "to-do"; cards: (TodayToDoCard | TodayAnkiCard | TodayBillCard)[] }
   /**
    * Occurrences judged Missed in the last 48 hours, latest first, except
    * those Missed through a rejection (alerts) and accepted misses.
@@ -777,6 +839,25 @@ export interface TodayToDoCard extends TodayPactCard {
 }
 
 /**
+ * An Anki pact's day open now, not judged yet and before its due time, with
+ * no excuse filed for it. It leaves Today once Pact sees the deck finished.
+ */
+export interface TodayAnkiCard extends TodayPactCard {
+  kind: "anki";
+  /** When its edit window closes; null once it has. */
+  editWindowClosesAt: Date | null;
+  /** The Anki day, "YYYY-MM-DD": the day it started on, in the owner's timezone. */
+  occurrenceDate: string;
+  dueAt: Date;
+  /** Its due-by time, "HH:MM", or null when it's due at midnight. */
+  dueBy: string | null;
+  /** The deck's name as AnkiWeb last gave it, or null once it's gone from the list. */
+  deckName: string | null;
+  /** The latest check of the deck for this Anki day, or null before the first. */
+  lastCheck: { cardsLeft: number; checkedAt: Date } | null;
+}
+
+/**
  * Bills to one recipient not due yet, with an unpaid part that payments
  * awaiting approval don't cover. One per recipient.
  */
@@ -810,6 +891,8 @@ export interface TodayMissedCard extends TodayPactCard {
    * Oura's clock, or null when Oura reported no sleep by 18:00 the next day.
    */
   night?: { inBedAt: string | null };
+  /** Anki pacts only: why the day is Missed. */
+  anki?: AnkiResult;
   /**
    * Today's occurrence of a Camera pact, Missed at its due-by time ("HH:MM")
    * with no evidence: it shows as Closed.

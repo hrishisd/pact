@@ -115,7 +115,7 @@ function changeOf(form: Form, note: string): PactChange | { problem: "no-amount"
   if (form.recipientId === null) return { problem: "no-recipient" };
   return {
     name: form.name.trim(),
-    description: form.kind === "oura" ? "" : form.description.trim(),
+    description: form.kind === "camera" ? form.description.trim() : "",
     ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
     ...optionalTimes(form),
     schedule: scheduleOf(form),
@@ -200,7 +200,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
     let body: ReactNode;
     switch (step) {
       case "goal":
-        body = <GoalStep form={form} update={update} />;
+        body = <GoalStep form={form} update={update} deckFixed />;
         break;
       case "schedule":
         body = <ScheduleStep form={form} update={update} kindFixed />;

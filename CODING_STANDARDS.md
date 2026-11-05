@@ -7,7 +7,7 @@ Read at review time. `npm run lint` enforces the mechanical rules: formatting (P
 - Domain decisions live in `src/core/`, behind the command/query interface the server calls as an account (`core.as(id)`). The server translates HTTP to core calls and back; the client renders what the core returns. A rule decided in a route or a component is a finding.
 - Commands are async and all-or-nothing: one SQLite transaction (`#command`). Anything a command sends goes into the outbox inside that transaction and is delivered after commit, never sent directly.
 - Queries are synchronous reads and never write. `photo` is the one async query, because the photo store is.
-- Outside effects go through the four ports (Clock, OuraSource, Notifier, PhotoStore). New outside effects get a port with a fake in `src/core/testing/`.
+- Outside effects go through the five ports (Clock, OuraSource, AnkiSource, Notifier, PhotoStore). New outside effects get a port with a fake in `src/core/testing/`.
 
 ## Results and errors
 

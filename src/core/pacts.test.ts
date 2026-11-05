@@ -42,6 +42,7 @@ describe("creating a pact", () => {
         evidenceKind: "camera",
         inBedBy: null,
         dueBy: null,
+        anki: null,
         startDate: null,
         endDate: null,
         schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },

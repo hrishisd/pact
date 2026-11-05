@@ -14,7 +14,12 @@ import {
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   type AcceptExcuseRejectionResponse,
+  type AnkiDecksResponse,
+  type CheckAnkiResponse,
   type CheckOuraResponse,
+  type ConnectAnkiRequest,
+  type ConnectAnkiResponse,
+  type DisconnectAnkiResponse,
   type DisconnectOuraResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
@@ -149,6 +154,10 @@ export const api = {
   today: () => call<TodayResponse>(API_PATHS.today),
   checkOura: () => post<CheckOuraResponse>(API_PATHS.ouraCheck),
   disconnectOura: () => post<DisconnectOuraResponse>(API_PATHS.ouraDisconnect),
+  connectAnki: (login: ConnectAnkiRequest) => post<ConnectAnkiResponse>(API_PATHS.ankiConnect, login),
+  ankiDecks: () => call<AnkiDecksResponse>(API_PATHS.ankiDecks),
+  checkAnki: () => post<CheckAnkiResponse>(API_PATHS.ankiCheck),
+  disconnectAnki: () => post<DisconnectAnkiResponse>(API_PATHS.ankiDisconnect),
   setTimezone: (timezone: string) =>
     post<SetTimezoneResponse>(API_PATHS.timezone, { timezone } satisfies SetTimezoneRequest),
   /** Works signed out. */

@@ -42,6 +42,9 @@ export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">)
   if (current.schedule.kind === "one-time") {
     return ["name", "description", "schedule", "due-by", "penalty", "recipient", "reviewers", "reminders"];
   }
+  if (current.evidenceKind === "anki") {
+    return ["name", "schedule", "due-by", "start-date", "end-date", "penalty", "recipient", "reviewers", "reminders"];
+  }
   return current.evidenceKind === "oura"
     ? ["name", "in-bed-by", "schedule", "start-date", "end-date", "penalty", "recipient", "reviewers", "reminders"]
     : [

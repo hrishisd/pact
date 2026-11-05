@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.ts";
 import { DayChip } from "./excuse-days.tsx";
 import { listNames } from "./change-terms.tsx";
-import { clockText, formatDate, money } from "./format.ts";
+import { ankiMissText, clockText, clockTime, formatDate, money } from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
@@ -51,15 +51,16 @@ function OccurrenceChip({
 
 /**
  * The line under an occurrence: who decided it and why, when Oura saw the
- * owner get into bed, and what a miss cost. `reviewerNames` names who a
+ * owner get into bed or Pact saw the deck finished, and what a miss cost. `reviewerNames` names who a
  * photo waits for; without it the chip says enough.
  */
 function occurrenceLine(record: Occurrence, reviewerNames: string[] = []): string {
-  const { status, decidedBy, recipientName, night } = record;
+  const { status, decidedBy, recipientName, night, anki } = record;
   const bed = night && (night.inBedAt === null ? "No sleep data by 6pm." : `In bed at ${clockText(night.inBedAt)}.`);
   switch (status.kind) {
     case "satisfied":
       if (bed) return bed;
+      if (anki?.checkedAt) return `Finished by ${clockTime(anki.checkedAt)}.`;
       return decidedBy?.kind === "evidence-approved" ? `Photo approved by ${decidedBy.reviewerName}.` : "";
     case "missed": {
       const cost = status.held
@@ -67,6 +68,7 @@ function occurrenceLine(record: Occurrence, reviewerNames: string[] = []): strin
         : `${money(status.penaltyCents)} to ${recipientName ?? "your recipient"}.`;
       if (decidedBy?.kind === "evidence-rejected")
         return `${decidedBy.reviewerName} rejected the photo: “${sentence(decidedBy.reason)}” ${cost}`;
+      if (anki) return `${ankiMissText(anki)}. ${cost}`;
       return `${bed ?? "No photo."} ${cost}`;
     }
     case "excused":

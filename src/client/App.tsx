@@ -8,7 +8,7 @@ import { EvidencePage } from "./EvidencePage.tsx";
 import { ExcusePage } from "./ExcusePage.tsx";
 import { formatDay, initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
-import { BackIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, RingIcon, TodayIcon } from "./icons.tsx";
+import { BackIcon, CardsIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, RingIcon, TodayIcon } from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
 import { forgetThisDevice, usePush, type Push } from "./push.ts";
@@ -324,6 +324,8 @@ function Shell({
           <CreatePact
             ouraConnected={profile.connections.some((connection) => connection.service === "oura")}
             ouraAvailable={profile.ouraAvailable}
+            ankiConnected={profile.connections.some((connection) => connection.service === "anki")}
+            ankiAvailable={profile.ankiAvailable}
             onCancel={nav.back}
             onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
             onInvite={() => setProfileOpen(true)}
@@ -513,9 +515,9 @@ function ProfileSheet({
 }
 
 /**
- * The connections the owner has made (Oura only), each with its status.
+ * The connections the owner has made (Oura, AnkiWeb), each with its status.
  * Reconnect when Oura refused its tokens; Disconnect first warns how many
- * Active pacts use it, since their nights count as Missed until it's back.
+ * Active pacts use it, since their days count as Missed until it's back.
  */
 function ConnectionsSection({
   connections,
@@ -526,82 +528,115 @@ function ConnectionsSection({
   timezone: string;
   onProfile: (p: MeResponse) => void;
 }) {
+  return (
+    <section className="stack">
+      <div className="label">Connections</div>
+      {connections.map((connection) => (
+        <ConnectionRow key={connection.service} connection={connection} timezone={timezone} onProfile={onProfile} />
+      ))}
+    </section>
+  );
+}
+
+/** What each service's row says, and how it disconnects. */
+const SERVICES = {
+  oura: {
+    name: "Oura Ring",
+    short: "Oura",
+    unit: "nights",
+    icon: <RingIcon />,
+    iconClass: "k-ring",
+    disconnect: () => api.disconnectOura(),
+  },
+  anki: {
+    name: "AnkiWeb",
+    short: "AnkiWeb",
+    unit: "days",
+    icon: <CardsIcon />,
+    iconClass: "k-anki",
+    disconnect: () => api.disconnectAnki(),
+  },
+} as const;
+
+function ConnectionRow({
+  connection,
+  timezone,
+  onProfile,
+}: {
+  connection: ConfirmedProfile["connections"][number];
+  timezone: string;
+  onProfile: (p: MeResponse) => void;
+}) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const service = SERVICES[connection.service];
   const disconnect = async () => {
     setBusy(true);
     setError(null);
     try {
-      onProfile(await api.disconnectOura());
+      onProfile(await service.disconnect());
     } catch (failure) {
       setError(`Couldn't disconnect. ${failureText(failure, "Check your connection and try again.")}`);
       setBusy(false);
     }
   };
+  const n = connection.activePacts;
   return (
-    <section className="stack">
-      <div className="label">Connections</div>
-      {connections.map((connection) => {
-        const n = connection.activePacts;
-        return (
-          <div key={connection.service} className="stack">
-            <div className="list">
-              <div className="rowbtn">
-                <span className="kico k-ring" aria-hidden="true">
-                  <RingIcon />
-                </span>
-                <span className="rt">
-                  <b>Oura Ring</b>
-                  <small>Connected {formatDay(connection.connectedAt, timezone)}</small>
-                </span>
-                {connection.status === "connected" ? (
-                  <span className="chip c-ok">Connected</span>
-                ) : (
-                  <span className="chip c-missed">Needs reconnecting</span>
-                )}
-              </div>
-            </div>
-            {asking ? (
-              <div className="alert amber" role="status">
-                <span>
-                  {n > 0 ? (
-                    <>
-                      <b>
-                        {n} active {n === 1 ? "pact uses" : "pacts use"} Oura.
-                      </b>{" "}
-                      {n === 1 ? "Its" : "Their"} nights will count as Missed until you reconnect.
-                    </>
-                  ) : (
-                    "Disconnect Oura? You can connect it again when you next create an Oura pact."
-                  )}
-                </span>
-                <div className="row2">
-                  <button className="btn sm" disabled={busy} onClick={() => setAsking(false)}>
-                    Keep connected
-                  </button>
-                  <button className="btn sm danger" disabled={busy} onClick={() => void disconnect()}>
-                    {busy ? "Disconnecting…" : "Disconnect"}
-                  </button>
-                </div>
-              </div>
+    <div className="stack">
+      <div className="list">
+        <div className="rowbtn">
+          <span className={`kico ${service.iconClass}`} aria-hidden="true">
+            {service.icon}
+          </span>
+          <span className="rt">
+            <b>{service.name}</b>
+            <small>Connected {formatDay(connection.connectedAt, timezone)}</small>
+          </span>
+          {connection.status === "connected" ? (
+            <span className="chip c-ok">Connected</span>
+          ) : (
+            <span className="chip c-missed">Needs reconnecting</span>
+          )}
+        </div>
+      </div>
+      {asking ? (
+        <div className="alert amber" role="status">
+          <span>
+            {n > 0 ? (
+              <>
+                <b>
+                  {n} active {n === 1 ? "pact uses" : "pacts use"} {service.short}.
+                </b>{" "}
+                {n === 1 ? "Its" : "Their"} {service.unit} will count as Missed until you reconnect.
+              </>
             ) : (
-              <div className="row2">
-                {connection.status === "needs-reconnecting" && (
-                  <a className="btn sm primary" href={OURA_RECONNECT_PATH}>
-                    Reconnect
-                  </a>
-                )}
-                <button className="btn sm" onClick={() => setAsking(true)}>
-                  Disconnect
-                </button>
-              </div>
+              `Disconnect ${service.short}? You can connect it again when you next create a pact that uses it.`
             )}
-            {error && <p className="error small">{error}</p>}
+          </span>
+          <div className="row2">
+            <button className="btn sm" disabled={busy} onClick={() => setAsking(false)}>
+              Keep connected
+            </button>
+            <button className="btn sm danger" disabled={busy} onClick={() => void disconnect()}>
+              {busy ? "Disconnecting…" : "Disconnect"}
+            </button>
           </div>
-        );
-      })}
-    </section>
+        </div>
+      ) : (
+        <div className="row2">
+          {connection.status === "needs-reconnecting" && connection.service === "oura" && (
+            <a className="btn sm primary" href={OURA_RECONNECT_PATH}>
+              Reconnect
+            </a>
+          )}
+          <button className="btn sm" onClick={() => setAsking(true)}>
+            Disconnect
+          </button>
+        </div>
+      )}
+      {error && <p className="error small">{error}</p>}
+    </div>
   );
 }
 

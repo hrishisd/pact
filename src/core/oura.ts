@@ -10,10 +10,10 @@
 // request waits longer (`tokenTimeoutMs`), because giving up on a refresh
 // Oura has granted loses the new pair, and the old refresh token is spent.
 
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openWithPragmas, type Db } from "./db.ts";
+import { secretBox, type SecretBox } from "./secret-box.ts";
 import type { AccountId } from "../shared/types.ts";
 import type { Clock, OuraDateRange, OuraSleepPeriod, OuraSleepResult, OuraSource } from "./ports.ts";
 
@@ -116,7 +116,7 @@ class Oura implements OuraAdapter {
   readonly #timeoutMs: number;
   readonly #tokenTimeoutMs: number;
   readonly #log: (line: string) => void;
-  readonly #key: Buffer;
+  readonly #box: SecretBox;
   /** Refreshes in progress, by account: a second caller waits for the first's result. */
   readonly #refreshing = new Map<AccountId, Promise<Tokens | null>>();
 
@@ -133,8 +133,7 @@ class Oura implements OuraAdapter {
     this.#timeoutMs = options.timeoutMs ?? DEFAULTS.timeoutMs;
     this.#tokenTimeoutMs = options.tokenTimeoutMs ?? DEFAULTS.tokenTimeoutMs;
     this.#log = options.log ?? console.log;
-    this.#key = Buffer.from(client.tokenKey, "base64");
-    if (this.#key.length !== 32) throw new Error("the Oura token key must be 32 bytes, base64");
+    this.#box = secretBox(client.tokenKey, "Oura token key");
   }
 
   authorizeUrl(state: string): string {
@@ -349,23 +348,11 @@ class Oura implements OuraAdapter {
     return replaced.changes === 1;
   }
 
-  /** AES-256-GCM: "iv.tag.ciphertext", each base64url. */
   #encrypt(text: string): string {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", this.#key, iv);
-    const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
-    return [iv, cipher.getAuthTag(), encrypted].map((part) => part.toString("base64url")).join(".");
+    return this.#box.encrypt(text);
   }
 
   #decrypt(stored: string): string {
-    const [iv, tag, encrypted] = stored.split(".").map((part) => Buffer.from(part, "base64url")) as [
-      Buffer,
-      Buffer,
-      Buffer,
-    ];
-    // A tag shorter than the 16 bytes #encrypt writes would weaken the check, so it's refused.
-    const decipher = createDecipheriv("aes-256-gcm", this.#key, iv, { authTagLength: 16 });
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+    return this.#box.decrypt(stored);
   }
 }

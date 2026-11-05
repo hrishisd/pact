@@ -98,3 +98,25 @@ describe("Oura", () => {
     expect(loadConfig({ OURA_CLIENT_ID: "id", OURA_CLIENT_SECRET: "secret" }).oura).toMatchObject({ clientId: "id" });
   });
 });
+
+describe("Anki", () => {
+  const ANKI_TOKEN_KEY = Buffer.alloc(32, 2).toString("base64");
+
+  test("production without an Anki token key starts with Anki not set up", () => {
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET }).anki).toBeNull();
+  });
+
+  test("an Anki token key must be 32 bytes, and the Python defaults to python3", () => {
+    expect(() => loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, ANKI_TOKEN_KEY: "c2hvcnQ=" })).toThrow(
+      "ANKI_TOKEN_KEY must be 32 bytes, base64",
+    );
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, ANKI_TOKEN_KEY }).anki).toEqual({
+      tokenKey: ANKI_TOKEN_KEY,
+      python: "python3",
+    });
+    expect(loadConfig({ ANKI_TOKEN_KEY, ANKI_PYTHON: "/opt/anki/bin/python3" }).anki).toEqual({
+      tokenKey: ANKI_TOKEN_KEY,
+      python: "/opt/anki/bin/python3",
+    });
+  });
+});
