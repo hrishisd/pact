@@ -272,7 +272,7 @@ export interface PactTerms {
   waiting: PactWaitingItem[];
   /** What its heat map shows. */
   history: PactHistory;
-  /** An Active Oura Ring pact whose owner's Oura can't be read: the same alert as on Today. Else null. */
+  /** An Active Oura Ring or Anki pact whose owner's Oura or AnkiWeb can't be read: the same alert as on Today. Else null. */
   connectionProblem: ConnectionProblem | null;
 }
 
@@ -679,8 +679,9 @@ export interface Connection {
 }
 
 /**
- * Why the owner's Oura can't be read while an Active bedtime pact needs it:
- * Oura refused its tokens (Needs reconnecting), or the owner disconnected it.
+ * Why the owner's Oura (or AnkiWeb) can't be read while an Active pact needs
+ * it: the service refused Pact's tokens or login (Needs reconnecting), or the
+ * owner disconnected it.
  */
 export type ConnectionProblem = "needs-reconnecting" | "not-connected";
 
@@ -709,6 +710,12 @@ export type TodayAlert =
    * alerts; it goes once the owner reconnects.
    */
   | { kind: "oura-connection"; status: ConnectionProblem }
+  /**
+   * The same for AnkiWeb, while the owner has an Active Anki pact: a day
+   * whose deck isn't finished by its due time counts as Missed. It goes once
+   * the owner reconnects.
+   */
+  | { kind: "anki-connection"; status: ConnectionProblem }
   /**
    * A reviewer asked about one of the owner's items still waiting for a
    * decision, and the owner hasn't replied yet. One per item, with its latest

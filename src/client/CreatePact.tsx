@@ -25,6 +25,7 @@ import {
 } from "../shared/types.ts";
 import { API_PATHS, type Json } from "../shared/api.ts";
 import { takeOuraResult } from "./oura.tsx";
+import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
 import { api, failureText } from "./api.ts";
 import {
   centsInputText,
@@ -308,7 +309,7 @@ export function CreatePact({
   );
   // Connecting AnkiWeb happens on this page, so the Connect step goes once it has.
   const [ankiConnected, setAnkiConnected] = useState(ankiConnectedBefore);
-  const [ankiLogin, setAnkiLogin] = useState<AnkiLogin>({ email: "", password: "", busy: false, failed: null });
+  const [ankiLogin, setAnkiLogin] = useState<AnkiLogin>(NO_ANKI_LOGIN);
   const steps = stepsFor(form.kind, { editing: editing !== undefined, ouraConnected, ankiConnected });
   const [stepIndex, setStepIndex] = useState(ouraResult === "connected" ? steps.indexOf("goal") : 0);
   const [tried, setTried] = useState(false);
@@ -358,18 +359,12 @@ export function CreatePact({
 
   const connectAnki = async () => {
     setAnkiLogin((login) => ({ ...login, busy: true, failed: null }));
-    try {
-      const result = await api.connectAnki({ email: ankiLogin.email, password: ankiLogin.password });
-      if (result.ok) {
-        // The password goes no further than that request.
-        setAnkiLogin({ email: ankiLogin.email, password: "", busy: false, failed: null });
-        setAnkiConnected(true);
-        return goTo(stepsFor("anki", { editing: false, ouraConnected, ankiConnected: true }).indexOf("goal"));
-      }
-      setAnkiLogin((login) => ({ ...login, busy: false, failed: result.reason }));
-    } catch (error) {
-      setAnkiLogin((login) => ({ ...login, busy: false, failed: { error } }));
-    }
+    const result = await signInToAnki(ankiLogin);
+    if (result !== true) return setAnkiLogin(result);
+    // The password goes no further than that request.
+    setAnkiLogin({ email: ankiLogin.email, password: "", busy: false, failed: null });
+    setAnkiConnected(true);
+    goTo(stepsFor("anki", { editing: false, ouraConnected, ankiConnected: true }).indexOf("goal"));
   };
 
   const create = async () => {
@@ -609,47 +604,12 @@ function ConnectStep() {
   );
 }
 
-/** The Connect AnkiWeb step's fields, and why the last try didn't connect. */
-interface AnkiLogin {
-  email: string;
-  password: string;
-  busy: boolean;
-  failed: "wrong-login" | "unreachable" | "unavailable" | { error: unknown } | null;
-}
-
 function ConnectAnkiStep({ login, onChange }: { login: AnkiLogin; onChange: (change: Partial<AnkiLogin>) => void }) {
-  const { failed } = login;
   return (
     <>
       <h2>Connect AnkiWeb</h2>
       <p>Sign in with your AnkiWeb account, the one your phone and computer sync to.</p>
-      <label className="field">
-        <span>AnkiWeb email</span>
-        <input
-          className="inp"
-          type="email"
-          autoComplete="username"
-          value={login.email}
-          placeholder="you@example.com"
-          onChange={(e) => onChange({ email: e.target.value })}
-        />
-      </label>
-      <label className="field">
-        <span>Password</span>
-        <input
-          className="inp"
-          type="password"
-          autoComplete="current-password"
-          value={login.password}
-          onChange={(e) => onChange({ password: e.target.value })}
-        />
-      </label>
-      {failed === "wrong-login" && <p className="error">AnkiWeb didn't accept that email and password.</p>}
-      {failed === "unreachable" && <p className="error">Couldn't reach AnkiWeb. Try again in a minute.</p>}
-      {failed === "unavailable" && <p className="error">Anki isn't set up yet.</p>}
-      {typeof failed === "object" && failed !== null && (
-        <p className="error">Couldn't connect. {failureText(failed.error, "Check your connection and try again.")}</p>
-      )}
+      <AnkiLoginFields login={login} onChange={onChange} />
       <p className="tos">AnkiWeb doesn't officially allow other apps to sign in, and could suspend your account.</p>
       <p className="keeps">
         Pact trades your password for an AnkiWeb sign-in key, then forgets the password. It keeps the key, encrypted,

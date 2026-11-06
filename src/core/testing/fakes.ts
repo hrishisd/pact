@@ -204,6 +204,11 @@ export class FakeAnkiSource implements AnkiSource {
     this.#disconnected.add(account);
   }
 
+  /** AnkiWeb takes the account's login again, as after the owner reconnects. */
+  reconnect(account: AccountId): void {
+    this.#disconnected.delete(account);
+  }
+
   /**
    * Holds `account`'s next deckCounts call open, as a slow AnkiWeb would:
    * `started` resolves once it's called, and it answers once `release` is called.

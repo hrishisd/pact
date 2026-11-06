@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { inviteTokenFromPath, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
+import { AnkiReconnectForm } from "./anki.tsx";
 import { ChangePact } from "./ChangePact.tsx";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
 import { CreatePact, EditPact } from "./CreatePact.tsx";
@@ -516,7 +517,8 @@ function ProfileSheet({
 
 /**
  * The connections the owner has made (Oura, AnkiWeb), each with its status.
- * Reconnect when Oura refused its tokens; Disconnect first warns how many
+ * Reconnect when Oura refused its tokens or AnkiWeb its login (AnkiWeb's
+ * signs in again on the spot); Disconnect first warns how many
  * Active pacts use it, since their days count as Missed until it's back.
  */
 function ConnectionsSection({
@@ -568,6 +570,7 @@ function ConnectionRow({
   onProfile: (p: MeResponse) => void;
 }) {
   const [asking, setAsking] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const service = SERVICES[connection.service];
@@ -579,6 +582,15 @@ function ConnectionRow({
     } catch (failure) {
       setError(`Couldn't disconnect. ${failureText(failure, "Check your connection and try again.")}`);
       setBusy(false);
+    }
+  };
+  const reconnected = async () => {
+    setError(null);
+    try {
+      onProfile(await api.me());
+      setReconnecting(false);
+    } catch (failure) {
+      setError(`Reconnected, but couldn't reload. ${failureText(failure, "Reopen Pact.")}`);
     }
   };
   const n = connection.activePacts;
@@ -623,12 +635,19 @@ function ConnectionRow({
             </button>
           </div>
         </div>
+      ) : reconnecting ? (
+        <AnkiReconnectForm onReconnected={() => void reconnected()} onCancel={() => setReconnecting(false)} />
       ) : (
         <div className="row2">
           {connection.status === "needs-reconnecting" && connection.service === "oura" && (
             <a className="btn sm primary" href={OURA_RECONNECT_PATH}>
               Reconnect
             </a>
+          )}
+          {connection.status === "needs-reconnecting" && connection.service === "anki" && (
+            <button className="btn sm primary" onClick={() => setReconnecting(true)}>
+              Reconnect
+            </button>
           )}
           <button className="btn sm" onClick={() => setAsking(true)}>
             Disconnect

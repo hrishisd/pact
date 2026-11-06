@@ -688,3 +688,129 @@ describe("a reminder from the rollover hour", () => {
     expect(reminders()).toHaveLength(1);
   });
 });
+
+describe("AnkiWeb refusing Pact's login", () => {
+  function connectionProblems(s: Scenario, owner: AccountHandle) {
+    return s.notifier.sentTo(owner).filter((n) => n.kind === "connection-problem");
+  }
+
+  test("at 08:00: one alert and one push, then no calls; reconnected at 12:00, a finished deck satisfies the day", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    deckShows({ review: 42 }, TUE, "Tue 07:50");
+    await s.advanceTo("Tue 07:50");
+
+    s.ankiSource.disconnect(owner.id);
+    await s.advanceTo("Tue 08:00");
+    const calls = s.ankiSource.countCalls.length;
+    await s.advanceTo("Tue 08:30");
+    await s.advanceTo("Tue 11:59");
+    s.setClockTo("Tue 11:59");
+    await owner.checkAnki();
+
+    expect(s.ankiSource.countCalls).toHaveLength(calls);
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
+    expect(owner.today().alerts).toEqual([{ kind: "anki-connection", status: "needs-reconnecting" }]);
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "needs-reconnecting" } });
+    expect(connectionProblems(s, owner)).toEqual([
+      {
+        recipient: owner.id,
+        kind: "connection-problem",
+        channel: "push",
+        payload: {
+          title: "AnkiWeb needs reconnecting",
+          body: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
+          url: "/",
+        },
+      },
+    ]);
+
+    s.ankiSource.reconnect(owner.id);
+    s.setClockTo("Tue 12:00");
+    await owner.connectAnki();
+    deckShows({}, TUE, "Tue 12:00");
+    await s.advanceTo("Tue 12:01");
+
+    expect(status(owner, pactId, TUE)).toBe("satisfied");
+    expect(owner.today().alerts).toEqual([]);
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: null } });
+    expect(connectionProblems(s, owner)).toHaveLength(1);
+  });
+
+  test("a check now that finds it refused marks it the same way", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    s.ankiSource.disconnect(owner.id);
+    s.setClockTo("Tue 09:00");
+    await owner.checkAnki();
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
+    expect(connectionProblems(s, owner)).toHaveLength(1);
+  });
+
+  test("never reconnected: the day is Missed at its due time, as not reached", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    s.ankiSource.disconnect(owner.id);
+    await s.advanceTo("Tue 08:00");
+    await s.advanceTo("Tue 23:59");
+    expect(status(owner, pactId, TUE)).toBe("not-judged");
+    await s.advanceTo("Wed 00:00");
+    expect(day(owner, pactId, TUE)).toMatchObject({
+      status: { kind: "missed" },
+      anki: { cardsLeft: null, checkedAt: null },
+    });
+  });
+
+  test("a reconnect while a check is running isn't undone when the check comes back refused", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.ankiSource.disconnect(owner.id);
+    const download = s.ankiSource.holdDeckCounts(owner.id);
+    const ticking = s.advanceTo("Tue 08:00");
+    await download.started;
+    // The owner reconnects with a new login while the check with the old one is still running.
+    s.clock.set(new Date(s.at("Tue 08:00").getTime() + 30_000));
+    await owner.connectAnki();
+    download.release();
+    await ticking;
+
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
+    expect(connectionProblems(s, owner)).toEqual([]);
+    s.ankiSource.reconnect(owner.id);
+    deckShows({}, TUE, "Tue 08:15");
+    await s.advanceTo("Tue 08:20");
+    expect(status(owner, pactId, TUE)).toBe("satisfied");
+  });
+
+  test("a failed check doesn't count as refused", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    failOnCall(s.ankiSource, "deckCounts", 1, new Error("AnkiWeb timed out"));
+    await s.advanceTo("Tue 08:00");
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
+    expect(owner.today().alerts).toEqual([]);
+    expect(connectionProblems(s, owner)).toEqual([]);
+  });
+
+  test("disconnected on Profile: an alert to connect again, no calls, and the day is Missed", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    await createPact({ days: ["wed"] });
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ service: "anki", activePacts: 2 })]);
+    await owner.disconnectAnki();
+
+    expect(owner.today().alerts).toEqual([{ kind: "anki-connection", status: "not-connected" }]);
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "not-connected" } });
+    await s.advanceTo("Tue 12:00");
+    await s.advanceTo("Wed 00:00");
+    expect(s.ankiSource.countCalls).toEqual([]);
+    expect(status(owner, pactId, TUE)).toBe("missed");
+  });
+});

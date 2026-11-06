@@ -498,6 +498,7 @@ const ANKI_POLL_INTERVAL_MS = 10 * 60 * 1000;
 const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
 /** What a broken Oura connection means for the owner, in its push and on Today. */
 const RECONNECT_BEFORE_6PM = "A night with no data by 6pm counts as Missed. Reconnect before then.";
+const RECONNECT_ANKI = "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.";
 /** The push services browsers use, as domains; a saved endpoint must be on one of them. */
 const PUSH_SERVICE_DOMAINS = [
   "push.apple.com",
@@ -1041,7 +1042,13 @@ class Core implements PactCore {
           history,
           anki: this.#ankiTerms(row),
           connectionProblem:
-            row.evidence_kind === "oura" && row.stage === "active" ? this.#ouraConnectionProblem(accountId) : null,
+            row.stage !== "active"
+              ? null
+              : row.evidence_kind === "oura"
+                ? this.#ouraConnectionProblem(accountId)
+                : row.evidence_kind === "anki"
+                  ? this.#connectionProblem(accountId, "anki")
+                  : null,
         };
         return { ok: true, pact };
       },
@@ -1174,6 +1181,8 @@ class Core implements PactCore {
       connectAnki: () =>
         this.#command(() => {
           account();
+          // A new login: the next tick checks at once, whenever the last check was.
+          this.#ankiPolls.delete(accountId);
           this.#db
             .prepare(
               `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, 'anki', 'connected', ?)
@@ -1184,6 +1193,7 @@ class Core implements PactCore {
       ankiDecks: async () => {
         account();
         if (!this.#hasConnection(accountId, "anki")) return { ok: false, reason: "not-connected" };
+        const askedAt = this.#clock.now();
         let result;
         try {
           result = await this.#ankiSource.decks(accountId);
@@ -1191,7 +1201,10 @@ class Core implements PactCore {
           this.#log(`AnkiWeb deck list for account ${accountId} failed: ${errorText(error)}`);
           return { ok: false, reason: "unreachable" };
         }
-        if (!result.ok) return result;
+        if (!result.ok) {
+          await this.#command(() => this.#markAnkiDisconnected(accountId, askedAt));
+          return result;
+        }
         const { decks, rolloverHour } = result;
         await this.#command(() => {
           this.#db
@@ -3864,9 +3877,14 @@ class Core implements PactCore {
 
   /** Why Oura can't be read for the account, or null when its connection works. */
   #ouraConnectionProblem(accountId: AccountId): ConnectionProblem | null {
+    return this.#connectionProblem(accountId, "oura");
+  }
+
+  /** Why the service can't be read for the account, or null when its connection works. */
+  #connectionProblem(accountId: AccountId, service: Connection["service"]): ConnectionProblem | null {
     const row = this.#db
-      .prepare(`SELECT status FROM connection WHERE account_id = ? AND service = 'oura'`)
-      .get(accountId) as { status: Connection["status"] } | undefined;
+      .prepare(`SELECT status FROM connection WHERE account_id = ? AND service = ?`)
+      .get(accountId, service) as { status: Connection["status"] } | undefined;
     if (!row) return "not-connected";
     return row.status === "connected" ? null : row.status;
   }
@@ -4421,9 +4439,11 @@ class Core implements PactCore {
       ...this.#questionAlerts(ownerId),
     ];
     const connectionProblem = this.#activeOuraPacts(ownerId) > 0 ? this.#ouraConnectionProblem(ownerId) : null;
+    const ankiProblem = this.#activeAnkiPacts(ownerId) > 0 ? this.#connectionProblem(ownerId, "anki") : null;
     return {
       alerts: [
         ...(connectionProblem ? [{ kind: "oura-connection" as const, status: connectionProblem }] : []),
+        ...(ankiProblem ? [{ kind: "anki-connection" as const, status: ankiProblem }] : []),
         ...bills.alerts,
         ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert),
       ],
@@ -5169,7 +5189,8 @@ class Core implements PactCore {
    * always does. Accounts are checked at once, so a slow AnkiWeb delays the
    * tick by its own call only, never by the sum of everyone's. A call that
    * throws is logged and forgotten, so the next tick tries again. A
-   * "disconnected" answer checks nothing. While a call runs, it holds judging
+   * "disconnected" answer checks nothing, and `#recordAnkiChecks` marks the
+   * connection Needs reconnecting. While a call runs, it holds judging
    * the days it may still satisfy (`#ankiCheckHolds`).
    */
   async #fetchAnki(t: Date, owner?: AccountId): Promise<FetchedAnki[]> {
@@ -5188,7 +5209,7 @@ class Core implements PactCore {
       this.#ankiChecksRunning.set(account, checks.add(running));
       try {
         const result = await this.#ankiSource.deckCounts(account, deckIds);
-        return result.ok ? { account, result, checkedAt: t } : null;
+        return { account, result, checkedAt: t };
       } catch (error) {
         this.#ankiPolls.delete(account);
         this.#log(`AnkiWeb check for account ${account} failed, nothing checked: ${errorText(error)}`);
@@ -5207,10 +5228,14 @@ class Core implements PactCore {
    * Anki pact on a checked deck Satisfied as of the check when it found the
    * deck finished (New, Learn and Due all 0) for the pact's day, evaluated
    * before that day's due time. A deck gone from the collection records
-   * nothing.
+   * nothing. A refused login marks the connection Needs reconnecting.
    */
   #recordAnkiChecks(fetched: FetchedAnki[]): void {
     for (const { account, result, checkedAt } of fetched) {
+      if (!result.ok) {
+        this.#markAnkiDisconnected(account, checkedAt);
+        continue;
+      }
       this.#renameAnkiDecks(account, result.names);
       const { ankiDate, asOf } = result;
       for (const [deckId, counts] of Object.entries(result.decks)) {
@@ -5269,6 +5294,29 @@ class Core implements PactCore {
     });
     if (!renamed) return;
     this.#db.prepare(`UPDATE anki_deck_list SET decks = ? WHERE account_id = ?`).run(JSON.stringify(decks), accountId);
+  }
+
+  /**
+   * Marks the account's AnkiWeb connection Needs reconnecting after AnkiWeb
+   * refused its login, once: the owner gets one push, and the Today and pact
+   * alerts show until they reconnect. Until then no check is made. A
+   * connection made again since AnkiWeb was asked (`askedAt`) is left alone:
+   * its new host key wasn't the one refused.
+   */
+  #markAnkiDisconnected(account: AccountId, askedAt: Date): void {
+    const marked = this.#db
+      .prepare(
+        `UPDATE connection SET status = 'needs-reconnecting'
+         WHERE account_id = ? AND service = 'anki' AND status = 'connected' AND connected_at <= ?`,
+      )
+      .run(account, askedAt.toISOString());
+    if (marked.changes === 0) return;
+    this.#enqueue({
+      recipient: account,
+      kind: "connection-problem",
+      channel: "push",
+      payload: { title: "AnkiWeb needs reconnecting", body: RECONNECT_ANKI, url: APP_PATHS.today },
+    });
   }
 
   /** On an Anki day just judged Missed at its due time: why, from the last check that counted for it. */
@@ -5915,7 +5963,8 @@ function capitalized(text: string): string {
 /** One check `#fetchAnki` got an answer to: whose collection, what AnkiWeb found, and when Pact checked. */
 interface FetchedAnki {
   account: AccountId;
-  result: Extract<AnkiCountsResult, { ok: true }>;
+  result: AnkiCountsResult;
+  /** When AnkiWeb was asked. */
   checkedAt: Date;
 }
 
