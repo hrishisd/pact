@@ -142,7 +142,7 @@ describe("creating an Anki pact", () => {
       description: "",
       dueBy: "01:00",
       inBedBy: null,
-      anki: { deckId: SPANISH, deckName: "Spanish", rolloverHour: 4 },
+      anki: { deckId: SPANISH, deckName: "Spanish", deckMissing: false, rolloverHour: 4 },
     });
     expect(owner.profile().connections).toEqual([expect.objectContaining({ service: "anki", activePacts: 1 })]);
   });
@@ -509,6 +509,7 @@ describe("Today", () => {
         dueAt: s.at("Wed 00:00"),
         dueBy: null,
         deckName: "Spanish",
+        deckMissing: false,
         lastCheck: null,
       },
     ]);
@@ -812,5 +813,49 @@ describe("AnkiWeb refusing Pact's login", () => {
     await s.advanceTo("Wed 00:00");
     expect(s.ankiSource.countCalls).toEqual([]);
     expect(status(owner, pactId, TUE)).toBe("missed");
+  });
+});
+
+describe("a deck gone from Anki", () => {
+  test("shows an alert on the pact and Today, its day is Missed at the due time, and the owner can excuse it", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.ankiSource.removeDeck(owner.id, SPANISH);
+    s.ankiSource.setAnkiDay(owner.id, TUE, s.at("Tue 20:00"));
+    await s.advanceTo("Tue 20:00");
+    expect(owner.pact(pactId)).toMatchObject({
+      ok: true,
+      pact: { anki: { deckId: SPANISH, deckName: "Spanish", deckMissing: true } },
+    });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckName: "Spanish", deckMissing: true })]);
+
+    await s.advanceTo("Wed 00:00");
+    expect(status(owner, pactId, TUE)).toBe("missed");
+
+    s.setClockTo("Wed 09:00");
+    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Deleted the deck by mistake" }, []);
+    if (!filed.ok) throw new Error(filed.reason);
+    expect(await reviewer.decide(filed.excuseId, { kind: "approve" })).toEqual({ ok: true });
+    expect(status(owner, pactId, TUE)).toBe("excused");
+  });
+
+  test("the alert goes once a check finds the deck again", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.ankiSource.removeDeck(owner.id, SPANISH);
+    s.ankiSource.setAnkiDay(owner.id, TUE, s.at("Tue 20:00"));
+    await s.advanceTo("Tue 20:00");
+    // The deck picker no longer lists it, but the alert still names it.
+    await owner.ankiDecks();
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { anki: { deckName: "Spanish", deckMissing: true } } });
+
+    deckShows({ review: 5 }, TUE, "Tue 20:10");
+    await s.advanceTo("Tue 20:10");
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { anki: { deckName: "Spanish", deckMissing: false } } });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckMissing: false })]);
   });
 });

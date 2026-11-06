@@ -29,7 +29,7 @@ import {
   type TodayWaitingItem,
   type WeekProgress,
 } from "../shared/types.ts";
-import { AnkiConnectionAlert } from "./anki.tsx";
+import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
 import {
   ankiMissText,
@@ -549,7 +549,11 @@ function AnkiCard({
       <div className="meta due">
         Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} · {timeLeft(Date.parse(card.dueAt) - now)}
       </div>
-      <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
+      {card.deckMissing ? (
+        <AnkiDeckMissing deckName={card.deckName} />
+      ) : (
+        <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
+      )}
       <div className="row2" onClick={(e) => e.stopPropagation()}>
         <button className="btn" onClick={onFileExcuse}>
           File excuse

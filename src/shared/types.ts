@@ -305,8 +305,10 @@ export type AnkiDecksResult =
 /** An Anki pact's deck, and when its Anki day starts. */
 export interface AnkiTerms {
   deckId: string;
-  /** The deck's name as AnkiWeb last gave it ("Spanish::Verbs" for a subdeck), or null once it's gone from the list. */
+  /** The deck's name as AnkiWeb last gave it ("Spanish::Verbs" for a subdeck), or null if Pact never had it. */
   deckName: string | null;
+  /** Whether the last check found the deck gone from the collection: its days count as Missed until it's back. */
+  deckMissing: boolean;
   /** The collection's "next day starts at" hour, 0–23, when the pact was made: each Anki day starts then. */
   rolloverHour: number;
 }
@@ -859,8 +861,10 @@ export interface TodayAnkiCard extends TodayPactCard {
   dueAt: Date;
   /** Its due-by time, "HH:MM", or null when it's due at midnight. */
   dueBy: string | null;
-  /** The deck's name as AnkiWeb last gave it, or null once it's gone from the list. */
+  /** The deck's name as AnkiWeb last gave it, or null if Pact never had it. */
   deckName: string | null;
+  /** Whether the last check found the deck gone from the collection. */
+  deckMissing: boolean;
   /** The latest check of the deck for this Anki day, or null before the first. */
   lastCheck: { cardsLeft: number; checkedAt: Date } | null;
 }

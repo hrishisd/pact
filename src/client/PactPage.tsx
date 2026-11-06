@@ -10,7 +10,7 @@ import type { Json } from "../shared/api.ts";
 import type { Friend, PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
-import { AnkiConnectionAlert } from "./anki.tsx";
+import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
@@ -88,6 +88,9 @@ export function PactPage({
             ) : (
               <OuraConnectionAlert status={state.pact.connectionProblem} />
             ))}
+          {state.pact.stage === "active" && state.pact.anki?.deckMissing && (
+            <AnkiDeckMissing deckName={state.pact.anki.deckName} />
+          )}
           <EditWindowBar pact={state.pact} onEdit={onEdit} onDeleted={onDeleted} />
           <StageLine pact={state.pact} />
           <NewTerms pact={state.pact} />

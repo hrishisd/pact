@@ -687,4 +687,24 @@ export const migrations: readonly Migration[] = [
   );
   `,
   },
+  // 27: decks gone from Anki, and deck changes
+  `
+  -- The decks the account's Anki pacts are on, as checks last found them:
+  -- the deck's last known full name (NULL if Pact never had one), and since
+  -- when checks find it gone from the collection (NULL while it's there).
+  -- The name outlives the deck list, which drops a deck once it's gone.
+  CREATE TABLE anki_pact_deck (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    deck_id TEXT NOT NULL,
+    name TEXT,
+    missing_since TEXT,
+    PRIMARY KEY (account_id, deck_id)
+  );
+
+  -- An Anki pact's deck can change after the edit window, through a change
+  -- request: an open day keeps the deck it had, as it keeps its other terms.
+  -- Earlier terms from before this are on the deck the pact has now.
+  ALTER TABLE pact_earlier_terms ADD COLUMN anki_deck_id TEXT;
+  UPDATE pact_earlier_terms SET anki_deck_id = (SELECT anki_deck_id FROM pact WHERE pact.id = pact_earlier_terms.pact_id);
+  `,
 ];

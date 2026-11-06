@@ -3852,7 +3852,23 @@ class Core implements PactCore {
 
   /** The deck's name as the last deck list or check found it, or null once it's gone from the list. */
   #ankiDeckName(accountId: AccountId, deckId: string): string | null {
-    return this.#ankiDeckList(accountId)?.decks.find((deck) => deck.id === deckId)?.name ?? null;
+    const listed = this.#ankiDeckList(accountId)?.decks.find((deck) => deck.id === deckId)?.name;
+    return listed ?? this.#ankiPactDeck(accountId, deckId)?.name ?? null;
+  }
+
+  /** A deck an Anki pact is on, as checks last found it; undefined before the first check. */
+  #ankiPactDeck(
+    accountId: AccountId,
+    deckId: string,
+  ): { name: string | null; missing_since: string | null } | undefined {
+    return this.#db
+      .prepare(`SELECT name, missing_since FROM anki_pact_deck WHERE account_id = ? AND deck_id = ?`)
+      .get(accountId, deckId) as { name: string | null; missing_since: string | null } | undefined;
+  }
+
+  /** Whether the last check found the deck gone from the account's collection. */
+  #ankiDeckMissing(accountId: AccountId, deckId: string): boolean {
+    return (this.#ankiPactDeck(accountId, deckId)?.missing_since ?? null) !== null;
   }
 
   /** An Anki pact's deck and rollover hour; null for any other pact. */
@@ -3861,6 +3877,7 @@ class Core implements PactCore {
     return {
       deckId: pact.anki_deck_id,
       deckName: this.#ankiDeckName(pact.owner_account_id, pact.anki_deck_id),
+      deckMissing: this.#ankiDeckMissing(pact.owner_account_id, pact.anki_deck_id),
       rolloverHour: pact.anki_rollover_hour,
     };
   }
@@ -4466,6 +4483,7 @@ class Core implements PactCore {
       dueAt: open.dueAt,
       dueBy: this.#termsOn(pact.id, open.date).due_by,
       deckName: this.#ankiDeckName(ownerId, pact.ankiDeckId!),
+      deckMissing: this.#ankiDeckMissing(ownerId, pact.ankiDeckId!),
       lastCheck: this.#lastAnkiCheck(pact.id, open.date),
     };
   }
@@ -5239,6 +5257,7 @@ class Core implements PactCore {
       this.#renameAnkiDecks(account, result.names);
       const { ankiDate, asOf } = result;
       for (const [deckId, counts] of Object.entries(result.decks)) {
+        this.#notePactDeck(account, deckId, counts === null ? null : (result.names[deckId] ?? null), checkedAt);
         if (counts === null) continue;
         this.#db
           .prepare(
@@ -5294,6 +5313,30 @@ class Core implements PactCore {
     });
     if (!renamed) return;
     this.#db.prepare(`UPDATE anki_deck_list SET decks = ? WHERE account_id = ?`).run(JSON.stringify(decks), accountId);
+  }
+
+  /**
+   * Keeps what a check found of a deck an Anki pact is on: its name, or with
+   * `name` null, that it's gone from the collection since `checkedAt`, under
+   * the last name Pact knew.
+   */
+  #notePactDeck(account: AccountId, deckId: string, name: string | null, checkedAt: Date): void {
+    if (name !== null) {
+      this.#db
+        .prepare(
+          `INSERT INTO anki_pact_deck (account_id, deck_id, name, missing_since) VALUES (?, ?, ?, NULL)
+           ON CONFLICT (account_id, deck_id) DO UPDATE SET name = excluded.name, missing_since = NULL`,
+        )
+        .run(account, deckId, name);
+      return;
+    }
+    this.#db
+      .prepare(
+        `INSERT INTO anki_pact_deck (account_id, deck_id, name, missing_since) VALUES (?, ?, ?, ?)
+         ON CONFLICT (account_id, deck_id) DO UPDATE SET name = COALESCE(anki_pact_deck.name, excluded.name),
+           missing_since = COALESCE(anki_pact_deck.missing_since, excluded.missing_since)`,
+      )
+      .run(account, deckId, this.#ankiDeckName(account, deckId), checkedAt.toISOString());
   }
 
   /**
