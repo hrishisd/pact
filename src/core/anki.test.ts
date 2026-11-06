@@ -253,3 +253,13 @@ test("the dev stand-in reads decks from a file, and refuses the password 'wrong'
     names: { "1": "Spanish" },
   });
 });
+
+test("the dev stand-in answers 'disconnected' while its file says AnkiWeb refuses the login", async () => {
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  const dir = join(s.dbPath, "..");
+  const dev = devAnki(dir, s.clock);
+  writeFileSync(join(dir, "anki-decks.json"), JSON.stringify({ refused: true, decks: DECKS }));
+  expect(await dev.decks(owner.id)).toEqual({ ok: false, reason: "disconnected" });
+  expect(await dev.deckCounts(owner.id, ["1"])).toEqual({ ok: false, reason: "disconnected" });
+});

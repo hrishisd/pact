@@ -2417,6 +2417,37 @@ describe("connecting AnkiWeb", () => {
     expect(s.ankiForgets).toEqual([accountId]);
   });
 
+  test("a change after the edit window can name another deck", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const accountId = s.core.accountIdForEmail(OPERATOR)!;
+    await login(s, owner.cookie, "right");
+    s.ankiSource.setDeck(accountId, { id: "1", name: "Spanish" });
+    s.ankiSource.setDeck(accountId, { id: "2", name: "Italian" });
+    await s.api(API_PATHS.ankiDecks, { cookie: owner.cookie });
+    const anki = { ...pact, evidenceKind: "anki", name: "Spanish", description: "", ankiDeckId: "1" };
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: anki,
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    s.clock.set(s.at("Wed 20:00"));
+
+    const { evidenceKind: _kind, ...change } = { ...anki, ankiDeckId: "2" };
+    const preview = await s.api<ChangePreviewResponse>(API_PATHS.changePreview(created.body.pactId), {
+      cookie: owner.cookie,
+      method: "POST",
+      body: change,
+    });
+    expect(preview.body).toMatchObject({
+      ok: true,
+      preview: {
+        changes: [{ term: "deck", before: { id: "1", name: "Spanish" }, after: { id: "2", name: "Italian" } }],
+        outcome: { kind: "needs-approval" },
+      },
+    });
+  });
+
   test("with Anki not set up, connecting is refused and the profile says so", async () => {
     const s = await server({ production: true, ankiSetUp: false });
     const { cookie } = await operatorWithInvite(s);

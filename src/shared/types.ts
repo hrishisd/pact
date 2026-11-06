@@ -272,7 +272,7 @@ export interface PactTerms {
   waiting: PactWaitingItem[];
   /** What its heat map shows. */
   history: PactHistory;
-  /** An Active Oura Ring pact whose owner's Oura can't be read: the same alert as on Today. Else null. */
+  /** An Active Oura Ring or Anki pact whose owner's Oura or AnkiWeb can't be read: the same alert as on Today. Else null. */
   connectionProblem: ConnectionProblem | null;
 }
 
@@ -305,8 +305,10 @@ export type AnkiDecksResult =
 /** An Anki pact's deck, and when its Anki day starts. */
 export interface AnkiTerms {
   deckId: string;
-  /** The deck's name as AnkiWeb last gave it ("Spanish::Verbs" for a subdeck), or null once it's gone from the list. */
+  /** The deck's name as AnkiWeb last gave it ("Spanish::Verbs" for a subdeck), or null if Pact never had it. */
   deckName: string | null;
+  /** Whether the last check found the deck gone from the collection: its days count as Missed until it's back. */
+  deckMissing: boolean;
   /** The collection's "next day starts at" hour, 0–23, when the pact was made: each Anki day starts then. */
   rolloverHour: number;
 }
@@ -679,10 +681,17 @@ export interface Connection {
 }
 
 /**
- * Why the owner's Oura can't be read while an Active bedtime pact needs it:
- * Oura refused its tokens (Needs reconnecting), or the owner disconnected it.
+ * Why the owner's Oura (or AnkiWeb) can't be read while an Active pact needs
+ * it: the service refused Pact's tokens or login (Needs reconnecting), or the
+ * owner disconnected it.
  */
 export type ConnectionProblem = "needs-reconnecting" | "not-connected";
+
+/** What a broken connection costs and what to do, as its push and its alerts say after "… needs reconnecting." */
+export const RECONNECT_TEXT: Record<Connection["service"], string> = {
+  oura: "A night with no data by 6pm counts as Missed. Reconnect before then.",
+  anki: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
+};
 
 /**
  * The Today query, in display order: alerts, then cards in their sections,
@@ -709,6 +718,12 @@ export type TodayAlert =
    * alerts; it goes once the owner reconnects.
    */
   | { kind: "oura-connection"; status: ConnectionProblem }
+  /**
+   * The same for AnkiWeb, while the owner has an Active Anki pact: a day
+   * whose deck isn't finished by its due time counts as Missed. It goes once
+   * the owner reconnects.
+   */
+  | { kind: "anki-connection"; status: ConnectionProblem }
   /**
    * A reviewer asked about one of the owner's items still waiting for a
    * decision, and the owner hasn't replied yet. One per item, with its latest
@@ -852,8 +867,10 @@ export interface TodayAnkiCard extends TodayPactCard {
   dueAt: Date;
   /** Its due-by time, "HH:MM", or null when it's due at midnight. */
   dueBy: string | null;
-  /** The deck's name as AnkiWeb last gave it, or null once it's gone from the list. */
+  /** The deck's name as AnkiWeb last gave it, or null if Pact never had it. */
   deckName: string | null;
+  /** Whether the last check found the deck gone from the collection. */
+  deckMissing: boolean;
   /** The latest check of the deck for this Anki day, or null before the first. */
   lastCheck: { cardsLeft: number; checkedAt: Date } | null;
 }
@@ -1269,6 +1286,8 @@ export interface PactChange {
   recipientId: string;
   /** One or more of the owner's friends. */
   reviewerIds: AccountId[];
+  /** Anki only: the deck, from the owner's deck list. Left out to keep the deck it has. Changing it always needs approval. */
+  ankiDeckId?: string;
   /** Why, for the reviewers, when part of it needs approval. Optional; trimmed, and a blank note is none. */
   note?: string;
 }
@@ -1285,6 +1304,13 @@ export type ChangeEffect = "needs-approval" | "stricter" | "at-once";
 export type TermChange =
   | { term: "name"; before: string; after: string; effect: ChangeEffect }
   | { term: "description"; before: string; after: string; effect: ChangeEffect }
+  /** An Anki pact's deck: its id, and its name as AnkiWeb last gave it (null if Pact never had it). */
+  | {
+      term: "deck";
+      before: { id: string; name: string | null };
+      after: { id: string; name: string | null };
+      effect: ChangeEffect;
+    }
   /** "HH:MM". */
   | { term: "in-bed-by"; before: string; after: string; effect: ChangeEffect }
   /** "HH:MM", or null for midnight. */
@@ -1378,6 +1404,7 @@ export type CurrentTerms = Pick<
   | "penaltyCents"
   | "recipient"
   | "reviewers"
+  | "anki"
 >;
 
 /** A change request, as its reviewers and its owner see it. */

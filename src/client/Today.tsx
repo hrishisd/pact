@@ -29,6 +29,7 @@ import {
   type TodayWaitingItem,
   type WeekProgress,
 } from "../shared/types.ts";
+import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
 import {
   ankiMissText,
@@ -96,9 +97,11 @@ export function Today({
     reload,
     CHECK_OURA_EVERY_MS,
   );
+  const ankiProblem = today?.alerts.some((alert) => alert.kind === "anki-connection") ?? false;
   const checkingAnki = useCheckNow(
-    today?.sections.some((section) => section.kind === "to-do" && section.cards.some((c) => c.kind === "anki")) ??
-      false,
+    !ankiProblem &&
+      (today?.sections.some((section) => section.kind === "to-do" && section.cards.some((c) => c.kind === "anki")) ??
+        false),
     api.checkAnki,
     reload,
     null,
@@ -212,6 +215,8 @@ function alertKey(alert: Json<TodayAlert>): string {
       return `question:${alert.item.id}`;
     case "oura-connection":
       return "oura";
+    case "anki-connection":
+      return "anki";
   }
 }
 
@@ -544,7 +549,11 @@ function AnkiCard({
       <div className="meta due">
         Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} · {timeLeft(Date.parse(card.dueAt) - now)}
       </div>
-      <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
+      {card.deckMissing ? (
+        <AnkiDeckMissing deckName={card.deckName} />
+      ) : (
+        <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
+      )}
       <div className="row2" onClick={(e) => e.stopPropagation()}>
         <button className="btn" onClick={onFileExcuse}>
           File excuse
@@ -726,6 +735,8 @@ function Alert({
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
     case "oura-connection":
       return <OuraConnectionAlert status={alert.status} error={ouraError} />;
+    case "anki-connection":
+      return <AnkiConnectionAlert status={alert.status} onReconnected={onChanged} />;
   }
 }
 

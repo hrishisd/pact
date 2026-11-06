@@ -25,6 +25,8 @@ export interface ChangeableTerms {
   reviewerIds: AccountId[];
   /** "HH:MM" each, in the order they go off, no repeats. */
   reminders: string[];
+  /** Anki only, the deck's id; null for any other pact (and in change requests sent before decks could change). */
+  ankiDeckId: string | null;
 }
 
 /** One changed term, with its effect, in the Request change form's order. */
@@ -32,6 +34,7 @@ export interface TermDiff {
   term:
     | "name"
     | "description"
+    | "deck"
     | "in-bed-by"
     | "schedule"
     | "due-by"
@@ -56,6 +59,10 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms, ankiR
   if (after.name !== before.name) add("name", "at-once");
   // It defines what a photo must show; only a reviewer can judge a new one.
   if (after.description !== before.description) add("description", "needs-approval");
+  // Pact can't tell whether another deck is easier: only a reviewer can judge it.
+  if (after.ankiDeckId !== before.ankiDeckId && before.ankiDeckId !== null && after.ankiDeckId !== null) {
+    add("deck", "needs-approval");
+  }
   if (after.inBedBy !== before.inBedBy && before.inBedBy !== null && after.inBedBy !== null) {
     add("in-bed-by", lateness(after.inBedBy) > lateness(before.inBedBy) ? "needs-approval" : "stricter");
   }

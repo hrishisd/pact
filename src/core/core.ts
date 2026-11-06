@@ -60,6 +60,7 @@ import {
   MAX_REMINDERS,
   MAX_WEEKLY_TARGET,
   NOTIFICATION_SETTINGS,
+  RECONNECT_TEXT,
   WEEKDAYS,
   type AcceptExcuseRejectionResult,
   type AcceptInviteResult,
@@ -497,7 +498,11 @@ const ANKI_POLL_INTERVAL_MS = 10 * 60 * 1000;
  */
 const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
 /** What a broken Oura connection means for the owner, in its push and on Today. */
-const RECONNECT_BEFORE_6PM = "A night with no data by 6pm counts as Missed. Reconnect before then.";
+/** The push when a connection needs reconnecting, by service. */
+const RECONNECT_PUSH: Record<Connection["service"], { title: string; body: string }> = {
+  oura: { title: "Oura needs reconnecting", body: RECONNECT_TEXT.oura },
+  anki: { title: "AnkiWeb needs reconnecting", body: RECONNECT_TEXT.anki },
+};
 /** The push services browsers use, as domains; a saved endpoint must be on one of them. */
 const PUSH_SERVICE_DOMAINS = [
   "push.apple.com",
@@ -1039,9 +1044,14 @@ class Core implements PactCore {
             this.#waitingExcuses(accountId, pactId),
           ) as PactWaitingItem[],
           history,
-          anki: this.#ankiTerms(row),
           connectionProblem:
-            row.evidence_kind === "oura" && row.stage === "active" ? this.#ouraConnectionProblem(accountId) : null,
+            row.stage !== "active"
+              ? null
+              : row.evidence_kind === "oura"
+                ? this.#connectionProblem(accountId, "oura")
+                : row.evidence_kind === "anki"
+                  ? this.#connectionProblem(accountId, "anki")
+                  : null,
         };
         return { ok: true, pact };
       },
@@ -1050,7 +1060,7 @@ class Core implements PactCore {
         const checked = this.#checkedChange(accountId, timezone, pactId, change, this.#clock.now());
         if (!checked.ok) return checked;
         const { before, after, diffs, outcome } = checked;
-        const preview: ChangePreview = { changes: this.#termChanges(before, after, diffs), outcome };
+        const preview: ChangePreview = { changes: this.#termChanges(accountId, before, after, diffs), outcome };
         return { ok: true, preview } satisfies ChangePreviewResult;
       },
       changePact: (pactId, change) =>
@@ -1161,7 +1171,7 @@ class Core implements PactCore {
         this.#ouraChecks.set(accountId, now.getTime());
         const fetched = await this.#fetchSleep(now, accountId);
         await this.#command(() => {
-          this.#markDisconnected(fetched);
+          for (const account of fetched.disconnected) this.#markDisconnected("oura", account, fetched.askedAt);
           this.#noteOuraClock(fetched.sleep);
           this.#judgeNights(now, fetched.sleep, accountId);
         });
@@ -1174,6 +1184,8 @@ class Core implements PactCore {
       connectAnki: () =>
         this.#command(() => {
           account();
+          // A new login: the next tick checks at once, whenever the last check was.
+          this.#ankiPolls.delete(accountId);
           this.#db
             .prepare(
               `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, 'anki', 'connected', ?)
@@ -1184,6 +1196,7 @@ class Core implements PactCore {
       ankiDecks: async () => {
         account();
         if (!this.#hasConnection(accountId, "anki")) return { ok: false, reason: "not-connected" };
+        const askedAt = this.#clock.now();
         let result;
         try {
           result = await this.#ankiSource.decks(accountId);
@@ -1191,7 +1204,10 @@ class Core implements PactCore {
           this.#log(`AnkiWeb deck list for account ${accountId} failed: ${errorText(error)}`);
           return { ok: false, reason: "unreachable" };
         }
-        if (!result.ok) return result;
+        if (!result.ok) {
+          await this.#command(() => this.#markDisconnected("anki", accountId, askedAt));
+          return result;
+        }
         const { decks, rolloverHour } = result;
         await this.#command(() => {
           this.#db
@@ -3080,7 +3096,7 @@ class Core implements PactCore {
 
   /** The terms the pact's occurrence dated `date` follows: those in force when it opened. */
   #termsOn(pactId: string, date: LocalDate): DatedTerms {
-    const columns = `description, schedule, in_bed_by, due_by, penalty_cents, recipient_id`;
+    const columns = `description, schedule, in_bed_by, due_by, penalty_cents, recipient_id, anki_deck_id`;
     const earlier = this.#db
       .prepare(`SELECT ${columns} FROM pact_earlier_terms WHERE pact_id = ? AND until > ? ORDER BY until LIMIT 1`)
       .get(pactId, date) as DatedTerms | undefined;
@@ -3101,6 +3117,7 @@ class Core implements PactCore {
       recipientId: pact.recipient_id,
       reviewerIds: this.#reviewersOf(pact.id),
       reminders: JSON.parse(pact.reminders) as string[],
+      ankiDeckId: pact.anki_deck_id,
     };
   }
 
@@ -3120,6 +3137,7 @@ class Core implements PactCore {
       penaltyCents: pact.penalty_cents,
       recipient,
       reviewers: this.#friendsSortedByName(this.#reviewersOf(pact.id)),
+      anki: this.#ankiTerms(pact),
       reminders: JSON.parse(pact.reminders) as string[],
     };
   }
@@ -3165,16 +3183,13 @@ class Core implements PactCore {
     if (!pact) return { ok: false, reason: "pact-not-found" };
     if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
     if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
-    const { note: _note, ...terms } = change;
-    // A change keeps the pact's deck: changing it is ticket-04 work, always reviewed.
+    const { note: _note, ankiDeckId: newDeckId, ...terms } = change;
+    // An Anki pact keeps its deck unless the change names another.
+    const ankiDeckId = pact.anki_deck_id === null ? undefined : (newDeckId ?? pact.anki_deck_id);
     const checked = this.#checkedPact(
       ownerId,
       timezone,
-      {
-        ...terms,
-        evidenceKind: pact.evidence_kind,
-        ...(pact.anki_deck_id !== null && { ankiDeckId: pact.anki_deck_id }),
-      },
+      { ...terms, evidenceKind: pact.evidence_kind, ...(ankiDeckId !== undefined && { ankiDeckId }) },
       new Date(pact.created_at),
       pact,
     );
@@ -3196,6 +3211,7 @@ class Core implements PactCore {
       recipientId: change.recipientId,
       reviewerIds: [...checked.reviewerIds].sort(),
       reminders: checked.reminders,
+      ankiDeckId: checked.ankiDeckId,
     };
     // Reminders apply at once, so they go off before the due time in force now as well as the new one.
     const current = {
@@ -3332,8 +3348,9 @@ class Core implements PactCore {
     this.#db
       .prepare(
         `INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, in_bed_by, due_by, penalty_cents,
-                                         recipient_id)
-         SELECT id, ?, description, schedule, in_bed_by, due_by, penalty_cents, recipient_id FROM pact WHERE id = ?
+                                         recipient_id, anki_deck_id)
+         SELECT id, ?, description, schedule, in_bed_by, due_by, penalty_cents, recipient_id, anki_deck_id
+         FROM pact WHERE id = ?
          ON CONFLICT (pact_id, until) DO NOTHING`,
       )
       .run(from, pact.id);
@@ -3345,7 +3362,8 @@ class Core implements PactCore {
     this.#db
       .prepare(
         `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?, end_date = ?,
-                         penalty_cents = ?, recipient_id = ?, first_occurrence = ?
+                         penalty_cents = ?, recipient_id = ?, first_occurrence = ?,
+                         anki_deck_id = COALESCE(?, anki_deck_id)
          WHERE id = ?`,
       )
       .run(
@@ -3358,6 +3376,7 @@ class Core implements PactCore {
         after.penaltyCents,
         after.recipientId,
         firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate),
+        after.ankiDeckId,
         pact.id,
       );
   }
@@ -3426,9 +3445,12 @@ class Core implements PactCore {
   }
 
   /** The changed terms, old and new, with names for the recipient and reviewers. */
-  #termChanges(before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
+  #termChanges(ownerId: AccountId, before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
+    const deck = (id: string) => ({ id, name: this.#ankiDeckName(ownerId, id) });
     return diffs.map(({ term, effect }): TermChange => {
       switch (term) {
+        case "deck":
+          return { term, before: deck(before.ankiDeckId!), after: deck(after.ankiDeckId!), effect };
         case "name":
           return { term, before: before.name, after: after.name, effect };
         case "description":
@@ -3545,7 +3567,9 @@ class Core implements PactCore {
       note: row.note,
       requestedAt: new Date(row.requested_at),
       changes:
-        after === null ? [] : this.#termChanges(before, after, termDiffs(before, after, pact.anki_rollover_hour)),
+        after === null
+          ? []
+          : this.#termChanges(pact.owner_account_id, before, after, termDiffs(before, after, pact.anki_rollover_hour)),
       // Reminders are the owner's own: reviewers don't see them.
       current: withoutReminders(this.#currentTerms(pact)),
       appliesFrom: start?.appliesFrom ?? null,
@@ -3839,7 +3863,30 @@ class Core implements PactCore {
 
   /** The deck's name as the last deck list or check found it, or null once it's gone from the list. */
   #ankiDeckName(accountId: AccountId, deckId: string): string | null {
-    return this.#ankiDeckList(accountId)?.decks.find((deck) => deck.id === deckId)?.name ?? null;
+    const listed = this.#ankiDeckList(accountId)?.decks.find((deck) => deck.id === deckId)?.name;
+    return listed ?? this.#ankiPactDeck(accountId, deckId)?.name ?? null;
+  }
+
+  /** The deck an Anki pact's day `date` is judged on: the one in force when it opened. */
+  #ankiDeckOn(pactId: string, date: LocalDate): string {
+    const deckId = this.#termsOn(pactId, date).anki_deck_id;
+    if (deckId === null) throw new Error(`pact ${pactId} has no Anki deck`);
+    return deckId;
+  }
+
+  /** A deck an Anki pact is on, as checks last found it; undefined before the first check. */
+  #ankiPactDeck(
+    accountId: AccountId,
+    deckId: string,
+  ): { name: string | null; missing_since: string | null } | undefined {
+    return this.#db
+      .prepare(`SELECT name, missing_since FROM anki_pact_deck WHERE account_id = ? AND deck_id = ?`)
+      .get(accountId, deckId) as { name: string | null; missing_since: string | null } | undefined;
+  }
+
+  /** Whether the last check found the deck gone from the account's collection. */
+  #ankiDeckMissing(accountId: AccountId, deckId: string): boolean {
+    return (this.#ankiPactDeck(accountId, deckId)?.missing_since ?? null) !== null;
   }
 
   /** An Anki pact's deck and rollover hour; null for any other pact. */
@@ -3848,6 +3895,7 @@ class Core implements PactCore {
     return {
       deckId: pact.anki_deck_id,
       deckName: this.#ankiDeckName(pact.owner_account_id, pact.anki_deck_id),
+      deckMissing: this.#ankiDeckMissing(pact.owner_account_id, pact.anki_deck_id),
       rolloverHour: pact.anki_rollover_hour,
     };
   }
@@ -3862,11 +3910,11 @@ class Core implements PactCore {
     return row.n;
   }
 
-  /** Why Oura can't be read for the account, or null when its connection works. */
-  #ouraConnectionProblem(accountId: AccountId): ConnectionProblem | null {
+  /** Why the service can't be read for the account, or null when its connection works. */
+  #connectionProblem(accountId: AccountId, service: Connection["service"]): ConnectionProblem | null {
     const row = this.#db
-      .prepare(`SELECT status FROM connection WHERE account_id = ? AND service = 'oura'`)
-      .get(accountId) as { status: Connection["status"] } | undefined;
+      .prepare(`SELECT status FROM connection WHERE account_id = ? AND service = ?`)
+      .get(accountId, service) as { status: Connection["status"] } | undefined;
     if (!row) return "not-connected";
     return row.status === "connected" ? null : row.status;
   }
@@ -4420,10 +4468,12 @@ class Core implements PactCore {
       ...this.#rejectedExcuseAlerts(ownerId, now),
       ...this.#questionAlerts(ownerId),
     ];
-    const connectionProblem = this.#activeOuraPacts(ownerId) > 0 ? this.#ouraConnectionProblem(ownerId) : null;
+    const connectionProblem = this.#activeOuraPacts(ownerId) > 0 ? this.#connectionProblem(ownerId, "oura") : null;
+    const ankiProblem = this.#activeAnkiPacts(ownerId) > 0 ? this.#connectionProblem(ownerId, "anki") : null;
     return {
       alerts: [
         ...(connectionProblem ? [{ kind: "oura-connection" as const, status: connectionProblem }] : []),
+        ...(ankiProblem ? [{ kind: "anki-connection" as const, status: ankiProblem }] : []),
         ...bills.alerts,
         ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert),
       ],
@@ -4445,7 +4495,8 @@ class Core implements PactCore {
       occurrenceDate: open.date,
       dueAt: open.dueAt,
       dueBy: this.#termsOn(pact.id, open.date).due_by,
-      deckName: this.#ankiDeckName(ownerId, pact.ankiDeckId!),
+      deckName: this.#ankiDeckName(ownerId, this.#ankiDeckOn(pact.id, open.date)),
+      deckMissing: this.#ankiDeckMissing(ownerId, this.#ankiDeckOn(pact.id, open.date)),
       lastCheck: this.#lastAnkiCheck(pact.id, open.date),
     };
   }
@@ -4659,7 +4710,7 @@ class Core implements PactCore {
     const rows = this.#db
       .prepare(
         `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.due_by, pact.start_date, pact.end_date,
-                pact.penalty_cents, pact.first_occurrence, pact.created_at, pact.evidence_kind, pact.anki_deck_id,
+                pact.penalty_cents, pact.first_occurrence, pact.created_at, pact.evidence_kind,
                 pact.anki_rollover_hour, recipient.name AS recipient_name
          FROM pact JOIN recipient ON recipient.id = pact.recipient_id
          WHERE pact.owner_account_id = ? AND pact.stage = 'active'
@@ -4678,7 +4729,6 @@ class Core implements PactCore {
       | "first_occurrence"
       | "created_at"
       | "evidence_kind"
-      | "anki_deck_id"
       | "anki_rollover_hour"
     > & {
       recipient_name: string;
@@ -4687,7 +4737,6 @@ class Core implements PactCore {
       id: row.id,
       name: row.name,
       evidenceKind: row.evidence_kind,
-      ankiDeckId: row.anki_deck_id,
       penaltyCents: row.penalty_cents,
       recipientName: row.recipient_name,
       terms: occurrenceTermsOf(row),
@@ -4714,7 +4763,7 @@ class Core implements PactCore {
         // Before judging at due times: a check made before a day's due time can still satisfy it.
         this.#recordAnkiChecks(checked);
         this.#judgeDueBy(t);
-        this.#markDisconnected(fetched);
+        for (const account of fetched.disconnected) this.#markDisconnected("oura", account, fetched.askedAt);
         this.#noteOuraClock(fetched.sleep);
         this.#judgeNights(t, fetched.sleep);
         this.#pushNoOuraData(t);
@@ -5009,7 +5058,7 @@ class Core implements PactCore {
     const askedAt = this.#clock.now();
     const ranges = new Map<AccountId, { startDate: LocalDate; endDate: LocalDate }>();
     for (const { pact, night } of this.#nightsWaiting(t, owner)) {
-      if (this.#ouraConnectionProblem(pact.owner_account_id) !== null) continue;
+      if (this.#connectionProblem(pact.owner_account_id, "oura") !== null) continue;
       // Oura files a night's sleep under the day it ends, usually the day after;
       // a day more covers a sleep that ends late, whether Oura's end_date is inclusive or not.
       const range = ranges.get(pact.owner_account_id);
@@ -5034,27 +5083,26 @@ class Core implements PactCore {
   }
 
   /**
-   * Marks each connection Oura answered "disconnected" Needs reconnecting,
-   * once: the owner gets one notification, and the Today and pact alerts
-   * show until they reconnect. A connection made again since the call was
-   * asked is left alone: its new tokens weren't the ones refused.
+   * Marks the account's connection to `service` Needs reconnecting after the
+   * service refused it (Oura its tokens, AnkiWeb its login), once: the owner
+   * gets one push, and the Today and pact alerts show until they reconnect.
+   * Until then no call is made. A connection made again since the service
+   * was asked (`askedAt`) is left alone: its new tokens weren't the ones refused.
    */
-  #markDisconnected({ disconnected, askedAt }: FetchedSleep): void {
-    for (const account of disconnected) {
-      const marked = this.#db
-        .prepare(
-          `UPDATE connection SET status = 'needs-reconnecting'
-           WHERE account_id = ? AND service = 'oura' AND status = 'connected' AND connected_at <= ?`,
-        )
-        .run(account, askedAt.toISOString());
-      if (marked.changes === 0) continue;
-      this.#enqueue({
-        recipient: account,
-        kind: "connection-problem",
-        channel: "push",
-        payload: { title: "Oura needs reconnecting", body: RECONNECT_BEFORE_6PM, url: APP_PATHS.today },
-      });
-    }
+  #markDisconnected(service: Connection["service"], account: AccountId, askedAt: Date): void {
+    const marked = this.#db
+      .prepare(
+        `UPDATE connection SET status = 'needs-reconnecting'
+         WHERE account_id = ? AND service = ? AND status = 'connected' AND connected_at <= ?`,
+      )
+      .run(account, service, askedAt.toISOString());
+    if (marked.changes === 0) return;
+    this.#enqueue({
+      recipient: account,
+      kind: "connection-problem",
+      channel: "push",
+      payload: { ...RECONNECT_PUSH[service], url: APP_PATHS.today },
+    });
   }
 
   /**
@@ -5073,7 +5121,7 @@ class Core implements PactCore {
         .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
         .run(pact.owner_account_id, night.date);
       if (sent.changes === 0) continue;
-      const fix = this.#ouraConnectionProblem(pact.owner_account_id) === null ? "Sync your ring" : "Reconnect Oura";
+      const fix = this.#connectionProblem(pact.owner_account_id, "oura") === null ? "Sync your ring" : "Reconnect Oura";
       this.#enqueue({
         recipient: pact.owner_account_id,
         kind: "connection-problem",
@@ -5137,7 +5185,7 @@ class Core implements PactCore {
   #ankiDaysWaiting(t: Date, owner?: AccountId): { pactId: string; account: AccountId; deckId: string }[] {
     const pacts = this.#db
       .prepare(
-        `SELECT pact.id, pact.owner_account_id, pact.anki_deck_id, account.timezone
+        `SELECT pact.id, pact.owner_account_id, account.timezone
          FROM pact
          JOIN account ON account.id = pact.owner_account_id
          JOIN connection ON connection.account_id = pact.owner_account_id AND connection.service = 'anki'
@@ -5145,12 +5193,7 @@ class Core implements PactCore {
            AND (? IS NULL OR pact.owner_account_id = ?)
          ORDER BY pact.created_at, pact.id`,
       )
-      .all(owner ?? null, owner ?? null) as {
-      id: string;
-      owner_account_id: AccountId;
-      anki_deck_id: string;
-      timezone: string | null;
-    }[];
+      .all(owner ?? null, owner ?? null) as { id: string; owner_account_id: AccountId; timezone: string | null }[];
     return pacts.flatMap((pact) => {
       // Every pact's owner has a timezone: creating one needs it.
       if (pact.timezone === null) return [];
@@ -5158,7 +5201,7 @@ class Core implements PactCore {
       if (!open || t.getTime() >= open.dueAt.getTime() || this.#isJudged(pact.id, open.date)) return [];
       // An approved excuse covers it: it's Excused at its due time whatever the deck shows.
       if (this.#excuseOn(pact.id, open.date) === "approved") return [];
-      return [{ pactId: pact.id, account: pact.owner_account_id, deckId: pact.anki_deck_id }];
+      return [{ pactId: pact.id, account: pact.owner_account_id, deckId: this.#ankiDeckOn(pact.id, open.date) }];
     });
   }
 
@@ -5169,7 +5212,8 @@ class Core implements PactCore {
    * always does. Accounts are checked at once, so a slow AnkiWeb delays the
    * tick by its own call only, never by the sum of everyone's. A call that
    * throws is logged and forgotten, so the next tick tries again. A
-   * "disconnected" answer checks nothing. While a call runs, it holds judging
+   * "disconnected" answer checks nothing, and `#recordAnkiChecks` marks the
+   * connection Needs reconnecting. While a call runs, it holds judging
    * the days it may still satisfy (`#ankiCheckHolds`).
    */
   async #fetchAnki(t: Date, owner?: AccountId): Promise<FetchedAnki[]> {
@@ -5188,7 +5232,7 @@ class Core implements PactCore {
       this.#ankiChecksRunning.set(account, checks.add(running));
       try {
         const result = await this.#ankiSource.deckCounts(account, deckIds);
-        return result.ok ? { account, result, checkedAt: t } : null;
+        return { account, result, checkedAt: t };
       } catch (error) {
         this.#ankiPolls.delete(account);
         this.#log(`AnkiWeb check for account ${account} failed, nothing checked: ${errorText(error)}`);
@@ -5207,13 +5251,18 @@ class Core implements PactCore {
    * Anki pact on a checked deck Satisfied as of the check when it found the
    * deck finished (New, Learn and Due all 0) for the pact's day, evaluated
    * before that day's due time. A deck gone from the collection records
-   * nothing.
+   * nothing. A refused login marks the connection Needs reconnecting.
    */
   #recordAnkiChecks(fetched: FetchedAnki[]): void {
     for (const { account, result, checkedAt } of fetched) {
+      if (!result.ok) {
+        this.#markDisconnected("anki", account, checkedAt);
+        continue;
+      }
       this.#renameAnkiDecks(account, result.names);
       const { ankiDate, asOf } = result;
       for (const [deckId, counts] of Object.entries(result.decks)) {
+        this.#notePactDeck(account, deckId, counts === null ? null : (result.names[deckId] ?? null), checkedAt);
         if (counts === null) continue;
         this.#db
           .prepare(
@@ -5234,17 +5283,19 @@ class Core implements PactCore {
       }
       const pacts = this.#db
         .prepare(
-          `SELECT pact.id, pact.anki_deck_id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
+          `SELECT pact.id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
            WHERE pact.owner_account_id = ? AND pact.stage = 'active' AND pact.evidence_kind = 'anki'
            ORDER BY pact.created_at, pact.id`,
         )
-        .all(account) as { id: string; anki_deck_id: string; timezone: string | null }[];
+        .all(account) as { id: string; timezone: string | null }[];
       for (const pact of pacts) {
-        const counts = result.decks[pact.anki_deck_id];
-        if (!counts || counts.new + counts.learn + counts.review > 0 || pact.timezone === null) continue;
+        if (pact.timezone === null) continue;
         const { includes, covering } = this.#occurrencesOf(pact.id, pact.timezone);
         const day = includes(ankiDate) ? covering(ankiDate) : null;
         if (!day || asOf.getTime() >= day.dueAt.getTime() || checkedAt.getTime() >= day.dueAt.getTime()) continue;
+        // The deck the day is on: a deck change approved since it opened applies from the next.
+        const counts = result.decks[this.#ankiDeckOn(pact.id, day.date)];
+        if (!counts || counts.new + counts.learn + counts.review > 0) continue;
         if (this.#isJudged(pact.id, day.date)) continue;
         this.#judge(pact.id, day.date, "satisfied", checkedAt);
         this.#noteAnkiResult(pact.id, day.date, { cardsLeft: 0, checkedAt });
@@ -5271,6 +5322,30 @@ class Core implements PactCore {
     this.#db.prepare(`UPDATE anki_deck_list SET decks = ? WHERE account_id = ?`).run(JSON.stringify(decks), accountId);
   }
 
+  /**
+   * Keeps what a check found of a deck an Anki pact is on: its name, or with
+   * `name` null, that it's gone from the collection since `checkedAt`, under
+   * the last name Pact knew.
+   */
+  #notePactDeck(account: AccountId, deckId: string, name: string | null, checkedAt: Date): void {
+    if (name !== null) {
+      this.#db
+        .prepare(
+          `INSERT INTO anki_pact_deck (account_id, deck_id, name, missing_since) VALUES (?, ?, ?, NULL)
+           ON CONFLICT (account_id, deck_id) DO UPDATE SET name = excluded.name, missing_since = NULL`,
+        )
+        .run(account, deckId, name);
+      return;
+    }
+    this.#db
+      .prepare(
+        `INSERT INTO anki_pact_deck (account_id, deck_id, name, missing_since) VALUES (?, ?, ?, ?)
+         ON CONFLICT (account_id, deck_id) DO UPDATE SET name = COALESCE(anki_pact_deck.name, excluded.name),
+           missing_since = COALESCE(anki_pact_deck.missing_since, excluded.missing_since)`,
+      )
+      .run(account, deckId, this.#ankiDeckName(account, deckId), checkedAt.toISOString());
+  }
+
   /** On an Anki day just judged Missed at its due time: why, from the last check that counted for it. */
   #noteAnkiMiss(pact: PactToJudge, day: Occurrence): void {
     const row = this.#db
@@ -5293,12 +5368,13 @@ class Core implements PactCore {
         `SELECT anki_check.new_count + anki_check.learn_count + anki_check.review_count AS cards_left,
                 anki_check.checked_at
          FROM anki_check JOIN pact ON pact.owner_account_id = anki_check.account_id
-                                  AND pact.anki_deck_id = anki_check.deck_id
-         WHERE pact.id = ? AND anki_check.anki_date = ? AND anki_check.as_of < ? AND anki_check.checked_at < ?
+         WHERE pact.id = ? AND anki_check.deck_id = ? AND anki_check.anki_date = ? AND anki_check.as_of < ?
+           AND anki_check.checked_at < ?
          ORDER BY anki_check.checked_at DESC, anki_check.id DESC
          LIMIT 1`,
       )
-      .get(pactId, date, until, until) as { cards_left: number; checked_at: string } | undefined;
+      .get(pactId, this.#ankiDeckOn(pactId, date), date, until, until) as
+      { cards_left: number; checked_at: string } | undefined;
     return row ? { cardsLeft: row.cards_left, checkedAt: new Date(row.checked_at) } : null;
   }
 
@@ -5588,8 +5664,6 @@ interface ActivePact {
   id: string;
   name: string;
   evidenceKind: PactTerms["evidenceKind"];
-  /** Anki pacts only, else null. */
-  ankiDeckId: string | null;
   penaltyCents: number;
   recipientName: string;
   terms: OccurrenceTerms;
@@ -5761,7 +5835,10 @@ interface PactRow {
 }
 
 /** The terms an occurrence follows: the pact's, as they stood when it opened. */
-type DatedTerms = Pick<PactRow, "description" | "schedule" | "in_bed_by" | "due_by" | "penalty_cents" | "recipient_id">;
+type DatedTerms = Pick<
+  PactRow,
+  "description" | "schedule" | "in_bed_by" | "due_by" | "penalty_cents" | "recipient_id" | "anki_deck_id"
+>;
 
 /** A change request as stored, with its pact's owner, their name and timezone. */
 interface ChangeRequestRow {
@@ -5836,6 +5913,7 @@ function itemPath(kind: ReviewItem["kind"], itemId: string): string {
 const TERM_LABELS: Record<TermDiff["term"], string> = {
   name: "Name",
   description: "Photo shows",
+  deck: "Deck",
   "in-bed-by": "In bed by",
   schedule: "Days",
   "due-by": "Due by",
@@ -5889,6 +5967,7 @@ function storedTerms(json: string): ChangeableTerms {
     startDate: null,
     endDate: null,
     reminders: [],
+    ankiDeckId: null,
     ...(JSON.parse(json) as Partial<ChangeableTerms>),
   } as ChangeableTerms;
 }
@@ -5915,7 +5994,8 @@ function capitalized(text: string): string {
 /** One check `#fetchAnki` got an answer to: whose collection, what AnkiWeb found, and when Pact checked. */
 interface FetchedAnki {
   account: AccountId;
-  result: Extract<AnkiCountsResult, { ok: true }>;
+  result: AnkiCountsResult;
+  /** When AnkiWeb was asked. */
   checkedAt: Date;
 }
 

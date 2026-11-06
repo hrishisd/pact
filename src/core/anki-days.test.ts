@@ -9,7 +9,7 @@
 // York, the scenario's timezone.
 
 import { describe, expect, test } from "vitest";
-import { WEEKDAYS } from "../shared/types.ts";
+import { WEEKDAYS, type PactChange } from "../shared/types.ts";
 import { ankiPact, ownerWithAnki, SPANISH } from "./testing/anki-pact.ts";
 import { failOnCall } from "./testing/fakes.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
@@ -142,7 +142,7 @@ describe("creating an Anki pact", () => {
       description: "",
       dueBy: "01:00",
       inBedBy: null,
-      anki: { deckId: SPANISH, deckName: "Spanish", rolloverHour: 4 },
+      anki: { deckId: SPANISH, deckName: "Spanish", deckMissing: false, rolloverHour: 4 },
     });
     expect(owner.profile().connections).toEqual([expect.objectContaining({ service: "anki", activePacts: 1 })]);
   });
@@ -509,6 +509,7 @@ describe("Today", () => {
         dueAt: s.at("Wed 00:00"),
         dueBy: null,
         deckName: "Spanish",
+        deckMissing: false,
         lastCheck: null,
       },
     ]);
@@ -686,5 +687,293 @@ describe("a reminder from the rollover hour", () => {
     expect(reminders()).toHaveLength(1);
     await s.advanceTo("Wed 10:00");
     expect(reminders()).toHaveLength(1);
+  });
+});
+
+describe("AnkiWeb refusing Pact's login", () => {
+  function connectionProblems(s: Scenario, owner: AccountHandle) {
+    return s.notifier.sentTo(owner).filter((n) => n.kind === "connection-problem");
+  }
+
+  test("at 08:00: one alert and one push, then no calls; reconnected at 12:00, a finished deck satisfies the day", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    deckShows({ review: 42 }, TUE, "Tue 07:50");
+    await s.advanceTo("Tue 07:50");
+
+    s.ankiSource.disconnect(owner.id);
+    await s.advanceTo("Tue 08:00");
+    const calls = s.ankiSource.countCalls.length;
+    await s.advanceTo("Tue 08:30");
+    await s.advanceTo("Tue 11:59");
+    s.setClockTo("Tue 11:59");
+    await owner.checkAnki();
+
+    expect(s.ankiSource.countCalls).toHaveLength(calls);
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
+    expect(owner.today().alerts).toEqual([{ kind: "anki-connection", status: "needs-reconnecting" }]);
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "needs-reconnecting" } });
+    expect(connectionProblems(s, owner)).toEqual([
+      {
+        recipient: owner.id,
+        kind: "connection-problem",
+        channel: "push",
+        payload: {
+          title: "AnkiWeb needs reconnecting",
+          body: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
+          url: "/",
+        },
+      },
+    ]);
+
+    s.ankiSource.reconnect(owner.id);
+    s.setClockTo("Tue 12:00");
+    await owner.connectAnki();
+    deckShows({}, TUE, "Tue 12:00");
+    await s.advanceTo("Tue 12:01");
+
+    expect(status(owner, pactId, TUE)).toBe("satisfied");
+    expect(owner.today().alerts).toEqual([]);
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: null } });
+    expect(connectionProblems(s, owner)).toHaveLength(1);
+  });
+
+  test("a check now that finds it refused marks it the same way", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    s.ankiSource.disconnect(owner.id);
+    s.setClockTo("Tue 09:00");
+    await owner.checkAnki();
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
+    expect(connectionProblems(s, owner)).toHaveLength(1);
+  });
+
+  test("never reconnected: the day is Missed at its due time, as not reached", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    s.ankiSource.disconnect(owner.id);
+    await s.advanceTo("Tue 08:00");
+    await s.advanceTo("Tue 23:59");
+    expect(status(owner, pactId, TUE)).toBe("not-judged");
+    await s.advanceTo("Wed 00:00");
+    expect(day(owner, pactId, TUE)).toMatchObject({
+      status: { kind: "missed" },
+      anki: { cardsLeft: null, checkedAt: null },
+    });
+  });
+
+  test("a reconnect while a check is running isn't undone when the check comes back refused", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.ankiSource.disconnect(owner.id);
+    const download = s.ankiSource.holdDeckCounts(owner.id);
+    const ticking = s.advanceTo("Tue 08:00");
+    await download.started;
+    // The owner reconnects with a new login while the check with the old one is still running.
+    s.clock.set(new Date(s.at("Tue 08:00").getTime() + 30_000));
+    await owner.connectAnki();
+    download.release();
+    await ticking;
+
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
+    expect(connectionProblems(s, owner)).toEqual([]);
+    s.ankiSource.reconnect(owner.id);
+    deckShows({}, TUE, "Tue 08:15");
+    await s.advanceTo("Tue 08:20");
+    expect(status(owner, pactId, TUE)).toBe("satisfied");
+  });
+
+  test("a failed check doesn't count as refused", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    failOnCall(s.ankiSource, "deckCounts", 1, new Error("AnkiWeb timed out"));
+    await s.advanceTo("Tue 08:00");
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
+    expect(owner.today().alerts).toEqual([]);
+    expect(connectionProblems(s, owner)).toEqual([]);
+  });
+
+  test("disconnected on Profile: an alert to connect again, no calls, and the day is Missed", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    await createPact({ days: ["wed"] });
+    expect(owner.profile().connections).toEqual([expect.objectContaining({ service: "anki", activePacts: 2 })]);
+    await owner.disconnectAnki();
+
+    expect(owner.today().alerts).toEqual([{ kind: "anki-connection", status: "not-connected" }]);
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "not-connected" } });
+    await s.advanceTo("Tue 12:00");
+    await s.advanceTo("Wed 00:00");
+    expect(s.ankiSource.countCalls).toEqual([]);
+    expect(status(owner, pactId, TUE)).toBe("missed");
+  });
+});
+
+describe("a deck gone from Anki", () => {
+  test("shows an alert on the pact and Today, its day is Missed at the due time, and the owner can excuse it", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.ankiSource.removeDeck(owner.id, SPANISH);
+    s.ankiSource.setAnkiDay(owner.id, TUE, s.at("Tue 20:00"));
+    await s.advanceTo("Tue 20:00");
+    expect(owner.pact(pactId)).toMatchObject({
+      ok: true,
+      pact: { anki: { deckId: SPANISH, deckName: "Spanish", deckMissing: true } },
+    });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckName: "Spanish", deckMissing: true })]);
+
+    await s.advanceTo("Wed 00:00");
+    expect(status(owner, pactId, TUE)).toBe("missed");
+
+    s.setClockTo("Wed 09:00");
+    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Deleted the deck by mistake" }, []);
+    if (!filed.ok) throw new Error(filed.reason);
+    expect(await reviewer.decide(filed.excuseId, { kind: "approve" })).toEqual({ ok: true });
+    expect(status(owner, pactId, TUE)).toBe("excused");
+  });
+
+  test("the alert goes once a check finds the deck again", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+
+    s.ankiSource.removeDeck(owner.id, SPANISH);
+    s.ankiSource.setAnkiDay(owner.id, TUE, s.at("Tue 20:00"));
+    await s.advanceTo("Tue 20:00");
+    // The deck picker no longer lists it, but the alert still names it.
+    await owner.ankiDecks();
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { anki: { deckName: "Spanish", deckMissing: true } } });
+
+    deckShows({ review: 5 }, TUE, "Tue 20:10");
+    await s.advanceTo("Tue 20:10");
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { anki: { deckName: "Spanish", deckMissing: false } } });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckMissing: false })]);
+  });
+});
+
+describe("changing an Anki pact's deck", () => {
+  /** An owner with Spanish and Italian in their deck list, and a daily pact on Spanish. */
+  async function spanishAndItalian(s: Scenario) {
+    const setUp = await ownerWithAnki(s);
+    s.ankiSource.setDeck(setUp.owner.id, { id: ITALIAN, name: "Italian" });
+    await setUp.owner.ankiDecks();
+    const pactId = await setUp.createPact();
+    const change = (terms: Partial<PactChange> = {}): PactChange => ({
+      name: "Spanish",
+      description: "",
+      schedule: { kind: "fixed-days", days: [...WEEKDAYS] },
+      penaltyCents: 500,
+      recipientId: setUp.sam.id,
+      reviewerIds: [setUp.reviewer.id],
+      ...terms,
+    });
+    const deckId = () => {
+      const result = setUp.owner.pact(pactId);
+      if (!result.ok) throw new Error(result.reason);
+      return result.pact.anki?.deckId;
+    };
+    return { ...setUp, pactId, change, deckId };
+  }
+
+  test("in the edit window, the deck changes freely", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, pactId, deckId } = await spanishAndItalian(s);
+    expect(await owner.editPact(pactId, ankiPact(sam.id, reviewer, { ankiDeckId: ITALIAN }))).toEqual({ ok: true });
+    expect(deckId()).toBe(ITALIAN);
+    expect(await owner.editPact(pactId, ankiPact(sam.id, reviewer, { ankiDeckId: "999" }))).toEqual({
+      ok: false,
+      reason: "unknown-deck",
+    });
+  });
+
+  test("after the edit window, it's a change request, and the pact keeps its deck until a reviewer approves", async () => {
+    const s = scenario();
+    const { owner, reviewer, pactId, change, deckId, deckShows } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+
+    const deck = {
+      term: "deck",
+      before: { id: SPANISH, name: "Spanish" },
+      after: { id: ITALIAN, name: "Italian" },
+      effect: "needs-approval",
+    };
+    expect(owner.changePreview(pactId, change({ ankiDeckId: ITALIAN }))).toEqual({
+      ok: true,
+      preview: {
+        changes: [deck],
+        outcome: { kind: "needs-approval", reviewerNames: [reviewer.name], bundlesStricter: false },
+      },
+    });
+    expect(await owner.changePact(pactId, change({ ankiDeckId: "999" }))).toEqual({
+      ok: false,
+      reason: "unknown-deck",
+    });
+    const sent = await owner.changePact(pactId, change({ ankiDeckId: ITALIAN }));
+    if (!sent.ok || !sent.changeRequestId) throw new Error("no change request");
+    expect(deckId()).toBe(SPANISH);
+    expect(owner.changeRequest(sent.changeRequestId)).toMatchObject({ ok: true, changeRequest: { changes: [deck] } });
+    expect(s.notifier.sentTo(reviewer).at(-1)?.payload.body).toBe("Deck");
+
+    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({ ok: true });
+    expect(deckId()).toBe(ITALIAN);
+    // Tuesday is open, so it keeps Spanish: Italian finished doesn't satisfy it, Spanish finished does.
+    deckShows({}, TUE, "Tue 20:00", ITALIAN);
+    await s.advanceTo("Tue 20:00");
+    expect(status(owner, pactId, TUE)).toBe("not-judged");
+    expect(s.ankiSource.countCalls.at(-1)).toEqual({ account: owner.id, deckIds: [SPANISH] });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckName: "Spanish" })]);
+    deckShows({}, TUE, "Tue 20:10");
+    await s.advanceTo("Tue 20:10");
+    expect(status(owner, pactId, TUE)).toBe("satisfied");
+
+    // Wednesday is on Italian.
+    deckShows({}, WED, "Wed 09:00", ITALIAN);
+    await s.advanceTo("Wed 09:00");
+    expect(s.ankiSource.countCalls.at(-1)).toEqual({ account: owner.id, deckIds: [ITALIAN] });
+    expect(status(owner, pactId, WED)).toBe("satisfied");
+  });
+
+  test("a change request that keeps the deck shows it among the terms as they stand", async () => {
+    const s = scenario();
+    const { owner, pactId, change } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+    const sent = await owner.changePact(pactId, change({ penaltyCents: 300 }));
+    if (!sent.ok || !sent.changeRequestId) throw new Error("no change request");
+    expect(owner.changeRequest(sent.changeRequestId)).toMatchObject({
+      ok: true,
+      changeRequest: { current: { anki: { deckId: SPANISH, deckName: "Spanish" } } },
+    });
+  });
+
+  test("a deck change waits for approval with an earlier due-by time bundled in", async () => {
+    const s = scenario();
+    const { owner, pactId, change } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+    expect(owner.changePreview(pactId, change({ ankiDeckId: ITALIAN, dueBy: "22:00" }))).toMatchObject({
+      ok: true,
+      preview: { outcome: { kind: "needs-approval", bundlesStricter: true } },
+    });
+  });
+
+  test("an earlier due-by time is stricter and applies to the days not open yet", async () => {
+    const s = scenario();
+    const { owner, pactId, change } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+    expect(await owner.changePact(pactId, change({ dueBy: "22:00" }))).toMatchObject({
+      ok: true,
+      outcome: { kind: "stricter", appliesFrom: WED },
+    });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, dueAt: s.at("Wed 00:00") })]);
+    s.setClockTo("Wed 09:00");
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, dueAt: s.at("Wed 22:00") })]);
   });
 });

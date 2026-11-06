@@ -49,6 +49,8 @@ Without `ANKI_TOKEN_KEY` set, development uses a stand-in for AnkiWeb (`devAnki`
 ```
 
 - Set every count of a deck to 0 to finish it: Today's next check (open Today, or wait up to 10 minutes) makes the day Satisfied.
+- Add `"refused": true` to make AnkiWeb refuse Pact's login: the next check marks the connection Needs reconnecting, with its alerts and push. Take it out again before using Reconnect, which takes any password as Connect does.
+- Take a deck out of `decks` to delete it in Anki: the next check shows the "deck is gone from Anki" alert on its pact.
 - With no file there are no decks. In Anki a parent's counts include its subdecks'; the stand-in shows what the file says, so keep them consistent.
 
 To try the real adapter, set `ANKI_TOKEN_KEY` and `ANKI_PYTHON` (a Python with `pip install -r src/core/anki-requirements.txt`). Anki's own sync server (`python -m anki.syncserver`, from the same package) can stand in for AnkiWeb: `ankiAdapter`'s `loginEndpoint` option points the login at it.

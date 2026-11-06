@@ -48,6 +48,7 @@ type Step = "goal" | "schedule" | "penalty" | "reviewers" | "reminders";
 const STEP_OF: Record<Term, Step> = {
   name: "goal",
   description: "goal",
+  deck: "goal",
   "in-bed-by": "goal",
   schedule: "schedule",
   "due-by": "schedule",
@@ -117,6 +118,7 @@ function changeOf(form: Form, note: string): PactChange | { problem: "no-amount"
     name: form.name.trim(),
     description: form.kind === "camera" ? form.description.trim() : "",
     ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
+    ...(form.kind === "anki" && form.ankiDeckId !== null && { ankiDeckId: form.ankiDeckId }),
     ...optionalTimes(form),
     schedule: scheduleOf(form),
     penaltyCents,
@@ -200,7 +202,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
     let body: ReactNode;
     switch (step) {
       case "goal":
-        body = <GoalStep form={form} update={update} deckFixed />;
+        body = <GoalStep form={form} update={update} />;
         break;
       case "schedule":
         body = <ScheduleStep form={form} update={update} kindFixed />;
