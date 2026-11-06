@@ -91,22 +91,25 @@ export const unavailableAnki: AnkiSource = {
  * come from `anki-decks.json` in `dir`, read on every call: `{ rolloverHour,
  * timezone, decks }`, with `decks` in the AnkiDeck shape. Counts are each
  * deck's, as of now, for the Anki day now falls in. With no file there are
- * no decks.
+ * no decks. With `refused: true` in the file, AnkiWeb refuses the login:
+ * decks and counts answer "disconnected".
  */
 export function devAnki(dir: string, clock: Clock): AnkiSource & AnkiConnector {
   const file = join(dir, "anki-decks.json");
-  const read = (): { rolloverHour: number; timezone: string; decks: AnkiDeck[] } => {
+  const read = (): { rolloverHour: number; timezone: string; decks: AnkiDeck[]; refused: boolean } => {
     const stored = existsSync(file)
       ? (JSON.parse(readFileSync(file, "utf8")) as Partial<{
           rolloverHour: number;
           timezone: string;
           decks: AnkiDeck[];
+          refused: boolean;
         }>)
       : {};
     return {
       rolloverHour: stored.rolloverHour ?? 4,
       timezone: stored.timezone ?? "America/New_York",
       decks: stored.decks ?? [],
+      refused: stored.refused === true,
     };
   };
   return {
@@ -118,11 +121,12 @@ export function devAnki(dir: string, clock: Clock): AnkiSource & AnkiConnector {
           : { ok: true },
     forget: async () => {},
     decks: async () => {
-      const { decks, rolloverHour } = read();
-      return { ok: true, decks, rolloverHour };
+      const { decks, rolloverHour, refused } = read();
+      return refused ? { ok: false, reason: "disconnected" } : { ok: true, decks, rolloverHour };
     },
     deckCounts: async (_account, deckIds) => {
-      const { decks, rolloverHour, timezone } = read();
+      const { decks, rolloverHour, timezone, refused } = read();
+      if (refused) return { ok: false, reason: "disconnected" };
       const asOf = clock.now();
       const asked = decks.filter((deck) => deckIds.includes(deck.id));
       return {

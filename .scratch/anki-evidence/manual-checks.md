@@ -19,3 +19,6 @@ Things that need a real AnkiWeb account, AnkiMobile or the Mac. Steps marked **(
 ## After ticket 04
 
 - [ ] **(human)** Change the AnkiWeb password. Pact marks the connection Needs reconnecting with one push, and Reconnect works.
+  It checks that real AnkiWeb answers a stale host key with an auth error (`anki_check.py` maps it to "disconnected"). If it answers something else, the log shows a failed check or an `OPERATOR_ALERT` every 10 minutes instead.
+- [ ] Delete a test deck that an Anki pact is on, in Anki, and sync. The pact page and Today show "The … deck is gone from Anki" within 10 minutes.
+- [ ] Reconnect from Profile and from the Today alert on a phone: the email and password fields fill from the password manager.
