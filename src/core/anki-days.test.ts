@@ -942,6 +942,18 @@ describe("changing an Anki pact's deck", () => {
     expect(status(owner, pactId, WED)).toBe("satisfied");
   });
 
+  test("a change request that keeps the deck shows it among the terms as they stand", async () => {
+    const s = scenario();
+    const { owner, pactId, change } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+    const sent = await owner.changePact(pactId, change({ penaltyCents: 300 }));
+    if (!sent.ok || !sent.changeRequestId) throw new Error("no change request");
+    expect(owner.changeRequest(sent.changeRequestId)).toMatchObject({
+      ok: true,
+      changeRequest: { current: { anki: { deckId: SPANISH, deckName: "Spanish" } } },
+    });
+  });
+
   test("a deck change waits for approval with an earlier due-by time bundled in", async () => {
     const s = scenario();
     const { owner, pactId, change } = await spanishAndItalian(s);

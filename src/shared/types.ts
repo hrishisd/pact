@@ -687,6 +687,12 @@ export interface Connection {
  */
 export type ConnectionProblem = "needs-reconnecting" | "not-connected";
 
+/** What a broken connection costs and what to do, as its push and its alerts say after "… needs reconnecting." */
+export const RECONNECT_TEXT: Record<Connection["service"], string> = {
+  oura: "A night with no data by 6pm counts as Missed. Reconnect before then.",
+  anki: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
+};
+
 /**
  * The Today query, in display order: alerts, then cards in their sections,
  * then Waiting for approval, then Yesterday. When alerts and sections are all
@@ -1398,6 +1404,7 @@ export type CurrentTerms = Pick<
   | "penaltyCents"
   | "recipient"
   | "reviewers"
+  | "anki"
 >;
 
 /** A change request, as its reviewers and its owner see it. */

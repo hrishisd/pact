@@ -73,11 +73,8 @@ export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">)
       ];
 }
 
-/** A term's value in the pact as it stands, with an Anki pact's deck. Reminders aren't terms: the pact's own page shows them. */
-export function currentValue(
-  term: Exclude<Term, "reminders">,
-  current: Current & { anki?: { deckName: string | null } | null },
-): string {
+/** A term's value in the pact as it stands. Reminders aren't terms: the pact's own page shows them. */
+export function currentValue(term: Exclude<Term, "reminders">, current: Current): string {
   switch (term) {
     case "name":
       return current.name;
@@ -104,9 +101,9 @@ export function currentValue(
   }
 }
 
-/** A deck's full name, or what to say when Pact doesn't have it. */
+/** A deck's full name, or what to say when Pact never had it. */
 function deckText(name: string | null): string {
-  return name ?? "Gone from your deck list";
+  return name ?? "Unknown deck";
 }
 
 /** A due-by time, "9:00pm", or "Midnight" without one. */

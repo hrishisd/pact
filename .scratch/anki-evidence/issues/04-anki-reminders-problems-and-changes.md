@@ -52,3 +52,5 @@ Decisions the spec left open, taken as Oura does or as the least surprise:
 - The deck list answering "disconnected" also marks the connection, not just checks.
 - The deck-gone alert is also on the Today card, not only the pact page, since the card's "Finish Spanish in Anki" would otherwise mislead.
 - A Missed day whose deck was gone says "AnkiWeb not reached" (or the last count that day). A separate "deck gone" reason was left out.
+
+Review fixes, the same day: a change request's "Everything else stays" now shows the deck (`CurrentTerms` gained `anki`), a deck name Pact never had reads "Unknown deck", Oura and AnkiWeb share one `#markDisconnected(service, …)`, and the reconnect copy lives once in `RECONNECT_TEXT` (`src/shared/types.ts`).

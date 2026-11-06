@@ -4,7 +4,7 @@
 // is gone from Anki.
 
 import { useState } from "react";
-import type { ConnectionProblem } from "../shared/types.ts";
+import { RECONNECT_TEXT, type ConnectionProblem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 
 /** The AnkiWeb sign-in fields, and why the last try didn't connect. */
@@ -116,8 +116,8 @@ export function AnkiConnectionAlert({
   return (
     <div className="alert bad" role="status">
       <span>
-        <b>{status === "needs-reconnecting" ? "AnkiWeb needs reconnecting." : "AnkiWeb is disconnected."}</b> A day
-        whose deck isn't finished by its due time counts as Missed. Reconnect before then.
+        <b>{status === "needs-reconnecting" ? "AnkiWeb needs reconnecting." : "AnkiWeb is disconnected."}</b>{" "}
+        {RECONNECT_TEXT.anki}
       </span>
       {reconnecting ? (
         <AnkiReconnectForm onReconnected={onReconnected} onCancel={() => setReconnecting(false)} />

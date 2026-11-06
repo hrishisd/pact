@@ -3,7 +3,7 @@
 // Oura's connect page went.
 
 import { OURA_RECONNECT_PATH, OURA_RESULT_PARAM, type OuraResult } from "../shared/api.ts";
-import type { ConnectionProblem } from "../shared/types.ts";
+import { RECONNECT_TEXT, type ConnectionProblem } from "../shared/types.ts";
 
 /**
  * How connecting Oura went, when Oura's callback just brought the browser
@@ -34,8 +34,8 @@ export function OuraConnectionAlert({ status, error }: { status: ConnectionProbl
   return (
     <div className="alert bad" role="status">
       <span>
-        <b>{status === "needs-reconnecting" ? "Oura needs reconnecting." : "Oura is disconnected."}</b> A night with no
-        data by 6pm counts as Missed. Reconnect before then.
+        <b>{status === "needs-reconnecting" ? "Oura needs reconnecting." : "Oura is disconnected."}</b>{" "}
+        {RECONNECT_TEXT.oura}
       </span>
       <div className="row2">
         <a className="btn sm primary" href={OURA_RECONNECT_PATH}>
