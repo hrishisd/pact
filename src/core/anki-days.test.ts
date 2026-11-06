@@ -9,7 +9,7 @@
 // York, the scenario's timezone.
 
 import { describe, expect, test } from "vitest";
-import { WEEKDAYS } from "../shared/types.ts";
+import { WEEKDAYS, type PactChange } from "../shared/types.ts";
 import { ankiPact, ownerWithAnki, SPANISH } from "./testing/anki-pact.ts";
 import { failOnCall } from "./testing/fakes.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
@@ -857,5 +857,111 @@ describe("a deck gone from Anki", () => {
     await s.advanceTo("Tue 20:10");
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { anki: { deckName: "Spanish", deckMissing: false } } });
     expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckMissing: false })]);
+  });
+});
+
+describe("changing an Anki pact's deck", () => {
+  /** An owner with Spanish and Italian in their deck list, and a daily pact on Spanish. */
+  async function spanishAndItalian(s: Scenario) {
+    const setUp = await ownerWithAnki(s);
+    s.ankiSource.setDeck(setUp.owner.id, { id: ITALIAN, name: "Italian" });
+    await setUp.owner.ankiDecks();
+    const pactId = await setUp.createPact();
+    const change = (terms: Partial<PactChange> = {}): PactChange => ({
+      name: "Spanish",
+      description: "",
+      schedule: { kind: "fixed-days", days: [...WEEKDAYS] },
+      penaltyCents: 500,
+      recipientId: setUp.sam.id,
+      reviewerIds: [setUp.reviewer.id],
+      ...terms,
+    });
+    const deckId = () => {
+      const result = setUp.owner.pact(pactId);
+      if (!result.ok) throw new Error(result.reason);
+      return result.pact.anki?.deckId;
+    };
+    return { ...setUp, pactId, change, deckId };
+  }
+
+  test("in the edit window, the deck changes freely", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, pactId, deckId } = await spanishAndItalian(s);
+    expect(await owner.editPact(pactId, ankiPact(sam.id, reviewer, { ankiDeckId: ITALIAN }))).toEqual({ ok: true });
+    expect(deckId()).toBe(ITALIAN);
+    expect(await owner.editPact(pactId, ankiPact(sam.id, reviewer, { ankiDeckId: "999" }))).toEqual({
+      ok: false,
+      reason: "unknown-deck",
+    });
+  });
+
+  test("after the edit window, it's a change request, and the pact keeps its deck until a reviewer approves", async () => {
+    const s = scenario();
+    const { owner, reviewer, pactId, change, deckId, deckShows } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+
+    const deck = {
+      term: "deck",
+      before: { id: SPANISH, name: "Spanish" },
+      after: { id: ITALIAN, name: "Italian" },
+      effect: "needs-approval",
+    };
+    expect(owner.changePreview(pactId, change({ ankiDeckId: ITALIAN }))).toEqual({
+      ok: true,
+      preview: {
+        changes: [deck],
+        outcome: { kind: "needs-approval", reviewerNames: [reviewer.name], bundlesStricter: false },
+      },
+    });
+    expect(await owner.changePact(pactId, change({ ankiDeckId: "999" }))).toEqual({
+      ok: false,
+      reason: "unknown-deck",
+    });
+    const sent = await owner.changePact(pactId, change({ ankiDeckId: ITALIAN }));
+    if (!sent.ok || !sent.changeRequestId) throw new Error("no change request");
+    expect(deckId()).toBe(SPANISH);
+    expect(owner.changeRequest(sent.changeRequestId)).toMatchObject({ ok: true, changeRequest: { changes: [deck] } });
+    expect(s.notifier.sentTo(reviewer).at(-1)?.payload.body).toBe("Deck");
+
+    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({ ok: true });
+    expect(deckId()).toBe(ITALIAN);
+    // Tuesday is open, so it keeps Spanish: Italian finished doesn't satisfy it, Spanish finished does.
+    deckShows({}, TUE, "Tue 20:00", ITALIAN);
+    await s.advanceTo("Tue 20:00");
+    expect(status(owner, pactId, TUE)).toBe("not-judged");
+    expect(s.ankiSource.countCalls.at(-1)).toEqual({ account: owner.id, deckIds: [SPANISH] });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckName: "Spanish" })]);
+    deckShows({}, TUE, "Tue 20:10");
+    await s.advanceTo("Tue 20:10");
+    expect(status(owner, pactId, TUE)).toBe("satisfied");
+
+    // Wednesday is on Italian.
+    deckShows({}, WED, "Wed 09:00", ITALIAN);
+    await s.advanceTo("Wed 09:00");
+    expect(s.ankiSource.countCalls.at(-1)).toEqual({ account: owner.id, deckIds: [ITALIAN] });
+    expect(status(owner, pactId, WED)).toBe("satisfied");
+  });
+
+  test("a deck change waits for approval with an earlier due-by time bundled in", async () => {
+    const s = scenario();
+    const { owner, pactId, change } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+    expect(owner.changePreview(pactId, change({ ankiDeckId: ITALIAN, dueBy: "22:00" }))).toMatchObject({
+      ok: true,
+      preview: { outcome: { kind: "needs-approval", bundlesStricter: true } },
+    });
+  });
+
+  test("an earlier due-by time is stricter and applies to the days not open yet", async () => {
+    const s = scenario();
+    const { owner, pactId, change } = await spanishAndItalian(s);
+    await s.advanceTo("Tue 09:00");
+    expect(await owner.changePact(pactId, change({ dueBy: "22:00" }))).toMatchObject({
+      ok: true,
+      outcome: { kind: "stricter", appliesFrom: WED },
+    });
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, dueAt: s.at("Wed 00:00") })]);
+    s.setClockTo("Wed 09:00");
+    expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, dueAt: s.at("Wed 22:00") })]);
   });
 });

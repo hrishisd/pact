@@ -923,7 +923,7 @@ function parsePactChange(value: unknown): ChangePactRequest | null {
   if (!isRecord(value)) return null;
   const { name, description, penaltyCents, recipientId, reviewerIds, note } = value;
   const schedule = parseSchedule(value.schedule);
-  const times = parseOptionalStrings(value, PACT_TIMES);
+  const times = parseOptionalStrings(value, [...PACT_TIMES, "ankiDeckId"]);
   const reminders = parseReminders(value);
   if (
     !times ||

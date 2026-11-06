@@ -15,6 +15,7 @@ type Current = Json<CurrentTerms>;
 export const TERM_LABELS: Record<Term, string> = {
   name: "Name",
   description: "Photo shows",
+  deck: "Deck",
   "in-bed-by": "In bed by",
   schedule: "Days",
   "due-by": "Due by",
@@ -43,7 +44,18 @@ export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">)
     return ["name", "description", "schedule", "due-by", "penalty", "recipient", "reviewers", "reminders"];
   }
   if (current.evidenceKind === "anki") {
-    return ["name", "schedule", "due-by", "start-date", "end-date", "penalty", "recipient", "reviewers", "reminders"];
+    return [
+      "name",
+      "deck",
+      "schedule",
+      "due-by",
+      "start-date",
+      "end-date",
+      "penalty",
+      "recipient",
+      "reviewers",
+      "reminders",
+    ];
   }
   return current.evidenceKind === "oura"
     ? ["name", "in-bed-by", "schedule", "start-date", "end-date", "penalty", "recipient", "reviewers", "reminders"]
@@ -61,11 +73,16 @@ export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">)
       ];
 }
 
-/** A term's value in the pact as it stands. Reminders aren't terms: the pact's own page shows them. */
-export function currentValue(term: Exclude<Term, "reminders">, current: Current): string {
+/** A term's value in the pact as it stands, with an Anki pact's deck. Reminders aren't terms: the pact's own page shows them. */
+export function currentValue(
+  term: Exclude<Term, "reminders">,
+  current: Current & { anki?: { deckName: string | null } | null },
+): string {
   switch (term) {
     case "name":
       return current.name;
+    case "deck":
+      return deckText(current.anki?.deckName ?? null);
     case "description":
       return current.description;
     case "in-bed-by":
@@ -87,6 +104,11 @@ export function currentValue(term: Exclude<Term, "reminders">, current: Current)
   }
 }
 
+/** A deck's full name, or what to say when Pact doesn't have it. */
+function deckText(name: string | null): string {
+  return name ?? "Gone from your deck list";
+}
+
 /** A due-by time, "9:00pm", or "Midnight" without one. */
 function dueByText(dueBy: string | null): string {
   return dueBy === null ? "Midnight" : clockText(dueBy);
@@ -102,6 +124,8 @@ export function changeValue(change: Change, side: "before" | "after"): string {
     case "name":
     case "description":
       return change[side];
+    case "deck":
+      return deckText(change[side].name);
     case "in-bed-by":
       return clockText(change[side]);
     case "schedule":
@@ -137,6 +161,8 @@ export function effectText(change: Change): string {
   switch (change.term) {
     case "description":
       return "Needs approval: it defines what a photo must show";
+    case "deck":
+      return "Needs approval: any change of deck";
     case "in-bed-by":
       return "Needs approval: a later time";
     case "schedule":

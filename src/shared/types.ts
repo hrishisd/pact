@@ -1280,6 +1280,8 @@ export interface PactChange {
   recipientId: string;
   /** One or more of the owner's friends. */
   reviewerIds: AccountId[];
+  /** Anki only: the deck, from the owner's deck list. Left out to keep the deck it has. Changing it always needs approval. */
+  ankiDeckId?: string;
   /** Why, for the reviewers, when part of it needs approval. Optional; trimmed, and a blank note is none. */
   note?: string;
 }
@@ -1296,6 +1298,13 @@ export type ChangeEffect = "needs-approval" | "stricter" | "at-once";
 export type TermChange =
   | { term: "name"; before: string; after: string; effect: ChangeEffect }
   | { term: "description"; before: string; after: string; effect: ChangeEffect }
+  /** An Anki pact's deck: its id, and its name as AnkiWeb last gave it (null if Pact never had it). */
+  | {
+      term: "deck";
+      before: { id: string; name: string | null };
+      after: { id: string; name: string | null };
+      effect: ChangeEffect;
+    }
   /** "HH:MM". */
   | { term: "in-bed-by"; before: string; after: string; effect: ChangeEffect }
   /** "HH:MM", or null for midnight. */

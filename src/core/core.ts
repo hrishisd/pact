@@ -1057,7 +1057,7 @@ class Core implements PactCore {
         const checked = this.#checkedChange(accountId, timezone, pactId, change, this.#clock.now());
         if (!checked.ok) return checked;
         const { before, after, diffs, outcome } = checked;
-        const preview: ChangePreview = { changes: this.#termChanges(before, after, diffs), outcome };
+        const preview: ChangePreview = { changes: this.#termChanges(accountId, before, after, diffs), outcome };
         return { ok: true, preview } satisfies ChangePreviewResult;
       },
       changePact: (pactId, change) =>
@@ -3093,7 +3093,7 @@ class Core implements PactCore {
 
   /** The terms the pact's occurrence dated `date` follows: those in force when it opened. */
   #termsOn(pactId: string, date: LocalDate): DatedTerms {
-    const columns = `description, schedule, in_bed_by, due_by, penalty_cents, recipient_id`;
+    const columns = `description, schedule, in_bed_by, due_by, penalty_cents, recipient_id, anki_deck_id`;
     const earlier = this.#db
       .prepare(`SELECT ${columns} FROM pact_earlier_terms WHERE pact_id = ? AND until > ? ORDER BY until LIMIT 1`)
       .get(pactId, date) as DatedTerms | undefined;
@@ -3114,6 +3114,7 @@ class Core implements PactCore {
       recipientId: pact.recipient_id,
       reviewerIds: this.#reviewersOf(pact.id),
       reminders: JSON.parse(pact.reminders) as string[],
+      ankiDeckId: pact.anki_deck_id,
     };
   }
 
@@ -3178,16 +3179,13 @@ class Core implements PactCore {
     if (!pact) return { ok: false, reason: "pact-not-found" };
     if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
     if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
-    const { note: _note, ...terms } = change;
-    // A change keeps the pact's deck: changing it is ticket-04 work, always reviewed.
+    const { note: _note, ankiDeckId: newDeckId, ...terms } = change;
+    // An Anki pact keeps its deck unless the change names another.
+    const ankiDeckId = pact.anki_deck_id === null ? undefined : (newDeckId ?? pact.anki_deck_id);
     const checked = this.#checkedPact(
       ownerId,
       timezone,
-      {
-        ...terms,
-        evidenceKind: pact.evidence_kind,
-        ...(pact.anki_deck_id !== null && { ankiDeckId: pact.anki_deck_id }),
-      },
+      { ...terms, evidenceKind: pact.evidence_kind, ...(ankiDeckId !== undefined && { ankiDeckId }) },
       new Date(pact.created_at),
       pact,
     );
@@ -3209,6 +3207,7 @@ class Core implements PactCore {
       recipientId: change.recipientId,
       reviewerIds: [...checked.reviewerIds].sort(),
       reminders: checked.reminders,
+      ankiDeckId: checked.ankiDeckId,
     };
     // Reminders apply at once, so they go off before the due time in force now as well as the new one.
     const current = {
@@ -3345,8 +3344,9 @@ class Core implements PactCore {
     this.#db
       .prepare(
         `INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, in_bed_by, due_by, penalty_cents,
-                                         recipient_id)
-         SELECT id, ?, description, schedule, in_bed_by, due_by, penalty_cents, recipient_id FROM pact WHERE id = ?
+                                         recipient_id, anki_deck_id)
+         SELECT id, ?, description, schedule, in_bed_by, due_by, penalty_cents, recipient_id, anki_deck_id
+         FROM pact WHERE id = ?
          ON CONFLICT (pact_id, until) DO NOTHING`,
       )
       .run(from, pact.id);
@@ -3358,7 +3358,8 @@ class Core implements PactCore {
     this.#db
       .prepare(
         `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?, end_date = ?,
-                         penalty_cents = ?, recipient_id = ?, first_occurrence = ?
+                         penalty_cents = ?, recipient_id = ?, first_occurrence = ?,
+                         anki_deck_id = COALESCE(?, anki_deck_id)
          WHERE id = ?`,
       )
       .run(
@@ -3371,6 +3372,7 @@ class Core implements PactCore {
         after.penaltyCents,
         after.recipientId,
         firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate),
+        after.ankiDeckId,
         pact.id,
       );
   }
@@ -3439,9 +3441,12 @@ class Core implements PactCore {
   }
 
   /** The changed terms, old and new, with names for the recipient and reviewers. */
-  #termChanges(before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
+  #termChanges(ownerId: AccountId, before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
+    const deck = (id: string) => ({ id, name: this.#ankiDeckName(ownerId, id) });
     return diffs.map(({ term, effect }): TermChange => {
       switch (term) {
+        case "deck":
+          return { term, before: deck(before.ankiDeckId!), after: deck(after.ankiDeckId!), effect };
         case "name":
           return { term, before: before.name, after: after.name, effect };
         case "description":
@@ -3558,7 +3563,9 @@ class Core implements PactCore {
       note: row.note,
       requestedAt: new Date(row.requested_at),
       changes:
-        after === null ? [] : this.#termChanges(before, after, termDiffs(before, after, pact.anki_rollover_hour)),
+        after === null
+          ? []
+          : this.#termChanges(pact.owner_account_id, before, after, termDiffs(before, after, pact.anki_rollover_hour)),
       // Reminders are the owner's own: reviewers don't see them.
       current: withoutReminders(this.#currentTerms(pact)),
       appliesFrom: start?.appliesFrom ?? null,
@@ -3854,6 +3861,13 @@ class Core implements PactCore {
   #ankiDeckName(accountId: AccountId, deckId: string): string | null {
     const listed = this.#ankiDeckList(accountId)?.decks.find((deck) => deck.id === deckId)?.name;
     return listed ?? this.#ankiPactDeck(accountId, deckId)?.name ?? null;
+  }
+
+  /** The deck an Anki pact's day `date` is judged on: the one in force when it opened. */
+  #ankiDeckOn(pactId: string, date: LocalDate): string {
+    const deckId = this.#termsOn(pactId, date).anki_deck_id;
+    if (deckId === null) throw new Error(`pact ${pactId} has no Anki deck`);
+    return deckId;
   }
 
   /** A deck an Anki pact is on, as checks last found it; undefined before the first check. */
@@ -4482,8 +4496,8 @@ class Core implements PactCore {
       occurrenceDate: open.date,
       dueAt: open.dueAt,
       dueBy: this.#termsOn(pact.id, open.date).due_by,
-      deckName: this.#ankiDeckName(ownerId, pact.ankiDeckId!),
-      deckMissing: this.#ankiDeckMissing(ownerId, pact.ankiDeckId!),
+      deckName: this.#ankiDeckName(ownerId, this.#ankiDeckOn(pact.id, open.date)),
+      deckMissing: this.#ankiDeckMissing(ownerId, this.#ankiDeckOn(pact.id, open.date)),
       lastCheck: this.#lastAnkiCheck(pact.id, open.date),
     };
   }
@@ -4697,7 +4711,7 @@ class Core implements PactCore {
     const rows = this.#db
       .prepare(
         `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.due_by, pact.start_date, pact.end_date,
-                pact.penalty_cents, pact.first_occurrence, pact.created_at, pact.evidence_kind, pact.anki_deck_id,
+                pact.penalty_cents, pact.first_occurrence, pact.created_at, pact.evidence_kind,
                 pact.anki_rollover_hour, recipient.name AS recipient_name
          FROM pact JOIN recipient ON recipient.id = pact.recipient_id
          WHERE pact.owner_account_id = ? AND pact.stage = 'active'
@@ -4716,7 +4730,6 @@ class Core implements PactCore {
       | "first_occurrence"
       | "created_at"
       | "evidence_kind"
-      | "anki_deck_id"
       | "anki_rollover_hour"
     > & {
       recipient_name: string;
@@ -4725,7 +4738,6 @@ class Core implements PactCore {
       id: row.id,
       name: row.name,
       evidenceKind: row.evidence_kind,
-      ankiDeckId: row.anki_deck_id,
       penaltyCents: row.penalty_cents,
       recipientName: row.recipient_name,
       terms: occurrenceTermsOf(row),
@@ -5175,7 +5187,7 @@ class Core implements PactCore {
   #ankiDaysWaiting(t: Date, owner?: AccountId): { pactId: string; account: AccountId; deckId: string }[] {
     const pacts = this.#db
       .prepare(
-        `SELECT pact.id, pact.owner_account_id, pact.anki_deck_id, account.timezone
+        `SELECT pact.id, pact.owner_account_id, account.timezone
          FROM pact
          JOIN account ON account.id = pact.owner_account_id
          JOIN connection ON connection.account_id = pact.owner_account_id AND connection.service = 'anki'
@@ -5183,12 +5195,7 @@ class Core implements PactCore {
            AND (? IS NULL OR pact.owner_account_id = ?)
          ORDER BY pact.created_at, pact.id`,
       )
-      .all(owner ?? null, owner ?? null) as {
-      id: string;
-      owner_account_id: AccountId;
-      anki_deck_id: string;
-      timezone: string | null;
-    }[];
+      .all(owner ?? null, owner ?? null) as { id: string; owner_account_id: AccountId; timezone: string | null }[];
     return pacts.flatMap((pact) => {
       // Every pact's owner has a timezone: creating one needs it.
       if (pact.timezone === null) return [];
@@ -5196,7 +5203,7 @@ class Core implements PactCore {
       if (!open || t.getTime() >= open.dueAt.getTime() || this.#isJudged(pact.id, open.date)) return [];
       // An approved excuse covers it: it's Excused at its due time whatever the deck shows.
       if (this.#excuseOn(pact.id, open.date) === "approved") return [];
-      return [{ pactId: pact.id, account: pact.owner_account_id, deckId: pact.anki_deck_id }];
+      return [{ pactId: pact.id, account: pact.owner_account_id, deckId: this.#ankiDeckOn(pact.id, open.date) }];
     });
   }
 
@@ -5278,17 +5285,19 @@ class Core implements PactCore {
       }
       const pacts = this.#db
         .prepare(
-          `SELECT pact.id, pact.anki_deck_id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
+          `SELECT pact.id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
            WHERE pact.owner_account_id = ? AND pact.stage = 'active' AND pact.evidence_kind = 'anki'
            ORDER BY pact.created_at, pact.id`,
         )
-        .all(account) as { id: string; anki_deck_id: string; timezone: string | null }[];
+        .all(account) as { id: string; timezone: string | null }[];
       for (const pact of pacts) {
-        const counts = result.decks[pact.anki_deck_id];
-        if (!counts || counts.new + counts.learn + counts.review > 0 || pact.timezone === null) continue;
+        if (pact.timezone === null) continue;
         const { includes, covering } = this.#occurrencesOf(pact.id, pact.timezone);
         const day = includes(ankiDate) ? covering(ankiDate) : null;
         if (!day || asOf.getTime() >= day.dueAt.getTime() || checkedAt.getTime() >= day.dueAt.getTime()) continue;
+        // The deck the day is on: a deck change approved since it opened applies from the next.
+        const counts = result.decks[this.#ankiDeckOn(pact.id, day.date)];
+        if (!counts || counts.new + counts.learn + counts.review > 0) continue;
         if (this.#isJudged(pact.id, day.date)) continue;
         this.#judge(pact.id, day.date, "satisfied", checkedAt);
         this.#noteAnkiResult(pact.id, day.date, { cardsLeft: 0, checkedAt });
@@ -5384,12 +5393,13 @@ class Core implements PactCore {
         `SELECT anki_check.new_count + anki_check.learn_count + anki_check.review_count AS cards_left,
                 anki_check.checked_at
          FROM anki_check JOIN pact ON pact.owner_account_id = anki_check.account_id
-                                  AND pact.anki_deck_id = anki_check.deck_id
-         WHERE pact.id = ? AND anki_check.anki_date = ? AND anki_check.as_of < ? AND anki_check.checked_at < ?
+         WHERE pact.id = ? AND anki_check.deck_id = ? AND anki_check.anki_date = ? AND anki_check.as_of < ?
+           AND anki_check.checked_at < ?
          ORDER BY anki_check.checked_at DESC, anki_check.id DESC
          LIMIT 1`,
       )
-      .get(pactId, date, until, until) as { cards_left: number; checked_at: string } | undefined;
+      .get(pactId, this.#ankiDeckOn(pactId, date), date, until, until) as
+      { cards_left: number; checked_at: string } | undefined;
     return row ? { cardsLeft: row.cards_left, checkedAt: new Date(row.checked_at) } : null;
   }
 
@@ -5679,8 +5689,6 @@ interface ActivePact {
   id: string;
   name: string;
   evidenceKind: PactTerms["evidenceKind"];
-  /** Anki pacts only, else null. */
-  ankiDeckId: string | null;
   penaltyCents: number;
   recipientName: string;
   terms: OccurrenceTerms;
@@ -5852,7 +5860,10 @@ interface PactRow {
 }
 
 /** The terms an occurrence follows: the pact's, as they stood when it opened. */
-type DatedTerms = Pick<PactRow, "description" | "schedule" | "in_bed_by" | "due_by" | "penalty_cents" | "recipient_id">;
+type DatedTerms = Pick<
+  PactRow,
+  "description" | "schedule" | "in_bed_by" | "due_by" | "penalty_cents" | "recipient_id" | "anki_deck_id"
+>;
 
 /** A change request as stored, with its pact's owner, their name and timezone. */
 interface ChangeRequestRow {
@@ -5927,6 +5938,7 @@ function itemPath(kind: ReviewItem["kind"], itemId: string): string {
 const TERM_LABELS: Record<TermDiff["term"], string> = {
   name: "Name",
   description: "Photo shows",
+  deck: "Deck",
   "in-bed-by": "In bed by",
   schedule: "Days",
   "due-by": "Due by",
@@ -5980,6 +5992,7 @@ function storedTerms(json: string): ChangeableTerms {
     startDate: null,
     endDate: null,
     reminders: [],
+    ankiDeckId: null,
     ...(JSON.parse(json) as Partial<ChangeableTerms>),
   } as ChangeableTerms;
 }

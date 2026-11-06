@@ -742,32 +742,7 @@ function problemText(problem: Problem, form: Pick<Form, "kind">): string {
   return PROBLEMS[problem === "invalid-due-by" && form.kind === "anki" ? "anki-due-by" : problem];
 }
 
-export function GoalStep({
-  form,
-  update,
-  deckFixed = false,
-}: {
-  form: Form;
-  update: (change: Partial<Form>) => void;
-  /** After the edit window, an Anki pact's deck shows but can't change here. */
-  deckFixed?: boolean;
-}) {
-  if (form.kind === "anki" && deckFixed) {
-    return (
-      <>
-        <h2>Goal</h2>
-        <div className="field">
-          <span>Deck to finish each day</span>
-          <div className="opt static">
-            <span className="rt">
-              <b>{form.ankiDeckName === "" ? "Gone from your deck list" : form.ankiDeckName}</b>
-            </span>
-          </div>
-        </div>
-        <NameField form={form} update={update} placeholder="e.g. Spanish" />
-      </>
-    );
-  }
+export function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
   if (form.kind === "anki") return <AnkiGoalStep form={form} update={update} />;
   if (form.kind === "oura") {
     return (
