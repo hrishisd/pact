@@ -5,12 +5,12 @@
 
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { PaymentDetail } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import { api } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { formatDayTime, money } from "./format.ts";
 import { DollarIcon } from "./icons.tsx";
 import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
-import { Empty, useLoad } from "./ui.tsx";
+import { LoadedFound, useLoad } from "./ui.tsx";
 
 export function PaymentPage({
   paymentId,
@@ -22,18 +22,32 @@ export function PaymentPage({
   timezone: string;
   onOpenLedger: (recipientId: string, name: string) => void;
 }) {
-  const { data: result, failed, reload } = useLoad(() => api.payment(paymentId));
+  const { state, reload } = useLoad(() => api.payment(paymentId));
 
-  if (result === null) {
-    return failed ? (
-      <Empty
-        title="This payment couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    ) : null;
-  }
-  if (!result.ok) return <Empty title="Payment not found" body="It isn't one of yours." />;
-  const { payment } = result;
+  return (
+    <LoadedFound
+      state={state}
+      what="This payment"
+      notFound={{ title: "Payment not found", body: "It isn't one of yours." }}
+    >
+      {({ payment }) => (
+        <PaymentView payment={payment} timezone={timezone} onOpenLedger={onOpenLedger} onReplied={reload} />
+      )}
+    </LoadedFound>
+  );
+}
+
+function PaymentView({
+  payment,
+  timezone,
+  onOpenLedger,
+  onReplied,
+}: {
+  payment: Json<PaymentDetail>;
+  timezone: string;
+  onOpenLedger: (recipientId: string, name: string) => void;
+  onReplied: () => void;
+}) {
   const { state } = payment;
   const src = API_PATHS.photo(encodeURIComponent(payment.photoId));
   return (
@@ -64,7 +78,7 @@ export function PaymentPage({
         </a>
       </article>
       <Thread thread={payment.thread} viewer="owner" timezone={timezone} />
-      {payment.thread.waitingOnReply && <ReplyBox itemId={payment.id} onReplied={reload} />}
+      {payment.thread.waitingOnReply && <ReplyBox itemId={payment.id} onReplied={onReplied} />}
       <p className="meta">
         Sent to {listNames(payment.reviewerNames)} · {formatDayTime(payment.recordedAt, timezone)}
       </p>

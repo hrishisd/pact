@@ -6,13 +6,13 @@
 
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import { api } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
 import { formatDayTime } from "./format.ts";
 import { ExcuseIcon } from "./icons.tsx";
 import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
-import { Empty, useLoad, useNow } from "./ui.tsx";
+import { LoadedFound, useLoad, useNow } from "./ui.tsx";
 
 export function ExcusePage({
   excuseId,
@@ -24,19 +24,31 @@ export function ExcusePage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { data: result, failed, reload } = useLoad(() => api.excuse(excuseId));
-  const now = useNow();
+  const { state, reload } = useLoad(() => api.excuse(excuseId));
 
-  if (result === null) {
-    return failed ? (
-      <Empty
-        title="This excuse couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    ) : null;
-  }
-  if (!result.ok) return <Empty title="Excuse not found" body="It isn't one of yours." />;
-  const { excuse } = result;
+  return (
+    <LoadedFound
+      state={state}
+      what="This excuse"
+      notFound={{ title: "Excuse not found", body: "It isn't one of yours." }}
+    >
+      {({ excuse }) => <ExcuseView excuse={excuse} timezone={timezone} onOpenPact={onOpenPact} onReplied={reload} />}
+    </LoadedFound>
+  );
+}
+
+function ExcuseView({
+  excuse,
+  timezone,
+  onOpenPact,
+  onReplied,
+}: {
+  excuse: Json<ExcuseDetail>;
+  timezone: string;
+  onOpenPact: (pactId: string, name: string) => void;
+  onReplied: () => void;
+}) {
+  const now = useNow();
   const { state } = excuse;
   return (
     <>
@@ -86,7 +98,7 @@ export function ExcusePage({
         </div>
       </section>
       <Thread thread={excuse.thread} viewer="owner" timezone={timezone} />
-      {excuse.thread.waitingOnReply && <ReplyBox itemId={excuse.id} onReplied={reload} />}
+      {excuse.thread.waitingOnReply && <ReplyBox itemId={excuse.id} onReplied={onReplied} />}
       <p className="meta">
         Sent to {listNames(excuse.reviewerNames)} · {formatDayTime(excuse.filedAt, timezone)}
       </p>

@@ -4,6 +4,7 @@ import {
   clockText,
   clockTime,
   dateIn,
+  dateUnlessToday,
   dueClockText,
   formatDate,
   formatDay,
@@ -105,6 +106,23 @@ describe("dateIn", () => {
     ["UTC", "2026-01-08"],
   ])("in %s, %s", (timeZone, date) => {
     expect(dateIn(instant, timeZone)).toBe(date);
+  });
+});
+
+describe("dateUnlessToday", () => {
+  // Noon on Thu Nov 12 2026 in New York.
+  const now = Date.parse("2026-11-12T17:00:00.000Z");
+
+  test("is null for today in the profile's timezone, and the date otherwise", () => {
+    expect(dateUnlessToday("2026-11-12", now, "America/New_York")).toBeNull();
+    expect(dateUnlessToday("2026-11-13", now, "America/New_York")).toBe("Fri Nov 13");
+    // Already Fri Nov 13 in Tokyo.
+    expect(dateUnlessToday("2026-11-12", now, "Asia/Tokyo")).toBe("Thu Nov 12");
+  });
+
+  test("names the same weekday and day of another year, which reads the same", () => {
+    // Nov 12 2020 was a Thursday too.
+    expect(dateUnlessToday("2020-11-12", now, "America/New_York")).toBe("Thu Nov 12");
   });
 });
 

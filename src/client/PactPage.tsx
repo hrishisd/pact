@@ -20,12 +20,9 @@ import { dueTimesForm, PROBLEMS, ReviewersStep } from "./CreatePact.tsx";
 import { clockText, formatDate, formatDay, minutesLeft, money, remindersText, scheduleText } from "./format.ts";
 import { CameraIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
-import { Empty, Sheet, useNow } from "./ui.tsx";
+import { LoadedFound, Sheet, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
-
-type State =
-  { kind: "loading" } | { kind: "loaded"; pact: Pact } | { kind: "not-found" } | { kind: "failed"; error: unknown };
 
 const STAGE_CHIPS: Record<Pact["stage"], { label: string; className: string }> = {
   active: { label: "Active", className: "c-ok" },
@@ -54,90 +51,71 @@ export function PactPage({
   onOpenChangeRequest: (changeRequestId: string) => void;
   onInvite: () => void;
 }) {
-  const [state, setState] = useState<State>({ kind: "loading" });
+  // Reloaded after a change made here, keeping the pact shown meanwhile and if the reload fails.
+  const { state, reload } = useLoad(() => api.pact(pactId));
+  const result = loadedData(state);
 
-  const load = useCallback(() => {
-    api.pact(pactId).then(
-      (result) => {
-        if (!result.ok) return setState({ kind: "not-found" });
-        setState({ kind: "loaded", pact: result.pact });
-        onLoaded(pactId, result.pact.name);
-      },
-      (error: unknown) => setState({ kind: "failed", error }),
-    );
-  }, [pactId, onLoaded]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    if (result?.ok) onLoaded(pactId, result.pact.name);
+  }, [result, pactId, onLoaded]);
 
-  switch (state.kind) {
-    case "loading":
-      return null;
-    case "not-found":
-      return <Empty title="Pact not found" body="It isn't one of your pacts." />;
-    case "failed":
-      return (
-        <Empty
-          title="This pact couldn't load"
-          body={failureText(state.error, "Check your connection and reopen Pact.")}
-        />
-      );
-    case "loaded":
-      return (
+  return (
+    <LoadedFound
+      state={state}
+      what="This pact"
+      notFound={{ title: "Pact not found", body: "It isn't one of your pacts." }}
+    >
+      {({ pact }) => (
         <>
-          {state.pact.connectionProblem &&
-            (state.pact.evidenceKind === "anki" ? (
-              <AnkiConnectionAlert status={state.pact.connectionProblem} onReconnected={load} />
+          {pact.connectionProblem &&
+            (pact.evidenceKind === "anki" ? (
+              <AnkiConnectionAlert status={pact.connectionProblem} onReconnected={reload} />
             ) : (
-              <OuraConnectionAlert status={state.pact.connectionProblem} />
+              <OuraConnectionAlert status={pact.connectionProblem} />
             ))}
-          {state.pact.stage === "active" && state.pact.evidenceKind === "anki" && state.pact.anki.deckMissing && (
-            <AnkiDeckMissing deckName={state.pact.anki.deckName} />
+          {pact.stage === "active" && pact.evidenceKind === "anki" && pact.anki.deckMissing && (
+            <AnkiDeckMissing deckName={pact.anki.deckName} />
           )}
-          <EditWindowBar pact={state.pact} onEdit={onEdit} onDeleted={onDeleted} />
-          <StageLine pact={state.pact} />
-          <NewTerms pact={state.pact} />
-          <Actions pact={state.pact} timezone={timezone} onFiled={load} onRequestChange={onRequestChange} />
-          {state.pact.waiting.length > 0 && (
-            <WaitingOn
-              items={state.pact.waiting}
-              onOpenExcuse={onOpenExcuse}
-              onOpenChangeRequest={onOpenChangeRequest}
-            />
+          <EditWindowBar pact={pact} onEdit={onEdit} onDeleted={onDeleted} />
+          <StageLine pact={pact} />
+          <NewTerms pact={pact} />
+          <Actions pact={pact} timezone={timezone} onFiled={reload} onRequestChange={onRequestChange} />
+          {pact.waiting.length > 0 && (
+            <WaitingOn items={pact.waiting} onOpenExcuse={onOpenExcuse} onOpenChangeRequest={onOpenChangeRequest} />
           )}
-          <History pact={state.pact} timezone={timezone} />
-          <Terms pact={state.pact} onSaved={load} onInvite={onInvite} />
-          <EndPact pact={state.pact} onSent={load} />
-          {state.pact.stage === "ended" && (
+          <History pact={pact} timezone={timezone} />
+          <Terms pact={pact} onSaved={reload} onInvite={onInvite} />
+          <EndPact pact={pact} onSent={reload} />
+          {pact.stage === "ended" && (
             <p className="small muted">
-              Ended {formatDay(state.pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on
-              the ledger.
+              Ended {formatDay(pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on the
+              ledger.
             </p>
           )}
         </>
-      );
-  }
+      )}
+    </LoadedFound>
+  );
 }
 
 /** The blue bar on a pact in its edit window. It and any open sheet go away when the window closes. */
 function EditWindowBar({ pact, onEdit, onDeleted }: { pact: Pact; onEdit: () => void; onDeleted: () => void }) {
   const now = useNow();
   const [asking, setAsking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const minutes = minutesLeft(pact.editWindowClosesAt, now);
-
-  const remove = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const {
+    busy,
+    error,
+    run: remove,
+  } = useSend(
+    async () => {
       const result = await api.deletePact(pact.id);
-      if (result.ok) return onDeleted();
-      setError(result.reason === "edit-window-closed" ? "The 10 minutes are up." : "This pact wasn't found.");
-    } catch (failure) {
-      setError(`Couldn't delete it. ${failureText(failure, "Check your connection and try again.")}`);
-    } finally {
-      setBusy(false);
-    }
-  };
+      if (!result.ok)
+        return result.reason === "edit-window-closed" ? "The 10 minutes are up." : "This pact wasn't found.";
+      onDeleted();
+    },
+    (failure) => `Couldn't delete it. ${failureText(failure, "Check your connection and try again.")}`,
+  );
+  const minutes = minutesLeft(pact.editWindowClosesAt, now);
 
   if (minutes === null) return error ? <p className="error">{error}</p> : null;
   return (
@@ -158,7 +136,7 @@ function EditWindowBar({ pact, onEdit, onDeleted }: { pact: Pact; onEdit: () => 
           <p>This action can't be undone.</p>
           {error && <p className="error">{error}</p>}
           <div className="stack">
-            <button className="btn danger block" disabled={busy} onClick={() => void remove()}>
+            <button className="btn danger block" disabled={busy} onClick={() => remove()}>
               {busy ? "Deleting…" : "Delete pact"}
             </button>
             <button className="btn block" onClick={() => setAsking(false)}>
@@ -272,33 +250,28 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
   const now = useNow();
   const [asking, setAsking] = useState(false);
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    busy,
+    error,
+    run: send,
+  } = useSend(
+    async () => {
+      const result = await api.endPact(pact.id, note.trim() === "" ? {} : { note });
+      if (!result.ok) {
+        return result.reason === "change-request-waiting"
+          ? "A change request is already waiting. Withdraw it first."
+          : "This pact can't be ended now. Reopen it to see where it stands.";
+      }
+      setAsking(false);
+      onSent();
+    },
+    (failure) => `Couldn't send it. ${failureText(failure, "Check your connection and try again.")}`,
+  );
   if (minutesLeft(pact.editWindowClosesAt, now) !== null || pact.stage === "ended" || changeWaiting(pact)) {
     return null;
   }
   const names = pact.reviewers.map((r) => r.name);
   const approval = names.length === 1 ? `${names[0]}'s approval` : `approval from ${listNames(names, "or")}`;
-
-  const send = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.endPact(pact.id, note.trim() === "" ? {} : { note });
-      if (result.ok) {
-        setAsking(false);
-        return onSent();
-      }
-      setError(
-        result.reason === "change-request-waiting"
-          ? "A change request is already waiting. Withdraw it first."
-          : "This pact can't be ended now. Reopen it to see where it stands.",
-      );
-    } catch (failure) {
-      setError(`Couldn't send it. ${failureText(failure, "Check your connection and try again.")}`);
-    }
-    setBusy(false);
-  };
 
   return (
     <>
@@ -321,7 +294,7 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
           </label>
           {error && <p className="error">{error}</p>}
           <div className="stack">
-            <button className="btn danger block" disabled={busy} onClick={() => void send()}>
+            <button className="btn danger block" disabled={busy} onClick={() => send()}>
               Send to {listNames(names)}
             </button>
             <button className="btn block" onClick={() => setAsking(false)}>
@@ -443,21 +416,20 @@ const REMINDERS_PROBLEMS: Partial<Record<ChangePactRefusal, string>> = REMINDER_
 
 function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(pact.name);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
+  const {
+    busy: saving,
+    error,
+    run: save,
+  } = useSend(
+    async () => {
       const result = await api.changePact(pact.id, changedAtOnce(pact, { name: name.trim() }));
-      if (result.ok || result.reason === "nothing-changed") return onSaved();
-      setError(SHARED_PROBLEMS[result.reason] ?? "Couldn't save it. Reopen the pact and try again.");
-    } catch (cause) {
-      setError(`Couldn't save it. ${failureText(cause, "Check your connection and try again.")}`);
-    }
-    setSaving(false);
-  };
+      if (!result.ok && result.reason !== "nothing-changed") {
+        return SHARED_PROBLEMS[result.reason] ?? "Couldn't save it. Reopen the pact and try again.";
+      }
+      onSaved();
+    },
+    (cause) => `Couldn't save it. ${failureText(cause, "Check your connection and try again.")}`,
+  );
 
   return (
     <Sheet title="Name" closeLabel="Cancel" onClose={onClose}>
@@ -472,7 +444,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
         <small>Shown on Today. A new name applies at once, with no approval.</small>
       </label>
       {error && <p className="error">{error}</p>}
-      <button className="btn primary block" disabled={saving} onClick={() => void save()}>
+      <button className="btn primary block" disabled={saving} onClick={() => save()}>
         Save name
       </button>
     </Sheet>
@@ -497,8 +469,6 @@ function AddReviewerSheet({
 }) {
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const loadFriends = useCallback(() => api.friends().then(setFriends, () => setFriends([])), []);
   useEffect(() => void loadFriends(), [loadFriends]);
 
@@ -507,18 +477,18 @@ function AddReviewerSheet({
   const reviewerNames = pact.reviewers.map((r) => r.name);
   const pickedNames = (others ?? []).filter((f) => picked.includes(f.id)).map((f) => f.name);
 
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
+  const {
+    busy: saving,
+    error,
+    run: save,
+  } = useSend(
+    async () => {
       const result = await api.changePact(pact.id, changedAtOnce(pact, { reviewerIds: [...current, ...picked] }));
-      if (result.ok) return onSaved();
-      setError(SHARED_PROBLEMS[result.reason] ?? "Couldn't add them. Reopen the pact and try again.");
-    } catch (cause) {
-      setError(`Couldn't add them. ${failureText(cause, "Check your connection and try again.")}`);
-    }
-    setSaving(false);
-  };
+      if (!result.ok) return SHARED_PROBLEMS[result.reason] ?? "Couldn't add them. Reopen the pact and try again.";
+      onSaved();
+    },
+    (cause) => `Couldn't add them. ${failureText(cause, "Check your connection and try again.")}`,
+  );
 
   let body: ReactNode = null;
   if (others !== null && others.length === 0) {
@@ -556,7 +526,7 @@ function AddReviewerSheet({
           />
         </div>
         {error && <p className="error">{error}</p>}
-        <button className="btn primary block" disabled={saving || picked.length === 0} onClick={() => void save()}>
+        <button className="btn primary block" disabled={saving || picked.length === 0} onClick={() => save()}>
           {picked.length === 0 ? "Add reviewer" : `Add ${listNames(pickedNames)}`}
         </button>
       </>
@@ -572,8 +542,21 @@ function AddReviewerSheet({
 
 function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void; onSaved: () => void }) {
   const [reminders, setReminders] = useState(pact.reminders);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    busy: saving,
+    error,
+    setError,
+    run: send,
+  } = useSend(
+    async () => {
+      const result = await api.changePact(pact.id, changedAtOnce(pact, { reminders }));
+      if (!result.ok && result.reason !== "nothing-changed") {
+        return REMINDERS_PROBLEMS[result.reason] ?? "Couldn't save them. Reopen the pact and try again.";
+      }
+      onSaved();
+    },
+    (cause) => `Couldn't save them. ${failureText(cause, "Check your connection and try again.")}`,
+  );
   const form = {
     kind: pact.evidenceKind,
     weekly: pact.schedule.kind === "weekly-count",
@@ -583,18 +566,9 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
     reminders,
   };
 
-  const save = async () => {
+  const save = () => {
     if (reminders.includes("")) return setError(REMINDER_PROBLEMS["invalid-reminders"]);
-    setSaving(true);
-    setError(null);
-    try {
-      const result = await api.changePact(pact.id, changedAtOnce(pact, { reminders }));
-      if (result.ok || result.reason === "nothing-changed") return onSaved();
-      setError(REMINDERS_PROBLEMS[result.reason] ?? "Couldn't save them. Reopen the pact and try again.");
-    } catch (cause) {
-      setError(`Couldn't save them. ${failureText(cause, "Check your connection and try again.")}`);
-    }
-    setSaving(false);
+    send();
   };
 
   return (
@@ -603,7 +577,7 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
         <RemindersStep form={form} onReminders={setReminders} hint="Changes apply at once, with no approval." />
       </div>
       {error && <p className="error">{error}</p>}
-      <button className="btn primary block" disabled={saving} onClick={() => void save()}>
+      <button className="btn primary block" disabled={saving} onClick={save}>
         Save reminders
       </button>
     </Sheet>

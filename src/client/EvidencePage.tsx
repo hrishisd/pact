@@ -5,12 +5,12 @@
 
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { EvidenceDetail } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import { api } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { formatDate, formatDayTime } from "./format.ts";
 import { CameraIcon } from "./icons.tsx";
 import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
-import { Empty, useLoad } from "./ui.tsx";
+import { LoadedFound, useLoad } from "./ui.tsx";
 
 export function EvidencePage({
   evidenceId,
@@ -22,18 +22,28 @@ export function EvidencePage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { data: result, failed, reload } = useLoad(() => api.evidence(evidenceId));
+  const { state, reload } = useLoad(() => api.evidence(evidenceId));
 
-  if (result === null) {
-    return failed ? (
-      <Empty
-        title="This evidence couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    ) : null;
-  }
-  if (!result.ok) return <Empty title="Evidence not found" body="It isn't yours." />;
-  const { evidence } = result;
+  return (
+    <LoadedFound state={state} what="This evidence" notFound={{ title: "Evidence not found", body: "It isn't yours." }}>
+      {({ evidence }) => (
+        <EvidenceView evidence={evidence} timezone={timezone} onOpenPact={onOpenPact} onReplied={reload} />
+      )}
+    </LoadedFound>
+  );
+}
+
+function EvidenceView({
+  evidence,
+  timezone,
+  onOpenPact,
+  onReplied,
+}: {
+  evidence: Json<EvidenceDetail>;
+  timezone: string;
+  onOpenPact: (pactId: string, name: string) => void;
+  onReplied: () => void;
+}) {
   const { state } = evidence;
   return (
     <>
@@ -73,7 +83,7 @@ export function EvidencePage({
         })}
       </article>
       <Thread thread={evidence.thread} viewer="owner" timezone={timezone} />
-      {evidence.thread.waitingOnReply && <ReplyBox itemId={evidence.id} onReplied={reload} />}
+      {evidence.thread.waitingOnReply && <ReplyBox itemId={evidence.id} onReplied={onReplied} />}
       <p className="meta">
         Sent to {listNames(evidence.reviewerNames)} · {formatDayTime(evidence.submittedAt, timezone)}
       </p>

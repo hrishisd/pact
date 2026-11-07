@@ -7,7 +7,7 @@ import type { Json } from "../shared/api.ts";
 import type { AskOwnerResult, QuestionThread, Refusal, ReplyResult } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { formatDayTime } from "./format.ts";
-import { Sheet } from "./ui.tsx";
+import { Sheet, useSend } from "./ui.tsx";
 
 /**
  * The questions and replies so far, oldest first; nothing when there are
@@ -50,24 +50,19 @@ const REPLY_REFUSAL_TEXT: Record<Refusal<ReplyResult>, string> = {
 /** The owner's reply box, under the thread while a question waits on their reply. */
 export function ReplyBox({ itemId, onReplied }: { itemId: string; onReplied: () => void }) {
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const send = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const {
+    busy,
+    error,
+    run: send,
+  } = useSend(
+    async () => {
       const result = await api.reply(itemId, text);
-      if (result.ok) {
-        setText("");
-        onReplied();
-      } else setError(REPLY_REFUSAL_TEXT[result.reason]);
-    } catch (failure) {
-      setError(`Couldn't send. ${failureText(failure, "Check your connection and try again.")}`);
-    } finally {
-      setBusy(false);
-    }
-  };
+      if (!result.ok) return REPLY_REFUSAL_TEXT[result.reason];
+      setText("");
+      onReplied();
+    },
+    (failure) => `Couldn't send. ${failureText(failure, "Check your connection and try again.")}`,
+  );
 
   return (
     <div className="stack">
@@ -80,7 +75,7 @@ export function ReplyBox({ itemId, onReplied }: { itemId: string; onReplied: () 
         onChange={(e) => setText(e.target.value)}
       />
       {error && <p className="error small">{error}</p>}
-      <button className="btn primary block" disabled={busy || text.trim() === ""} onClick={() => void send()}>
+      <button className="btn primary block" disabled={busy || text.trim() === ""} onClick={() => send()}>
         {busy ? "Sending…" : "Send reply"}
       </button>
     </div>
@@ -112,22 +107,18 @@ export function AskSheet({
   onAsked: () => void;
 }) {
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const send = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const {
+    busy,
+    error,
+    run: send,
+  } = useSend(
+    async () => {
       const result = await api.askOwner(itemId, text);
-      if (result.ok) return onAsked();
-      setError(ASK_REFUSAL_TEXT[result.reason]);
-    } catch (failure) {
-      setError(`Couldn't send. ${failureText(failure, "Check your connection and try again.")}`);
-    } finally {
-      setBusy(false);
-    }
-  };
+      if (!result.ok) return ASK_REFUSAL_TEXT[result.reason];
+      onAsked();
+    },
+    (failure) => `Couldn't send. ${failureText(failure, "Check your connection and try again.")}`,
+  );
 
   return (
     <Sheet title={`Ask ${ownerName}`} closeLabel="Cancel" onClose={onClose}>
@@ -147,7 +138,7 @@ export function AskSheet({
         />
       </label>
       {error && <p className="error small">{error}</p>}
-      <button className="btn primary block" disabled={busy || text.trim() === ""} onClick={() => void send()}>
+      <button className="btn primary block" disabled={busy || text.trim() === ""} onClick={() => send()}>
         {busy ? "Sending…" : `Send to ${ownerName}`}
       </button>
     </Sheet>

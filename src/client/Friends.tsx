@@ -4,10 +4,12 @@ import { useState } from "react";
 import { invitePath } from "../shared/api.ts";
 import { api, failureText } from "./api.ts";
 import { initial } from "./format.ts";
-import { useLoad } from "./ui.tsx";
+import { loadFailure, loadedData, useLoad } from "./ui.tsx";
 
 export function FriendsSection() {
-  const { data: friends, failed } = useLoad(api.friends);
+  const { state } = useLoad(api.friends);
+  const friends = loadedData(state);
+  const failed = loadFailure(state);
 
   return (
     <section className="stack">

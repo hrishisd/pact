@@ -37,3 +37,19 @@ test.each([
 ])("sleep(%j) throws", (start, message) => {
   expect(() => sleep(start)).toThrow(message);
 });
+
+test("a night after the clocks go forward is written with New York's summer offset", () => {
+  // The reference week's Mon+10 is 2026-03-16, after the change on 2026-03-08.
+  expect(sleep("Mon+10 23:40")).toMatchObject({
+    day: "2026-03-17",
+    bedtime_start: "2026-03-16T23:40:00-04:00",
+    bedtime_end: "2026-03-17T06:40:00-04:00",
+  });
+  // The night of the change starts in winter time and is written so.
+  expect(sleep("Sat+8 23:00").bedtime_start).toBe("2026-03-07T23:00:00-05:00");
+});
+
+test("a start the clocks skip throws", () => {
+  // Sun+8 is 2026-03-08, when 02:00 jumps to 03:00 in New York.
+  expect(() => sleep("Sun+8 02:30")).toThrow('sleep start "Sun+8 02:30" is skipped by the clocks in America/New_York');
+});

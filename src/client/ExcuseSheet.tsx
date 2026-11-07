@@ -5,7 +5,7 @@
 // what filing holds.
 
 import { useEffect, useRef, useState } from "react";
-import type { Json } from "../shared/api.ts";
+import type { FileExcuseRequest, Json } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
 import {
   MAX_EXCUSE_PHOTOS,
@@ -22,7 +22,7 @@ import { listNames } from "./change-terms.tsx";
 import { DayChip, SKIP_REASON_TEXT, dayNote, excuseDayText } from "./excuse-days.tsx";
 import { formatDate, money, scheduleText, hoursLeft } from "./format.ts";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
-import { Sheet, useNow } from "./ui.tsx";
+import { Sheet, useNow, useSend } from "./ui.tsx";
 
 export interface ExcuseSheetProps {
   pactId: string;
@@ -125,8 +125,19 @@ function ExcuseForm({
   const [aheadFrom, setAheadFrom] = useState(options?.today ?? "");
   const [aheadTo, setAheadTo] = useState(options?.today ?? "");
   const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, setError, run } = useSend(
+    async (excuse: FileExcuseRequest, photoBlobs: Blob[]) => {
+      const result = await api.fileExcuse(pact.id, excuse, photoBlobs);
+      if (!result.ok) return FILE_REFUSAL_TEXT[result.reason];
+      onFiled();
+    },
+    (failure) =>
+      uploadFailureText(
+        failure,
+        "A photo was too large to send. Remove it and add it again.",
+        "Couldn't send. Check your connection and try again.",
+      ),
+  );
 
   const dates: Dates =
     day !== undefined
@@ -160,29 +171,12 @@ function ExcuseForm({
 
   const photos = usePhotos(setError);
 
-  const send = async () => {
-    if (!ready) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.fileExcuse(
-        pact.id,
+  const send = () => {
+    if (ready)
+      run(
         { ...dates, reason: reason.trim() },
         photos.list.map((p) => p.blob),
       );
-      if (result.ok) return onFiled();
-      setError(FILE_REFUSAL_TEXT[result.reason]);
-    } catch (failure) {
-      setError(
-        uploadFailureText(
-          failure,
-          "A photo was too large to send. Remove it and add it again.",
-          "Couldn't send. Check your connection and try again.",
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
   };
 
   // "Gym is Mon, Wed, Fri", "Read is every day", or "Piano is 3× per week".
@@ -374,7 +368,7 @@ function ExcuseForm({
           </span>
         )}
         {error && <p className="error small">{error}</p>}
-        <button className="btn primary block" disabled={!ready} onClick={() => void send()}>
+        <button className="btn primary block" disabled={!ready} onClick={send}>
           {busy ? "Sending…" : `Send to ${reviewers}`}
         </button>
       </div>

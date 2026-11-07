@@ -39,7 +39,7 @@ import {
 } from "./CreatePact.tsx";
 import { formatDate, money, parseCents, remindersText } from "./format.ts";
 import { RemindersStep } from "./reminders-step.tsx";
-import { Empty, Sheet, useLoad } from "./ui.tsx";
+import { LoadedFound, Sheet, useLoad, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
 type Step = "goal" | "schedule" | "penalty" | "reviewers" | "reminders";
@@ -95,18 +95,16 @@ export function ChangePact({
   onDone: () => void;
   onInvite: () => void;
 }) {
-  const { data, failed } = useLoad(() => api.pact(pactId));
-  if (failed) {
-    return (
-      <Empty
-        title="This pact couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    );
-  }
-  if (data === null) return null;
-  if (!data.ok) return <Empty title="Pact not found" body="It isn't one of your pacts." />;
-  return <ChangeForm pact={data.pact} onDone={onDone} onInvite={onInvite} />;
+  const { state } = useLoad(() => api.pact(pactId));
+  return (
+    <LoadedFound
+      state={state}
+      what="This pact"
+      notFound={{ title: "Pact not found", body: "It isn't one of your pacts." }}
+    >
+      {({ pact }) => <ChangeForm pact={pact} onDone={onDone} onInvite={onInvite} />}
+    </LoadedFound>
+  );
 }
 
 /** The form's terms as the core takes them, or what stops them being sent. */
@@ -146,8 +144,18 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
   const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
   const [verdict, setVerdict] = useState<Verdict>({ kind: "loading" });
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const {
+    busy: sending,
+    error: sendError,
+    run: sendChange,
+  } = useSend(
+    async (sent: PactChange) => {
+      const result = await api.changePact(pact.id, sent);
+      if (!result.ok) return REFUSAL_TEXT[result.reason];
+      onDone();
+    },
+    (error) => `Couldn't send it. ${failureText(error, "Check your connection and try again.")}`,
+  );
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
 
   // As on Create pact: a list that didn't load says so, rather than looking empty.
@@ -181,19 +189,9 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
     };
   }, [key]);
 
-  const send = async () => {
+  const send = () => {
     const sent = changeOf(form, note);
-    if ("problem" in sent) return;
-    setSending(true);
-    setSendError(null);
-    try {
-      const result = await api.changePact(pact.id, sent);
-      if (result.ok) return onDone();
-      setSendError(REFUSAL_TEXT[result.reason]);
-    } catch (error) {
-      setSendError(`Couldn't send it. ${failureText(error, "Check your connection and try again.")}`);
-    }
-    setSending(false);
+    if (!("problem" in sent)) sendChange(sent);
   };
 
   const changes = verdict.kind === "loaded" ? verdict.preview.changes : [];
@@ -311,7 +309,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
       <button
         className="btn primary block"
         disabled={sending || verdict.kind !== "loaded" || verdict.preview.outcome.kind === "nothing"}
-        onClick={() => void send()}
+        onClick={send}
       >
         {buttonText(verdict)}
       </button>

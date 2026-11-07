@@ -44,7 +44,7 @@ import {
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { TermsList } from "./PactPage.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
-import { Empty, useLoad, useNow } from "./ui.tsx";
+import { LoadedFound, loadFailure, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 type Step = "kind" | "connect" | "goal" | "schedule" | "penalty" | "reviewers" | "reminders" | "check";
 const AFTER_KIND: Step[] = ["goal", "schedule", "penalty", "reviewers", "reminders", "check"];
@@ -241,29 +241,27 @@ export function EditPact({
   onDone: () => void;
   onInvite: () => void;
 }) {
-  const { data, failed } = useLoad(() => api.pact(pactId));
-  if (failed) {
-    return (
-      <Empty
-        title="This pact couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    );
-  }
-  if (data === null) return null;
-  if (!data.ok) return <Empty title="Pact not found" body="It isn't one of your pacts." />;
+  const { state } = useLoad(() => api.pact(pactId));
   // Editing never shows the kind step, so neither the Oura nor the Anki flags change anything here.
   return (
-    <CreatePact
-      editing={data.pact}
-      ouraConnected
-      ouraAvailable
-      ankiConnected
-      ankiAvailable
-      onCancel={onDone}
-      onCreated={onDone}
-      onInvite={onInvite}
-    />
+    <LoadedFound
+      state={state}
+      what="This pact"
+      notFound={{ title: "Pact not found", body: "It isn't one of your pacts." }}
+    >
+      {({ pact }) => (
+        <CreatePact
+          editing={pact}
+          ouraConnected
+          ouraAvailable
+          ankiConnected
+          ankiAvailable
+          onCancel={onDone}
+          onCreated={onDone}
+          onInvite={onInvite}
+        />
+      )}
+    </LoadedFound>
   );
 }
 
@@ -618,7 +616,9 @@ function deckLeaf(name: string): string {
 
 /** Anki's Goal step: the deck tree, indented, with the picked deck's counts now, then the name. */
 function AnkiGoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
-  const { data, failed, reload } = useLoad(() => api.ankiDecks());
+  const { state, reload } = useLoad(() => api.ankiDecks());
+  const data = loadedData(state);
+  const failed = loadFailure(state);
   let picker: ReactNode = <small className="muted">Loading your decks from AnkiWeb…</small>;
   if (failed || (data !== null && !data.ok)) {
     const reason = data !== null && !data.ok ? data.reason : null;
@@ -1151,21 +1151,18 @@ export function PenaltyStep({
 
 function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipient) => void; onCancel: () => void }) {
   const [name, setName] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
+  const {
+    busy: saving,
+    error,
+    run: save,
+  } = useSend(
+    async () => {
       const result = await api.addRecipient({ name });
-      if (result.ok) return onSaved(result.recipient);
-      setError("Enter a name.");
-    } catch (error) {
-      setError(`Couldn't save it. ${failureText(error, "Check your connection and try again.")}`);
-    }
-    setSaving(false);
-  };
+      if (!result.ok) return "Enter a name.";
+      onSaved(result.recipient);
+    },
+    (error) => `Couldn't save it. ${failureText(error, "Check your connection and try again.")}`,
+  );
 
   return (
     <div className="card">
@@ -1180,7 +1177,7 @@ function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipien
       </label>
       {error && <p className="error">{error}</p>}
       <div className="row2">
-        <button className="btn sm primary" disabled={name.trim() === "" || saving} onClick={() => void save()}>
+        <button className="btn sm primary" disabled={name.trim() === "" || saving} onClick={() => save()}>
           Save
         </button>
         <button className="btn sm" onClick={onCancel}>

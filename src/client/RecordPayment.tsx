@@ -3,12 +3,12 @@
 // it doesn't lower what's owed.
 
 import { useEffect, useRef, useState } from "react";
-import type { Json } from "../shared/api.ts";
+import type { Json, RecordPaymentRequest } from "../shared/api.ts";
 import type { LedgerSummary, RecordPaymentRefusal } from "../shared/types.ts";
 import { api, uploadFailureText } from "./api.ts";
 import { centsInputText, money, parseCents } from "./format.ts";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
-import { Sheet } from "./ui.tsx";
+import { Sheet, useSend } from "./ui.tsx";
 
 /**
  * The Record a payment sheet for one ledger. The amount starts at the open
@@ -30,8 +30,21 @@ export function RecordPaymentSheet({
   const [amount, setAmount] = useState(() => centsInputText(startingCents(ledger)));
   const [screenshot, setScreenshot] = useState<ShrunkPhoto | null>(null);
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, setError, run } = useSend(
+    async (payment: RecordPaymentRequest, screenshotBlob: Blob) => {
+      const result = await api.recordPayment(ledger.recipientId, payment, screenshotBlob);
+      if (!result.ok) {
+        return result.reason === "payment-exceeds-owed" ? overLimitText(ledger) : REFUSAL_TEXT[result.reason];
+      }
+      onSent();
+    },
+    (failure) =>
+      uploadFailureText(
+        failure,
+        "The screenshot was too large to send. Choose another.",
+        "Couldn't send. Check your connection and try again.",
+      ),
+  );
   // Whether the sheet is still there for a pick to finish into.
   const mounted = useRef(false);
   useEffect(() => {
@@ -63,25 +76,8 @@ export function RecordPaymentSheet({
     }
   };
   const remove = () => setScreenshot(null);
-  const send = async () => {
-    if (!ready || amountCents === null || screenshot === null) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.recordPayment(ledger.recipientId, { amountCents, note }, screenshot.blob);
-      if (result.ok) return onSent();
-      setError(result.reason === "payment-exceeds-owed" ? overLimitText(ledger) : REFUSAL_TEXT[result.reason]);
-    } catch (failure) {
-      setError(
-        uploadFailureText(
-          failure,
-          "The screenshot was too large to send. Choose another.",
-          "Couldn't send. Check your connection and try again.",
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
+  const send = () => {
+    if (ready && amountCents !== null && screenshot !== null) run({ amountCents, note }, screenshot.blob);
   };
 
   return (
@@ -142,7 +138,7 @@ export function RecordPaymentSheet({
         A reviewer checks the screenshot. It doesn't lower what you owe until they approve it.
       </p>
       {error && <p className="error small">{error}</p>}
-      <button className="btn primary block" disabled={busy || !ready} onClick={() => void send()}>
+      <button className="btn primary block" disabled={busy || !ready} onClick={send}>
         {busy ? "Sending…" : "Send for approval"}
       </button>
     </Sheet>

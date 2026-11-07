@@ -4,7 +4,6 @@
 // about it with the reply box while one waits on the owner's reply, and
 // Withdraw change while it waits.
 
-import { useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
@@ -12,7 +11,7 @@ import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.
 import { formatDayTime } from "./format.ts";
 import { PencilIcon } from "./icons.tsx";
 import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
-import { Empty, useLoad } from "./ui.tsx";
+import { LoadedFound, useLoad, useSend } from "./ui.tsx";
 
 export function ChangeRequestPage({
   changeRequestId,
@@ -24,34 +23,52 @@ export function ChangeRequestPage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { data: result, failed, reload } = useLoad(() => api.changeRequest(changeRequestId));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (result === null) {
-    return failed ? (
-      <Empty
-        title="This change request couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    ) : null;
-  }
-  if (!result.ok) return <Empty title="Change request not found" body="It isn't one of yours." />;
-  const { changeRequest: request } = result;
-  const waiting = request.state.kind === "waiting";
-
-  const withdraw = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const withdrawn = await api.withdrawChangeRequest(request.id);
-      if (!withdrawn.ok) setError("It isn't waiting any more. Reopen it to see where it stands.");
+  const { state, reload } = useLoad(() => api.changeRequest(changeRequestId));
+  // Here rather than in the view, like the load, so a refusal's words outlast the reload after it.
+  const withdrawal = useSend(
+    async (id: string) => {
+      const withdrawn = await api.withdrawChangeRequest(id);
+      if (!withdrawn.ok) withdrawal.setError("It isn't waiting any more. Reopen it to see where it stands.");
+      // Either way it isn't waiting now: reload to show where it stands.
       reload();
-    } catch (failure) {
-      setError(`Couldn't withdraw it. ${failureText(failure, "Check your connection and try again.")}`);
-    }
-    setBusy(false);
-  };
+    },
+    (failure) => `Couldn't withdraw it. ${failureText(failure, "Check your connection and try again.")}`,
+  );
+
+  return (
+    <LoadedFound
+      state={state}
+      what="This change request"
+      notFound={{ title: "Change request not found", body: "It isn't one of yours." }}
+    >
+      {({ changeRequest }) => (
+        <ChangeRequestView
+          request={changeRequest}
+          timezone={timezone}
+          withdrawal={withdrawal}
+          onOpenPact={onOpenPact}
+          onReplied={reload}
+        />
+      )}
+    </LoadedFound>
+  );
+}
+
+function ChangeRequestView({
+  request,
+  timezone,
+  withdrawal: { busy, error, run: withdraw },
+  onOpenPact,
+  onReplied,
+}: {
+  request: Json<ChangeRequestDetail>;
+  timezone: string;
+  /** Withdraw change, sent from the page. */
+  withdrawal: { busy: boolean; error: string | null; run: (id: string) => void };
+  onOpenPact: (pactId: string, name: string) => void;
+  onReplied: () => void;
+}) {
+  const waiting = request.state.kind === "waiting";
 
   return (
     <>
@@ -92,12 +109,12 @@ export function ChangeRequestPage({
         )}
       </article>
       <Thread thread={request.thread} viewer="owner" timezone={timezone} />
-      {request.thread.waitingOnReply && <ReplyBox itemId={request.id} onReplied={reload} />}
+      {request.thread.waitingOnReply && <ReplyBox itemId={request.id} onReplied={onReplied} />}
       {waiting && (
         <>
           <p className="meta">Sent to {listNames(request.reviewerNames)}</p>
           {error && <p className="error">{error}</p>}
-          <button className="btn danger self-start" disabled={busy} onClick={() => void withdraw()}>
+          <button className="btn danger self-start" disabled={busy} onClick={() => withdraw(request.id)}>
             Withdraw change
           </button>
           <p className="small muted">

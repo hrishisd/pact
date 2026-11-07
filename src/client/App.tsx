@@ -20,7 +20,7 @@ import { PaymentPage } from "./PaymentPage.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
-import { Centered, Sheet } from "./ui.tsx";
+import { Centered, Sheet, useSend } from "./ui.tsx";
 
 type Session =
   | { kind: "loading" }
@@ -165,7 +165,7 @@ function ConfirmTimezone({
       </div>
       {error && <p className="error">{error}</p>}
       <div className="stack">
-        <button className="btn primary block" disabled={saving} onClick={() => void save(zone)}>
+        <button className="btn primary block" disabled={saving} onClick={() => save(zone)}>
           {picking ? "Use this timezone" : "Confirm"}
         </button>
         {!picking && (
@@ -195,22 +195,15 @@ function TimezoneSelect({ value, onChange }: { value: string; onChange: (zone: s
 }
 
 function useSaveTimezone(profile: MeResponse, onSaved: (p: ConfirmedProfile) => void) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const save = async (timezone: string) => {
-    setSaving(true);
-    setError(null);
-    try {
+  const { busy, error, run } = useSend(
+    async (timezone: string) => {
       const result = await api.setTimezone(timezone);
-      if (result.ok) onSaved({ ...profile, timezone: result.timezone });
-      else setError("That timezone isn't recognised. Pick one from the list.");
-    } catch (error) {
-      setError(`Couldn't save. ${failureText(error, "Check your connection and try again.")}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-  return { save, saving, error };
+      if (!result.ok) return "That timezone isn't recognised. Pick one from the list.";
+      onSaved({ ...profile, timezone: result.timezone });
+    },
+    (error) => `Couldn't save. ${failureText(error, "Check your connection and try again.")}`,
+  );
+  return { save: run, saving: busy, error };
 }
 
 // ---------- App shell ----------
@@ -480,7 +473,7 @@ function ProfileSheet({
             <TimezoneSelect value={zone} onChange={setZone} />
             {error && <p className="error">{error}</p>}
             <div className="row2">
-              <button className="btn primary" disabled={saving} onClick={() => void save(zone)}>
+              <button className="btn primary" disabled={saving} onClick={() => save(zone)}>
                 Save
               </button>
               <button className="btn" onClick={() => setChanging(false)}>
@@ -571,19 +564,16 @@ function ConnectionRow({
 }) {
   const [asking, setAsking] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const service = SERVICES[connection.service];
-  const disconnect = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      onProfile(await service.disconnect());
-    } catch (failure) {
-      setError(`Couldn't disconnect. ${failureText(failure, "Check your connection and try again.")}`);
-      setBusy(false);
-    }
-  };
+  const {
+    busy,
+    error,
+    setError,
+    run: disconnect,
+  } = useSend(
+    async () => onProfile(await service.disconnect()),
+    (failure) => `Couldn't disconnect. ${failureText(failure, "Check your connection and try again.")}`,
+  );
   const reconnected = async () => {
     setError(null);
     try {
@@ -630,7 +620,7 @@ function ConnectionRow({
             <button className="btn sm" disabled={busy} onClick={() => setAsking(false)}>
               Keep connected
             </button>
-            <button className="btn sm danger" disabled={busy} onClick={() => void disconnect()}>
+            <button className="btn sm danger" disabled={busy} onClick={() => disconnect()}>
               {busy ? "Disconnecting…" : "Disconnect"}
             </button>
           </div>

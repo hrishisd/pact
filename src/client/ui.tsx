@@ -1,7 +1,8 @@
 // Small building blocks shared by several screens.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { failureText } from "./api.ts";
 import { minutesLeft } from "./format.ts";
 
 /** A full screen with its content centred: sign-in, timezone, invite. */
@@ -14,34 +15,59 @@ export function Centered({ children }: { children: ReactNode }) {
 }
 
 /**
- * What `load` resolves to (null until it does), or `failed` if it rejects.
- * Loads on mount, and again on `reload()`, keeping the last data meanwhile.
- * Only the newest load's answer counts: an older one arriving after it is
- * dropped. `failed` is the error when the load failed, for `failureText`;
- * null otherwise.
+ * Where a screen's load stands. `failed` is a load that failed with nothing
+ * loaded before it; a reload that fails keeps what was loaded, with
+ * `reloadFailed` saying why. The error is for `failureText`.
  */
-export function useLoad<T>(load: () => Promise<T>): {
-  data: T | null;
-  failed: { error: unknown } | null;
-  reload: () => void;
-} {
-  const [data, setData] = useState<T | null>(null);
-  const [failed, setFailed] = useState<{ error: unknown } | null>(null);
+export type Load<T> =
+  | { kind: "loading" }
+  | { kind: "failed"; error: unknown }
+  | { kind: "loaded"; data: T; reloadFailed: { error: unknown } | null };
+
+/** How a load settled: what it loaded, or why it failed. */
+type Settled<T> = { ok: true; data: T } | { ok: false; error: unknown };
+
+/** `load` after a load settles: new data replaces the old; a failure keeps any data already shown. */
+export function settledLoad<T>(load: Load<T>, settled: Settled<T>): Load<T> {
+  if (settled.ok) return { kind: "loaded", data: settled.data, reloadFailed: null };
+  return load.kind === "loaded"
+    ? { ...load, reloadFailed: { error: settled.error } }
+    : { kind: "failed", error: settled.error };
+}
+
+/** The data on screen, if any: loaded, or kept after a failed reload. */
+export function loadedData<T>(load: Load<T>): T | null {
+  return load.kind === "loaded" ? load.data : null;
+}
+
+/** Why the last load failed, whether or not earlier data is still shown; null when it didn't. */
+export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
+  if (load.kind === "failed") return { error: load.error };
+  return load.kind === "loaded" ? load.reloadFailed : null;
+}
+
+/**
+ * Loads on mount, and again on `reload()`, keeping the last data meanwhile
+ * and if the reload fails. Only the newest load's answer counts: an older one
+ * arriving after it is dropped.
+ */
+export function useLoad<T>(load: () => Promise<T>): { state: Load<T>; reload: () => void } {
+  const [state, setState] = useState<Load<T>>({ kind: "loading" });
   const [loads, setLoads] = useState(0);
-  // A reload runs the cleanup first, which drops the load before it.
+  // A reload runs the cleanup first, which drops the load before it. `load`
+  // is left out of the deps on purpose: callers pass a new function each
+  // render, and a screen showing something else gets a new `key` instead.
   useEffect(
     () =>
       settleUnlessDropped(
         load(),
-        (loaded) => {
-          setData(loaded);
-          setFailed(null);
-        },
-        (error) => setFailed({ error }),
+        (data) => setState((before) => settledLoad(before, { ok: true, data })),
+        (error) => setState((before) => settledLoad(before, { ok: false, error })),
       ),
     [loads],
   );
-  return { data, failed, reload: () => setLoads((n) => n + 1) };
+  const reload = useCallback(() => setLoads((n) => n + 1), []);
+  return { state, reload };
 }
 
 /**
@@ -66,6 +92,106 @@ export function settleUnlessDropped<T>(
   return () => {
     dropped = true;
   };
+}
+
+/** "`what` couldn't load", and why. */
+export function LoadFailed({ what, error }: { what: string; error: unknown }) {
+  return <Empty title={`${what} couldn't load`} body={failureText(error, "Check your connection and reopen Pact.")} />;
+}
+
+/**
+ * A screen's loaded data, through `children`: nothing while it first loads;
+ * if that fails, "`what` couldn't load" and why. A failed reload says the same
+ * above the data already shown.
+ */
+export function Loaded<T>({
+  state,
+  what,
+  children,
+}: {
+  state: Load<T>;
+  /** "This pact", for "This pact couldn't load". */
+  what: string;
+  children: (data: T) => ReactNode;
+}) {
+  switch (state.kind) {
+    case "loading":
+      return null;
+    case "failed":
+      return <LoadFailed what={what} error={state.error} />;
+    case "loaded":
+      return (
+        <>
+          {state.reloadFailed && <LoadFailed what={what} error={state.reloadFailed.error} />}
+          {children(state.data)}
+        </>
+      );
+  }
+}
+
+/** `Loaded` for a lookup that can answer not found (`{ ok: false }`): then `notFound` says so. */
+export function LoadedFound<T extends { ok: boolean }>({
+  state,
+  what,
+  notFound,
+  children,
+}: {
+  state: Load<T>;
+  what: string;
+  notFound: { title: string; body: string };
+  children: (found: Extract<T, { ok: true }>) => ReactNode;
+}) {
+  return (
+    <Loaded state={state} what={what}>
+      {(result) => (isFound(result) ? children(result) : <Empty title={notFound.title} body={notFound.body} />)}
+    </Loaded>
+  );
+}
+
+function isFound<T extends { ok: boolean }>(result: T): result is Extract<T, { ok: true }> {
+  return result.ok;
+}
+
+/** What a failed send says, from the error it threw: often `failureText` with the screen's own words. */
+type FailureText = (error: unknown) => string;
+
+/**
+ * One send from a button, and what it says: busy while it runs, then
+ * `send`'s answer. `send` returns the text of a refusal, to show as the
+ * error, or nothing once it went through (having done what follows). If it
+ * throws, `failure` says why. The error clears when the next send starts.
+ */
+export async function sendOnce(
+  send: () => Promise<string | void>,
+  failure: FailureText,
+  setBusy: (busy: boolean) => void,
+  setError: (error: string | null) => void,
+): Promise<void> {
+  setBusy(true);
+  setError(null);
+  try {
+    const refusal = await send();
+    if (typeof refusal === "string") setError(refusal);
+  } catch (error) {
+    setError(failure(error));
+  } finally {
+    setBusy(false);
+  }
+}
+
+/**
+ * `sendOnce` as a hook: `run(...args)` sends, `busy` and `error` say how it
+ * went. `setError` is for the screen's own problems, found before sending
+ * (a field left empty, a photo that couldn't be read).
+ */
+export function useSend<Args extends unknown[]>(
+  send: (...args: Args) => Promise<string | void>,
+  failure: FailureText,
+): { busy: boolean; error: string | null; setError: (error: string | null) => void; run: (...args: Args) => void } {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = (...args: Args) => void sendOnce(() => send(...args), failure, setBusy, setError);
+  return { busy, error, setError, run };
 }
 
 /** The current time, updated every second, so countdowns stay right and end on time. */

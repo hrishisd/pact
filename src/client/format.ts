@@ -71,6 +71,15 @@ export function dateIn(now: number, timeZone: string): LocalDate {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+/**
+ * `date`, as written, unless it is today in `timeZone` (the profile's) at
+ * `now` (ms): "Thu Nov 12", or null for today. The same day of another
+ * year isn't today.
+ */
+export function dateUnlessToday(date: LocalDate, now: number, timeZone: string): string | null {
+  return date === dateIn(now, timeZone) ? null : formatDate(date);
+}
+
 /** Time left as "16h 19m", or "1d 21h" from 24 hours up. Never negative. */
 export function timeLeft(ms: number): string {
   const minutes = Math.floor(Math.max(0, ms) / 60_000);

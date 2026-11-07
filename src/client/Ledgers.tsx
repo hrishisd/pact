@@ -8,10 +8,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
 import type { LedgerPayment, LedgerPenalty, LedgerSummary } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import { api } from "./api.ts";
 import { formatDate, formatDay, money } from "./format.ts";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
-import { Empty, useLoad } from "./ui.tsx";
+import { Empty, Loaded, LoadedFound, loadedData, useLoad } from "./ui.tsx";
 
 export function Ledgers({
   timezone,
@@ -21,45 +21,45 @@ export function Ledgers({
   timezone: string;
   onOpenLedger: (recipientId: string, name: string) => void;
 }) {
-  const { data: ledgers, failed, reload } = useLoad(api.ledgers);
+  const { state, reload } = useLoad(api.ledgers);
   // The ledger whose Record a payment sheet is open, outside the cards.
   const [paying, setPaying] = useState<Json<LedgerSummary> | null>(null);
 
-  if (failed) {
-    return (
-      <Empty title="Ledgers couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
-    );
-  }
-  if (ledgers?.length === 0) {
-    return <Empty title="No ledgers yet" body="Each recipient gets a ledger once a pact names them." />;
-  }
   return (
-    <>
-      <div className="cards">
-        {ledgers?.map((ledger) => (
-          // Record payment sits beside the button that opens the ledger, not inside it.
-          <div key={ledger.recipientId} className="ledger-card">
-            <button className="rowbtn" onClick={() => onOpenLedger(ledger.recipientId, ledger.name)}>
-              <span className="rt">
-                <b>{ledger.name}</b>
-                <Summary ledger={ledger} timezone={timezone} />
-              </span>
-            </button>
-            <RecordPaymentButton ledger={ledger} onRecord={() => setPaying(ledger)} />
-          </div>
-        ))}
-      </div>
-      {paying && (
-        <RecordPaymentSheet
-          ledger={paying}
-          onClose={() => setPaying(null)}
-          onSent={() => {
-            setPaying(null);
-            reload();
-          }}
-        />
-      )}
-    </>
+    <Loaded state={state} what="Ledgers">
+      {(ledgers) =>
+        ledgers.length === 0 ? (
+          <Empty title="No ledgers yet" body="Each recipient gets a ledger once a pact names them." />
+        ) : (
+          <>
+            <div className="cards">
+              {ledgers.map((ledger) => (
+                // Record payment sits beside the button that opens the ledger, not inside it.
+                <div key={ledger.recipientId} className="ledger-card">
+                  <button className="rowbtn" onClick={() => onOpenLedger(ledger.recipientId, ledger.name)}>
+                    <span className="rt">
+                      <b>{ledger.name}</b>
+                      <Summary ledger={ledger} timezone={timezone} />
+                    </span>
+                  </button>
+                  <RecordPaymentButton ledger={ledger} onRecord={() => setPaying(ledger)} />
+                </div>
+              ))}
+            </div>
+            {paying && (
+              <RecordPaymentSheet
+                ledger={paying}
+                onClose={() => setPaying(null)}
+                onSent={() => {
+                  setPaying(null);
+                  reload();
+                }}
+              />
+            )}
+          </>
+        )
+      }
+    </Loaded>
   );
 }
 
@@ -77,54 +77,53 @@ export function LedgerPage({
   onOpenPact: (pactId: string, name: string) => void;
 }) {
   // Reloaded after a payment, keeping the ledger shown meanwhile and if the reload fails.
-  const { data: result, failed, reload } = useLoad(() => api.ledger(recipientId));
+  const { state, reload } = useLoad(() => api.ledger(recipientId));
+  const result = loadedData(state);
   const [paying, setPaying] = useState(false);
 
   useEffect(() => {
     if (result?.ok) onLoaded(recipientId, result.ledger.summary.name);
   }, [result, recipientId, onLoaded]);
 
-  if (result === null) {
-    return failed ? (
-      <Empty
-        title="This ledger couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    ) : null;
-  }
-  if (!result.ok) return <Empty title="Ledger not found" body="It isn't one of your ledgers." />;
-  const { summary, history } = result.ledger;
   return (
-    <>
-      <section className="card">
-        <Summary ledger={summary} timezone={timezone} />
-        <RecordPaymentButton ledger={summary} onRecord={() => setPaying(true)} />
-      </section>
-      <section className="stack">
-        <div className="label">History</div>
-        {/* Not tappable as rows: each penalty links to its pact by name. */}
-        <div className="list">
-          {history.length === 0 && <div className="rowbtn muted">Nothing yet</div>}
-          {history.map((entry) =>
-            entry.kind === "penalty" ? (
-              <PenaltyRow key={entry.penaltyId} penalty={entry} onOpenPact={onOpenPact} />
-            ) : (
-              <PaymentRow key={entry.paymentId} payment={entry} timezone={timezone} />
-            ),
+    <LoadedFound
+      state={state}
+      what="This ledger"
+      notFound={{ title: "Ledger not found", body: "It isn't one of your ledgers." }}
+    >
+      {({ ledger: { summary, history } }) => (
+        <>
+          <section className="card">
+            <Summary ledger={summary} timezone={timezone} />
+            <RecordPaymentButton ledger={summary} onRecord={() => setPaying(true)} />
+          </section>
+          <section className="stack">
+            <div className="label">History</div>
+            {/* Not tappable as rows: each penalty links to its pact by name. */}
+            <div className="list">
+              {history.length === 0 && <div className="rowbtn muted">Nothing yet</div>}
+              {history.map((entry) =>
+                entry.kind === "penalty" ? (
+                  <PenaltyRow key={entry.penaltyId} penalty={entry} onOpenPact={onOpenPact} />
+                ) : (
+                  <PaymentRow key={entry.paymentId} payment={entry} timezone={timezone} />
+                ),
+              )}
+            </div>
+          </section>
+          {paying && (
+            <RecordPaymentSheet
+              ledger={summary}
+              onClose={() => setPaying(false)}
+              onSent={() => {
+                setPaying(false);
+                reload();
+              }}
+            />
           )}
-        </div>
-      </section>
-      {paying && (
-        <RecordPaymentSheet
-          ledger={summary}
-          onClose={() => setPaying(false)}
-          onSent={() => {
-            setPaying(false);
-            reload();
-          }}
-        />
+        </>
       )}
-    </>
+    </LoadedFound>
   );
 }
 

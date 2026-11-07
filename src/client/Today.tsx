@@ -38,6 +38,7 @@ import {
   ankiMissText,
   clockText,
   clockTime,
+  dateUnlessToday,
   formatDate,
   formatDay,
   formatDueAt,
@@ -53,7 +54,7 @@ import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
-import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
+import { EditWindowChip, Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** What the File excuse sheet is open on: a pact, and the day it was opened from (none for the pact-page form). */
 interface ExcuseTarget {
@@ -87,7 +88,8 @@ export function Today({
   onCreate: () => void;
   onInvite: () => void;
 }) {
-  const { data: today, failed, reload } = useLoad(api.today);
+  const { state, reload } = useLoad(api.today);
+  const today = loadedData(state);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
   // Back from reconnecting Oura: say so if it didn't work.
@@ -124,86 +126,87 @@ export function Today({
     }
   };
 
-  if (failed)
-    return (
-      <Empty title="Today couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
-    );
-  if (today === null) return null;
-
-  // Story 4: a new user's first screen says what to do next.
-  if (!today.hasPacts) {
-    return (
-      <Empty title="Nothing to do right now" body="Invite a friend to review your pacts, then create your first pact.">
-        <div className="row2">
-          <button className="btn primary" onClick={onInvite}>
-            Invite a friend
-          </button>
-          <button className="btn" onClick={onCreate}>
-            Create a pact
-          </button>
-        </div>
-      </Empty>
-    );
-  }
+  // A failed reload keeps the cards shown, with what failed above them.
   return (
-    <>
-      {today.alerts.length === 0 && today.sections.length === 0 && (
-        <Empty
-          title="Nothing to do right now"
-          body="When one of your pacts needs something from you, it shows up here."
-        />
-      )}
-      {today.alerts.map((alert) => (
-        <Alert
-          key={alertKey(alert)}
-          alert={alert}
-          timezone={timezone}
-          now={now}
-          ouraError={ouraError}
-          onFileExcuse={setExcusing}
-          onOpenItem={openItem}
-          onChanged={reload}
-        />
-      ))}
-      {today.sections.map((section) => (
-        <Section
-          key={section.kind}
-          section={section}
-          timezone={timezone}
-          now={now}
-          checkingOura={checking}
-          checkingAnki={checkingAnki}
-          ouraConnectionProblem={ouraConnectionProblem}
-          onOpenPact={onOpenPact}
-          onOpenLedger={onOpenLedger}
-          onFileExcuse={setExcusing}
-          onChanged={reload}
-        />
-      ))}
-      {today.waiting.length > 0 && (
-        <Waiting
-          items={today.waiting}
-          onOpenPact={onOpenPact}
-          onOpenLedger={onOpenLedger}
-          onOpenExcuse={onOpenExcuse}
-          onOpenChangeRequest={onOpenChangeRequest}
-        />
-      )}
-      <Yesterday entries={today.yesterday} timezone={timezone} now={now} onOpenPact={onOpenPact} />
-      {excusing && (
-        <ExcuseSheet
-          pactId={excusing.pactId}
-          pactName={excusing.pactName}
-          timezone={timezone}
-          {...(excusing.day !== undefined && { day: excusing.day })}
-          onClose={() => setExcusing(null)}
-          onFiled={() => {
-            setExcusing(null);
-            reload();
-          }}
-        />
-      )}
-    </>
+    <Loaded state={state} what="Today">
+      {(today) =>
+        // Story 4: a new user's first screen says what to do next.
+        !today.hasPacts ? (
+          <Empty
+            title="Nothing to do right now"
+            body="Invite a friend to review your pacts, then create your first pact."
+          >
+            <div className="row2">
+              <button className="btn primary" onClick={onInvite}>
+                Invite a friend
+              </button>
+              <button className="btn" onClick={onCreate}>
+                Create a pact
+              </button>
+            </div>
+          </Empty>
+        ) : (
+          <>
+            {today.alerts.length === 0 && today.sections.length === 0 && (
+              <Empty
+                title="Nothing to do right now"
+                body="When one of your pacts needs something from you, it shows up here."
+              />
+            )}
+            {today.alerts.map((alert) => (
+              <Alert
+                key={alertKey(alert)}
+                alert={alert}
+                timezone={timezone}
+                now={now}
+                ouraError={ouraError}
+                onFileExcuse={setExcusing}
+                onOpenItem={openItem}
+                onChanged={reload}
+              />
+            ))}
+            {today.sections.map((section) => (
+              <Section
+                key={section.kind}
+                section={section}
+                timezone={timezone}
+                now={now}
+                checkingOura={checking}
+                checkingAnki={checkingAnki}
+                ouraConnectionProblem={ouraConnectionProblem}
+                onOpenPact={onOpenPact}
+                onOpenLedger={onOpenLedger}
+                onFileExcuse={setExcusing}
+                onChanged={reload}
+              />
+            ))}
+            {today.waiting.length > 0 && (
+              <Waiting
+                items={today.waiting}
+                onOpenPact={onOpenPact}
+                onOpenLedger={onOpenLedger}
+                onOpenExcuse={onOpenExcuse}
+                onOpenChangeRequest={onOpenChangeRequest}
+              />
+            )}
+            <Yesterday entries={today.yesterday} timezone={timezone} now={now} onOpenPact={onOpenPact} />
+            {excusing && (
+              <ExcuseSheet
+                pactId={excusing.pactId}
+                pactName={excusing.pactName}
+                timezone={timezone}
+                {...(excusing.day !== undefined && { day: excusing.day })}
+                onClose={() => setExcusing(null)}
+                onFiled={() => {
+                  setExcusing(null);
+                  reload();
+                }}
+              />
+            )}
+          </>
+        )
+      }
+    </Loaded>
   );
 }
 
@@ -425,9 +428,8 @@ function Section({
  * anytime is due on the deadline's date ("Thu Nov 12 "). Empty for today.
  */
 function dueDayText(card: Json<TodayToDoCard>, timezone: string, now: number): string {
-  const today = formatDay(new Date(now).toISOString(), timezone);
-  const due = formatDate(card.occurrenceDate);
-  return due === today ? "" : `${due} `;
+  const day = dateUnlessToday(card.occurrenceDate, now, timezone);
+  return day === null ? "" : `${day} `;
 }
 
 /**
@@ -501,11 +503,11 @@ function NoOuraDataCard({
           Tonight, in bed by {clockText(tonight.inBedBy)} · {timeLeft(Date.parse(tonight.dueAt) - now)}
         </div>
       )}
-      <div className="row2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <CardActions className="row2">
         <button className="btn sm" onClick={onFileExcuse}>
           File excuse
         </button>
-      </div>
+      </CardActions>
     </PactCard>
   );
 }
@@ -563,11 +565,11 @@ function AnkiCard({
       ) : (
         <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
       )}
-      <div className="row2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <CardActions className="row2">
         <button className="btn" onClick={onFileExcuse}>
           File excuse
         </button>
-      </div>
+      </CardActions>
     </PactCard>
   );
 }
@@ -653,25 +655,22 @@ function RecordPaymentAction({
   onSent: () => void;
 }) {
   const [ledger, setLedger] = useState<Json<LedgerSummary> | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const open = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const {
+    busy,
+    error,
+    run: open,
+  } = useSend(
+    async () => {
       const result = await api.ledger(recipientId);
-      if (result.ok) setLedger(result.ledger.summary);
-      else setError("This ledger wasn't found.");
-    } catch (failure) {
-      setError(failureText(failure, "Couldn't open it. Check your connection and try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
+      if (!result.ok) return "This ledger wasn't found.";
+      setLedger(result.ledger.summary);
+    },
+    (failure) => failureText(failure, "Couldn't open it. Check your connection and try again."),
+  );
   return (
-    <div className="stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <CardActions className="stack">
       <div className="row2">
-        <button className={primary ? "btn primary" : "btn sm"} disabled={busy} onClick={() => void open()}>
+        <button className={primary ? "btn primary" : "btn sm"} disabled={busy} onClick={() => open()}>
           {busy ? "Opening…" : "Record payment"}
         </button>
       </div>
@@ -686,7 +685,7 @@ function RecordPaymentAction({
           }}
         />
       )}
-    </div>
+    </CardActions>
   );
 }
 
@@ -806,22 +805,15 @@ function useTakeTheL<Refusal extends string>(
   refusalText: Record<Refusal, string>,
   onTaken: () => void,
 ) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const take = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const { busy, error, run } = useSend(
+    async () => {
       const result = await send();
-      if (result.ok) return onTaken();
-      setError(refusalText[result.reason]);
-    } catch (failure) {
-      setError(failureText(failure, "Couldn't send. Check your connection and try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { busy, error, take: () => void take() };
+      if (!result.ok) return refusalText[result.reason];
+      onTaken();
+    },
+    (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
+  );
+  return { busy, error, take: run };
 }
 
 /** "File excuse · 31h 12m left" until `excusableUntil`; nothing once it's passed. */
@@ -854,7 +846,7 @@ function MissedActions({
   );
   const fileLabel = fileExcuseLabel("File excuse", excusableUntil, now);
   return (
-    <div className="stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <CardActions className="stack">
       <div className="row2">
         {fileLabel && (
           <button className="btn" onClick={onFileExcuse}>
@@ -866,7 +858,7 @@ function MissedActions({
         </button>
       </div>
       {error && <p className="error small">{error}</p>}
-    </div>
+    </CardActions>
   );
 }
 
@@ -1101,8 +1093,31 @@ function EvidenceForm({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<ShrunkPhoto[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    busy,
+    error,
+    setError,
+    run: submit,
+  } = useSend(
+    async () => {
+      const result = await api.submitEvidence(
+        pactId,
+        photos.map((photo) => photo.blob),
+      );
+      if (!result.ok) {
+        return weekly && result.reason === "already-judged"
+          ? WEEKLY_ALREADY_REJECTED_TEXT
+          : REFUSAL_TEXT[result.reason];
+      }
+      onSubmitted();
+    },
+    (failure) =>
+      uploadFailureText(
+        failure,
+        "A photo was too large to send. Remove it and take it again.",
+        "Couldn't send. Check your connection and try again.",
+      ),
+  );
   const urls = useRef<string[]>([]);
   urls.current = photos.map((photo) => photo.url);
   useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
@@ -1121,33 +1136,8 @@ function EvidenceForm({
     URL.revokeObjectURL(photo.url);
     setPhotos((taken) => taken.filter((p) => p !== photo));
   };
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.submitEvidence(
-        pactId,
-        photos.map((photo) => photo.blob),
-      );
-      if (result.ok) return onSubmitted();
-      setError(
-        weekly && result.reason === "already-judged" ? WEEKLY_ALREADY_REJECTED_TEXT : REFUSAL_TEXT[result.reason],
-      );
-    } catch (failure) {
-      setError(
-        uploadFailureText(
-          failure,
-          "A photo was too large to send. Remove it and take it again.",
-          "Couldn't send. Check your connection and try again.",
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <div className="evidence stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <CardActions className="evidence stack">
       <input
         ref={input}
         type="file"
@@ -1187,13 +1177,13 @@ function EvidenceForm({
               </button>
             )}
           </div>
-          <button className="btn primary" disabled={busy} onClick={() => void submit()}>
+          <button className="btn primary" disabled={busy} onClick={() => submit()}>
             {busy ? "Sending…" : "Submit"}
           </button>
         </>
       )}
       {error && <p className="error small">{error}</p>}
-    </div>
+    </CardActions>
   );
 }
 
@@ -1208,6 +1198,18 @@ const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "already-approved": "Evidence for today is already approved.",
   "already-judged": "Today is already Missed, so new photos can't count.",
 };
+
+/**
+ * A card's own buttons and forms. A click or Enter on them stays here
+ * rather than opening what the card opens.
+ */
+function CardActions({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <div className={className} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {children}
+    </div>
+  );
+}
 
 /**
  * A Today card: the pact's name (or for a bill, "Pay Sam"), a chip, its

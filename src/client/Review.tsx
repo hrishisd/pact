@@ -5,7 +5,7 @@
 // reviewer can still open and decide.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { API_PATHS, type Json } from "../shared/api.ts";
+import { API_PATHS, type Json, type ReviewQueueResponse } from "../shared/api.ts";
 import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { formatDate, formatDayTime, money, weekdayName } from "./format.ts";
@@ -13,7 +13,7 @@ import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.
 import { DiffList, EverythingElse, startsText } from "./change-terms.tsx";
 import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
-import { Empty, useLoad, useNow } from "./ui.tsx";
+import { Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
 export function Review({
@@ -24,8 +24,10 @@ export function Review({
   timezone: string;
   onQueue: (length: number) => void;
 }) {
-  const { data: queue, failed, reload } = useLoad(api.reviewQueue);
-  const { data: waiting, reload: reloadWaiting } = useLoad(api.waitingOnReply);
+  const { state, reload } = useLoad(api.reviewQueue);
+  const queue = loadedData(state);
+  const { state: waitingState, reload: reloadWaiting } = useLoad(api.waitingOnReply);
+  const waiting = loadedData(waitingState);
   const [index, setIndex] = useState(0);
   // Says why the last decision didn't go through, above the next item.
   const [notice, setNotice] = useState<string | null>(null);
@@ -36,12 +38,6 @@ export function Review({
   useEffect(() => {
     if (queue) onQueue(queue.length);
   }, [queue, onQueue]);
-
-  if (failed)
-    return (
-      <Empty title="Review couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
-    );
-  if (queue === null) return null;
 
   const refresh = () => {
     setOpenedId(null);
@@ -77,64 +73,74 @@ export function Review({
     />
   );
 
-  const opened = waiting?.find((item) => item.id === openedId);
-  if (opened) {
+  /** The queue as loaded: the item opened from below it, or the item at `index`, then what waits on a reply. */
+  const queueView = (queue: ReviewQueueResponse): ReactNode => {
+    const opened = waiting?.find((item) => item.id === openedId);
+    if (opened) {
+      return (
+        <>
+          <button className="link self-start" onClick={() => setOpenedId(null)}>
+            ‹ Back to your queue
+          </button>
+          <ItemView item={opened} timezone={timezone} onDecided={decided} onAsk={() => setAsking(opened)} />
+          {askSheet}
+        </>
+      );
+    }
+
+    if (queue.length === 0)
+      return (
+        <>
+          {notice && <p className="error small">{notice}</p>}
+          <Empty
+            title="Nothing to review"
+            body={
+              waitingList
+                ? "What's left is waiting on a reply, below."
+                : "When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here."
+            }
+          />
+          {waitingList}
+        </>
+      );
+
+    const at = Math.min(index, queue.length - 1);
+    const item = queue[at]!;
+    const step = (by: number) => {
+      setNotice(null);
+      setIndex((at + by + queue.length) % queue.length);
+    };
+
     return (
       <>
-        <button className="link self-start" onClick={() => setOpenedId(null)}>
-          ‹ Back to your queue
-        </button>
-        <ItemView item={opened} timezone={timezone} onDecided={decided} onAsk={() => setAsking(opened)} />
+        <div className="spread">
+          <span className="counter">
+            {at + 1} of {queue.length} to review
+          </span>
+          {queue.length > 1 && (
+            <div className="row2">
+              <button className="btn sm" onClick={() => step(-1)}>
+                ‹ Prev
+              </button>
+              <button className="btn sm" onClick={() => step(1)}>
+                Skip ›
+              </button>
+            </div>
+          )}
+        </div>
+        {notice && <p className="error small">{notice}</p>}
+        <ItemView item={item} timezone={timezone} onDecided={decided} onAsk={() => setAsking(item)} />
+        {waitingList}
         {askSheet}
       </>
     );
-  }
-
-  if (queue.length === 0)
-    return (
-      <>
-        {notice && <p className="error small">{notice}</p>}
-        <Empty
-          title="Nothing to review"
-          body={
-            waitingList
-              ? "What's left is waiting on a reply, below."
-              : "When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here."
-          }
-        />
-        {waitingList}
-      </>
-    );
-
-  const at = Math.min(index, queue.length - 1);
-  const item = queue[at]!;
-  const step = (by: number) => {
-    setNotice(null);
-    setIndex((at + by + queue.length) % queue.length);
   };
 
+  // A failed reload keeps the queue shown, under what failed.
   return (
-    <>
-      <div className="spread">
-        <span className="counter">
-          {at + 1} of {queue.length} to review
-        </span>
-        {queue.length > 1 && (
-          <div className="row2">
-            <button className="btn sm" onClick={() => step(-1)}>
-              ‹ Prev
-            </button>
-            <button className="btn sm" onClick={() => step(1)}>
-              Skip ›
-            </button>
-          </div>
-        )}
-      </div>
-      {notice && <p className="error small">{notice}</p>}
-      <ItemView item={item} timezone={timezone} onDecided={decided} onAsk={() => setAsking(item)} />
-      {waitingList}
-      {askSheet}
-    </>
+    <Loaded state={state} what="Review">
+      {queueView}
+    </Loaded>
   );
 }
 
@@ -499,8 +505,17 @@ function Decision({
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    busy,
+    error,
+    run: decide,
+  } = useSend(
+    async (decision: ReviewDecision) => {
+      const result = await api.decide(itemId, decision);
+      onDecided(result.ok ? null : result.reason);
+    },
+    (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
+  );
   const rejectForm = useRef<HTMLDivElement>(null);
   const reasonField = useRef<HTMLTextAreaElement>(null);
 
@@ -510,19 +525,6 @@ function Decision({
     rejectForm.current?.scrollIntoView({ block: "end", behavior: "smooth" });
     reasonField.current?.focus({ preventScroll: true });
   }, [rejecting]);
-
-  const decide = async (decision: ReviewDecision) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.decide(itemId, decision);
-      onDecided(result.ok ? null : result.reason);
-    } catch (failure) {
-      setError(failureText(failure, "Couldn't send. Check your connection and try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <>
@@ -547,7 +549,7 @@ function Decision({
             <button
               className="btn danger grow"
               disabled={busy || reason.trim() === ""}
-              onClick={() => void decide({ kind: "reject", reason })}
+              onClick={() => decide({ kind: "reject", reason })}
             >
               Reject
             </button>
@@ -561,7 +563,7 @@ function Decision({
           <button className="btn" disabled={busy} onClick={onAsk}>
             Ask
           </button>
-          <button className="btn ok" disabled={busy} onClick={() => void decide({ kind: "approve" })}>
+          <button className="btn ok" disabled={busy} onClick={() => decide({ kind: "approve" })}>
             Approve
           </button>
         </div>

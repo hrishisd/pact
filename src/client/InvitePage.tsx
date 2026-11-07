@@ -7,7 +7,7 @@ import type { InviteUnusableReason, Refusal } from "../shared/types.ts";
 import { api, failureText, signInWithInvite } from "./api.ts";
 import { GoogleIcon } from "./icons.tsx";
 import { initial } from "./format.ts";
-import { Centered } from "./ui.tsx";
+import { Centered, useSend } from "./ui.tsx";
 
 type State =
   | { kind: "loading" }
@@ -28,8 +28,7 @@ export function InvitePage({
   onDone: () => void;
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [busy, setBusy] = useState(false);
-  const [acceptFailed, setAcceptFailed] = useState<{ error: unknown } | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
   // Google sign-in that went wrong comes back here with ?error=<code>.
   const [signInFailed] = useState(() => new URLSearchParams(window.location.search).has("error"));
 
@@ -45,22 +44,22 @@ export function InvitePage({
   };
   useEffect(load, [token]);
 
-  const accept = async (inviterName: string) => {
-    setBusy(true);
-    setAcceptFailed(null);
-    try {
+  // A refusal is a screen of its own, not an error under Accept.
+  const {
+    busy,
+    error: acceptError,
+    run: accept,
+  } = useSend(
+    async (inviterName: string) => {
       const result = await api.acceptInvite(token);
       setState(
         result.ok
           ? { kind: "accepted", friendName: result.friend.name }
           : { kind: "refused", reason: result.reason, inviterName },
       );
-    } catch (error) {
-      setAcceptFailed({ error });
-    } finally {
-      setBusy(false);
-    }
-  };
+    },
+    (error) => `Couldn't accept. ${failureText(error, "Check your connection and try again.")}`,
+  );
 
   const openPact = profile && (
     <button className="btn block" onClick={onDone}>
@@ -118,12 +117,8 @@ export function InvitePage({
           </div>
           {profile ? (
             <div className="stack">
-              {acceptFailed && (
-                <p className="error">
-                  Couldn't accept. {failureText(acceptFailed.error, "Check your connection and try again.")}
-                </p>
-              )}
-              <button className="btn primary block" disabled={busy} onClick={() => void accept(inviterName)}>
+              {acceptError && <p className="error">{acceptError}</p>}
+              <button className="btn primary block" disabled={busy} onClick={() => accept(inviterName)}>
                 Accept
               </button>
               <button className="btn block" onClick={onDone}>
@@ -136,10 +131,10 @@ export function InvitePage({
               {signInFailed && <p className="error">Sign-in didn't work. Try again.</p>}
               <button
                 className="btn block google"
-                disabled={busy}
+                disabled={signingIn}
                 onClick={() => {
-                  setBusy(true);
-                  signInWithInvite(token).catch(() => setBusy(false));
+                  setSigningIn(true);
+                  signInWithInvite(token).catch(() => setSigningIn(false));
                 }}
               >
                 <GoogleIcon />
