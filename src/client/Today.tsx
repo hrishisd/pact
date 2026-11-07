@@ -52,7 +52,7 @@ import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
 import { CameraIcon } from "./icons.tsx";
 import { WaitingRow } from "./item-page.tsx";
-import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
+import { usePhotoPicks } from "./photos.ts";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
 import { EditWindowChip, Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
@@ -1098,19 +1098,14 @@ function EvidenceForm({
   onSubmitted: () => void;
   onFileExcuse: () => void;
 }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [photos, setPhotos] = useState<ShrunkPhoto[]>([]);
   const {
     busy,
     error,
     setError,
     run: submit,
   } = useSend(
-    async () => {
-      const result = await api.submitEvidence(
-        pactId,
-        photos.map((photo) => photo.blob),
-      );
+    async (photoBlobs: Blob[]) => {
+      const result = await api.submitEvidence(pactId, photoBlobs);
       if (!result.ok) {
         return weekly && result.reason === "already-judged"
           ? WEEKLY_ALREADY_REJECTED_TEXT
@@ -1125,41 +1120,18 @@ function EvidenceForm({
         "Couldn't send. Check your connection and try again.",
       ),
   );
-  const urls = useRef<string[]>([]);
-  urls.current = photos.map((photo) => photo.url);
-  useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
-
-  const takePhoto = () => input.current?.click();
-  const add = async (file: File) => {
-    setError(null);
-    try {
-      const photo = await shrinkForPreview(file);
-      setPhotos((taken) => [...taken, photo]);
-    } catch {
-      setError("That photo couldn't be read. Take it again.");
-    }
-  };
-  const remove = (photo: ShrunkPhoto) => {
-    URL.revokeObjectURL(photo.url);
-    setPhotos((taken) => taken.filter((p) => p !== photo));
-  };
+  const picks = usePhotoPicks({
+    max: MAX_EVIDENCE_PHOTOS,
+    unreadable: "That photo couldn't be read. Take it again.",
+    setError,
+  });
+  const { photos } = picks;
   return (
     <CardActions className="evidence stack">
-      <input
-        ref={input}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (file) void add(file);
-        }}
-      />
+      <input ref={picks.input} type="file" accept="image/*" capture="environment" hidden onChange={picks.onChange} />
       {photos.length === 0 ? (
         <div className="row2">
-          <button className="btn primary" onClick={takePhoto}>
+          <button className="btn primary" onClick={picks.choose}>
             <CameraIcon />
             Take photo
           </button>
@@ -1173,18 +1145,18 @@ function EvidenceForm({
             {photos.map((photo, i) => (
               <div key={photo.url} className="thumb">
                 <img src={photo.url} alt={`Photo ${i + 1}`} />
-                <button className="remove" aria-label={`Remove photo ${i + 1}`} onClick={() => remove(photo)}>
+                <button className="remove" aria-label={`Remove photo ${i + 1}`} onClick={() => picks.remove(photo)}>
                   ×
                 </button>
               </div>
             ))}
             {photos.length < MAX_EVIDENCE_PHOTOS && (
-              <button className="ph-add" aria-label="Take another photo" onClick={takePhoto}>
+              <button className="ph-add" aria-label="Take another photo" onClick={picks.choose}>
                 +
               </button>
             )}
           </div>
-          <button className="btn primary" disabled={busy} onClick={() => submit()}>
+          <button className="btn primary" disabled={busy} onClick={() => submit(photos.map((photo) => photo.blob))}>
             {busy ? "Sending…" : "Submit"}
           </button>
         </>

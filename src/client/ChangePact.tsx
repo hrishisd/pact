@@ -4,17 +4,9 @@
 // struck out and what it needs. Under the list, the core's verdict on the
 // whole change, an optional "Why?" when it needs approval, and Send or Apply.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type {
-  ChangePactRefusal,
-  ChangePreview,
-  CreatePactRefusal,
-  Friend,
-  PactChange,
-  PactTerms,
-  Recipient,
-} from "../shared/types.ts";
+import type { ChangePactRefusal, ChangePreview, CreatePactRefusal, PactChange, PactTerms } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import {
   changeValue,
@@ -26,17 +18,23 @@ import {
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
-import { formOf, GoalStep, PenaltyStep, PROBLEMS, ReviewersStep, ScheduleStep, termsOfForm } from "./CreatePact.tsx";
+import {
+  formOf,
+  ListsFailed,
+  PactFormStep,
+  PROBLEMS,
+  termsOfForm,
+  usePactFormLists,
+  type FormStep,
+} from "./CreatePact.tsx";
 import { formatDate, money, remindersText } from "./format.ts";
 import type { Form } from "./pact-form.ts";
-import { RemindersStep } from "./reminders-step.tsx";
 import { LoadedFound, Sheet, useLoad, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
-type Step = "goal" | "schedule" | "penalty" | "reviewers" | "reminders";
 
 /** The create form's step each term is changed on. */
-const STEP_OF: Record<Term, Step> = {
+const STEP_OF: Record<Term, FormStep> = {
   name: "goal",
   description: "goal",
   deck: "goal",
@@ -51,7 +49,7 @@ const STEP_OF: Record<Term, Step> = {
   reminders: "reminders",
 };
 
-const STEP_TITLES: Record<Step, string> = {
+const STEP_TITLES: Record<FormStep, string> = {
   goal: "Goal",
   schedule: "Schedule",
   penalty: "Penalty",
@@ -117,10 +115,9 @@ const PREVIEW_DELAY_MS = 250;
 function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void; onInvite: () => void }) {
   const [form, setForm] = useState<Form>(() => formOf(pact));
   const [note, setNote] = useState("");
-  const [step, setStep] = useState<Step | null>(null);
-  const [friends, setFriends] = useState<Friend[] | null>(null);
-  const [recipients, setRecipients] = useState<Recipient[] | null>(null);
-  const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
+  const [step, setStep] = useState<FormStep | null>(null);
+  // As on Create pact: a list that didn't load says so, rather than looking empty.
+  const lists = usePactFormLists();
   const [verdict, setVerdict] = useState<Verdict>({ kind: "loading" });
   const {
     busy: sending,
@@ -137,13 +134,6 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
     { leavesScreen: true },
   );
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
-
-  // As on Create pact: a list that didn't load says so, rather than looking empty.
-  const loadFriends = () => api.friends().then(setFriends, (error: unknown) => setLoadFailed({ error }));
-  useEffect(() => {
-    void loadFriends();
-    api.recipients().then(setRecipients, (error: unknown) => setLoadFailed({ error }));
-  }, []);
 
   const change = changeOf(form, "");
   const key = JSON.stringify(change);
@@ -177,64 +167,28 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
   const changes = verdict.kind === "loaded" ? verdict.preview.changes : [];
   const reviewerNames = pact.reviewers.map((r) => r.name);
 
-  let sheet: ReactNode = null;
-  if (step !== null) {
-    let body: ReactNode;
-    switch (step) {
-      case "goal":
-        body = <GoalStep form={form} update={update} />;
-        break;
-      case "schedule":
-        body = <ScheduleStep form={form} update={update} kindFixed />;
-        break;
-      case "penalty":
-        body = (
-          <PenaltyStep
-            form={form}
-            update={update}
-            recipients={recipients}
-            onAdded={(recipient) => {
-              setRecipients((list) => [...(list ?? []), recipient]);
-              update({ recipientId: recipient.id });
-            }}
-          />
-        );
-        break;
-      case "reviewers":
-        body = (
-          <ReviewersStep
-            friends={friends}
-            reviewerIds={form.reviewerIds}
-            onReviewerIds={(reviewerIds) => update({ reviewerIds })}
-            kind={form.kind}
-            hint="Adding a reviewer applies at once. Removing one needs approval. There's always at least one."
-            onInvite={onInvite}
-            onCheckAgain={() => void loadFriends()}
-          />
-        );
-        break;
-      case "reminders":
-        body = (
-          <RemindersStep form={form} onReminders={(reminders) => update({ reminders })} hint="Changes apply at once." />
-        );
-        break;
-    }
-    sheet = (
-      <Sheet title={STEP_TITLES[step]} onClose={() => setStep(null)}>
-        <div className="stack step-in-sheet">
-          {loadFailed && (step === "penalty" || step === "reviewers") && (
-            <p className="error">
-              Some of this couldn't load. {failureText(loadFailed.error, "Check your connection and reopen Pact.")}
-            </p>
-          )}
-          {body}
-        </div>
-        <button className="btn primary block" onClick={() => setStep(null)}>
-          Done
-        </button>
-      </Sheet>
-    );
-  }
+  const sheet = step !== null && (
+    <Sheet title={STEP_TITLES[step]} onClose={() => setStep(null)}>
+      <div className="stack step-in-sheet">
+        {lists.failed && (step === "penalty" || step === "reviewers") && <ListsFailed failed={lists.failed} />}
+        <PactFormStep
+          step={step}
+          form={form}
+          update={update}
+          lists={lists}
+          onInvite={onInvite}
+          kindFixed
+          hints={{
+            reviewers: "Adding a reviewer applies at once. Removing one needs approval. There's always at least one.",
+            reminders: "Changes apply at once.",
+          }}
+        />
+      </div>
+      <button className="btn primary block" onClick={() => setStep(null)}>
+        Done
+      </button>
+    </Sheet>
+  );
 
   return (
     <>

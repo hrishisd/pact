@@ -47,7 +47,9 @@ import { TermsList } from "./PactPage.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { LoadedFound, loadFailure, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
-type Step = "kind" | "connect" | "goal" | "schedule" | "penalty" | "reviewers" | "reminders" | "check";
+/** The steps that fill in the pact's terms: Request change opens each of them on its own. */
+export type FormStep = "goal" | "schedule" | "penalty" | "reviewers" | "reminders";
+type Step = "kind" | "connect" | FormStep | "check";
 const AFTER_KIND: Step[] = ["goal", "schedule", "penalty", "reviewers", "reminders", "check"];
 
 type Pact = Json<PactTerms>;
@@ -249,9 +251,10 @@ export function CreatePact({
   const [ankiLogin, setAnkiLogin] = useState<AnkiLogin>(NO_ANKI_LOGIN);
   const [step, setStep] = useState<Step>(editing || ouraResult === "connected" ? "goal" : "kind");
   const [tried, setTried] = useState(false);
-  const [friends, setFriends] = useState<Friend[] | null>(null);
-  const [recipients, setRecipients] = useState<Recipient[] | null>(null);
-  const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
+  // With only one saved recipient, it's the one.
+  const lists = usePactFormLists((list) => {
+    if (list.length === 1) setForm((f) => (f.recipientId === null ? { ...f, recipientId: list[0]!.id } : f));
+  });
   const top = useRef<HTMLDivElement>(null);
 
   /** Whether picking `kind` adds a Connect step: Oura Ring or Anki, with no connection yet. */
@@ -289,19 +292,6 @@ export function CreatePact({
     // Created or saved leaves for the pact's page: the button stays disabled till then.
     { leavesScreen: true },
   );
-
-  const loadFriends = () => api.friends().then(setFriends, (error: unknown) => setLoadFailed({ error }));
-  useEffect(() => {
-    void loadFriends();
-    api.recipients().then(
-      (list) => {
-        setRecipients(list);
-        // With only one saved recipient, it's the one.
-        if (list.length === 1) setForm((f) => (f.recipientId === null ? { ...f, recipientId: list[0]!.id } : f));
-      },
-      (error: unknown) => setLoadFailed({ error }),
-    );
-  }, []);
 
   useEffect(() => {
     top.current?.scrollIntoView({ block: "start" });
@@ -351,41 +341,16 @@ export function CreatePact({
         );
       break;
     case "goal":
-      body = <GoalStep form={form} update={update} />;
-      break;
     case "schedule":
-      body = <ScheduleStep form={form} update={update} />;
-      break;
     case "penalty":
-      body = (
-        <PenaltyStep
-          form={form}
-          update={update}
-          recipients={recipients}
-          onAdded={(recipient) => {
-            setRecipients((list) => [...(list ?? []), recipient]);
-            update({ recipientId: recipient.id });
-          }}
-        />
-      );
-      break;
     case "reviewers":
-      body = (
-        <ReviewersStep
-          friends={friends}
-          reviewerIds={form.reviewerIds}
-          onReviewerIds={(reviewerIds) => update({ reviewerIds })}
-          kind={form.kind}
-          onInvite={onInvite}
-          onCheckAgain={() => void loadFriends()}
-        />
-      );
-      break;
     case "reminders":
-      body = <RemindersStep form={form} onReminders={(reminders) => update({ reminders })} />;
+      body = <PactFormStep step={step} form={form} update={update} lists={lists} onInvite={onInvite} />;
       break;
     case "check":
-      body = <CheckStep form={form} friends={friends ?? []} recipients={recipients ?? []} editing={editing} />;
+      body = (
+        <CheckStep form={form} friends={lists.friends ?? []} recipients={lists.recipients ?? []} editing={editing} />
+      );
       break;
   }
 
@@ -417,11 +382,7 @@ export function CreatePact({
           {minutes !== null && <span className="chip c-new">{minutes} min left to edit</span>}
         </div>
       </div>
-      {loadFailed && (
-        <p className="error">
-          Some of this couldn't load. {failureText(loadFailed.error, "Check your connection and reopen Pact.")}
-        </p>
-      )}
+      {lists.failed && <ListsFailed failed={lists.failed} />}
       {body}
       {tried && problem && <p className="error">{problemText(problem, form)}</p>}
       {ouraError && <p className="error">{ouraError}</p>}
@@ -463,6 +424,104 @@ export function CreatePact({
       </div>
     </>
   );
+}
+
+/** The friends and recipients the form's steps pick from, as `usePactFormLists` loads them. */
+export interface PactFormLists {
+  /** Null until loaded (or if loading failed). */
+  friends: Friend[] | null;
+  recipients: Recipient[] | null;
+  /** Why a list didn't load, so the step says so rather than looking empty. */
+  failed: { error: unknown } | null;
+  /** Check again for friends, after inviting one. */
+  reloadFriends: () => void;
+  /** A recipient just saved from the Penalty step joins the list. */
+  addRecipient: (recipient: Recipient) => void;
+}
+
+/** Loads the friends and recipients once, on mount. `onRecipients` sees the recipients when they arrive. */
+export function usePactFormLists(onRecipients?: (list: Recipient[]) => void): PactFormLists {
+  const [friends, setFriends] = useState<Friend[] | null>(null);
+  const [recipients, setRecipients] = useState<Recipient[] | null>(null);
+  const [failed, setFailed] = useState<{ error: unknown } | null>(null);
+  const reloadFriends = () => void api.friends().then(setFriends, (error: unknown) => setFailed({ error }));
+  useEffect(() => {
+    reloadFriends();
+    api.recipients().then(
+      (list) => {
+        setRecipients(list);
+        onRecipients?.(list);
+      },
+      (error: unknown) => setFailed({ error }),
+    );
+  }, []);
+  const addRecipient = (recipient: Recipient) => setRecipients((list) => [...(list ?? []), recipient]);
+  return { friends, recipients, failed, reloadFriends, addRecipient };
+}
+
+/** "Some of this couldn't load", and why: above a step whose lists didn't all load. */
+export function ListsFailed({ failed }: { failed: { error: unknown } }) {
+  return (
+    <p className="error">
+      Some of this couldn't load. {failureText(failed.error, "Check your connection and reopen Pact.")}
+    </p>
+  );
+}
+
+/**
+ * One of the steps that fill in the pact's terms, as Create pact shows it in
+ * turn and Request change in a sheet. `kindFixed`: the kind of schedule
+ * can't change. `hints` say what changing the reviewers or reminders does.
+ */
+export function PactFormStep({
+  step,
+  form,
+  update,
+  lists,
+  onInvite,
+  kindFixed,
+  hints = {},
+}: {
+  step: FormStep;
+  form: Form;
+  update: (change: Partial<Form>) => void;
+  lists: PactFormLists;
+  onInvite: () => void;
+  kindFixed?: boolean;
+  hints?: { reviewers?: string; reminders?: string };
+}) {
+  switch (step) {
+    case "goal":
+      return <GoalStep form={form} update={update} />;
+    case "schedule":
+      return <ScheduleStep form={form} update={update} kindFixed={kindFixed} />;
+    case "penalty":
+      return (
+        <PenaltyStep
+          form={form}
+          update={update}
+          recipients={lists.recipients}
+          onAdded={(recipient) => {
+            lists.addRecipient(recipient);
+            update({ recipientId: recipient.id });
+          }}
+        />
+      );
+    case "reviewers":
+      return (
+        <ReviewersStep
+          friends={lists.friends}
+          reviewerIds={form.reviewerIds}
+          onReviewerIds={(reviewerIds) => update({ reviewerIds })}
+          kind={form.kind}
+          hint={hints.reviewers}
+          onInvite={onInvite}
+          onCheckAgain={lists.reloadFriends}
+        />
+      );
+    case "reminders":
+      return <RemindersStep form={form} onReminders={(reminders) => update({ reminders })} hint={hints.reminders} />;
+  }
 }
 
 // ---------- steps ----------
@@ -669,7 +728,7 @@ function problemText(problem: Problem, form: Pick<Form, "kind">): string {
   return PROBLEMS[problem === "invalid-due-by" && form.kind === "anki" ? "anki-due-by" : problem];
 }
 
-export function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
+function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
   if (form.kind === "anki") return <AnkiGoalStep form={form} update={update} />;
   if (form.kind === "oura") {
     return (
@@ -772,7 +831,7 @@ function remindersAs(form: Form, to: Schedule["kind"]): string[] {
   return form.deadline === "" ? [] : form.reminders.map((time) => (time === "" ? "" : `${form.deadline}T${time}`));
 }
 
-export function ScheduleStep({
+function ScheduleStep({
   form,
   update,
   kindFixed = false,
@@ -994,7 +1053,7 @@ function DateRange({ form, update, weekly }: { form: Form; update: (change: Part
   );
 }
 
-export function PenaltyStep({
+function PenaltyStep({
   form,
   update,
   recipients,

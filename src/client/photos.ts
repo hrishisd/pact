@@ -3,6 +3,8 @@
 // on cellular, and the redraw drops the original's metadata, GPS location
 // included. Excuse photos (ticket 07) go through here too.
 
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+
 /** The one place photo size and quality are set: about 100–180 KB a photo. */
 const PHOTO_SHRINK = { maxEdge: 1280, quality: 0.6 } as const;
 
@@ -39,4 +41,67 @@ async function shrinkPhoto(photo: Blob): Promise<Blob> {
   } finally {
     bitmap.close();
   }
+}
+
+/**
+ * Photos picked from a file input, each shrunk before it's shown; at most
+ * `max`. `input` goes on a hidden file input with `onChange` as its change
+ * handler, and `choose` opens it. A photo that can't be read says
+ * `unreadable` through `setError`, which a new pick clears first.
+ * Thumbnails' object URLs are revoked when a photo is removed and when the
+ * screen goes; a pick that finishes after that is dropped.
+ */
+export function usePhotoPicks({
+  max,
+  unreadable,
+  setError,
+}: {
+  max: number;
+  unreadable: string;
+  setError: (error: string | null) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [photos, setPhotos] = useState<ShrunkPhoto[]>([]);
+  const urls = useRef<string[]>([]);
+  urls.current = photos.map((photo) => photo.url);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      urls.current.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+
+  const add = async (files: File[]) => {
+    setError(null);
+    for (const file of files.slice(0, max - photos.length)) {
+      try {
+        const photo = await shrinkForPreview(file);
+        if (!mounted.current) {
+          URL.revokeObjectURL(photo.url);
+          return;
+        }
+        setPhotos((added) => {
+          if (added.length < max) return [...added, photo];
+          URL.revokeObjectURL(photo.url);
+          return added;
+        });
+      } catch {
+        if (mounted.current) setError(unreadable);
+      }
+    }
+  };
+  /** The input's change handler: adds what was picked, and empties the input so the same file can be picked again. */
+  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = "";
+    if (files.length > 0) void add(files);
+  };
+  const choose = () => input.current?.click();
+  const remove = (photo: ShrunkPhoto) => {
+    URL.revokeObjectURL(photo.url);
+    setPhotos((added) => added.filter((p) => p !== photo));
+  };
+  return { input, photos, onChange, choose, remove };
 }
