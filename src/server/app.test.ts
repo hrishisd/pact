@@ -1761,6 +1761,12 @@ describe("payments", () => {
       status: 200,
       body: { ok: true, paymentId: expect.any(String) } satisfies RecordPaymentResponse,
     });
+    // The form's note reaches the core.
+    const { paymentId } = recorded.body as { paymentId: string };
+    expect((await owner.get<PaymentResponse>(API_PATHS.paymentItem(paymentId))).body).toMatchObject({
+      ok: true,
+      payment: { amountCents: 1000, note: "Venmo" },
+    });
     const ledgers = await owner.get<LedgersResponse>(API_PATHS.ledgers);
     expect(ledgers.body).toEqual([
       {
