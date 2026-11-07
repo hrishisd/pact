@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import type { NewExcuse, TodayAlert } from "../shared/types.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
-import { scenario } from "./testing/scenario.ts";
+import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
 
 const MONDAY = "2026-01-05";
 const TUESDAY = "2026-01-06";
@@ -170,6 +170,21 @@ describe("the 48 hours after a miss", () => {
     expect(owner.today().waiting).toEqual([]);
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(owed(owner)).toBe(500);
+  });
+
+  test("judged when the server received the photos: one received at Wed 23:59 is accepted, though the upload finished after", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Wed 23:59");
+    // A slow upload: the server has the photo at Wed 23:59, but writes the excuse at Thu 00:01.
+    const store = s.photoStore.store.bind(s.photoStore);
+    s.photoStore.store = async (p) => {
+      const stored = await store(p);
+      s.setClockTo("Thu 00:01");
+      return stored;
+    };
+
+    expect(await owner.fileExcuse(gym, sick(MONDAY), [photo()])).toEqual({ ok: true, excuseId: expect.any(String) });
+    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", filedAt: s.at("Wed 23:59") })]);
   });
 });
 
@@ -514,6 +529,28 @@ describe("a rejected excuse with days not judged yet", () => {
     ]);
     // Wednesday, Missed after the rejection, can be excused until Sat 00:00; Friday is not judged yet.
     expect(owner.today().alerts).toEqual([expect.objectContaining({ refile: { closesAt: s.at("Sat 00:00") } })]);
+  });
+  test("an approved change takes all its days off the schedule: no alert is left, and Today still loads", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Tue 08:00");
+    const excuseId = await fileExcuse(owner, gym, sick(FRIDAY));
+    await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
+    expect(owner.today().alerts).toEqual([expect.objectContaining({ kind: "excuse-rejected", excuseId })]);
+
+    const pact = owner.pact(gym);
+    if (!pact.ok) throw new Error(pact.reason);
+    const { name, description, penaltyCents, recipient, reviewers } = pact.pact;
+    const changed = await owner.changePact(gym, {
+      name,
+      description,
+      schedule: { kind: "fixed-days", days: ["mon", "wed"] },
+      penaltyCents,
+      recipientId: recipient.id,
+      reviewerIds: reviewers.map((r) => r.id),
+    });
+    await reviewer.decide(changeRequestIdOf(changed), { kind: "approve" });
+
+    expect(owner.today().alerts).toEqual([]);
   });
 });
 

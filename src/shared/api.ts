@@ -340,7 +340,7 @@ export type ExcuseResponse = Json<ExcuseResult>;
 /** POST /api/excuses/:id/accept-rejection (no body). */
 export type AcceptExcuseRejectionResponse = AcceptExcuseRejectionResult;
 
-/** GET /api/review: the signed-in account's Review Queue, oldest first. */
+/** GET /api/review: the signed-in account's Review Queue, change requests first, then the rest oldest first. */
 export type ReviewQueueResponse = Json<ReviewItem[]>;
 
 /**

@@ -113,6 +113,16 @@ describe("check-fly-secrets", () => {
     expect(output).not.toContain("value-from-fly-toml");
   });
 
+  test("an optional secret that needs others fails without them: Oura's client id alone", () => {
+    const { status, output } = check(listing([...secretNames(), "OURA_CLIENT_ID"]));
+    expect(status).not.toBe(0);
+    expect(output).toContain("::error::Production won't boot without: OURA_CLIENT_SECRET OURA_TOKEN_KEY.");
+
+    const withOura = check(listing([...secretNames(), "OURA_CLIENT_ID", "OURA_CLIENT_SECRET", "OURA_TOKEN_KEY"]));
+    expect(withOura.output).toContain("Fly secrets check passed");
+    expect(withOura.status).toBe(0);
+  });
+
   test("a staged secret counts as present", () => {
     const { status, output } = check(listing(secretNames(), "Staged"));
     expect(output).toContain("Fly secrets check passed");
@@ -176,23 +186,28 @@ describe("check-fly-secrets", () => {
       warned(check(listing(secretNames()), noEnv));
     });
 
+    /** A PATH directory with everything else the script runs, and without `leftOut`. */
+    const binWithout = (leftOut: string) => {
+      const bin = join(dir, `no-${leftOut}-bin`);
+      mkdirSync(bin);
+      const tools: Record<string, string | undefined> = { node: process.execPath, jq: JQ };
+      for (const tool of ["dirname", "awk", "printf"]) tools[tool] = which(tool);
+      for (const [tool, found] of Object.entries(tools)) {
+        if (tool === leftOut) continue;
+        if (found === undefined) throw new Error(`check-fly-secrets tests need ${tool} on PATH`);
+        symlinkSync(found, join(bin, tool));
+      }
+      return bin;
+    };
+
     test("when node isn't there", () => {
-      const result = checkWithCommand(["printf", "%s", listing(secretNames())], FLY_TOML, join(dir, "empty-path"));
+      const result = checkWithCommand(["printf", "%s", listing(secretNames())], FLY_TOML, binWithout("node"));
       warned(result);
       expect(result.output).toContain("couldn't read the required names");
     });
 
     test("when jq isn't there", () => {
-      // Everything else the script runs, and no jq.
-      const bin = join(dir, "no-jq-bin");
-      mkdirSync(bin);
-      symlinkSync(process.execPath, join(bin, "node"));
-      for (const tool of ["dirname", "awk", "grep", "printf"]) {
-        const found = which(tool);
-        if (found === undefined) throw new Error(`check-fly-secrets tests need ${tool} on PATH`);
-        symlinkSync(found, join(bin, tool));
-      }
-      const result = checkWithCommand(["printf", "%s", listing(secretNames())], FLY_TOML, bin);
+      const result = checkWithCommand(["printf", "%s", listing(secretNames())], FLY_TOML, binWithout("jq"));
       warned(result);
       expect(result.output).toContain("couldn't read the output of the secrets listing");
     });

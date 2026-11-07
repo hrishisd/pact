@@ -23,7 +23,7 @@ import {
   type Schedule,
   type Weekday,
 } from "../shared/types.ts";
-import { API_PATHS, type Json } from "../shared/api.ts";
+import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
 import { takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
 import { api, failureText } from "./api.ts";
@@ -761,32 +761,15 @@ export function GoalStep({ form, update }: { form: Form; update: (change: Partia
           />
           <small>Late is when your ring says you got into bed after this.</small>
         </label>
-        <label className="field">
-          <span>Name</span>
-          <input
-            className="inp"
-            value={form.name}
-            placeholder="e.g. In bed by midnight"
-            onChange={(e) => update({ name: e.target.value, named: e.target.value.trim() !== "" })}
-          />
-          <small>Shown on Today.</small>
-        </label>
+        <NameField form={form} update={update} placeholder="e.g. In bed by midnight" />
       </>
     );
   }
   return (
     <>
       <h2>Goal</h2>
-      <label className="field">
-        <span>Name</span>
-        <input
-          className="inp"
-          value={form.name}
-          placeholder="e.g. Gym"
-          onChange={(e) => update({ name: e.target.value })}
-        />
-        <small>Shown on Today.</small>
-      </label>
+      {/* Typed, it stays if the owner goes back and picks a bedtime or a deck instead. */}
+      <NameField form={form} update={update} placeholder="e.g. Gym" />
       <label className="field">
         <span>What will your photo show?</span>
         <textarea
@@ -1287,7 +1270,10 @@ export function ReviewersStep({
 }
 
 type FirstState =
-  { kind: "loading" } | { kind: "loaded"; first: Json<FirstOccurrence> } | { kind: "failed"; error: unknown };
+  | { kind: "loading" }
+  | { kind: "loaded"; first: Json<FirstOccurrence> }
+  | { kind: "refused"; reason: Extract<FirstOccurrenceResponse, { ok: false }>["reason"] }
+  | { kind: "failed"; error: unknown };
 
 /** How often the Check step asks again, so the day it names stays the one Create would store. */
 const FIRST_OCCURRENCE_REFRESH_MS = 60_000;
@@ -1319,7 +1305,7 @@ function CheckStep({
       api.firstOccurrence({ schedule, evidenceKind: form.kind, inBedBy, dueBy, startDate, editing: editing?.id }).then(
         (result) =>
           show(
-            result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "failed", error: result.reason },
+            result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "refused", reason: result.reason },
           ),
         (error: unknown) => show({ kind: "failed", error }),
       );
@@ -1382,17 +1368,16 @@ function CheckStep({
             </>
           )}
           {editing?.editWindowClosesAt && (
-            <> Your 10 minutes end at {clockTime(editing.editWindowClosesAt)}. Saving doesn't add more.</>
+            // On this device's clock: the form has no profile timezone, and the window ends minutes from now.
+            <> Your 10 minutes end at {clockTime(editing.editWindowClosesAt, undefined)}. Saving doesn't add more.</>
           )}
         </p>
-        {first.kind === "failed" &&
-          (first.error === "deadline-too-soon" ? (
-            <p className="error">{PROBLEMS["deadline-too-soon"]}</p>
-          ) : (
-            <p className="muted small">
-              Couldn't load the first day. {failureText(first.error, "Check your connection.")}
-            </p>
-          ))}
+        {first.kind === "refused" && <p className="error">{PROBLEMS[first.reason]}</p>}
+        {first.kind === "failed" && (
+          <p className="muted small">
+            Couldn't load the first day. {failureText(first.error, "Check your connection.")}
+          </p>
+        )}
       </div>
     </>
   );

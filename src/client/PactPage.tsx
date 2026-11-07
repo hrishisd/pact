@@ -43,7 +43,7 @@ export function PactPage({
   onInvite,
 }: {
   pactId: string;
-  /** The profile's timezone, for when it Ended. */
+  /** The profile's timezone, for when it Ended, when its days are due and when AnkiWeb was checked. */
   timezone: string;
   onLoaded: (pactId: string, name: string) => void;
   onEdit: () => void;
@@ -94,7 +94,7 @@ export function PactPage({
           <EditWindowBar pact={state.pact} onEdit={onEdit} onDeleted={onDeleted} />
           <StageLine pact={state.pact} />
           <NewTerms pact={state.pact} />
-          <Actions pact={state.pact} onFiled={load} onRequestChange={onRequestChange} />
+          <Actions pact={state.pact} timezone={timezone} onFiled={load} onRequestChange={onRequestChange} />
           {state.pact.waiting.length > 0 && (
             <WaitingOn
               items={state.pact.waiting}
@@ -102,7 +102,7 @@ export function PactPage({
               onOpenChangeRequest={onOpenChangeRequest}
             />
           )}
-          <History pact={state.pact} />
+          <History pact={state.pact} timezone={timezone} />
           <Terms pact={state.pact} onSaved={load} onInvite={onInvite} />
           <EndPact pact={state.pact} onSent={load} />
           {state.pact.stage === "ended" && (
@@ -206,7 +206,17 @@ function changeWaiting(pact: Pact): boolean {
  * excuse sheet asks which day. While a change request waits, Request change
  * gives way to word of it.
  */
-function Actions({ pact, onFiled, onRequestChange }: { pact: Pact; onFiled: () => void; onRequestChange: () => void }) {
+function Actions({
+  pact,
+  timezone,
+  onFiled,
+  onRequestChange,
+}: {
+  pact: Pact;
+  timezone: string;
+  onFiled: () => void;
+  onRequestChange: () => void;
+}) {
   const now = useNow();
   const [filing, setFiling] = useState(false);
   const close = useCallback(() => setFiling(false), []);
@@ -239,6 +249,7 @@ function Actions({ pact, onFiled, onRequestChange }: { pact: Pact; onFiled: () =
         <ExcuseSheet
           pactId={pact.id}
           pactName={pact.name}
+          timezone={timezone}
           onClose={close}
           onFiled={() => {
             setFiling(false);
@@ -376,9 +387,9 @@ function WaitingOn({
   );
 }
 
-function History({ pact }: { pact: Pact }) {
+function History({ pact, timezone }: { pact: Pact; timezone: string }) {
   const now = useNow();
-  return <HeatMap pact={pact} now={now} />;
+  return <HeatMap pact={pact} timezone={timezone} now={now} />;
 }
 
 /**

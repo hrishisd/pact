@@ -31,6 +31,7 @@ import {
 } from "../shared/types.ts";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
+import { listNames } from "./change-terms.tsx";
 import {
   ankiMissText,
   clockText,
@@ -73,7 +74,7 @@ export function Today({
   onCreate,
   onInvite,
 }: {
-  /** The profile's timezone, for when bills are due. */
+  /** The profile's timezone, for when bills and days are due and when AnkiWeb was checked. */
   timezone: string;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
@@ -185,11 +186,12 @@ export function Today({
           onOpenChangeRequest={onOpenChangeRequest}
         />
       )}
-      <Yesterday entries={today.yesterday} now={now} onOpenPact={onOpenPact} />
+      <Yesterday entries={today.yesterday} timezone={timezone} now={now} onOpenPact={onOpenPact} />
       {excusing && (
         <ExcuseSheet
           pactId={excusing.pactId}
           pactName={excusing.pactName}
+          timezone={timezone}
           {...(excusing.day !== undefined && { day: excusing.day })}
           onClose={() => setExcusing(null)}
           onFiled={() => {
@@ -324,6 +326,7 @@ function Section({
           <AnkiCard
             key={`anki:${card.pactId}`}
             card={card}
+            timezone={timezone}
             now={now}
             checking={checkingAnki}
             onOpen={() => onOpenPact(card.pactId, card.name)}
@@ -365,7 +368,7 @@ function Section({
           chip={<span className="chip c-missed">{card.closed ? "Closed" : "Missed"}</span>}
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
-          <div className="meta">{missedLine(card)}</div>
+          <div className="meta">{missedLine(card, timezone)}</div>
           <MissedActions
             pactId={card.pactId}
             occurrenceDate={card.occurrenceDate}
@@ -513,12 +516,15 @@ function NoOuraDataCard({
  */
 function AnkiCard({
   card,
+  timezone,
   now,
   checking,
   onOpen,
   onFileExcuse,
 }: {
   card: Json<TodayAnkiCard>;
+  /** The profile's timezone, for when AnkiWeb was checked. */
+  timezone: string;
   now: number;
   /** Whether a check of AnkiWeb is running now. */
   checking: boolean;
@@ -541,7 +547,9 @@ function AnkiCard({
             <span className="leftbig">{lastCheck.cardsLeft}</span>{" "}
             <span className="muted">{lastCheck.cardsLeft === 1 ? "card" : "cards"} left</span>
           </div>
-          <div className="meta">{checking ? <CheckingAnkiWeb /> : `Checked ${clockTime(lastCheck.checkedAt)}`}</div>
+          <div className="meta">
+            {checking ? <CheckingAnkiWeb /> : `Checked ${clockTime(lastCheck.checkedAt, timezone)}`}
+          </div>
         </>
       ) : (
         <div className="meta">{checking ? <CheckingAnkiWeb /> : "Not checked yet today."}</div>
@@ -554,7 +562,7 @@ function AnkiCard({
       ) : (
         <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
       )}
-      <div className="row2" onClick={(e) => e.stopPropagation()}>
+      <div className="row2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         <button className="btn" onClick={onFileExcuse}>
           File excuse
         </button>
@@ -577,13 +585,13 @@ function CheckingAnkiWeb() {
  * into bed, or for an Anki day why. Today's day past its due-by time says when evidence was due. A
  * Weekly count week says how far it got.
  */
-function missedLine(card: Json<TodayMissedCard>): string {
+function missedLine(card: Json<TodayMissedCard>, timezone: string): string {
   if (card.closed) return `Evidence was due by ${clockText(card.closed.dueBy)}.`;
   if (card.week) {
     const { sessions, target } = card.week;
     return `Week of ${formatDate(card.occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
   }
-  if (card.anki !== undefined) return `${formatDate(card.occurrenceDate)} · ${ankiMissText(card.anki)}`;
+  if (card.anki !== undefined) return `${formatDate(card.occurrenceDate)} · ${ankiMissText(card.anki, timezone)}`;
   if (!card.night) return formatDate(card.occurrenceDate);
   const { inBedAt } = card.night;
   return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;
@@ -698,7 +706,7 @@ function OverdueAlert({
       <span className="small">
         Your {formatDate(alert.billedOn)} bill was due {formatDay(alert.dueAt, timezone)}.
         {reviewerNames.length > 0 &&
-          ` ${reviewerNames.join(" and ")} ${reviewerNames.length === 1 ? "has" : "have"} been told.`}
+          ` ${listNames(reviewerNames)} ${reviewerNames.length === 1 ? "has" : "have"} been told.`}
       </span>
       <RecordPaymentAction recipientId={alert.recipientId} onSent={onPaid} />
     </div>

@@ -1,5 +1,14 @@
 import { describe, expect, it, test } from "vitest";
-import { clockText, formatDueAt, inBedByName, parseCents, timeLeft } from "./format.ts";
+import {
+  ankiMissText,
+  clockText,
+  clockTime,
+  dueClockText,
+  formatDueAt,
+  inBedByName,
+  parseCents,
+  timeLeft,
+} from "./format.ts";
 
 describe("parseCents", () => {
   it.each([
@@ -41,6 +50,29 @@ describe("formatDueAt", () => {
     ["2026-01-21T05:00:00.000Z", "Pacific/Auckland", "Wed Jan 21 at 6pm"],
   ])("%s in %s reads %s", (instant, timeZone, text) => {
     expect(formatDueAt(instant, timeZone)).toBe(text);
+  });
+});
+
+describe("dueClockText", () => {
+  test.each([
+    ["2026-01-22T05:00:00.000Z", "America/New_York", "midnight"],
+    ["2026-01-22T02:00:00.000Z", "America/New_York", "9:00pm"],
+    ["2026-01-22T06:30:00.000Z", "America/New_York", "1:30am"],
+    ["2026-01-22T05:00:00.000Z", "America/Los_Angeles", "9:00pm"],
+  ])("%s in %s reads %s", (instant, timeZone, text) => {
+    expect(dueClockText(instant, timeZone)).toBe(text);
+  });
+});
+
+describe("Anki check times read in the profile's timezone", () => {
+  const checkedAt = "2026-01-21T23:50:00.000Z";
+
+  test.each([
+    ["America/New_York", "6:50pm"],
+    ["America/Los_Angeles", "3:50pm"],
+  ])("in %s, %s", (timeZone, time) => {
+    expect(clockTime(checkedAt, timeZone)).toBe(time);
+    expect(ankiMissText({ cardsLeft: 12, checkedAt }, timeZone)).toBe(`12 cards left at ${time}`);
   });
 });
 

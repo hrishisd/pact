@@ -364,7 +364,7 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
         <div className="list">
           {item.days.map((day) => {
             const { date, status } = day;
-            const note = dayNote(status, now, day.through !== undefined);
+            const note = dayNote(status, now, timezone, day.through !== undefined);
             return (
               <div key={date} className="covrow">
                 <span className="rt">

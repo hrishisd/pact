@@ -16,7 +16,9 @@ export function Centered({ children }: { children: ReactNode }) {
 /**
  * What `load` resolves to (null until it does), or `failed` if it rejects.
  * Loads on mount, and again on `reload()`, keeping the last data meanwhile.
- * `failed` is the error when the load failed, for `failureText`; null otherwise.
+ * Only the newest load's answer counts: an older one arriving after it is
+ * dropped. `failed` is the error when the load failed, for `failureText`;
+ * null otherwise.
  */
 export function useLoad<T>(load: () => Promise<T>): {
   data: T | null;
@@ -27,13 +29,18 @@ export function useLoad<T>(load: () => Promise<T>): {
   const [failed, setFailed] = useState<{ error: unknown } | null>(null);
   const [loads, setLoads] = useState(0);
   useEffect(() => {
+    let newest = true;
     load().then(
       (loaded) => {
+        if (!newest) return;
         setData(loaded);
         setFailed(null);
       },
-      (error: unknown) => setFailed({ error }),
+      (error: unknown) => newest && setFailed({ error }),
     );
+    return () => {
+      newest = false;
+    };
   }, [loads]);
   return { data, failed, reload: () => setLoads((n) => n + 1) };
 }

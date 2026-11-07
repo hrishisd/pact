@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #
 # Stops a deploy when production would refuse to boot for a missing variable:
-# compares what loadConfig (src/server/config.ts) requires with fly.toml's [env]
-# and the secrets Fly lists, Deployed or Staged (staged ones apply on this deploy).
+# runs loadConfig (src/server/config.ts) as production with every name in
+# fly.toml's [env] and every secret Fly lists, Deployed or Staged (staged ones
+# apply on this deploy), set to a placeholder, and reports the names it still
+# misses. So an optional secret that needs others counts: OURA_CLIENT_ID alone
+# misses OURA_CLIENT_SECRET and OURA_TOKEN_KEY.
 #
 #   scripts/check-fly-secrets.sh FLY_TOML LIST_COMMAND...
 #
@@ -24,22 +27,6 @@ skip() {
 [ "$#" -ge 2 ] || skip "usage: check-fly-secrets.sh FLY_TOML LIST_COMMAND..."
 fly_toml="$1"
 shift
-
-# ── What production requires: the names in loadConfig's own error ────────────
-prefix="missing required environment variables: "
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-config_error="$(cd "$repo_root" && node --experimental-strip-types --disable-warning=ExperimentalWarning --input-type=module -e '
-  import { loadConfig } from "./src/server/config.ts";
-  try {
-    loadConfig({ NODE_ENV: "production" });
-  } catch (error) {
-    console.log(error.message);
-  }
-')"
-case "$config_error" in
-  "$prefix"*) required="${config_error#"$prefix"}" ;;
-  *) skip "couldn't read the required names from config.ts" ;;
-esac
 
 # ── What fly.toml provides ───────────────────────────────────────────────────
 env_names="$(awk '
@@ -64,16 +51,29 @@ secret_names="$(printf '%s' "$listing" | jq -r '
 ' 2>/dev/null)" || skip "couldn't read the output of the secrets listing"
 [ -n "$secret_names" ] || skip "couldn't read the output of the secrets listing"
 
-# ── The comparison ───────────────────────────────────────────────────────────
-missing=""
-for name in ${required//,/ }; do
-  if ! printf '%s\n%s\n' "$env_names" "$secret_names" | grep -qxF "$name"; then
-    missing="$missing $name"
-  fi
-done
+# ── What production would still miss: the names in loadConfig's own error ────
+# Only that error counts: the placeholders can fail loadConfig's other checks
+# (a key's length, say), which this can't judge without the real values.
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+checked="$(cd "$repo_root" && PRESENT_NAMES="$env_names $secret_names" node --experimental-strip-types --disable-warning=ExperimentalWarning --input-type=module -e '
+  import { loadConfig } from "./src/server/config.ts";
+  const prefix = "missing required environment variables: ";
+  const present = (process.env.PRESENT_NAMES ?? "").split(/\s+/).filter(Boolean);
+  let missing = "";
+  try {
+    loadConfig({ ...Object.fromEntries(present.map((name) => [name, "placeholder"])), NODE_ENV: "production" });
+  } catch (error) {
+    if (error.message.startsWith(prefix)) missing = error.message.slice(prefix.length);
+  }
+  console.log("missing:" + missing);
+')"
+case "$checked" in
+  missing:*) missing="${checked#missing:}" ;;
+  *) skip "couldn't read the required names from config.ts" ;;
+esac
 
 if [ -n "$missing" ]; then
-  echo "::error::Production won't boot without:$missing. Set with: fly secrets set NAME=value --stage"
+  echo "::error::Production won't boot without: ${missing//,/}. Set with: fly secrets set NAME=value --stage"
   exit 1
 fi
 echo "Fly secrets check passed: every variable config.ts requires is on Fly or in $fly_toml."

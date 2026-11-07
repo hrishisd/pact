@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.ts";
 import { DayChip } from "./excuse-days.tsx";
 import { listNames } from "./change-terms.tsx";
-import { ankiMissText, clockText, clockTime, formatDate, money } from "./format.ts";
+import { ankiMissText, clockText, clockTime, formatDate, formatDay, money } from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
@@ -51,16 +51,17 @@ function OccurrenceChip({
 
 /**
  * The line under an occurrence: who decided it and why, when Oura saw the
- * owner get into bed or Pact saw the deck finished, and what a miss cost. `reviewerNames` names who a
- * photo waits for; without it the chip says enough.
+ * owner get into bed or Pact saw the deck finished (in `timezone`, the
+ * profile's), and what a miss cost. `reviewerNames` names who a photo waits
+ * for; without it the chip says enough.
  */
-function occurrenceLine(record: Occurrence, reviewerNames: string[] = []): string {
+function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: string[] = []): string {
   const { status, decidedBy, recipientName, night, anki } = record;
   const bed = night && (night.inBedAt === null ? "No sleep data by 6pm." : `In bed at ${clockText(night.inBedAt)}.`);
   switch (status.kind) {
     case "satisfied":
       if (bed) return bed;
-      if (anki?.checkedAt) return `Finished by ${clockTime(anki.checkedAt)}.`;
+      if (anki?.checkedAt) return `Finished by ${clockTime(anki.checkedAt, timezone)}.`;
       return decidedBy?.kind === "evidence-approved" ? `Photo approved by ${decidedBy.reviewerName}.` : "";
     case "missed": {
       const cost = status.held
@@ -68,7 +69,7 @@ function occurrenceLine(record: Occurrence, reviewerNames: string[] = []): strin
         : `${money(status.penaltyCents)} to ${recipientName ?? "your recipient"}.`;
       if (decidedBy?.kind === "evidence-rejected")
         return `${decidedBy.reviewerName} rejected the photo: “${sentence(decidedBy.reason)}” ${cost}`;
-      if (anki !== undefined) return `${ankiMissText(anki)}. ${cost}`;
+      if (anki !== undefined) return `${ankiMissText(anki, timezone)}. ${cost}`;
       return `${bed ?? "No photo."} ${cost}`;
     }
     case "excused":
@@ -134,15 +135,15 @@ const SQUARE_TEXT: Record<Exclude<Square, "none">, string> = {
  * first occurrence and a row per weekday, scrolled to now. Tapping a square
  * shows its day below the legend.
  */
-export function HeatMap({ pact, now }: { pact: Json<PactTerms>; now: number }) {
+export function HeatMap({ pact, timezone, now }: { pact: Json<PactTerms>; timezone: string; now: number }) {
   const { history } = pact;
   switch (history.kind) {
     case "weekly-count":
-      return <WeeklyHeatMap weeks={history.weeks} now={now} />;
+      return <WeeklyHeatMap weeks={history.weeks} timezone={timezone} now={now} />;
     case "one-time":
-      return <OneTimeHistory pact={pact} day={history.day} now={now} />;
+      return <OneTimeHistory pact={pact} day={history.day} timezone={timezone} now={now} />;
     case "fixed-days":
-      return <DailyHeatMap pact={pact} days={history.days} now={now} />;
+      return <DailyHeatMap pact={pact} days={history.days} timezone={timezone} now={now} />;
   }
 }
 
@@ -151,12 +152,23 @@ export function HeatMap({ pact, now }: { pact: Json<PactTerms>; now: number }) {
  * it went (or what it's waiting for) beside it. With Submit anytime, an open
  * occurrence is due on that date, not today.
  */
-function OneTimeHistory({ pact, day, now }: { pact: Json<PactTerms>; day: Day; now: number }) {
+function OneTimeHistory({
+  pact,
+  day,
+  timezone,
+  now,
+}: {
+  pact: Json<PactTerms>;
+  day: Day;
+  timezone: string;
+  now: number;
+}) {
   const record = day.occurrence;
   if (record === null) return null;
   const square = squareOf(record, now);
   const line = occurrenceLine(
     record,
+    timezone,
     pact.reviewers.map((r) => r.name),
   );
   // Open before its date, with Submit anytime: it's due on the deadline's date, not today.
@@ -166,7 +178,7 @@ function OneTimeHistory({ pact, day, now }: { pact: Json<PactTerms>; day: Day; n
     !status.evidenceWaiting &&
     status.excuse === null &&
     square === "open" &&
-    deviceDate(now) !== day.date;
+    formatDay(new Date(now).toISOString(), timezone) !== formatDate(day.date);
   return (
     <section className="card">
       <h3>History</h3>
@@ -189,13 +201,17 @@ function OneTimeHistory({ pact, day, now }: { pact: Json<PactTerms>; day: Day; n
   );
 }
 
-/** `now` (ms) as "YYYY-MM-DD" on this device's calendar. */
-function deviceDate(now: number): string {
-  const at = new Date(now);
-  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
-}
-
-function DailyHeatMap({ pact, days, now }: { pact: Json<PactTerms>; days: Day[]; now: number }) {
+function DailyHeatMap({
+  pact,
+  days,
+  timezone,
+  now,
+}: {
+  pact: Json<PactTerms>;
+  days: Day[];
+  timezone: string;
+  now: number;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -208,6 +224,7 @@ function DailyHeatMap({ pact, days, now }: { pact: Json<PactTerms>; days: Day[];
   const line = picked?.occurrence
     ? occurrenceLine(
         picked.occurrence,
+        timezone,
         pact.reviewers.map((r) => r.name),
       )
     : "";
@@ -292,7 +309,7 @@ function Legend() {
  * with the number of days that counted, scrolled to now. Tapping one shows
  * the week below the legend.
  */
-function WeeklyHeatMap({ weeks, now }: { weeks: Week[]; now: number }) {
+function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: string; now: number }) {
   const [selected, setSelected] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -338,7 +355,7 @@ function WeeklyHeatMap({ weeks, now }: { weeks: Week[]; now: number }) {
             <b>Week of {formatDate(picked.date)}</b>
             <DayChip status={picked.occurrence.status} now={now} week />
           </div>
-          <span className="small muted">{weekLine(picked)}</span>
+          <span className="small muted">{weekLine(picked, timezone)}</span>
         </div>
       ) : (
         <p className="small muted">Tap a week to see what happened.</p>
@@ -358,7 +375,7 @@ function weekText({ progress, occurrence }: Week): string {
 }
 
 /** The line under a tapped week: how far it got, and what a short week cost or the excuse that covered it. */
-function weekLine(week: Week): string {
+function weekLine(week: Week, timezone: string): string {
   const record = week.occurrence;
   if (record === null) return "";
   const { status } = record;
@@ -369,7 +386,7 @@ function weekLine(week: Week): string {
       : `${money(status.penaltyCents)} to ${record.recipientName ?? "your recipient"}.`;
     return `${weekText(week)}. ${short} short: ${cost}`;
   }
-  const excused = occurrenceLine(record);
+  const excused = occurrenceLine(record, timezone);
   if (status.kind === "excused" || excused !== "") return excused;
   return `${weekText(week)}.`;
 }
@@ -399,10 +416,13 @@ function HeatMapSquare({
 /** Yesterday, last on Today: one row per pact due yesterday with its chip and a short line, opening the pact. */
 export function Yesterday({
   entries,
+  timezone,
   now,
   onOpenPact,
 }: {
   entries: Json<TodayYesterdayEntry>[];
+  /** The profile's timezone, for when AnkiWeb was checked. */
+  timezone: string;
   now: number;
   onOpenPact: (id: string, name: string) => void;
 }) {
@@ -413,7 +433,7 @@ export function Yesterday({
       <div className="label">Yesterday · {formatDate(date)}</div>
       <div className="cards">
         {entries.map((entry) => {
-          const line = occurrenceLine(entry.occurrence);
+          const line = occurrenceLine(entry.occurrence, timezone);
           return (
             <button key={entry.pactId} className="rowbtn" onClick={() => onOpenPact(entry.pactId, entry.name)}>
               <span className="rt">

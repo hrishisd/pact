@@ -360,6 +360,13 @@ export function ankiDueByFits(dueBy: string, rolloverHour: number): boolean {
   return ankiDueByDayAfter(dueBy, rolloverHour) !== null;
 }
 
+/** `ankiDueByDayAfter` for a time already checked with `ankiDueByFits`: throws for one that can't fit. */
+function fittingAnkiDueByDayAfter(dueBy: string, rolloverHour: number): 0 | 1 {
+  const dayAfter = ankiDueByDayAfter(dueBy, rolloverHour);
+  if (dayAfter === null) throw new Error(`an Anki day starting at ${rolloverHour}:00 can't be due by ${dueBy}`);
+  return dayAfter;
+}
+
 /**
  * Minutes from when an Anki day opens (its rollover hour) to `time`
  * ("HH:MM"), reading a time before the rollover hour as the morning after:
@@ -373,11 +380,11 @@ export function ankiReminderOrder(time: string, rolloverHour: number): number {
 /**
  * Minutes from when an Anki day opens to its due-by time `dueBy` ("HH:MM",
  * "00:00" for midnight), read as `ankiDueByDayAfter` reads it: how due-by
- * times sort, the later the looser. Null for a time it can't be due by.
+ * times sort, the later the looser. Throws for a time it can't be due by,
+ * which is refused before this.
  */
-export function ankiDueByOrder(dueBy: string, rolloverHour: number): number | null {
-  const dayAfter = ankiDueByDayAfter(dueBy, rolloverHour);
-  if (dayAfter === null) return null;
+export function ankiDueByOrder(dueBy: string, rolloverHour: number): number {
+  const dayAfter = fittingAnkiDueByDayAfter(dueBy, rolloverHour);
   const [hour, minute] = clockOf(dueBy);
   return dayAfter * MINUTES_PER_DAY + hour * 60 + minute - rolloverHour * 60;
 }
@@ -403,8 +410,8 @@ function fixedDaysOccurrence(
     let dueAt = startOfDay(addDays(date, 1), timezone);
     if (dueBy !== null) {
       const [hour, minute] = clockOf(dueBy);
-      // A due-by time that can't fit is refused before this; read it as the morning after.
-      dueAt = wallTime(addDays(date, ankiDueByDayAfter(dueBy, ankiRollover) ?? 1), hour, minute, timezone);
+      // A due-by time that can't fit is refused before this.
+      dueAt = wallTime(addDays(date, fittingAnkiDueByDayAfter(dueBy, ankiRollover)), hour, minute, timezone);
     }
     return { date, opensAt, dueAt, closesAt: dueAt };
   }

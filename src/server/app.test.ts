@@ -644,6 +644,17 @@ describe("dev sign-in", () => {
     expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
   });
 
+  test("any other failure is a server error, not a refusal for want of an invite", async () => {
+    const s = await server();
+    vi.spyOn(s.core, "signIn").mockRejectedValue(new Error("database is locked"));
+
+    const response = await s.request(`${DEV_SIGN_IN_PATH}?as=operator`);
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Location")).toBeNull();
+    expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
+  });
+
   test("signing in again as the same person reuses the user and adds a session", async () => {
     const s = await server();
 
@@ -832,7 +843,6 @@ describe("pacts", () => {
       { ...pact, schedule: { kind: "one-time", deadline: "2026-01-08" } },
       { ...pact, schedule: { kind: "one-time", deadline: 20260108, submitAnytime: false } },
       { ...pact, penaltyCents: "500" },
-      { ...pact, penaltyCents: 5.5 },
       { ...pact, reviewerIds: "someone" },
       { ...pact, reviewerIds: [1] },
       { ...pact, dueBy: 900 },
@@ -855,6 +865,18 @@ describe("pacts", () => {
       status: 400,
       body: { error: "invalid-request" },
     });
+  });
+
+  test("a fractional penalty is the core's refusal, as data, like a fractional payment", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+
+    const created = await s.api(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { ...pact, penaltyCents: 5.5 },
+    });
+
+    expect(created).toEqual({ status: 200, body: { ok: false, reason: "invalid-penalty" } });
   });
 
   test("a due-by time, start date and end date go through to the core, and its refusals come back as data", async () => {
@@ -1452,7 +1474,8 @@ describe("excuses", () => {
 
   test("the owner previews, files with a photo, sees it waiting and on its page; the reviewer approves it", async () => {
     const { s, owner, friend, pactId } = await ownerWithPact();
-    await s.core.advanceTo(s.at("Tue 00:00"));
+    s.clock.set(s.at("Tue 00:00"));
+    await s.core.advanceTo(s.clock.now());
     s.clock.set(s.at("Tue 08:00"));
     const monday = { from: "2026-01-05", to: "2026-01-05" };
 
@@ -1511,7 +1534,8 @@ describe("excuses", () => {
 
   test("a rejected excuse is an alert; Take the L on it is a 200, and so is its refusal", async () => {
     const { s, owner, friend, pactId } = await ownerWithPact();
-    await s.core.advanceTo(s.at("Tue 00:00"));
+    s.clock.set(s.at("Tue 00:00"));
+    await s.core.advanceTo(s.clock.now());
     const filed = await fileExcuse(s, owner.cookie, pactId, { from: "2026-01-05", to: "2026-01-05", reason: "Sick" });
     const { excuseId } = filed.body as { excuseId: string };
     await s.api(API_PATHS.decide(excuseId), {

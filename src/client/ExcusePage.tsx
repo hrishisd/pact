@@ -7,6 +7,7 @@
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
+import { listNames } from "./change-terms.tsx";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
 import { formatDate, formatDayTime } from "./format.ts";
 import { ExcuseIcon } from "./icons.tsx";
@@ -87,7 +88,7 @@ export function ExcusePage({
       <Thread thread={excuse.thread} viewer="owner" timezone={timezone} />
       {excuse.thread.waitingOnReply && <ReplyBox itemId={excuse.id} onReplied={reload} />}
       <p className="meta">
-        Sent to {excuse.reviewerNames.join(" and ")} · {formatDayTime(excuse.filedAt, timezone)}
+        Sent to {listNames(excuse.reviewerNames)} · {formatDayTime(excuse.filedAt, timezone)}
       </p>
     </>
   );

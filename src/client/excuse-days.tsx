@@ -4,7 +4,7 @@
 
 import type { Json } from "../shared/api.ts";
 import type { ExcuseDay, ExcuseSkipReason, OccurrenceStatus } from "../shared/types.ts";
-import { formatDate, money } from "./format.ts";
+import { dueClockText, formatDate, money } from "./format.ts";
 
 type Status = Json<OccurrenceStatus>;
 
@@ -54,16 +54,18 @@ export function DayChip({
 
 /**
  * The small line under a covered day: "$5 held", "Not open yet", "Due at
- * midnight" ("Due by Sunday" for a Weekly count `week`), "Not judged yet"
- * ("No Oura data" for an `oura` night), or nothing.
+ * midnight" or at its due time in `timezone` (the profile's), "Due by
+ * Sunday" for a Weekly count `week`, "Not judged yet" ("No Oura data" for an
+ * `oura` night), or nothing.
  */
-export function dayNote(status: Status, now: number, week = false, oura = false): string {
+export function dayNote(status: Status, now: number, timezone: string, week = false, oura = false): string {
   switch (status.kind) {
     case "missed":
       return status.held ? `${money(status.penaltyCents)} held` : `${money(status.penaltyCents)} to be held`;
     case "not-judged":
       if (Date.parse(status.opensAt) > now) return "Not open yet";
-      if (Date.parse(status.dueAt) > now) return week ? "Due by Sunday" : "Due at midnight";
+      if (Date.parse(status.dueAt) > now)
+        return week ? "Due by Sunday" : `Due at ${dueClockText(status.dueAt, timezone)}`;
       return oura ? "No Oura data" : "Not judged yet";
     default:
       return "";

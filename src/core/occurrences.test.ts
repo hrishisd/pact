@@ -5,6 +5,7 @@
 import { describe, expect, test } from "vitest";
 import type { Weekday } from "../shared/types.ts";
 import {
+  ankiDueByOrder,
   newOccurrenceTerms,
   nightStartsAt,
   noOuraDataPushAt,
@@ -339,5 +340,16 @@ describe("a One-time occurrence", () => {
     expect(covering("2026-03-04")).toEqual(first);
     expect(covering("2026-03-09")).toBeNull();
     expect([includes("2026-03-04"), includes("2026-03-08")]).toEqual([false, true]);
+  });
+});
+
+describe("an Anki due-by time that can't fit its Anki day", () => {
+  // 09:00 with a 4am rollover is neither that evening nor the morning after.
+  // Pacts refuse it before storing it, so meeting one is a bug: it throws rather than guess a time.
+  test("throws when it's read as a due time, or sorted against another", () => {
+    const terms = { schedule: fixedDays("mon"), firstOccurrence: "2026-01-05", dueBy: "09:00", ankiRollover: 4 };
+
+    expect(() => occurrences(terms, NEW_YORK).covering("2026-01-05")).toThrow("can't be due by 09:00");
+    expect(() => ankiDueByOrder("09:00", 4)).toThrow("can't be due by 09:00");
   });
 });

@@ -23,7 +23,7 @@ Read at review time. `npm run lint` enforces the mechanical rules: formatting (P
 
 - Core behaviour is tested through `scenario()` with named times ("Mon 18:00", America/New_York) and fake ports, not by calling internals. The one exception is occurrence timing (`src/core/occurrences.ts`), which is also tested at its own interface (`occurrences.test.ts`) for calendar cases a scenario can't express, such as daylight saving changes. HTTP behaviour is tested at the `app.test.ts` seam, with Google faked at its token endpoint.
 - Write the test first and watch it fail for the right reason. A test that passes before the code exists (for example, through the SPA fallback's 200) proves nothing.
-- Account ids are random, so anything sorted by them comes in a different order each run. A test that fails the `n`th call to a port names one account only when that account is the only one being called.
+- Account ids are random in production (scenarios make them rise in creation order); never depend on id order. A test that fails the `n`th call to a port names one account only when that account is the only one being called.
 - Asserting on `s.logs` is fine when the log line is a required output (`OPERATOR_ALERT`). `app.test.ts` may read the auth tables directly to prove a refused sign-in created no rows.
 
 ## Auth

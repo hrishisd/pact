@@ -122,7 +122,7 @@ function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null 
 function dueByOrder(dueBy: string | null, ankiRollover: number | null): number {
   if (ankiRollover !== null) {
     // Both sides passed ankiDueByFits before this.
-    return ankiDueByOrder(dueBy ?? "00:00", ankiRollover) ?? 0;
+    return ankiDueByOrder(dueBy ?? "00:00", ankiRollover);
   }
   const [hour, minute] = (dueBy ?? "24:00").split(":").map(Number) as [number, number];
   return hour * 60 + minute;

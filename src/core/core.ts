@@ -834,15 +834,15 @@ class Core implements PactCore {
         }),
       friends: () => {
         account();
-        return this.#db
+        const friends = this.#db
           .prepare(
             `SELECT account.id, account.name FROM friendship
              JOIN account ON account.id =
                CASE WHEN friendship.account_a_id = ? THEN friendship.account_b_id ELSE friendship.account_a_id END
-             WHERE friendship.account_a_id = ? OR friendship.account_b_id = ?
-             ORDER BY account.name, account.id`,
+             WHERE friendship.account_a_id = ? OR friendship.account_b_id = ?`,
           )
           .all(accountId, accountId, accountId) as Friend[];
+        return friends.sort(byName);
       },
       addRecipient: (recipient) =>
         this.#command((): AddRecipientResult => {
@@ -1387,8 +1387,10 @@ class Core implements PactCore {
         const early = acceptance(this.#clock.now());
         if (!early.ok) return early;
         const stored = await Promise.all(photos.map((photo) => this.#photoStore.store(photo)));
+        // With no photos, the server received the excuse when it writes it.
+        const lastReceived = stored.length === 0 ? null : Math.max(...stored.map((p) => p.receivedAt.getTime()));
         return this.#command((): FileExcuseResult => {
-          const filedAt = this.#clock.now();
+          const filedAt = lastReceived === null ? this.#clock.now() : new Date(lastReceived);
           const checked = acceptance(filedAt);
           if (!checked.ok) return checked;
           const excuseId = this.#newId();
@@ -1435,14 +1437,7 @@ class Core implements PactCore {
              WHERE excuse.id = ?`,
           )
           .get(excuseId) as ReviewStateRow & { reason: string; filed_at: string };
-        const reviewerNames = (
-          this.#db
-            .prepare(
-              `SELECT account.name FROM pact_reviewer JOIN account ON account.id = pact_reviewer.reviewer_account_id
-               WHERE pact_reviewer.pact_id = ? ORDER BY account.name, account.id`,
-            )
-            .all(pact.id) as { name: string }[]
-        ).map((r) => r.name);
+        const reviewerNames = this.#friendsSortedByName(this.#reviewersOf(pact.id)).map((friend) => friend.name);
         const excuse: ExcuseDetail = {
           id: excuseId,
           pactId: pact.id,
@@ -2034,8 +2029,7 @@ class Core implements PactCore {
            AND (? IS NULL OR recipient.id = ?)
            AND (EXISTS (SELECT 1 FROM pact WHERE pact.recipient_id = recipient.id)
                 OR EXISTS (SELECT 1 FROM penalty WHERE penalty.recipient_id = recipient.id))
-         GROUP BY recipient.id
-         ORDER BY recipient.name, recipient.id`,
+         GROUP BY recipient.id`,
       )
       .all(ownerId, recipientId ?? null, recipientId ?? null) as {
       id: string;
@@ -2046,7 +2040,7 @@ class Core implements PactCore {
       awaiting_count: number;
     }[];
     const now = this.#clock.now();
-    return rows.map((row) => {
+    return rows.sort(byName).map((row) => {
       // An excuse approved after its penalty was paid leaves more paid than
       // owed. The surplus pays the next penalties (#allocate), and owed is $0
       // meanwhile, never below.
@@ -2305,12 +2299,12 @@ class Core implements PactCore {
     const alerts: TodayAlert[] = [];
     const recipients = this.#db
       .prepare(
-        `SELECT DISTINCT bill.recipient_id, recipient.name FROM bill
+        `SELECT DISTINCT recipient.id, recipient.name FROM bill
          JOIN recipient ON recipient.id = bill.recipient_id
-         WHERE bill.owner_account_id = ? ORDER BY recipient.name, recipient.id`,
+         WHERE bill.owner_account_id = ?`,
       )
-      .all(ownerId) as { recipient_id: string; name: string }[];
-    for (const { recipient_id: recipientId, name } of recipients) {
+      .all(ownerId) as Recipient[];
+    for (const { id: recipientId, name } of recipients.sort(byName)) {
       const bills = this.#billsOf(ownerId, recipientId);
       const overdue = overdueOf(bills, now);
       if (overdue.cents > 0) {
@@ -2325,10 +2319,9 @@ class Core implements PactCore {
           billedOn: overdue.billedOn!,
           dueAt: overdue.dueAt!,
           reviewerNames: told
-            ? this.#paymentReviewers(ownerId, recipientId)
-                .filter((id) => !this.#settingIsOff(id, "overdue-bill"))
-                .map((id) => this.#accountName(id))
-                .sort()
+            ? this.#friendsSortedByName(
+                this.#paymentReviewers(ownerId, recipientId).filter((id) => !this.#settingIsOff(id, "overdue-bill")),
+              ).map((friend) => friend.name)
             : [],
         });
       }
@@ -2894,7 +2887,8 @@ class Core implements PactCore {
   /**
    * One alert per rejected excuse of the owner's, newest rejection first,
    * until the owner takes the L on it or files a new excuse for any of its
-   * days. With when it was rejected, for ordering among the alerts.
+   * days, and while it still covers a day on the schedule. With when it was
+   * rejected, for ordering among the alerts.
    */
   #rejectedExcuseAlerts(ownerId: AccountId, now: Date): { at: Date; alert: TodayAlert }[] {
     const rows = this.#db
@@ -2923,8 +2917,10 @@ class Core implements PactCore {
       timezone: string;
       reviewer_name: string;
     }[];
-    return rows.map((row) => {
+    return rows.flatMap((row) => {
       const days = this.#excuseDays(row.id, row.pact_id, row.timezone);
+      // An approved change took all its days off the schedule: nothing is owed and nothing is left to do.
+      if (days.length === 0) return [];
       const { owed } = this.#db
         .prepare(
           `SELECT COALESCE(SUM(penalty.amount_cents), 0) AS owed FROM excuse_day
@@ -2935,22 +2931,24 @@ class Core implements PactCore {
       const excusable = days.filter(({ status }) => this.#skipReason(status, now) === null);
       const closing = excusable.flatMap(({ status }) => (status.kind === "missed" ? [status.excusableUntil] : []));
       const closesAt = closing.length === 0 ? null : new Date(Math.min(...closing.map((d) => d.getTime())));
-      return {
-        at: new Date(row.decided_at),
-        alert: {
-          kind: "excuse-rejected",
-          excuseId: row.id,
-          pactId: row.pact_id,
-          name: row.name,
-          reviewerName: row.reviewer_name,
-          reason: row.reject_reason,
-          firstDate: days[0]!.date,
-          lastDate: days.at(-1)!.date,
-          owedAgainCents: owed,
-          hasDaysNotJudged: days.some(({ status }) => status.kind === "not-judged"),
-          refile: excusable.length === 0 ? null : { closesAt },
+      return [
+        {
+          at: new Date(row.decided_at),
+          alert: {
+            kind: "excuse-rejected",
+            excuseId: row.id,
+            pactId: row.pact_id,
+            name: row.name,
+            reviewerName: row.reviewer_name,
+            reason: row.reject_reason,
+            firstDate: days[0]!.date,
+            lastDate: days.at(-1)!.date,
+            owedAgainCents: owed,
+            hasDaysNotJudged: days.some(({ status }) => status.kind === "not-judged"),
+            refile: excusable.length === 0 ? null : { closesAt },
+          },
         },
-      };
+      ];
     });
   }
 
@@ -3092,9 +3090,7 @@ class Core implements PactCore {
 
   /** The accounts `ids` as friends, sorted by name. */
   #friendsSortedByName(ids: AccountId[]): Friend[] {
-    return ids
-      .map((id) => ({ id, name: this.#accountName(id) }))
-      .sort((a, b) => a.name.localeCompare(b.name, "en-US") || a.id.localeCompare(b.id, "en-US"));
+    return ids.map((id) => ({ id, name: this.#accountName(id) })).sort(byName);
   }
 
   /** The id of the pact's change request waiting for a decision, or null. */
@@ -4693,9 +4689,8 @@ class Core implements PactCore {
 
   /** The recipients matching the SQL `condition` on `recipient`, sorted by name. */
   #selectRecipients(condition: string, ...params: string[]): Recipient[] {
-    return this.#db
-      .prepare(`SELECT id, name FROM recipient WHERE ${condition} ORDER BY name, id`)
-      .all(...params) as Recipient[];
+    const recipients = this.#db.prepare(`SELECT id, name FROM recipient WHERE ${condition}`).all(...params);
+    return (recipients as Recipient[]).sort(byName);
   }
 
   async advanceTo(t: Date): Promise<void> {
@@ -5595,6 +5590,14 @@ interface InviteRow {
   claimed_by_account_id: string | null;
 }
 
+/**
+ * Orders people (accounts or recipients) by name the same way on every page:
+ * by the en-US collation, so "alice" comes before "Bob", ties broken by id.
+ */
+function byName(a: { id: string; name: string }, b: { id: string; name: string }): number {
+  return a.name.localeCompare(b.name, "en-US") || a.id.localeCompare(b.id, "en-US");
+}
+
 /** A friendship row's two account ids, in the order the table stores them. */
 function friendshipPair(a: AccountId, b: AccountId): [AccountId, AccountId] {
   return a < b ? [a, b] : [b, a];
@@ -5714,8 +5717,7 @@ function remindersGoOffInTime(
     if (due.inBedBy !== null) return nightOrder(time) < nightOrder(due.inBedBy);
     // Without a due-by time an Anki day is due at midnight. A due-by time that can't fit is refused before this.
     if (ankiRollover !== null) {
-      const dueOrder = ankiDueByOrder(due.dueBy ?? "00:00", ankiRollover) ?? 0;
-      return ankiReminderOrder(time, ankiRollover) < dueOrder;
+      return ankiReminderOrder(time, ankiRollover) < ankiDueByOrder(due.dueBy ?? "00:00", ankiRollover);
     }
     return due.dueBy === null || time < due.dueBy;
   });

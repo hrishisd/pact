@@ -144,15 +144,17 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
   const [step, setStep] = useState<Step | null>(null);
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
   const [verdict, setVerdict] = useState<Verdict>({ kind: "loading" });
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
 
-  const loadFriends = () => api.friends().then(setFriends, () => setFriends([]));
+  // As on Create pact: a list that didn't load says so, rather than looking empty.
+  const loadFriends = () => api.friends().then(setFriends, (error: unknown) => setLoadFailed({ error }));
   useEffect(() => {
     void loadFriends();
-    api.recipients().then(setRecipients, () => setRecipients([]));
+    api.recipients().then(setRecipients, (error: unknown) => setLoadFailed({ error }));
   }, []);
 
   const change = changeOf(form, "");
@@ -241,7 +243,14 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
     }
     sheet = (
       <Sheet title={STEP_TITLES[step]} onClose={() => setStep(null)}>
-        <div className="stack step-in-sheet">{body}</div>
+        <div className="stack step-in-sheet">
+          {loadFailed && (step === "penalty" || step === "reviewers") && (
+            <p className="error">
+              Some of this couldn't load. {failureText(loadFailed.error, "Check your connection and reopen Pact.")}
+            </p>
+          )}
+          {body}
+        </div>
         <button className="btn primary block" onClick={() => setStep(null)}>
           Done
         </button>

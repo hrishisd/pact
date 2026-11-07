@@ -107,7 +107,7 @@ import {
   type SubmitEvidenceResponse,
   type TodayResponse,
 } from "../shared/api.ts";
-import { INVITE_REQUIRED_CODE, type Auth } from "./auth.ts";
+import { INVITE_REQUIRED_CODE, isInviteRequired, type Auth } from "./auth.ts";
 import { inviteRequiredPage, signInFailedPage } from "./pages.ts";
 
 export interface AppOptions {
@@ -326,8 +326,9 @@ export function createApp({
           returnHeaders: true,
         });
         for (const cookie of headers.getSetCookie()) c.header("Set-Cookie", cookie, { append: true });
-      } catch {
-        return c.redirect(INVITE_REQUIRED_PATH);
+      } catch (error) {
+        if (isInviteRequired(error)) return c.redirect(INVITE_REQUIRED_PATH);
+        throw error;
       }
       // As Google's sign-in does: back to the invite, to accept it, or home.
       return c.redirect(inviteToken === undefined ? "/" : invitePath(inviteToken));
@@ -915,7 +916,6 @@ function parsePactTerms(value: Record<string, unknown>): Omit<NewPact, "evidence
     typeof description !== "string" ||
     !schedule ||
     typeof penaltyCents !== "number" ||
-    !Number.isSafeInteger(penaltyCents) ||
     typeof recipientId !== "string" ||
     !isStringArray(reviewerIds)
   ) {

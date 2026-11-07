@@ -52,6 +52,17 @@ export function formatDayTime(instant: string, timeZone: string): string {
  * off the hour.
  */
 export function formatDueAt(instant: string, timeZone: string): string {
+  return `${formatDay(instant, timeZone)} at ${clockText(wallClockIn(instant, timeZone)).replace(":00", "")}`;
+}
+
+/** An instant, as an ISO string, as the time a day is due by in `timeZone` (the profile's): "9:00pm", or "midnight". */
+export function dueClockText(instant: string, timeZone: string): string {
+  const clock = wallClockIn(instant, timeZone);
+  return clock === "00:00" ? "midnight" : clockText(clock);
+}
+
+/** An instant, as an ISO string, as its wall-clock time in `timeZone`: "HH:MM", 00:00 to 23:59. */
+function wallClockIn(instant: string, timeZone: string): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     hour: "2-digit",
@@ -59,8 +70,7 @@ export function formatDueAt(instant: string, timeZone: string): string {
     hourCycle: "h23",
   }).formatToParts(new Date(instant));
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
-  const clock = clockText(`${part("hour")}:${part("minute")}`);
-  return `${formatDay(instant, timeZone)} at ${clock.replace(":00", "")}`;
+  return `${part("hour")}:${part("minute")}`;
 }
 
 /** Time left as "16h 19m", or "1d 21h" from 24 hours up. Never negative. */
@@ -84,9 +94,12 @@ export function minutesLeft(closesAt: string | null, now: number): number | null
   return ms > 0 ? Math.ceil(ms / 60_000) : null;
 }
 
-/** An instant, as an ISO string, as a time on this device: "2:24pm". */
-export function clockTime(instant: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).formatToParts(
+/**
+ * An instant, as an ISO string, as a time in `timeZone` (the profile's):
+ * "2:24pm". Undefined reads it on this device's clock.
+ */
+export function clockTime(instant: string, timeZone: string | undefined): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).formatToParts(
     new Date(instant),
   );
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
@@ -100,11 +113,11 @@ export function initial(name: string): string {
 
 /**
  * Why an Anki day is Missed: how many cards were left at Pact's last check
- * that counted for it ("12 cards left at 11:50pm"), or that no check reached
- * AnkiWeb that day.
+ * that counted for it ("12 cards left at 11:50pm" in `timeZone`, the
+ * profile's), or that no check reached AnkiWeb that day.
  */
-export function ankiMissText(check: Json<AnkiCheck> | null): string {
+export function ankiMissText(check: Json<AnkiCheck> | null, timeZone: string): string {
   if (check === null) return "AnkiWeb not reached";
   const { cardsLeft, checkedAt } = check;
-  return `${cardsLeft} ${cardsLeft === 1 ? "card" : "cards"} left at ${clockTime(checkedAt)}`;
+  return `${cardsLeft} ${cardsLeft === 1 ? "card" : "cards"} left at ${clockTime(checkedAt, timeZone)}`;
 }

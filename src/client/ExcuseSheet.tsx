@@ -17,6 +17,7 @@ import {
   type PactTerms,
 } from "../shared/types.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
+import { listNames } from "./change-terms.tsx";
 import { DayChip, SKIP_REASON_TEXT, dayNote, excuseDayText } from "./excuse-days.tsx";
 import { formatDate, money, scheduleText, hoursLeft } from "./format.ts";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
@@ -31,6 +32,8 @@ export interface ExcuseSheetProps {
    * pact page, where the sheet asks "Which day?".
    */
   day?: string;
+  /** The profile's timezone, for when a day is due. */
+  timezone: string;
   onClose: () => void;
   /** After the excuse is filed: the opener reloads. */
   onFiled: () => void;
@@ -54,7 +57,7 @@ type PreviewState = {
   result: { ok: true; preview: Preview } | { ok: false; reason: ExcuseDatesRefusal };
 } | null;
 
-export function ExcuseSheet({ pactId, pactName, day, onClose, onFiled }: ExcuseSheetProps) {
+export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled }: ExcuseSheetProps) {
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
 
   useEffect(() => {
@@ -77,7 +80,7 @@ export function ExcuseSheet({ pactId, pactName, day, onClose, onFiled }: ExcuseS
   return (
     <Sheet title={title} closeLabel="Cancel" onClose={onClose}>
       {loaded.kind === "loaded" ? (
-        <ExcuseForm pact={loaded.pact} options={loaded.options} day={day} onFiled={onFiled} />
+        <ExcuseForm pact={loaded.pact} options={loaded.options} day={day} timezone={timezone} onFiled={onFiled} />
       ) : loaded.kind === "refused" ? (
         <p className="error small">{loaded.text}</p>
       ) : loaded.kind === "failed" ? (
@@ -98,16 +101,21 @@ function ExcuseForm({
   pact,
   options,
   day,
+  timezone,
   onFiled,
 }: {
   pact: Pact;
   /** Only when opened without a day. */
   options: Json<ExcuseOptions> | null;
   day: string | undefined;
+  timezone: string;
   onFiled: () => void;
 }) {
   const now = useNow();
-  const reviewers = pact.reviewers.map((r) => r.name).join(" or ");
+  const reviewers = listNames(
+    pact.reviewers.map((r) => r.name),
+    "or",
+  );
   // From a day: run on to later days through `through`, once picked.
   const [more, setMore] = useState(false);
   const [through, setThrough] = useState("");
@@ -191,7 +199,15 @@ function ExcuseForm({
     const later = shown ? onlyAfter(shown, day) : null;
     days = (
       <>
-        <DayCard day={day} weekly={weekly} oura={oura} preview={shown} reviewers={reviewers} now={now} />
+        <DayCard
+          day={day}
+          weekly={weekly}
+          oura={oura}
+          preview={shown}
+          reviewers={reviewers}
+          timezone={timezone}
+          now={now}
+        />
         {more ? (
           <>
             <label className="field">
@@ -213,6 +229,7 @@ function ExcuseForm({
                     preview={later}
                     weekly={weekly}
                     oura={oura}
+                    timezone={timezone}
                     now={now}
                     empty={noDays(nextDay(day), through)}
                   />
@@ -238,7 +255,7 @@ function ExcuseForm({
                 <input type="radio" name="excuse-day" checked={choice === d.date} onChange={() => setChoice(d.date)} />
                 <span className="rt">
                   <b>{excuseDayText(d)}</b>
-                  <small>{recentNote(d, now, weekly, oura)}</small>
+                  <small>{recentNote(d, now, timezone, weekly, oura)}</small>
                 </span>
                 <DayChip status={d.status} now={now} week={weekly} oura={oura} />
               </label>
@@ -285,7 +302,14 @@ function ExcuseForm({
               (refusal ??
                 previewFailed ??
                 (shown && (
-                  <DayList preview={shown} weekly={weekly} oura={oura} now={now} empty={noDays(aheadFrom, aheadTo)} />
+                  <DayList
+                    preview={shown}
+                    weekly={weekly}
+                    oura={oura}
+                    timezone={timezone}
+                    now={now}
+                    empty={noDays(aheadFrom, aheadTo)}
+                  />
                 )))}
           </>
         )}
@@ -368,6 +392,7 @@ function DayCard({
   oura,
   preview,
   reviewers,
+  timezone,
   now,
 }: {
   day: string;
@@ -377,6 +402,7 @@ function DayCard({
   oura: boolean;
   preview: Preview | null;
   reviewers: string;
+  timezone: string;
   now: number;
 }) {
   const holds = (date: string) => (weekly ? date <= day && day <= weekEnd(date) : date === day);
@@ -398,7 +424,7 @@ function DayCard({
           <span className="meta due">{hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse</span>
         </>
       ) : status ? (
-        <span className="meta">{dayNote(status, now, weekly, oura)}</span>
+        <span className="meta">{dayNote(status, now, timezone, weekly, oura)}</span>
       ) : skipped ? (
         <span className="meta">{SKIP_REASON_TEXT[skipped.reason]}</span>
       ) : null}
@@ -411,17 +437,23 @@ function DayList({
   preview,
   weekly,
   oura,
+  timezone,
   now,
   empty,
 }: {
   preview: Preview;
   weekly: boolean;
   oura: boolean;
+  timezone: string;
   now: number;
   empty: string;
 }) {
   const rows = [
-    ...preview.covered.map((d) => ({ date: d.date, covered: true, note: dayNote(d.status, now, weekly, oura) })),
+    ...preview.covered.map((d) => ({
+      date: d.date,
+      covered: true,
+      note: dayNote(d.status, now, timezone, weekly, oura),
+    })),
     ...preview.skipped.map((d) => ({ date: d.date, covered: false, note: SKIP_REASON_TEXT[d.reason] })),
   ].sort((a, b) => a.date.localeCompare(b.date, "en-US"));
   if (rows.length === 0) return <p className="muted small">{empty}</p>;
@@ -441,11 +473,11 @@ function DayList({
 }
 
 /** The small line on a recent day's radio row: the time left to file for a miss, else the day's note. */
-function recentNote(d: Day, now: number, weekly: boolean, oura: boolean): string {
+function recentNote(d: Day, now: number, timezone: string, weekly: boolean, oura: boolean): string {
   const { status } = d;
   if (status.kind === "missed")
     return `${money(status.penaltyCents)} · ${hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse`;
-  return dayNote(status, now, weekly, oura);
+  return dayNote(status, now, timezone, weekly, oura);
 }
 
 /** `preview` without `day` and the days before it: the later days a run-on adds. */

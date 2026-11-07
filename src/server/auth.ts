@@ -113,6 +113,11 @@ export function createAuth(options: AuthOptions) {
   };
 }
 
+/** Whether `error` is the dev sign-in's refusal when the core refuses the person: no usable invite. */
+export function isInviteRequired(error: unknown): boolean {
+  return error instanceof APIError && error.body?.code === INVITE_REQUIRED_CODE;
+}
+
 /**
  * DEVELOPMENT ONLY. Signs `email` in without Google: through the same core
  * gate (the operator, or a usable invite token, which this claims), then a
