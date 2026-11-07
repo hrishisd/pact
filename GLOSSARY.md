@@ -59,7 +59,7 @@ The Anki deck an Anki pact's owner must finish each scheduled day, picked from t
 An Anki pact's occurrence. The Anki day of Tue Nov 3 runs from the collection's rollover hour (Anki's "next day starts at", usually 4am) on Tuesday to the same hour on Wednesday. Its due-by time can be from noon through the rollover hour: a time up to the rollover hour is the morning after, and a later one that day.
 
 **Day clock**:
-How a pact on Fixed days reads its days: a Camera pact's day runs from midnight, a night from 6pm, an Anki day from its rollover hour. Its times of day, such as reminders, are read from that start: a time before it is the morning after.
+How a pact on Fixed days reads its days: a Camera pact's day runs from midnight, a night from 6pm, an Anki day from its rollover hour. Its reminders and in-bed-by time are read from that start: a time before it is the morning after. An Anki day's due-by time is read as under Anki day, so the rollover hour itself is the morning after too.
 
 **Start date / End date**:
 Optional days that bound a recurring pact. The start date can only push its first occurrence later. The end date is its last day: once that day's occurrence closes, the pact has no more and is Ended.

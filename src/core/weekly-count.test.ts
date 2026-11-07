@@ -642,6 +642,43 @@ describe("changing the target", () => {
   });
 });
 
+describe("changing the due-by time", () => {
+  test("an earlier one is stricter and applies from next Monday: this week's days keep the old time", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(1), { dates: { dueBy: "21:00" } });
+    s.setClockTo("Wed+1 09:00");
+
+    expect(owner.changePreview(piano, changed(owner, piano, { dueBy: "20:00" }))).toEqual({
+      ok: true,
+      preview: {
+        changes: [{ term: "due-by", before: "21:00", after: "20:00", effect: "stricter" }],
+        outcome: { kind: "stricter", appliesFrom: s.date("Mon+2"), todayKeepsCents: null },
+      },
+    });
+    ok(await owner.changePact(piano, changed(owner, piano, { dueBy: "20:00" })));
+
+    s.setClockTo("Thu+1 20:30");
+    ok(await owner.submitEvidence(piano, [photo()]));
+    s.setClockTo("Tue+2 20:30");
+    expect(await owner.submitEvidence(piano, [photo()])).toEqual({ ok: false, reason: "not-open" });
+  });
+
+  test("a later one, or none, needs approval", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(1), { dates: { dueBy: "21:00" } });
+    s.setClockTo("Wed+1 09:00");
+    const effects = (dueBy: string | undefined) => {
+      const preview = ok(owner.changePreview(piano, changed(owner, piano, { dueBy }))).preview;
+      return [preview.outcome.kind, ...preview.changes.map((change) => `${change.term}: ${change.effect}`)];
+    };
+
+    expect(effects("22:00")).toEqual(["needs-approval", "due-by: needs-approval"]);
+    expect(effects(undefined)).toEqual(["needs-approval", "due-by: needs-approval"]);
+  });
+});
+
 describe("dates, bills and the heat map", () => {
   test("an end date ends the pact after the last whole week before it", async () => {
     const s = scenario();
