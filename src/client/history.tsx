@@ -9,10 +9,12 @@ import type {
   EvidenceKind,
   HeatMapDay,
   HeatMapWeek,
+  LocalDate,
   OccurrenceRecord,
   PactTerms,
   TodayYesterdayEntry,
 } from "../shared/types.ts";
+import { addDays, parseLocalDate } from "../shared/calendar.ts";
 import { DayChip } from "./excuse-days.tsx";
 import { listNames } from "./change-terms.tsx";
 import { ankiMissText, clockText, clockTime, dateIn, formatDate, money } from "./format.ts";
@@ -102,15 +104,24 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 /** Row labels, Monday first, as GitHub labels every other row. */
 const ROW_LABELS = ["M", "", "W", "", "F", "", "S"];
 
+/** A Mon–Sun week of the heat map: its Monday, and its days with blanks for those before the first. */
+interface HeatMapColumn {
+  monday: LocalDate;
+  days: (Day | null)[];
+}
+
 /** Mon–Sun weeks of `days` (which start on any weekday), with blanks before the first. */
-function weeksOf(days: Day[]): (Day | null)[][] {
+function weeksOf(days: Day[]): HeatMapColumn[] {
   const first = days[0];
   if (!first) return [];
-  const [year, month, date] = first.date.split("-").map(Number) as [number, number, number];
-  const lead = (new Date(Date.UTC(year, month - 1, date)).getUTCDay() + 6) % 7;
+  const { year, month, day } = parseLocalDate(first.date);
+  const lead = (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
+  const firstMonday = addDays(first.date, -lead);
   const cells: (Day | null)[] = [...Array<null>(lead).fill(null), ...days];
-  const weeks: (Day | null)[][] = [];
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  const weeks: HeatMapColumn[] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push({ monday: addDays(firstMonday, i), days: cells.slice(i, i + 7) });
+  }
   return weeks;
 }
 
@@ -118,17 +129,11 @@ function weeksOf(days: Day[]): (Day | null)[][] {
  * Each week's month label: a week whose Monday is in the first 7 days of a
  * month, and the first week unless the next one is labelled already.
  */
-function monthLabels(weeks: (Day | null)[][]): string[] {
-  const monday = (week: (Day | null)[], i: number) => {
-    const [year, month, date] = (week.find((day) => day !== null)?.date ?? "").split("-").map(Number) as number[];
-    return new Date(Date.UTC(year!, month! - 1, date! - (i === 0 ? week.findIndex((day) => day !== null) : 0)));
-  };
-  const labels = weeks.map((week, i) => {
-    const start = monday(week, i);
-    return start.getUTCDate() <= 7 ? MONTHS[start.getUTCMonth()]! : "";
-  });
+function monthLabels(weeks: HeatMapColumn[]): string[] {
+  const monthOf = (week: HeatMapColumn) => MONTHS[parseLocalDate(week.monday).month - 1]!;
+  const labels = weeks.map((week) => (parseLocalDate(week.monday).day <= 7 ? monthOf(week) : ""));
   const first = weeks[0];
-  if (first && labels[0] === "" && !labels[1]) labels[0] = MONTHS[monday(first, 0).getUTCMonth()]!;
+  if (first && labels[0] === "" && !labels[1]) labels[0] = monthOf(first);
   return labels;
 }
 
@@ -254,9 +259,9 @@ function DailyHeatMap({
             ))}
           </div>
           {weeks.map((week, w) => (
-            <div key={week.find((day) => day !== null)?.date ?? w} className="hm-col">
+            <div key={week.monday} className="hm-col">
               <div className="hm-lbl mo">{months[w]}</div>
-              {week.map((day, i) =>
+              {week.days.map((day, i) =>
                 day === null ? (
                   <div key={i} />
                 ) : (

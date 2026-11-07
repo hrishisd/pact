@@ -2,6 +2,7 @@
 // date and time, which goes off once), with Remove and "+ Add reminder". The create form, Request change and the pact page's
 // own Change all show it. The core decides when each goes off.
 
+import { addDays, parseClockTime } from "../shared/calendar.ts";
 import { MAX_REMINDERS, type CreatePactRefusal } from "../shared/types.ts";
 import type { Form } from "./CreatePact.tsx";
 import { clockText } from "./format.ts";
@@ -25,23 +26,17 @@ export const REMINDER_PROBLEMS = {
  */
 function suggestedReminder(form: RemindersForm): string {
   const due = form.kind === "oura" ? form.inBedBy : form.dueByOn ? form.dueBy : "";
-  const [hour, minute] = due === "" ? [20, 30] : (due.split(":").map(Number) as [number, number]);
+  const { hour, minute } = due === "" ? { hour: 20, minute: 30 } : parseClockTime(due);
   const before = hour * 60 + minute - 30;
   const minutes = (before + 24 * 60) % (24 * 60);
   const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
   if (!oneTime(form)) return time;
   if (form.deadline === "") return "";
-  return `${before < 0 ? dayBefore(form.deadline) : form.deadline}T${time}`;
+  return `${before < 0 ? addDays(form.deadline, -1) : form.deadline}T${time}`;
 }
 
 function oneTime(form: RemindersForm): boolean {
   return form.kind === "camera" && form.oneTime;
-}
-
-/** The day before "YYYY-MM-DD". */
-function dayBefore(date: string): string {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
-  return new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10);
 }
 
 export function RemindersStep({

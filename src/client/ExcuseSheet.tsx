@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Json } from "../shared/api.ts";
+import { addDays } from "../shared/calendar.ts";
 import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
@@ -231,7 +232,7 @@ function ExcuseForm({
                     oura={oura}
                     timezone={timezone}
                     now={now}
-                    empty={noDays(nextDay(day), through)}
+                    empty={noDays(addDays(day, 1), through)}
                   />
                 )))}
             {through !== "" && through < day && <p className="error small">Pick {formatDate(day)} or a later day.</p>}
@@ -405,7 +406,8 @@ function DayCard({
   timezone: string;
   now: number;
 }) {
-  const holds = (date: string) => (weekly ? date <= day && day <= weekEnd(date) : date === day);
+  // On Weekly count, a covered day is its week's Monday, and holds through that week's Sunday.
+  const holds = (date: string) => (weekly ? date <= day && day <= addDays(date, 6) : date === day);
   const covered = preview?.covered.find((d) => holds(d.date));
   const status = covered?.status;
   const skipped = preview?.skipped.find((d) => holds(d.date));
@@ -487,21 +489,6 @@ function onlyAfter(preview: Preview, day: string): Preview {
     skipped: preview.skipped.filter((d) => d.date > day),
     heldCents: preview.heldCents,
   };
-}
-
-/** The calendar day after `isoDate`, "YYYY-MM-DD". */
-function nextDay(isoDate: string): string {
-  return daysAfter(isoDate, 1);
-}
-
-/** The Sunday ending the Mon–Sun week that starts on the Monday `isoDate`. */
-function weekEnd(isoDate: string): string {
-  return daysAfter(isoDate, 6);
-}
-
-function daysAfter(isoDate: string, days: number): string {
-  const [year, month, date] = isoDate.split("-").map(Number) as [number, number, number];
-  return new Date(Date.UTC(year, month - 1, date + days)).toISOString().slice(0, 10);
 }
 
 /**

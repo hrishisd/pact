@@ -2,8 +2,9 @@
 // the pact's schedule, its first occurrence and the owner's timezone. Whether
 // an occurrence is Satisfied, Missed or Excused is judging's to decide.
 
-import { WEEKDAYS, type Schedule } from "../shared/types.ts";
-import { addDays, localDateOf, mondayOf, startOfDay, wallTime, weekdayOf, type LocalDate } from "./calendar.ts";
+import { WEEKDAYS, type ClockTime, type DatedReminder, type LocalDate, type Schedule } from "../shared/types.ts";
+import { addDays, parseClockTime, parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
+import { localDateOf, mondayOf, startOfDay, wallTime, weekdayOf } from "./calendar.ts";
 
 /** One occurrence's timing. */
 export interface Occurrence {
@@ -28,14 +29,14 @@ export interface OccurrenceTerms {
   /** Fixed days' days Monday first, without repeats. */
   schedule: Schedule;
   firstOccurrence: LocalDate;
-  /** Bedtime pacts only: the in-bed-by time, "HH:MM". */
-  inBedBy: string | null;
+  /** Bedtime pacts only: the in-bed-by time. */
+  inBedBy: ClockTime | null;
   /**
-   * Camera and Anki pacts, optional: the due-by time, "HH:MM", each day's due
+   * Camera and Anki pacts, optional: the due-by time, each day's due
    * time instead of midnight. On Weekly count it limits each day's evidence
    * only. On an Anki pact a time before noon is the morning after.
    */
-  dueBy: string | null;
+  dueBy: ClockTime | null;
   /**
    * Anki pacts only: the hour, 0–23, the collection's Anki day starts at.
    * Each day opens then, and is still open after midnight until its due time.
@@ -49,8 +50,8 @@ export interface OccurrenceTerms {
 
 /** The optional times a new pact's first occurrence depends on. */
 export interface NewOccurrenceOptions {
-  inBedBy: string | null;
-  dueBy: string | null;
+  inBedBy: ClockTime | null;
+  dueBy: ClockTime | null;
   ankiRollover: number | null;
   /** The first occurrence is on this day or later. */
   startDate: LocalDate | null;
@@ -274,7 +275,7 @@ type OneTimeSchedule = Extract<Schedule, { kind: "one-time" }>;
  */
 function oneTimeOccurrences(
   schedule: OneTimeSchedule,
-  dueBy: string | null,
+  dueBy: ClockTime | null,
   createdAt: Date | null,
   timezone: string,
 ): Occurrences {
@@ -302,7 +303,7 @@ function oneTimeOccurrences(
  */
 function oneTimeOccurrence(
   schedule: OneTimeSchedule,
-  dueBy: string | null,
+  dueBy: ClockTime | null,
   createdAt: Date | null,
   timezone: string,
 ): Occurrence {
@@ -313,9 +314,11 @@ function oneTimeOccurrence(
   return { date, opensAt, dueAt, closesAt: dueAt };
 }
 
-/** When a day `date` is due: at its due-by time `dueBy` ("HH:MM") that day, or with none, the midnight ending it. */
-function dueOnDay(date: LocalDate, dueBy: string | null, timezone: string): Date {
-  return dueBy === null ? startOfDay(addDays(date, 1), timezone) : wallTime(date, ...clockOf(dueBy), timezone);
+/** When a day `date` is due: at its due-by time `dueBy` that day, or with none, the midnight ending it. */
+function dueOnDay(date: LocalDate, dueBy: ClockTime | null, timezone: string): Date {
+  if (dueBy === null) return startOfDay(addDays(date, 1), timezone);
+  const { hour, minute } = parseClockTime(dueBy);
+  return wallTime(date, hour, minute, timezone);
 }
 
 /** A Weekly count week starting on the Monday `date`: open from its start, due at the end of its Sunday. */
@@ -333,47 +336,47 @@ const ANKI_EVENING_HOUR = 12;
 const MINUTES_PER_DAY = 24 * 60;
 
 /**
- * When an Anki day of `date` is due by `dueBy` ("HH:MM"), with its Anki day
+ * When an Anki day of `date` is due by `dueBy`, with its Anki day
  * starting at `rolloverHour`: that day, from noon and after the rollover
  * hour; else the morning after, up to the rollover hour, while it's still
  * that Anki day. Null for a time that's neither, such as 09:00 with Anki's
  * usual 4am rollover. "00:00" is the midnight ending its day.
  */
-function ankiDueByDayAfter(dueBy: string, rolloverHour: number): 0 | 1 | null {
+function ankiDueByDayAfter(dueBy: ClockTime, rolloverHour: number): 0 | 1 | null {
   const time = minutesFrom(dueBy, 0);
   if (time >= ANKI_EVENING_HOUR * 60 && time > rolloverHour * 60) return 0;
   return time <= rolloverHour * 60 ? 1 : null;
 }
 
 /** Whether an Anki pact can be due by `dueBy` with its Anki day starting at `rolloverHour`; see `ankiDueByDayAfter`. */
-export function ankiDueByFits(dueBy: string, rolloverHour: number): boolean {
+export function ankiDueByFits(dueBy: ClockTime, rolloverHour: number): boolean {
   return ankiDueByDayAfter(dueBy, rolloverHour) !== null;
 }
 
 /** `ankiDueByDayAfter` for a time already checked with `ankiDueByFits`: throws for one that can't fit. */
-function fittingAnkiDueByDayAfter(dueBy: string, rolloverHour: number): 0 | 1 {
+function fittingAnkiDueByDayAfter(dueBy: ClockTime, rolloverHour: number): 0 | 1 {
   const dayAfter = ankiDueByDayAfter(dueBy, rolloverHour);
   if (dayAfter === null) throw new Error(`an Anki day starting at ${rolloverHour}:00 can't be due by ${dueBy}`);
   return dayAfter;
 }
 
 /**
- * Minutes from `startHour`:00 to `time` ("HH:MM"), reading a time before
+ * Minutes from `startHour`:00 to `time`, reading a time before
  * `startHour` as the day after: how times sort in a day that starts then,
  * such as a bedtime night (`NIGHT_STARTS_HOUR`) or an Anki day (its rollover hour).
  */
-export function minutesFrom(time: string, startHour: number): number {
-  const [hour, minute] = clockOf(time);
+export function minutesFrom(time: ClockTime, startHour: number): number {
+  const { hour, minute } = parseClockTime(time);
   return (hour * 60 + minute - startHour * 60 + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 }
 
 /**
- * Minutes from when an Anki day opens to its due-by time `dueBy` ("HH:MM",
- * null for midnight), read as `ankiDueByDayAfter` reads it: how due-by
+ * Minutes from when an Anki day opens to its due-by time `dueBy` (null for
+ * midnight), read as `ankiDueByDayAfter` reads it: how due-by
  * times sort, the later the looser. Throws for a time it can't be due by,
  * which is refused before this.
  */
-export function ankiDueByOrder(dueBy: string | null, rolloverHour: number): number {
+export function ankiDueByOrder(dueBy: ClockTime | null, rolloverHour: number): number {
   const time = dueBy ?? "00:00";
   const dayAfter = fittingAnkiDueByDayAfter(time, rolloverHour);
   return dayAfter * MINUTES_PER_DAY + minutesFrom(time, 0) - rolloverHour * 60;
@@ -390,8 +393,8 @@ export function ankiDueByOrder(dueBy: string | null, rolloverHour: number): numb
 function fixedDaysOccurrence(
   date: LocalDate,
   timezone: string,
-  inBedBy: string | null,
-  dueBy: string | null,
+  inBedBy: ClockTime | null,
+  dueBy: ClockTime | null,
   ouraOffset: OuraOffset,
   ankiRollover: number | null,
 ): Occurrence {
@@ -407,7 +410,7 @@ function fixedDaysOccurrence(
     const dueAt = dueOnDay(date, dueBy, timezone);
     return { date, opensAt, dueAt, closesAt: dueAt };
   }
-  const [hour, minute] = clockOf(inBedBy);
+  const { hour, minute } = parseClockTime(inBedBy);
   return {
     date,
     opensAt,
@@ -417,7 +420,7 @@ function fixedDaysOccurrence(
 }
 
 /**
- * When a reminder set for `time` ("HH:MM") goes off for the occurrence dated
+ * When a reminder set for `time` goes off for the occurrence dated
  * `date`: that time on its day, or for a bedtime night, that evening from
  * 18:00, else the morning after, as an in-bed-by time is read; for an Anki
  * day, that day from its rollover hour (`kind.ankiRollover`), else the
@@ -425,19 +428,20 @@ function fixedDaysOccurrence(
  */
 export function reminderAt(
   date: LocalDate,
-  time: string,
+  time: ClockTime,
   timezone: string,
   kind: "day" | "night" | { ankiRollover: number },
 ): Date {
-  const [hour, minute] = clockOf(time);
+  const { hour, minute } = parseClockTime(time);
   const eveningFrom = kind === "night" ? NIGHT_STARTS_HOUR : kind === "day" ? 0 : kind.ankiRollover;
   return wallTime(hour < eveningFrom ? addDays(date, 1) : date, hour, minute, timezone);
 }
 
-/** When a One-time pact's reminder, "YYYY-MM-DDTHH:MM" on the owner's clock, goes off. */
-export function oneTimeReminderAt(reminder: string, timezone: string): Date {
-  const [date = "", time = ""] = reminder.split("T");
-  return wallTime(date, ...clockOf(time), timezone);
+/** When a One-time pact's reminder, on the owner's clock, goes off. */
+export function oneTimeReminderAt(reminder: DatedReminder, timezone: string): Date {
+  const { date, time } = parseDatedReminder(reminder);
+  const { hour, minute } = parseClockTime(time);
+  return wallTime(date, hour, minute, timezone);
 }
 
 /**
@@ -459,7 +463,7 @@ export function noOuraDataPushAt(date: LocalDate, timezone: string, ouraOffset: 
 /** `hour`:00 on `date` at the UTC offset `ouraOffset`, or in `timezone` with none. */
 function nightClockTime(date: LocalDate, hour: number, timezone: string, ouraOffset: OuraOffset): Date {
   if (ouraOffset === null) return wallTime(date, hour, 0, timezone);
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const { year, month, day } = parseLocalDate(date);
   return new Date(Date.UTC(year, month - 1, day, hour) - utcOffsetMs(ouraOffset));
 }
 
@@ -469,9 +473,4 @@ export function utcOffsetMs(offset: string): number {
   if (!match) throw new Error(`unreadable UTC offset "${offset}"`);
   const [, sign, hours, minutes] = match as unknown as [string, string, string, string];
   return (sign === "-" ? -1 : 1) * (Number(hours) * 60 + Number(minutes)) * 60 * 1000;
-}
-
-/** "HH:MM" as hour and minute. */
-export function clockOf(time: string): [number, number] {
-  return time.split(":").map(Number) as [number, number];
 }

@@ -26,6 +26,7 @@ import {
   type TermsByKind,
   type Weekday,
 } from "../shared/types.ts";
+import { parseDatedReminder } from "../shared/calendar.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
 import { takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
@@ -807,7 +808,7 @@ export function optionalTimes(form: Form): { dueBy?: string; startDate?: string;
  */
 function remindersAs(form: Form, oneTime: boolean): string[] {
   if (oneTime === isOneTime(form)) return form.reminders;
-  if (!oneTime) return form.reminders.map((reminder) => reminder.split("T")[1] ?? "");
+  if (!oneTime) return form.reminders.map((reminder) => parseDatedReminder(reminder).time);
   return form.deadline === "" ? [] : form.reminders.map((time) => (time === "" ? "" : `${form.deadline}T${time}`));
 }
 

@@ -6,8 +6,8 @@
 // reads. The core reads time only from the Clock port.
 
 import { createECDH, randomBytes, randomUUID } from "node:crypto";
+import { addDays, parseClockTime, parseDatedReminder } from "../shared/calendar.ts";
 import {
-  addDays,
   earlierDate,
   laterDate,
   localDateOf,
@@ -16,14 +16,12 @@ import {
   wallTime,
   weekdayOf,
   zoneOffsetAt,
-  type LocalDate,
 } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
   ankiDueByFits,
   ankiDueByOrder,
-  clockOf,
   dueSoonEnough,
   firstWeekFrom,
   lastDayOf,
@@ -78,6 +76,7 @@ import {
   type AskOwnerResult,
   type AddRecipientResult,
   type ChangeOutcome,
+  type ClockTime,
   type ChangePactRefusal,
   type ChangePactResult,
   type ChangePreview,
@@ -98,6 +97,7 @@ import {
   type EditPactResult,
   type EvidenceRejection,
   type EvidenceResult,
+  type EvidenceView,
   type ExcuseDates,
   type ExcuseDatesRefusal,
   type ExcuseDay,
@@ -107,6 +107,7 @@ import {
   type ExcusePreviewResult,
   type ExcuseResult,
   type ExcuseSkipReason,
+  type ExcuseView,
   type FileExcuseRefusal,
   type FileExcuseResult,
   type FirstOccurrenceResult,
@@ -122,6 +123,7 @@ import {
   type LedgerPenalty,
   type LedgerResult,
   type LedgerSummary,
+  type LocalDate,
   type NewExcuse,
   type NewPact,
   type NewRecipient,
@@ -137,6 +139,7 @@ import {
   type EvidenceKind,
   type PactTiming,
   type PaymentResult,
+  type PaymentView,
   type QuestionThread,
   type ReplyResult,
   type ReviewState,
@@ -1428,13 +1431,13 @@ class Core implements PactCore {
           .get(excuseId) as ReviewStateRow & { reason: string; filed_at: string };
         const reviewerNames = this.#friendsSortedByName(this.#reviewersOf(pact.id)).map((friend) => friend.name);
         const excuse: ExcuseDetail = {
-          id: excuseId,
-          pactId: pact.id,
-          pactName: pact.name,
-          reason: row.reason,
-          photoIds: this.#excusePhotoIds(excuseId),
-          filedAt: new Date(row.filed_at),
-          days: this.#excuseDays(excuseId, pact.id, pact.timezone),
+          ...this.#excuseView({
+            ...row,
+            id: excuseId,
+            pact_id: pact.id,
+            pact_name: pact.name,
+            timezone: pact.timezone,
+          }),
           state: reviewStateOf(row),
           reviewerNames,
           thread: this.#thread(excuseId, row.decision === null),
@@ -1529,27 +1532,12 @@ class Core implements PactCore {
              LEFT JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
              WHERE evidence.id = ? AND pact.owner_account_id = ?`,
           )
-          .get(evidenceId, accountId) as
-          | (ReviewStateRow & {
-              id: string;
-              pact_id: string;
-              pact_name: string;
-              occurrence_date: LocalDate;
-              day: LocalDate;
-              submitted_at: string;
-            })
-          | undefined;
+          .get(evidenceId, accountId) as (ReviewStateRow & EvidenceViewRow) | undefined;
         if (!row) return { ok: false, reason: "evidence-not-found" };
         return {
           ok: true,
           evidence: {
-            id: row.id,
-            pactId: row.pact_id,
-            pactName: row.pact_name,
-            occurrenceDate: row.day,
-            description: this.#termsOn(row.pact_id, row.occurrence_date).description,
-            photoIds: this.#evidencePhotoIds(row.id),
-            submittedAt: new Date(row.submitted_at),
+            ...this.#evidenceView(row),
             state: reviewStateOf(row),
             reviewerNames: this.#friendsSortedByName(this.#reviewersOf(row.pact_id)).map((friend) => friend.name),
             thread: this.#thread(row.id, row.decision === null),
@@ -1567,28 +1555,13 @@ class Core implements PactCore {
              LEFT JOIN account AS reviewer ON reviewer.id = payment.decided_by_account_id
              WHERE payment.id = ? AND payment.owner_account_id = ?`,
           )
-          .get(paymentId, accountId) as
-          | (ReviewStateRow & {
-              id: string;
-              recipient_id: string;
-              recipient_name: string;
-              amount_cents: number;
-              note: string | null;
-              photo_id: string;
-              recorded_at: string;
-            })
-          | undefined;
+          .get(paymentId, accountId) as (ReviewStateRow & PaymentViewRow & { recipient_id: string }) | undefined;
         if (!row) return { ok: false, reason: "payment-not-found" };
         return {
           ok: true,
           payment: {
-            id: row.id,
+            ...paymentView(row),
             recipientId: row.recipient_id,
-            recipientName: row.recipient_name,
-            amountCents: row.amount_cents,
-            note: row.note,
-            photoId: row.photo_id,
-            recordedAt: new Date(row.recorded_at),
             state: reviewStateOf(row),
             reviewerNames: this.#friendsSortedByName(this.#paymentReviewers(accountId, row.recipient_id)).map(
               (friend) => friend.name,
@@ -1861,6 +1834,32 @@ class Core implements PactCore {
     });
   }
 
+  /** Evidence as its reviewers and its owner see it, with what counts from `terms`: the occurrence's day's. */
+  #evidenceView(row: EvidenceViewRow, terms = this.#termsOn(row.pact_id, row.occurrence_date)): EvidenceView {
+    return {
+      id: row.id,
+      pactId: row.pact_id,
+      pactName: row.pact_name,
+      occurrenceDate: row.day,
+      description: terms.description,
+      photoIds: this.#evidencePhotoIds(row.id),
+      submittedAt: new Date(row.submitted_at),
+    };
+  }
+
+  /** An excuse as its reviewers and its owner see it, its days as they stand now. */
+  #excuseView(row: ExcuseViewRow): ExcuseView {
+    return {
+      id: row.id,
+      pactId: row.pact_id,
+      pactName: row.pact_name,
+      reason: row.reason,
+      photoIds: this.#excusePhotoIds(row.id),
+      filedAt: new Date(row.filed_at),
+      days: this.#excuseDays(row.id, row.pact_id, row.timezone),
+    };
+  }
+
   /**
    * Every item `reviewerId` may decide, waiting on the owner's reply or not:
    * change requests first, then the rest oldest first.
@@ -1892,29 +1891,14 @@ class Core implements PactCore {
          WHERE evidence.decision IS NULL AND pact.created_at <= ?
          ORDER BY evidence.submitted_at, evidence.id`,
       )
-      .all(reviewerId, this.#editWindowCutoff()) as {
-      id: string;
-      pact_id: string;
-      pact_name: string;
-      owner_name: string;
-      submitted_at: string;
-      occurrence_date: string;
-      day: string;
-      weekly: 0 | 1;
-    }[];
+      .all(reviewerId, this.#editWindowCutoff()) as (EvidenceViewRow & { owner_name: string; weekly: 0 | 1 })[];
     return rows.map((row): ReviewItem => {
       // What counts, and what rejecting costs: the terms of the occurrence's day.
       const terms = this.#termsOn(row.pact_id, row.occurrence_date);
       return {
         kind: "evidence",
-        id: row.id,
-        pactId: row.pact_id,
-        pactName: row.pact_name,
+        ...this.#evidenceView(row, terms),
         ownerName: row.owner_name,
-        description: terms.description,
-        photoIds: this.#evidencePhotoIds(row.id),
-        submittedAt: new Date(row.submitted_at),
-        occurrenceDate: row.day,
         penaltyCents: terms.penalty_cents,
         recipientName: this.#recipientName(terms.recipient_id),
         ...(row.weekly === 1 && { week: this.#weekProgress(row.pact_id, row.occurrence_date) }),
@@ -2790,29 +2774,17 @@ class Core implements PactCore {
          WHERE excuse.decision IS NULL
          ORDER BY excuse.filed_at, excuse.id`,
       )
-      .all(reviewerId) as {
-      id: string;
-      reason: string;
-      filed_at: string;
-      pact_id: string;
-      pact_name: string;
-      owner_name: string;
-      timezone: string;
-      recipient_name: string;
-    }[];
+      .all(reviewerId) as (ExcuseViewRow & { owner_name: string; recipient_name: string })[];
     return rows.map((row): ReviewItem => {
-      const days = this.#excuseDays(row.id, row.pact_id, row.timezone);
+      const excuse = this.#excuseView(row);
       return {
         kind: "excuse",
-        id: row.id,
-        pactId: row.pact_id,
-        pactName: row.pact_name,
+        ...excuse,
         ownerName: row.owner_name,
-        reason: row.reason,
-        photoIds: this.#excusePhotoIds(row.id),
-        filedAt: new Date(row.filed_at),
-        days,
-        heldCents: days.reduce((sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0), 0),
+        heldCents: excuse.days.reduce(
+          (sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0),
+          0,
+        ),
         recipientName: row.recipient_name,
         thread: this.#thread(row.id, true),
       };
@@ -3860,28 +3832,17 @@ class Core implements PactCore {
          WHERE payment.decision IS NULL AND ${MAY_DECIDE_PAYMENT}
          ORDER BY payment.recorded_at, payment.id`,
       )
-      .all(reviewerId) as {
-      id: string;
+      .all(reviewerId) as (PaymentViewRow & {
       owner_account_id: AccountId;
       recipient_id: string;
       owner_name: string;
-      recipient_name: string;
-      amount_cents: number;
-      note: string | null;
-      photo_id: string;
-      recorded_at: string;
-    }[];
-    return rows.map((row) => {
+    })[];
+    return rows.map((row): ReviewItem => {
       const owedCents = this.#ledgerSummaries(row.owner_account_id, row.recipient_id)[0]?.owedCents ?? 0;
       return {
         kind: "payment",
-        id: row.id,
+        ...paymentView(row),
         ownerName: row.owner_name,
-        recipientName: row.recipient_name,
-        amountCents: row.amount_cents,
-        note: row.note,
-        photoId: row.photo_id,
-        recordedAt: new Date(row.recorded_at),
         owedCents,
         owedAfterApprovalCents: Math.max(0, owedCents - row.amount_cents),
         thread: this.#thread(row.id, true),
@@ -5671,8 +5632,8 @@ function nightOf(timestamp: string): LocalDate {
 }
 
 /** The night of `date`'s in-bed-by deadline as a wall-clock "YYYY-MM-DDTHH:MM". */
-function deadlineWallClock(date: LocalDate, inBedBy: string): string {
-  return `${clockOf(inBedBy)[0] >= NIGHT_STARTS_HOUR ? date : addDays(date, 1)}T${inBedBy}`;
+function deadlineWallClock(date: LocalDate, inBedBy: ClockTime): string {
+  return `${parseClockTime(inBedBy).hour >= NIGHT_STARTS_HOUR ? date : addDays(date, 1)}T${inBedBy}`;
 }
 
 /** A pact's terms as `#checkedPact` checks them. */
@@ -5829,14 +5790,14 @@ function withoutReminders({
   return terms;
 }
 
-/** "HH:MM" on a 24-hour clock. */
+/** Whether `text` is a clock time, "HH:MM" on a 24-hour clock. */
 function isClockTime(text: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
 }
 
-/** A One-time pact's reminder: a date and a clock time, "YYYY-MM-DDTHH:MM". */
+/** Whether `text` is a One-time pact's reminder, "YYYY-MM-DDTHH:MM". */
 function isDatedReminder(text: string): boolean {
-  const [date = "", time = ""] = text.split("T");
+  const { date, time } = parseDatedReminder(text);
   return text.length === 16 && isLocalDate(date) && isClockTime(time);
 }
 
@@ -6305,6 +6266,48 @@ function nextBillDay(addedAt: Date, now: Date, timezone: string): LocalDate {
 /** Whether `text` is a real calendar day written "YYYY-MM-DD". */
 function isLocalDate(text: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) && addDays(text, 0) === text;
+}
+
+/** The evidence columns `#evidenceView` reads. `day` is the day it was for; `occurrence_date` its occurrence's. */
+interface EvidenceViewRow {
+  id: string;
+  pact_id: string;
+  pact_name: string;
+  occurrence_date: LocalDate;
+  day: LocalDate;
+  submitted_at: string;
+}
+
+/** The excuse columns `#excuseView` reads, with the owner's timezone. */
+interface ExcuseViewRow {
+  id: string;
+  pact_id: string;
+  pact_name: string;
+  reason: string;
+  filed_at: string;
+  timezone: string;
+}
+
+/** The payment columns `paymentView` reads. */
+interface PaymentViewRow {
+  id: string;
+  recipient_name: string;
+  amount_cents: number;
+  note: string | null;
+  photo_id: string;
+  recorded_at: string;
+}
+
+/** A payment as its reviewers and its owner see it. */
+function paymentView(row: PaymentViewRow): PaymentView {
+  return {
+    id: row.id,
+    recipientName: row.recipient_name,
+    amountCents: row.amount_cents,
+    note: row.note,
+    photoId: row.photo_id,
+    recordedAt: new Date(row.recorded_at),
+  };
 }
 
 /** A payment a reviewer is deciding on, as `decide` reads it. */

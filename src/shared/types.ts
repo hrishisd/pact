@@ -3,6 +3,15 @@
 
 export type AccountId = string;
 
+/** "YYYY-MM-DD": a calendar day in some timezone, which the field's own doc names. */
+export type LocalDate = string;
+
+/** "HH:MM" on a 24-hour clock, "00:00" to "23:59". */
+export type ClockTime = string;
+
+/** A One-time pact's reminder: a day and a clock time, "YYYY-MM-DDTHH:MM". */
+export type DatedReminder = string;
+
 /** Why a command or query answered `{ ok: false }`: the `reason` of result type `R`. */
 export type Refusal<R extends { ok: boolean }> = Extract<R, { ok: false; reason: unknown }>["reason"];
 
@@ -60,12 +69,12 @@ export type Schedule =
    */
   | { kind: "weekly-count"; target: number }
   /**
-   * Camera only: one occurrence, due at the deadline: `deadline`, a
-   * "YYYY-MM-DD" day in the owner's timezone, at the pact's due-by time, or
-   * else the midnight ending it. With `submitAnytime` off, evidence counts
-   * only on that day; on, from the pact's creation until the deadline.
+   * Camera only: one occurrence, due at the deadline: `deadline`, a day in
+   * the owner's timezone, at the pact's due-by time, or else the midnight
+   * ending it. With `submitAnytime` off, evidence counts only on that day;
+   * on, from the pact's creation until the deadline.
    */
-  | { kind: "one-time"; deadline: string; submitAnytime: boolean };
+  | { kind: "one-time"; deadline: LocalDate; submitAnytime: boolean };
 
 /** A Weekly count target can't be more than one day of evidence a day. */
 export const MAX_WEEKLY_TARGET = 7;
@@ -83,20 +92,18 @@ export interface NewPact {
   /** For Camera: what the photo will show. Oura Ring pacts have none. */
   description: string;
   /**
-   * Oura Ring only: the in-bed-by time, "HH:MM" on a 24-hour clock. An
-   * evening time (from 18:00) is due that evening; an earlier one, the
-   * morning after.
+   * Oura Ring only: the in-bed-by time. An evening time (from 18:00) is due
+   * that evening; an earlier one, the morning after.
    */
-  inBedBy?: string;
+  inBedBy?: ClockTime;
   /**
-   * Camera and Anki, optional: the due-by time, "HH:MM" on a 24-hour clock
-   * after 00:00. Evidence is due by it each day instead of midnight, and the
+   * Camera and Anki, optional: the due-by time, after 00:00. Evidence is due by it each day instead of midnight, and the
    * day is judged then. On an Anki pact it runs from noon through the
    * collection's rollover hour: a time up to the rollover hour is the morning
    * after, still the evening's Anki day, and a later one, from noon, is that
    * day once its Anki day has opened.
    */
-  dueBy?: string;
+  dueBy?: ClockTime;
   /**
    * Anki only: the deck's id, from the owner's deck list (`AnkiDecksResult`).
    * Its subdecks count in it. On a change: left out to keep the deck it has;
@@ -104,22 +111,22 @@ export interface NewPact {
    */
   ankiDeckId?: string;
   /**
-   * Optional, "YYYY-MM-DD": the pact starts no earlier than this day. It can
-   * only push the first occurrence later. Recurring pacts only: One-time has none.
-   * On a change: it can change only before the first occurrence opens.
+   * Optional: the pact starts no earlier than this day. It can only push the
+   * first occurrence later. Recurring pacts only: One-time has none. On a
+   * change: it can change only before the first occurrence opens.
    */
-  startDate?: string;
+  startDate?: LocalDate;
   /**
-   * Optional, "YYYY-MM-DD": the pact's last day. Once it passes, the pact
-   * makes no more occurrences and is Ended. Recurring pacts only: One-time has none.
+   * Optional: the pact's last day. Once it passes, the pact makes no more
+   * occurrences and is Ended. Recurring pacts only: One-time has none.
    */
-  endDate?: string;
+  endDate?: LocalDate;
   /**
-   * Optional: when to remind the owner, each "HH:MM" in their timezone, or on
-   * a One-time pact "YYYY-MM-DDTHH:MM". See `PactTerms.reminders`. On a
+   * Optional: when to remind the owner, in their timezone, each a clock time,
+   * or on a One-time pact a dated reminder. See `PactTerms.reminders`. On a
    * change: they apply at once, even while a change request waits.
    */
-  reminders?: string[];
+  reminders?: (ClockTime | DatedReminder)[];
   schedule: Schedule;
   /** The Penalty per missed occurrence, in US cents: a positive whole number. */
   penaltyCents: number;
@@ -196,17 +203,17 @@ export interface PactTiming {
   /** Anki pacts open and fall due on the Anki day, which starts at the collection's rollover hour. Default Camera. */
   evidenceKind?: EvidenceKind;
   /** Oura Ring only: see `NewPact.inBedBy`. */
-  inBedBy?: string;
+  inBedBy?: ClockTime;
   /** Camera and Anki: see `NewPact.dueBy`. */
-  dueBy?: string;
+  dueBy?: ClockTime;
   /** See `NewPact.startDate`. */
-  startDate?: string;
+  startDate?: LocalDate;
 }
 
 /** A pact's first occurrence, as the create form's Check step names it. */
 export interface FirstOccurrence {
-  /** The occurrence's day in the owner's timezone, "YYYY-MM-DD": for Weekly count, its week's Monday. */
-  date: string;
+  /** The occurrence's day in the owner's timezone: for Weekly count, its week's Monday. */
+  date: LocalDate;
   /**
    * Its due time: midnight at the end of that day, or the due-by or in-bed-by
    * time, in the owner's timezone; for Weekly count, the end of its Sunday.
@@ -244,16 +251,16 @@ export type PactTerms = CurrentTerms & PactPageTerms & ({ stage: "active" } | { 
 interface PactPageTerms {
   id: string;
   /**
-   * When the owner is reminded, each "HH:MM" in their timezone, in the order
+   * When the owner is reminded, each a clock time in their timezone, in the order
    * they go off. On a Camera pact: that time on each scheduled day, before
    * the day's due time, while it has no evidence. On an Oura Ring pact: each
    * scheduled night (from 18:00 that evening, else the morning after), before
    * the in-bed-by time, even if the owner is already in bed. Neither fires on
    * an occurrence an approved excuse covers. On a One-time pact each is
-   * "YYYY-MM-DDTHH:MM" and goes off once, before the deadline, unless
-   * evidence was already submitted.
+   * dated and goes off once, before the deadline, unless evidence was
+   * already submitted.
    */
-  reminders: string[];
+  reminders: (ClockTime | DatedReminder)[];
   firstOccurrence: FirstOccurrence;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
@@ -279,10 +286,10 @@ export type CurrentTerms = TermsByKind & {
   name: string;
   /** For Camera: what the photo will show. Empty for the others. */
   description: string;
-  /** "YYYY-MM-DD", or null: see `NewPact.startDate`. */
-  startDate: string | null;
-  /** "YYYY-MM-DD", or null: see `NewPact.endDate`. */
-  endDate: string | null;
+  /** Or null: see `NewPact.startDate`. */
+  startDate: LocalDate | null;
+  /** Or null: see `NewPact.endDate`. */
+  endDate: LocalDate | null;
   penaltyCents: number;
   recipient: Recipient;
   /** Sorted by name. */
@@ -294,20 +301,20 @@ export type TermsByKind =
   | {
       evidenceKind: "camera";
       schedule: Schedule;
-      /** The due-by time, "HH:MM", or null for midnight. */
-      dueBy: string | null;
+      /** The due-by time, or null for midnight. */
+      dueBy: ClockTime | null;
     }
   | {
       evidenceKind: "oura";
       schedule: FixedDays;
-      /** The in-bed-by time, "HH:MM". */
-      inBedBy: string;
+      /** The in-bed-by time. */
+      inBedBy: ClockTime;
     }
   | {
       evidenceKind: "anki";
       schedule: FixedDays;
-      /** The due-by time, "HH:MM", or null for midnight. */
-      dueBy: string | null;
+      /** The due-by time, or null for midnight. */
+      dueBy: ClockTime | null;
       /** The pact's deck and the Anki day it's judged on. */
       anki: AnkiTerms;
     };
@@ -379,8 +386,8 @@ export type PactHistory =
 
 /** One week on a Weekly count pact's heat map. */
 export interface HeatMapWeek {
-  /** Its Monday, "YYYY-MM-DD" in the owner's timezone. */
-  date: string;
+  /** Its Monday, in the owner's timezone. */
+  date: LocalDate;
   /** How its occurrence went, or null for a week from the one the pact Ended that was never judged. */
   occurrence: OccurrenceRecord | null;
   /** How far it got: see `WeekProgress`. */
@@ -400,8 +407,8 @@ export interface WeekProgress {
 
 /** One day on a heat map. */
 export interface HeatMapDay {
-  /** "YYYY-MM-DD" in the owner's timezone. */
-  date: string;
+  /** In the owner's timezone. */
+  date: LocalDate;
   /**
    * How its occurrence went, or null on a day the pact has none: one its
    * schedule skips, or one from the day it Ended that was never judged.
@@ -444,10 +451,10 @@ export type RecordedStatus =
 /** What an Oura Ring or Anki pact's judged occurrence adds to its record. */
 export type OccurrenceDetail =
   /**
-   * When the owner got into bed, "HH:MM" on Oura's clock, or null when Oura
+   * When the owner got into bed, on Oura's clock, or null when Oura
    * reported no sleep by 18:00 the next day.
    */
-  | { kind: "night"; inBedAt: string | null }
+  | { kind: "night"; inBedAt: ClockTime | null }
   /** The check that decided the Anki day, or null when no check reached AnkiWeb that day. */
   | { kind: "anki"; lastCheck: AnkiCheck | null };
 
@@ -503,72 +510,92 @@ export type ReviewItem =
   /** A change request: the reviewer compares the old terms with the new, or decides on ending the pact. */
   | ({ kind: "change-request"; ownerName: string; thread: QuestionThread } & ChangeRequestView)
   /** Photo evidence: the reviewer checks the photos against what counts. */
-  | {
+  | ({
       kind: "evidence";
-      /** The evidence's id. */
-      id: string;
-      pactId: string;
-      pactName: string;
       ownerName: string;
-      /** The pact's description of what counts. */
-      description: string;
-      /** In the order taken; each is served at the photo path. */
-      photoIds: string[];
-      /** When the server received its last photo. */
-      submittedAt: Date;
-      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it counts for. */
-      occurrenceDate: string;
       /** What rejecting costs the owner: the pact's penalty, added to the ledger for `recipientName`. */
       penaltyCents: number;
       recipientName: string;
       /** Weekly count only: its week so far. Rejecting costs nothing then: the day just doesn't count. */
       week?: WeekProgress;
       thread: QuestionThread;
-    }
+    } & EvidenceView)
   /**
    * An excuse: the reviewer reads the reason and photos and decides all of
    * its days at once.
    */
-  | {
+  | ({
       kind: "excuse";
-      /** The excuse's id. */
-      id: string;
-      pactId: string;
-      pactName: string;
       ownerName: string;
-      reason: string;
-      /** In the order added; each is served at the photo path. */
-      photoIds: string[];
-      filedAt: Date;
-      /** The days it covers, oldest first, as they stand now. */
-      days: ExcuseDay[];
       /** The penalties held while it waits: approving removes them, rejecting makes them owed. */
       heldCents: number;
       recipientName: string;
       thread: QuestionThread;
-    }
+    } & ExcuseView)
   /**
    * A payment the owner recorded: the reviewer checks the screenshot. Any
    * reviewer of any of the owner's pacts with the recipient may decide it.
    */
-  | {
+  | ({
       kind: "payment";
-      /** The payment's id. */
-      id: string;
       ownerName: string;
-      recipientName: string;
-      amountCents: number;
-      /** The owner's note, or null when there's none. */
-      note: string | null;
-      /** The screenshot, served at the photo path. */
-      photoId: string;
-      recordedAt: Date;
       /** What the owner owes the recipient now. Approving lowers it by `amountCents`. */
       owedCents: number;
       /** What the owner would owe the recipient once this payment is approved, never below zero. */
       owedAfterApprovalCents: number;
       thread: QuestionThread;
-    };
+    } & PaymentView);
+
+/** Evidence, as its reviewers and its owner see it. */
+export interface EvidenceView {
+  /** The evidence's id. */
+  id: string;
+  pactId: string;
+  pactName: string;
+  /** The occurrence's day in the owner's timezone: on Weekly count, the day it counts for. */
+  occurrenceDate: LocalDate;
+  /** What counts, as the occurrence's terms say. */
+  description: string;
+  /** In the order taken; each is served at the photo path. */
+  photoIds: string[];
+  /** When the server received its last photo. */
+  submittedAt: Date;
+}
+
+/** An excuse, as its reviewers and its owner see it. */
+export interface ExcuseView {
+  /** The excuse's id. */
+  id: string;
+  pactId: string;
+  pactName: string;
+  reason: string;
+  /** In the order added; each is served at the photo path. */
+  photoIds: string[];
+  filedAt: Date;
+  /** The days it covers, oldest first, as they stand now. */
+  days: ExcuseDay[];
+}
+
+/** A payment, as its reviewers and its owner see it. */
+export interface PaymentView {
+  /** The payment's id. */
+  id: string;
+  recipientName: string;
+  amountCents: number;
+  /** The owner's note, or null when there's none. */
+  note: string | null;
+  /** The screenshot, served at the photo path. */
+  photoId: string;
+  recordedAt: Date;
+}
+
+/** What an item's page adds for its owner: where it stands, who may decide it, and its questions. */
+export interface ReviewedItem {
+  state: ReviewState;
+  /** Who may decide it, sorted by name. */
+  reviewerNames: string[];
+  thread: QuestionThread;
+}
 
 /**
  * A review item's questions and replies, oldest first. A reviewer's question
@@ -622,41 +649,13 @@ export type ReviewState =
   | { kind: "approved"; reviewerName: string; decidedAt: Date }
   | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
 
-/** Evidence's page, for its owner: what was sent, where it stands, and its questions. */
-export interface EvidenceDetail {
-  id: string;
-  pactId: string;
-  pactName: string;
-  /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it counts for. */
-  occurrenceDate: string;
-  /** What counts, as the occurrence's terms say. */
-  description: string;
-  /** In the order taken; each is served at the photo path. */
-  photoIds: string[];
-  submittedAt: Date;
-  state: ReviewState;
-  /** The pact's reviewers, sorted by name: who may decide it. */
-  reviewerNames: string[];
-  thread: QuestionThread;
-}
+/** Evidence's page, for its owner. Its reviewers are the pact's. */
+export type EvidenceDetail = EvidenceView & ReviewedItem;
 
 export type EvidenceResult = { ok: true; evidence: EvidenceDetail } | { ok: false; reason: "evidence-not-found" };
 
-/** A payment's page, for its owner: what was sent, where it stands, and its questions. */
-export interface PaymentDetail {
-  id: string;
-  recipientId: string;
-  recipientName: string;
-  amountCents: number;
-  note: string | null;
-  /** The screenshot, served at the photo path. */
-  photoId: string;
-  recordedAt: Date;
-  state: ReviewState;
-  /** The reviewers of the owner's pacts with the recipient, sorted by name: who may decide it. */
-  reviewerNames: string[];
-  thread: QuestionThread;
-}
+/** A payment's page, for its owner. Its reviewers are those of the owner's pacts with the recipient. */
+export type PaymentDetail = PaymentView & ReviewedItem & { recipientId: string };
 
 export type PaymentResult = { ok: true; payment: PaymentDetail } | { ok: false; reason: "payment-not-found" };
 
@@ -798,8 +797,8 @@ export type TodayAlert =
       name: string;
       reviewerName: string;
       reason: string;
-      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone: on Weekly count, the day it was for. */
-      occurrenceDate: string;
+      /** The occurrence's day in the owner's timezone: on Weekly count, the day it was for. */
+      occurrenceDate: LocalDate;
       penaltyCents: number;
       recipientName: string;
       /** Until when an excuse for the day is accepted: 48 hours after the rejection (on Weekly count, after the week's due time). */
@@ -820,9 +819,9 @@ export type TodayAlert =
       name: string;
       reviewerName: string;
       reason: string;
-      /** The first and last days it covered, "YYYY-MM-DD"; the same day for one. */
-      firstDate: string;
-      lastDate: string;
+      /** The first and last days it covered; the same day for one. */
+      firstDate: LocalDate;
+      lastDate: LocalDate;
       /** The penalties it held, owed again now. */
       owedAgainCents: number;
       /** Whether any of its days isn't judged yet. */
@@ -845,8 +844,8 @@ export type TodayAlert =
       recipientName: string;
       /** The unpaid part of the overdue bills that payments awaiting approval don't cover. */
       overdueCents: number;
-      /** The oldest overdue bill: the Wednesday it was made, "YYYY-MM-DD", and when it was due. */
-      billedOn: string;
+      /** The oldest overdue bill: the Wednesday it was made, and when it was due. */
+      billedOn: LocalDate;
       dueAt: Date;
       /**
        * Who has been told: the reviewers of the owner's pacts with this
@@ -886,15 +885,15 @@ export interface TodayToDoCard extends TodayPactCard {
   kind: "evidence";
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The open occurrence's day, "YYYY-MM-DD" in the owner's timezone: for Weekly count, its week's Monday. */
-  occurrenceDate: string;
+  /** The open occurrence's day in the owner's timezone: for Weekly count, its week's Monday. */
+  occurrenceDate: LocalDate;
   /**
    * Its due-by time today, or midnight ending today, in the owner's timezone;
    * for Weekly count, the end of its Sunday, so it sorts below things due today.
    */
   dueAt: Date;
-  /** Its due-by time, "HH:MM", or null when it's due at midnight. On Weekly count it limits each day's evidence. */
-  dueBy: string | null;
+  /** Its due-by time, or null when it's due at midnight. On Weekly count it limits each day's evidence. */
+  dueBy: ClockTime | null;
   /** Weekly count only: the week so far. */
   week?: WeekProgress;
 }
@@ -907,11 +906,11 @@ export interface TodayAnkiCard extends TodayPactCard {
   kind: "anki";
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The Anki day, "YYYY-MM-DD": the day it started on, in the owner's timezone. */
-  occurrenceDate: string;
+  /** The Anki day: the day it started on, in the owner's timezone. */
+  occurrenceDate: LocalDate;
   dueAt: Date;
-  /** Its due-by time, "HH:MM", or null when it's due at midnight. */
-  dueBy: string | null;
+  /** Its due-by time, or null when it's due at midnight. */
+  dueBy: ClockTime | null;
   /** The deck's name as AnkiWeb last gave it, or null if Pact never had it. */
   deckName: string | null;
   /** Whether the last check found the deck gone from the collection. */
@@ -930,9 +929,9 @@ export interface TodayBillCard {
   recipientName: string;
   /** What's left to pay on those bills, less payments awaiting approval. */
   amountCents: number;
-  /** The soonest due of them, and the Wednesday it was made, "YYYY-MM-DD". */
+  /** The soonest due of them, and the Wednesday it was made. */
   dueAt: Date;
-  billedOn: string;
+  billedOn: LocalDate;
 }
 
 /** Who rejected some evidence, and why. */
@@ -943,8 +942,8 @@ export interface EvidenceRejection {
 
 /** An occurrence judged Missed at its due time; `penaltyCents` is the penalty it added. */
 export interface TodayMissedCard extends TodayPactCard {
-  /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
-  occurrenceDate: string;
+  /** The occurrence's day in the owner's timezone. */
+  occurrenceDate: LocalDate;
   /** When it was judged Missed. */
   missedAt: Date;
   /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
@@ -956,10 +955,10 @@ export interface TodayMissedCard extends TodayPactCard {
 export type MissedDetail =
   | OccurrenceDetail
   /**
-   * Today's occurrence of a Camera pact, Missed at its due-by time ("HH:MM")
-   * with no evidence: it shows as Closed.
+   * Today's occurrence of a Camera pact, Missed at its due-by time with no
+   * evidence: it shows as Closed.
    */
-  | { kind: "closed"; dueBy: string }
+  | { kind: "closed"; dueBy: ClockTime }
   /** Weekly count only: how far the week got. `penaltyCents` is one penalty per day short. */
   | { kind: "week"; progress: WeekProgress };
 
@@ -968,33 +967,32 @@ export type MissedDetail =
  * no excuse covers. Syncing the ring before `closesAt` still counts.
  */
 export interface TodayNoOuraDataCard extends TodayPactCard {
-  /** The night's day, "YYYY-MM-DD" in the owner's timezone. */
-  occurrenceDate: string;
+  /** The night's day in the owner's timezone. */
+  occurrenceDate: LocalDate;
   /** 18:00 the next day: with no sleep data by then, it's Missed. */
   closesAt: Date;
   /** Tonight's night of the same pact, which rides on this card instead of an Automatic one; null when there's none. */
-  tonight: { occurrenceDate: string; dueAt: Date; inBedBy: string } | null;
+  tonight: { occurrenceDate: LocalDate; dueAt: Date; inBedBy: ClockTime } | null;
 }
 
 /** A bedtime pact's night that runs now. */
 export interface TodayAutomaticCard extends TodayPactCard {
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The night's day, "YYYY-MM-DD" in the owner's timezone. */
-  occurrenceDate: string;
+  /** The night's day in the owner's timezone. */
+  occurrenceDate: LocalDate;
   /** Tonight's in-bed-by deadline. */
   dueAt: Date;
-  /** "HH:MM". */
-  inBedBy: string;
+  inBedBy: ClockTime;
 }
 
 export interface TodayComingUpCard extends TodayPactCard {
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The first occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
-  opensOn: string;
-  /** The pact's start date, "YYYY-MM-DD", when the owner set one: it starts rather than opens. */
-  startDate: string | null;
+  /** The first occurrence's day in the owner's timezone. */
+  opensOn: LocalDate;
+  /** The pact's start date, when the owner set one: it starts rather than opens. */
+  startDate: LocalDate | null;
 }
 
 /** Something of the owner's waiting for a reviewer's decision, newest first. */
@@ -1006,8 +1004,8 @@ export type TodayWaitingItem =
       id: string;
       pactId: string;
       name: string;
-      /** The occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
-      occurrenceDate: string;
+      /** The occurrence's day in the owner's timezone. */
+      occurrenceDate: LocalDate;
       /** When the server received its last photo. */
       submittedAt: Date;
     }
@@ -1018,9 +1016,9 @@ export type TodayWaitingItem =
       id: string;
       pactId: string;
       name: string;
-      /** The first and last days it covers, "YYYY-MM-DD"; the same day for one. */
-      firstDate: string;
-      lastDate: string;
+      /** The first and last days it covers; the same day for one. */
+      firstDate: LocalDate;
+      lastDate: LocalDate;
       filedAt: Date;
     }
   /** A payment no reviewer has decided yet. */
@@ -1050,8 +1048,8 @@ export interface TodayYesterdayEntry {
   name: string;
   /** A bedtime night not judged yet is waiting on Oura, not a reviewer. */
   evidenceKind: EvidenceKind;
-  /** Yesterday, "YYYY-MM-DD" in the owner's timezone. */
-  occurrenceDate: string;
+  /** Yesterday, in the owner's timezone. */
+  occurrenceDate: LocalDate;
   occurrence: OccurrenceRecord;
 }
 
@@ -1115,8 +1113,8 @@ export interface LedgerPenalty {
   penaltyId: string;
   pactId: string;
   pactName: string;
-  /** The Missed occurrence's day, "YYYY-MM-DD" in the owner's timezone. */
-  occurrenceDate: string;
+  /** The Missed occurrence's day in the owner's timezone. */
+  occurrenceDate: LocalDate;
   amountCents: number;
   /** When it was added: when the occurrence was judged Missed. */
   addedAt: Date;
@@ -1134,13 +1132,13 @@ export interface LedgerPenalty {
   held: boolean;
   /**
    * The bill it's on, or the Wednesday bill it goes on once it can't be
-   * excused (dates "YYYY-MM-DD"). While it's held, the bill it would go on
+   * excused. While it's held, the bill it would go on
    * if the excuse were rejected now: a later one the longer the excuse waits.
    */
   bill:
-    | { kind: "on-bill"; billedOn: string; dueAt: Date }
-    | { kind: "next-bill"; billedOn: string }
-    | { kind: "if-excuse-rejected"; billedOn: string };
+    | { kind: "on-bill"; billedOn: LocalDate; dueAt: Date }
+    | { kind: "next-bill"; billedOn: LocalDate }
+    | { kind: "if-excuse-rejected"; billedOn: LocalDate };
 }
 
 /** A payment to the recipient the owner recorded, and where its review stands. */
@@ -1174,9 +1172,9 @@ export const MAX_EXCUSE_SPAN_DAYS = 62;
 
 /** The dates an owner picks for an excuse for one pact. */
 export interface ExcuseDates {
-  /** "YYYY-MM-DD" in the owner's timezone, both included. */
-  from: string;
-  to: string;
+  /** In the owner's timezone, both included. */
+  from: LocalDate;
+  to: LocalDate;
 }
 
 export interface NewExcuse extends ExcuseDates {
@@ -1211,10 +1209,10 @@ export type OccurrenceStatus =
 
 /** One of a pact's days on an excuse, and where it stands. */
 export interface ExcuseDay {
-  /** "YYYY-MM-DD" in the owner's timezone: for Weekly count, its week's Monday. */
-  date: string;
+  /** In the owner's timezone: for Weekly count, its week's Monday. */
+  date: LocalDate;
   /** Weekly count only: its week's Sunday. A day in the week excuses the whole week. */
-  through?: string;
+  through?: LocalDate;
   status: OccurrenceStatus;
 }
 
@@ -1230,7 +1228,7 @@ export interface ExcusePreview {
   /** Oldest first, as they stand before filing. */
   covered: ExcuseDay[];
   /** Oldest first. */
-  skipped: { date: string; reason: ExcuseSkipReason }[];
+  skipped: { date: LocalDate; reason: ExcuseSkipReason }[];
   /** The penalties filing would hold: those of the covered Missed days. */
   heldCents: number;
 }
@@ -1240,7 +1238,7 @@ export type ExcuseDatesRefusal =
   | "pact-not-found"
   /** Excuses open once the edit window closes. */
   | "edit-window-open"
-  /** Not "YYYY-MM-DD", or `to` before `from`. */
+  /** Not a "YYYY-MM-DD" date, or `to` before `from`. */
   | "invalid-dates"
   /** More than MAX_EXCUSE_SPAN_DAYS days. */
   | "too-many-days";
@@ -1249,8 +1247,8 @@ export type ExcusePreviewResult = { ok: true; preview: ExcusePreview } | { ok: f
 
 /** What the File excuse sheet opened from a pact page offers. */
 export interface ExcuseOptions {
-  /** The owner's today, "YYYY-MM-DD": the Days ahead range starts here. */
-  today: string;
+  /** The owner's today: the Days ahead range starts here. */
+  today: LocalDate;
   /** Days dated today or earlier that an excuse would cover now, newest first. */
   recentDays: ExcuseDay[];
 }
@@ -1268,21 +1266,8 @@ export type FileExcuseRefusal =
 
 export type FileExcuseResult = { ok: true; excuseId: string } | { ok: false; reason: FileExcuseRefusal };
 
-/** The excuse page. */
-export interface ExcuseDetail {
-  id: string;
-  pactId: string;
-  pactName: string;
-  reason: string;
-  photoIds: string[];
-  filedAt: Date;
-  /** Oldest first, as they stand now. */
-  days: ExcuseDay[];
-  state: ReviewState;
-  /** The pact's reviewers, sorted by name: who it was sent to. */
-  reviewerNames: string[];
-  thread: QuestionThread;
-}
+/** The excuse page, for its owner. Its reviewers are the pact's: who it was sent to. */
+export type ExcuseDetail = ExcuseView & ReviewedItem;
 
 export type ExcuseResult = { ok: true; excuse: ExcuseDetail } | { ok: false; reason: "excuse-not-found" };
 
@@ -1324,20 +1309,24 @@ export type TermChange =
       after: { id: string; name: string | null };
       effect: ChangeEffect;
     }
-  /** "HH:MM". */
-  | { term: "in-bed-by"; before: string; after: string; effect: ChangeEffect }
-  /** "HH:MM", or null for midnight. */
-  | { term: "due-by"; before: string | null; after: string | null; effect: ChangeEffect }
-  /** "YYYY-MM-DD", or null for none. */
-  | { term: "start-date"; before: string | null; after: string | null; effect: ChangeEffect }
-  /** "YYYY-MM-DD", or null for none. */
-  | { term: "end-date"; before: string | null; after: string | null; effect: ChangeEffect }
+  | { term: "in-bed-by"; before: ClockTime; after: ClockTime; effect: ChangeEffect }
+  /** Null for midnight. */
+  | { term: "due-by"; before: ClockTime | null; after: ClockTime | null; effect: ChangeEffect }
+  /** Null for none. */
+  | { term: "start-date"; before: LocalDate | null; after: LocalDate | null; effect: ChangeEffect }
+  /** Null for none. */
+  | { term: "end-date"; before: LocalDate | null; after: LocalDate | null; effect: ChangeEffect }
   | { term: "schedule"; before: Schedule; after: Schedule; effect: ChangeEffect }
   /** In US cents. */
   | { term: "penalty"; before: number; after: number; effect: ChangeEffect }
   | { term: "recipient"; before: Recipient; after: Recipient; effect: ChangeEffect }
-  /** "HH:MM" each, in the order they go off. Changing them always applies at once. */
-  | { term: "reminders"; before: string[]; after: string[]; effect: ChangeEffect }
+  /** In the order they go off. Changing them always applies at once. */
+  | {
+      term: "reminders";
+      before: (ClockTime | DatedReminder)[];
+      after: (ClockTime | DatedReminder)[];
+      effect: ChangeEffect;
+    }
   /** Each list sorted by name. Removing anyone needs approval; adding applies at once. */
   | {
       term: "reviewers";
@@ -1423,12 +1412,12 @@ interface TermsChangeRequest {
 }
 
 /**
- * When new terms start: `appliesFrom`, "YYYY-MM-DD", is the first occurrence
- * not open yet. `todayKeepsCents` is today's penalty, when today is an
+ * When new terms start: `appliesFrom` is the first occurrence's day not
+ * open yet. `todayKeepsCents` is today's penalty, when today is an
  * occurrence on the old terms and the penalty changes.
  */
 export interface ChangeStart {
-  appliesFrom: string;
+  appliesFrom: LocalDate;
   todayKeepsCents: number | null;
 }
 

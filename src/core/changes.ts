@@ -3,28 +3,34 @@
 // (applies without approval to occurrences not open yet), or doesn't change
 // what counts (applies at once), like the name and the reminders.
 
-import type { AccountId, ChangeEffect, Schedule, TermChange } from "../shared/types.ts";
+import type {
+  AccountId,
+  ChangeEffect,
+  ClockTime,
+  DatedReminder,
+  LocalDate,
+  Schedule,
+  TermChange,
+} from "../shared/types.ts";
 import { ankiDueByOrder, minutesFrom, NIGHT_STARTS_HOUR } from "./occurrences.ts";
 
 /** A pact's terms an owner can change: everything but its evidence kind. */
 export interface ChangeableTerms {
   name: string;
   description: string;
-  /** Oura Ring only, "HH:MM"; null for Camera. */
-  inBedBy: string | null;
-  /** Camera and Anki, "HH:MM", or null for midnight. */
-  dueBy: string | null;
-  /** "YYYY-MM-DD", or null. */
-  startDate: string | null;
-  /** "YYYY-MM-DD", or null. */
-  endDate: string | null;
+  /** Oura Ring only; null for Camera. */
+  inBedBy: ClockTime | null;
+  /** Camera and Anki, or null for midnight. */
+  dueBy: ClockTime | null;
+  startDate: LocalDate | null;
+  endDate: LocalDate | null;
   schedule: Schedule;
   penaltyCents: number;
   recipientId: string;
   /** Sorted, no repeats. */
   reviewerIds: AccountId[];
-  /** "HH:MM" each, in the order they go off, no repeats. */
-  reminders: string[];
+  /** In the order they go off, no repeats. */
+  reminders: (ClockTime | DatedReminder)[];
   /** Anki only, the deck's id; null for any other pact (and in change requests sent before decks could change). */
   ankiDeckId: string | null;
 }
@@ -121,7 +127,7 @@ function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null 
  * Camera day ends at midnight, so no due-by time is the latest. An Anki day
  * runs from its rollover hour, so a time the morning after is later than midnight.
  */
-function dueByOrder(dueBy: string | null, ankiRollover: number | null): number {
+function dueByOrder(dueBy: ClockTime | null, ankiRollover: number | null): number {
   // Both sides passed ankiDueByFits before this.
   if (ankiRollover !== null) return ankiDueByOrder(dueBy, ankiRollover);
   return dueBy === null ? 24 * 60 : minutesFrom(dueBy, 0);

@@ -3,10 +3,8 @@
 // some zone; which zone is always the caller's to say. No Pact rules live
 // here: when occurrences open and fall due is occurrences.ts's to say.
 
-import { WEEKDAYS, type Weekday } from "../shared/types.ts";
-
-/** "YYYY-MM-DD": a calendar day in some timezone. */
-export type LocalDate = string;
+import { addDays, parseLocalDate } from "../shared/calendar.ts";
+import { WEEKDAYS, type LocalDate, type Weekday } from "../shared/types.ts";
 
 /** The instant the wall-clock time `year-month-day hour:minute` names in `timezone`. */
 export function zonedWallTimeToInstant(
@@ -25,7 +23,7 @@ export function zonedWallTimeToInstant(
 
 /** The instant the wall-clock time `hour`:`minute` on `date` names in `timezone`. */
 export function wallTime(date: LocalDate, hour: number, minute: number, timezone: string): Date {
-  const [year, month, day] = splitDate(date);
+  const { year, month, day } = parseLocalDate(date);
   return zonedWallTimeToInstant(year, month, day, hour, minute, timezone);
 }
 
@@ -41,13 +39,8 @@ export function localDateOf(instant: Date, timezone: string): LocalDate {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-export function addDays(date: LocalDate, days: number): LocalDate {
-  const [year, month, day] = splitDate(date);
-  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
-}
-
 export function weekdayOf(date: LocalDate): Weekday {
-  const [year, month, day] = splitDate(date);
+  const { year, month, day } = parseLocalDate(date);
   // getUTCDay counts from Sunday; WEEKDAYS counts from Monday.
   return WEEKDAYS[(new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7] as Weekday;
 }
@@ -73,7 +66,7 @@ export function mondayOf(date: LocalDate): LocalDate {
  * there, and the day starts when the jump lands.
  */
 export function startOfDay(date: LocalDate, timezone: string): Date {
-  const [year, month, day] = splitDate(date);
+  const { year, month, day } = parseLocalDate(date);
   const midnight = zonedWallTimeToInstant(year, month, day, 0, 0, timezone);
   if (localDateOf(midnight, timezone) === date) return midnight;
   // `midnight` fell just before the jump; the offset there puts the wall
@@ -84,11 +77,6 @@ export function startOfDay(date: LocalDate, timezone: string): Date {
 /** `timezone`'s UTC offset at `instant`, in ms (negative west of UTC). */
 export function zoneOffsetAt(instant: Date, timezone: string): number {
   return offsetMs(instant.getTime(), timezone);
-}
-
-function splitDate(date: LocalDate): [number, number, number] {
-  const [year, month, day] = date.split("-").map(Number);
-  return [year as number, month as number, day as number];
 }
 
 /** The zone's UTC offset at `instantMs`, in ms (negative west of UTC). */
