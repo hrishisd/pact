@@ -46,6 +46,16 @@ export function weekdayOf(date: LocalDate): Weekday {
   return WEEKDAYS[(new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7] as Weekday;
 }
 
+/** The later of two dates. */
+export function laterDate(a: LocalDate, b: LocalDate): LocalDate {
+  return a > b ? a : b;
+}
+
+/** The earlier of two dates. */
+export function earlierDate(a: LocalDate, b: LocalDate): LocalDate {
+  return a < b ? a : b;
+}
+
 /** The Monday of `date`'s Mon–Sun week. */
 export function mondayOf(date: LocalDate): LocalDate {
   return addDays(date, -WEEKDAYS.indexOf(weekdayOf(date)));
