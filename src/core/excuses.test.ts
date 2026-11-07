@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "vitest";
 import type { NewExcuse, TodayAlert } from "../shared/types.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
+import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import type { AccountHandle } from "./testing/scenario.ts";
 import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
 import { changed, ledgerHistory, ok, owed } from "./testing/queries.ts";
@@ -18,7 +18,6 @@ const THURSDAY = "2026-01-08";
 const FRIDAY = "2026-01-09";
 const SATURDAY = "2026-01-10";
 const SUNDAY = "2026-01-11";
-const EVERY_DAY = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
 /** An excuse for `from` to `to` (or just `from`), "Sick with the flu". */
 function sick(from: string, to = from): NewExcuse {
@@ -185,7 +184,7 @@ describe("days ahead", () => {
   test("an excuse for Fri–Sun filed Wednesday and approved Thursday: those days are Excused when they end, with no penalty", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const run = await createPact("Run", [...EVERY_DAY]);
+    const run = await createPact("Run", EVERY_DAY);
     await s.advanceTo("Wed 10:00");
 
     const excuseId = await fileExcuse(owner, run, { from: FRIDAY, to: SUNDAY, reason: "Trip" });

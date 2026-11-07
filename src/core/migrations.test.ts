@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, onTestFinished, test } from "vitest";
 import { systemClock } from "./adapters.ts"; // conventions-ok: brackets SQLite's 'now', which no Clock reaches
 import { localDateOf } from "./calendar.ts";
 import { createPactCore, type PactCore } from "./core.ts";
@@ -23,10 +23,11 @@ let path: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "pact-migrations-"));
   path = join(dir, "pact.db");
+  // Registered first, so it runs last: after the test's core has closed.
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-/** The core on the migrated database, with a FakeClock starting at `start`. */
+/** The core on the migrated database, with a FakeClock starting at `start`; it closes when the test ends. */
 function coreAt(start: Date): { core: PactCore; clock: FakeClock; notifier: RecordingNotifier } {
   const clock = new FakeClock(start);
   const notifier = new RecordingNotifier();
@@ -40,6 +41,7 @@ function coreAt(start: Date): { core: PactCore; clock: FakeClock; notifier: Reco
     operatorEmail: "owner@example.test",
     log: () => {},
   });
+  onTestFinished(() => core.close());
   return { core, clock, notifier };
 }
 
@@ -98,7 +100,6 @@ test("migration 5: a pact made before judging existed gets no penalty for any oc
     "2026-01-08",
     "2026-01-09",
   ]);
-  await core.close();
 });
 
 test("migration 19: evidence from before Weekly count counts for its own day", async () => {
@@ -137,7 +138,6 @@ test("migration 19: evidence from before Weekly count counts for its own day", a
   expect(core.as("reviewer").reviewQueue()).toEqual([
     expect.objectContaining({ kind: "evidence", id: "tuesday", occurrenceDate: "2026-01-06" }),
   ]);
-  await core.close();
 });
 
 // The new-bill notifications sent so far.
@@ -213,7 +213,6 @@ test.each([
     await advance(core, clock, new Date(billAt));
     expect(newBills(notifier)).toHaveLength(1);
     expect(billOf()).toMatchObject({ kind: "on-bill", billedOn });
-    await core.close();
   },
 );
 

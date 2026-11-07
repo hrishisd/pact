@@ -6,9 +6,9 @@
 
 import { describe, expect, test } from "vitest";
 import { termsOf } from "../shared/terms.ts";
-import type { PactChange, Weekday } from "../shared/types.ts";
+import type { PactChange } from "../shared/types.ts";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import type { Scenario } from "./testing/scenario.ts";
 import { changed, ok, pactOf, penalties, penaltyDays } from "./testing/queries.ts";
 import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
@@ -20,7 +20,6 @@ const THURSDAY = "2026-01-08";
 const FRIDAY = "2026-01-09";
 const SATURDAY = "2026-01-10";
 const NEXT_MONDAY = "2026-01-12";
-const EVERY_DAY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /** An every-day $5 Gym pact made Mon 09:00, its edit window long closed by Thu 15:00. */
 async function dailyGym(s: Scenario) {
@@ -82,7 +81,7 @@ describe("a stricter change applies at once, from the first occurrence not open 
   test("a rejection after the change still costs that day's penalty, to that day's recipient", async () => {
     const s = scenario();
     const { owner, reviewer, gym } = await dailyGym(s);
-    const submitted = ok(await owner.submitEvidence(gym, [{ bytes: new Uint8Array([1]), contentType: "image/jpeg" }]));
+    const submitted = ok(await owner.submitEvidence(gym, [photo()]));
     ok(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 1000 })));
     await s.advanceTo("Fri 10:00");
 
@@ -152,7 +151,7 @@ describe("a relaxing change waits for a reviewer", () => {
     const id = changeRequestIdOf(result);
     expect(pactOf(owner, gym)).toMatchObject({ penaltyCents: 500, newTerms: null });
     for (const r of [reviewer, second]) {
-      expect(s.notifier.sentTo(r).filter((n) => n.kind === "review-item")).toEqual([
+      expect(s.notifier.sentTo(r, "review-item")).toEqual([
         expect.objectContaining({
           payload: expect.objectContaining({
             itemKind: "change-request",
@@ -186,7 +185,7 @@ describe("a relaxing change waits for a reviewer", () => {
       penaltyCents: 200,
       newTerms: { appliesFrom: SATURDAY, todayKeepsCents: 500 },
     });
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([
+    expect(s.notifier.sentTo(owner, "change-request-decided")).toEqual([
       expect.objectContaining({
         payload: expect.objectContaining({
           itemId: id,
@@ -241,7 +240,7 @@ describe("a relaxing change waits for a reviewer", () => {
     expect(pactOf(owner, gym).description).toBe("A photo of Gym");
     await reviewer.decide(changeRequestIdOf(result), { kind: "approve" });
     expect(pactOf(owner, gym).description).toBe("A photo of any workout");
-    ok(await owner.submitEvidence(gym, [{ bytes: new Uint8Array([1]), contentType: "image/jpeg" }]));
+    ok(await owner.submitEvidence(gym, [photo()]));
     expect(reviewer.reviewQueue()).toEqual([
       expect.objectContaining({ kind: "evidence", occurrenceDate: THURSDAY, description: "A photo of Gym" }),
     ]);
@@ -277,7 +276,7 @@ describe("a relaxing change waits for a reviewer", () => {
     });
     await second.decide(changeRequestIdOf(result), { kind: "approve" });
     expect(pactOf(owner, gym).reviewers.map((r) => r.name)).toEqual(["reviewer"]);
-    ok(await owner.submitEvidence(gym, [{ bytes: new Uint8Array([1]), contentType: "image/jpeg" }]));
+    ok(await owner.submitEvidence(gym, [photo()]));
     expect(second.reviewQueue()).toEqual([]);
     expect(reviewer.reviewQueue()).toHaveLength(1);
   });
@@ -345,7 +344,7 @@ describe("a relaxing change waits for a reviewer", () => {
         start: null,
       },
     });
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([
+    expect(s.notifier.sentTo(owner, "change-request-decided")).toEqual([
       expect.objectContaining({
         payload: expect.objectContaining({ title: "reviewer rejected your change", body: "Gym · “You can afford $5”" }),
       }),
@@ -462,7 +461,7 @@ describe("one change request at a time", () => {
       penaltyCents: 500,
       reviewers: [{ name: "reviewer" }, { name: "third" }],
     });
-    expect(s.notifier.sentTo(third).map((n) => n.kind)).toEqual(["picked-as-reviewer", "review-item"]);
+    expect(s.notifier.kindsSentTo(third)).toEqual(["picked-as-reviewer", "review-item"]);
     // The penalty in force until the change is approved.
     expect(s.notifier.sentTo(third)[0]?.payload).toEqual({
       pactId: gym,
@@ -498,7 +497,7 @@ describe("one change request at a time", () => {
   test("change requests come first in the Review Queue, then everything else oldest first", async () => {
     const s = scenario();
     const { owner, reviewer, gym } = await dailyGym(s);
-    const submitted = ok(await owner.submitEvidence(gym, [{ bytes: new Uint8Array([1]), contentType: "image/jpeg" }]));
+    const submitted = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Thu 16:00");
 
     const result = ok(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 200 })));
@@ -572,12 +571,7 @@ describe("ending a pact", () => {
     });
     expect(queued).not.toHaveProperty("changes");
     expect(queued).not.toHaveProperty("start");
-    expect(
-      s.notifier
-        .sentTo(reviewer)
-        .filter((n) => n.kind === "review-item")
-        .at(-1),
-    ).toMatchObject({
+    expect(s.notifier.sentTo(reviewer, "review-item").at(-1)).toMatchObject({
       payload: { title: "owner asked to end Gym", body: "“I've moved and the gym is too far”" },
     });
 
@@ -593,12 +587,7 @@ describe("ending a pact", () => {
       { kind: "to-do", cards: [expect.objectContaining({ pactId: read })] },
       expect.objectContaining({ kind: "missed" }),
     ]);
-    expect(
-      s.notifier
-        .sentTo(owner)
-        .filter((n) => n.kind === "change-request-decided")
-        .at(-1),
-    ).toMatchObject({
+    expect(s.notifier.sentTo(owner, "change-request-decided").at(-1)).toMatchObject({
       payload: { title: "reviewer approved ending Gym", body: "Gym is Ended" },
     });
 
@@ -705,7 +694,7 @@ describe("once a pact has Ended", () => {
       reason: "item-not-found",
     });
     expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endedAt });
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([]);
+    expect(s.notifier.sentTo(owner, "change-request-decided")).toEqual([]);
   });
 
   test("an end approved after midnight, before the scheduler's tick, still judges the day before", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { gymEvidenceWaiting, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
@@ -81,19 +81,10 @@ describe("a restart", () => {
   });
 });
 
-/** An owner with a Mon/Wed/Fri "Gym" pact two friends review, and evidence for Monday submitted at Mon 18:00. */
-async function evidenceWaiting() {
-  const s = scenario();
-  const setup = await ownerWithReviewers(s);
-  const gym = await setup.createPact("Gym", MON_WED_FRI);
-  s.setClockTo("Mon 18:00");
-  const submitted = ok(await setup.owner.submitEvidence(gym, [photo()]));
-  return { s, ...setup, gym, evidenceId: submitted.evidenceId };
-}
-
 describe("deciding on evidence", () => {
   test("with two reviewers, the first to decide wins: the item leaves both queues and a second decision is refused", async () => {
-    const { s, reviewer, second, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { reviewer, second, evidenceId } = await gymEvidenceWaiting(s);
     s.setClockTo("Mon 19:00");
 
     expect(await second.decide(evidenceId, { kind: "approve" })).toEqual({ ok: true });
@@ -106,7 +97,7 @@ describe("deciding on evidence", () => {
   });
 
   test("a rejection needs a reason: a blank one is refused and the item stays in the queue", async () => {
-    const { reviewer, evidenceId } = await evidenceWaiting();
+    const { reviewer, evidenceId } = await gymEvidenceWaiting(scenario());
 
     for (const reason of ["", "  \n "]) {
       expect(await reviewer.decide(evidenceId, { kind: "reject", reason })).toEqual({
@@ -118,7 +109,8 @@ describe("deciding on evidence", () => {
   });
 
   test("only a reviewer of the pact can decide: the owner, a stranger and an unknown item are not found", async () => {
-    const { s, owner, reviewer, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, evidenceId } = await gymEvidenceWaiting(s);
     const stranger = await s.befriend(owner, "stranger");
 
     const notFound = { ok: false, reason: "item-not-found" };
@@ -130,7 +122,8 @@ describe("deciding on evidence", () => {
   });
 
   test("the owner is told of the decision, and the reviewers aren't", async () => {
-    const { s, owner, reviewer, second, gym, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, second, gym, evidenceId } = await gymEvidenceWaiting(s);
     await reviewer.decide(evidenceId, { kind: "reject", reason: "  That's last week's photo " });
 
     expect(s.notifier.sentTo(owner)).toEqual([
@@ -150,14 +143,15 @@ describe("deciding on evidence", () => {
       },
     ]);
     // Each reviewer had only the review item.
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["review-item"]);
-    expect(s.notifier.sentTo(second).map((n) => n.kind)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(second)).toEqual(["review-item"]);
   });
 });
 
 describe("the owner's Today after a decision", () => {
   test("approved evidence: the pact is done for the day, so it leaves Today", async () => {
-    const { s, owner, reviewer, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, evidenceId } = await gymEvidenceWaiting(s);
     s.setClockTo("Mon 19:00");
 
     await reviewer.decide(evidenceId, { kind: "approve" });

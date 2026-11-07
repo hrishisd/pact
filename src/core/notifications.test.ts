@@ -4,8 +4,8 @@
 import { describe, expect, test } from "vitest";
 import type { PushDevice } from "./ports.ts";
 import { failOnCall } from "./testing/fakes.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
-import { scenario, type Scenario } from "./testing/scenario.ts";
+import { gymEvidenceWaiting, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { scenario } from "./testing/scenario.ts";
 import { ok, owed } from "./testing/queries.ts";
 
 // A real P-256 public key, from RFC 8291's example.
@@ -16,18 +16,10 @@ function device(name: string): PushDevice {
   return { endpoint: `https://web.push.apple.com/${name}`, p256dh: P256DH, auth: AUTH };
 }
 
-async function submitted(s: Scenario) {
-  const people = await ownerWithReviewers(s);
-  const gym = await people.createPact("Gym", MON_WED_FRI);
-  s.setClockTo("Mon 18:00");
-  const evidence = ok(await people.owner.submitEvidence(gym, [photo()]));
-  return { ...people, gym, evidenceId: evidence.evidenceId };
-}
-
 describe("each kind records one notification for each person it's for", () => {
   test("approving evidence: one decision to the owner, opening the pact", async () => {
     const s = scenario();
-    const { owner, reviewer, second, gym, evidenceId } = await submitted(s);
+    const { owner, reviewer, second, gym, evidenceId } = await gymEvidenceWaiting(s);
     const before = s.notifier.sent.length;
 
     await reviewer.decide(evidenceId, { kind: "approve" });
@@ -47,7 +39,7 @@ describe("each kind records one notification for each person it's for", () => {
         },
       },
     ]);
-    expect(s.notifier.sentTo(second).map((n) => n.kind)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(second)).toEqual(["review-item"]);
   });
 
   test("a Missed judgment: one to the owner, opening the pact", async () => {
@@ -70,7 +62,7 @@ describe("each kind records one notification for each person it's for", () => {
         },
       },
     ]);
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["picked-as-reviewer"]);
 
     await s.advanceTo("Tue 00:00");
     expect(s.notifier.sentTo(owner)).toHaveLength(1);
@@ -78,12 +70,12 @@ describe("each kind records one notification for each person it's for", () => {
 
   test("a rejection sends the decision only, not a Missed occurrence as well", async () => {
     const s = scenario();
-    const { owner, reviewer, evidenceId } = await submitted(s);
+    const { owner, reviewer, evidenceId } = await gymEvidenceWaiting(s);
 
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Last week's" });
     await s.advanceTo("Tue 00:00");
 
-    expect(s.notifier.sentTo(owner).map((n) => n.kind)).toEqual(["evidence-decided"]);
+    expect(s.notifier.kindsSentTo(owner)).toEqual(["evidence-decided"]);
   });
 });
 
@@ -114,13 +106,13 @@ describe("notification settings", () => {
     await owner.submitEvidence(gym, [photo()]);
 
     expect(s.notifier.sentTo(reviewer)).toEqual([]);
-    expect(s.notifier.sentTo(second).map((n) => n.kind)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(second)).toEqual(["review-item"]);
     expect(reviewer.reviewQueue()).toHaveLength(1);
   });
 
   test("decision turned off covers evidence and payments", async () => {
     const s = scenario();
-    const { owner, reviewer, sam, evidenceId } = await submitted(s);
+    const { owner, reviewer, sam, evidenceId } = await gymEvidenceWaiting(s);
     await owner.setNotificationSetting("decision", false);
 
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Last week's" });
@@ -164,7 +156,7 @@ describe("notification settings", () => {
 
     await s.core.raiseRestoreAlert();
 
-    expect(s.notifier.sentTo(owner).map((n) => n.kind)).toEqual(["operator-alert"]);
+    expect(s.notifier.kindsSentTo(owner)).toEqual(["operator-alert"]);
   });
 });
 
@@ -358,6 +350,6 @@ describe("delivery happens after the command", () => {
     await s.restart();
     await s.advanceTo("Mon 18:01");
 
-    expect(s.notifier.sentTo(reviewer).filter((n) => n.kind === "review-item")).toHaveLength(1);
+    expect(s.notifier.sentTo(reviewer, "review-item")).toHaveLength(1);
   });
 });

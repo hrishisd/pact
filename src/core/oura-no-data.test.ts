@@ -6,15 +6,11 @@
 
 import { describe, expect, test } from "vitest";
 import { ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
-import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { scenario, type Scenario } from "./testing/scenario.ts";
 import { ok, sectionKinds, statusOn } from "./testing/queries.ts";
 
 const TUE = "2026-01-06";
 const WED = "2026-01-07";
-
-function connectionProblems(s: Scenario, owner: AccountHandle) {
-  return s.notifier.sentTo(owner).filter((n) => n.kind === "connection-problem");
-}
 
 /** An owner whose Mon night was Satisfied, so Tue night is the one waiting on Oura. */
 async function tueNightWaiting(s: Scenario) {
@@ -171,7 +167,7 @@ describe("the 15:00 push", () => {
     const s = scenario();
     const { owner } = await tueNightWaiting(s);
     await s.advanceTo("Wed 14:59");
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
 
     await s.advanceTo("Wed 15:00");
     await s.advanceTo("Wed 15:01");
@@ -179,7 +175,7 @@ describe("the 15:00 push", () => {
     await s.advanceTo("Wed 15:02");
     await s.advanceTo("Wed 17:00");
 
-    expect(connectionProblems(s, owner)).toEqual([
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
       {
         recipient: owner.id,
         kind: "connection-problem",
@@ -200,7 +196,7 @@ describe("the 15:00 push", () => {
     s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
     await s.advanceTo("Wed 14:00");
     await s.advanceTo("Wed 15:00");
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
   });
 
   test("one push for the night, however many bedtime pacts wait on it", async () => {
@@ -209,7 +205,7 @@ describe("the 15:00 push", () => {
     s.setClockTo("Tue 08:00");
     await createPact("23:30");
     await s.advanceTo("Wed 15:00");
-    expect(connectionProblems(s, owner)).toHaveLength(1);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toHaveLength(1);
   });
 
   test("a night with an excuse filed gets no push", async () => {
@@ -218,7 +214,7 @@ describe("the 15:00 push", () => {
     s.setClockTo("Wed 09:00");
     ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring was charging" }, []));
     await s.advanceTo("Wed 15:00");
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
   });
 
   test("a traveller gets it at 15:00 on Oura's clock, three hours before the night closes there", async () => {
@@ -230,9 +226,9 @@ describe("the 15:00 push", () => {
     await s.advanceTo("Tue 07:00");
 
     await s.advanceTo("Wed 08:59");
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
     await s.advanceTo("Wed 09:00");
-    expect(connectionProblems(s, owner)).toEqual([
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
       expect.objectContaining({ payload: expect.objectContaining({ title: "No Oura data", occurrenceDate: TUE }) }),
     ]);
   });
@@ -241,7 +237,7 @@ describe("the 15:00 push", () => {
     const s = scenario();
     const { owner } = await tueNightWaiting(s);
     await s.advanceTo("Wed 18:30");
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
   });
 });
 
@@ -262,7 +258,7 @@ describe("a disconnected connection", () => {
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
     expect(owner.today().alerts).toEqual([{ kind: "connection", service: "oura", status: "needs-reconnecting" }]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "needs-reconnecting" } });
-    expect(connectionProblems(s, owner)).toEqual([
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
       {
         recipient: owner.id,
         kind: "connection-problem",
@@ -284,7 +280,7 @@ describe("a disconnected connection", () => {
     expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
     expect(owner.today().alerts).toEqual([]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: null } });
-    expect(connectionProblems(s, owner)).toHaveLength(1);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toHaveLength(1);
   });
 
   test("a check now that finds it disconnected marks it the same way", async () => {
@@ -295,7 +291,7 @@ describe("a disconnected connection", () => {
     s.setClockTo("2026-01-07T09:00:20-05:00");
     await owner.checkOura();
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
-    expect(connectionProblems(s, owner)).toHaveLength(1);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toHaveLength(1);
   });
 
   test("disconnected and never reconnected: Missed at 18:00", async () => {
@@ -319,7 +315,7 @@ describe("a disconnected connection", () => {
     await s.advanceTo("Wed 08:01");
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
     expect(owner.today().alerts).toEqual([]);
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
   });
 
   test("with a connection problem, the 15:00 push says to reconnect", async () => {
@@ -328,7 +324,7 @@ describe("a disconnected connection", () => {
     s.ouraSource.disconnect(owner.id);
     await s.advanceTo("Wed 08:00");
     await s.advanceTo("Wed 15:00");
-    expect(connectionProblems(s, owner).map((n) => n.payload.body)).toEqual([
+    expect(s.notifier.sentTo(owner, "connection-problem").map((n) => n.payload.body)).toEqual([
       "A night with no data by 6pm counts as Missed. Reconnect before then.",
       "No Oura data for Tue night yet. Reconnect Oura before 6pm or it counts as missed.",
     ]);

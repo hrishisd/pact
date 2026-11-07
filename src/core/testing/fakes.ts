@@ -10,6 +10,8 @@ import type {
   Clock,
   DeliveryReport,
   Notification,
+  NotificationKind,
+  NotificationOf,
   Notifier,
   OuraDateRange,
   OuraSleepPeriod,
@@ -64,8 +66,16 @@ export class RecordingNotifier implements Notifier {
     };
   }
 
-  sentTo(account: { id: AccountId }): Notification[] {
-    return this.sent.filter((n) => n.recipient === account.id);
+  /** Every notification delivered to `account`, or only those of `kind`, in delivery order. */
+  sentTo(account: { id: AccountId }): Notification[];
+  sentTo<K extends NotificationKind>(account: { id: AccountId }, kind: K): NotificationOf<K>[];
+  sentTo(account: { id: AccountId }, kind?: NotificationKind): Notification[] {
+    return this.sent.filter((n) => n.recipient === account.id && (kind === undefined || n.kind === kind));
+  }
+
+  /** The kind of every notification delivered to `account`, in delivery order. */
+  kindsSentTo(account: { id: AccountId }): NotificationKind[] {
+    return this.sentTo(account).map((n) => n.kind);
   }
 
   /** Every device a delivery to `account` has gone to, repeats included. */

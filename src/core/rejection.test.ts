@@ -5,25 +5,16 @@
 
 import { describe, expect, test } from "vitest";
 import type { Today } from "../shared/types.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { gymEvidenceWaiting, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
 const MONDAY = "2026-01-05";
 
-/** An owner with a Mon/Wed/Fri $5 "Gym" pact, and Monday's evidence submitted at Mon 13:00. */
-async function evidenceOnMonday() {
-  const s = scenario();
-  const setup = await ownerWithReviewers(s);
-  const gym = await setup.createPact("Gym", MON_WED_FRI);
-  s.setClockTo("Mon 13:00");
-  const submitted = ok(await setup.owner.submitEvidence(gym, [photo()]));
-  return { s, ...setup, gym, evidenceId: submitted.evidenceId };
-}
-
 describe("a rejection is final straight away", () => {
   test("rejected Monday afternoon, while the day is still open: Missed at once, $5 owed; the pact leaves To do; Today shows only the alert", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
 
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
@@ -54,7 +45,8 @@ describe("a rejection is final straight away", () => {
   });
 
   test("rejected Tuesday, after Monday's due time: the same alert, and Monday isn't in the Missed section", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     await s.advanceTo("Tue 00:00");
     s.setClockTo("Tue 08:00");
 
@@ -93,7 +85,8 @@ describe("a rejection is final straight away", () => {
   });
 
   test("when the day ends it isn't judged again: still one penalty, as of the rejection", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
 
@@ -109,7 +102,8 @@ describe("a rejection is final straight away", () => {
   });
 
   test("evidence for a day whose evidence was rejected is refused, and nothing reaches the reviewers", async () => {
-    const { s, owner, reviewer, second, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, second, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     const today = owner.today();
@@ -128,7 +122,8 @@ describe("a rejection is final straight away", () => {
 
 describe("the rejected-evidence alert", () => {
   test("Take the L clears it; owed and the ledger's history are unchanged", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     const [summary] = owner.ledgers();
@@ -146,7 +141,8 @@ describe("the rejected-evidence alert", () => {
   });
 
   test("is still there after 48 hours, and after a restart, if Take the L wasn't tapped", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
 
@@ -159,7 +155,8 @@ describe("the rejected-evidence alert", () => {
   });
 
   test("one per rejected occurrence, newest rejection first; Take the L clears only its own", async () => {
-    const { s, owner, reviewer, second, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, second, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     s.setClockTo("Wed 09:00");
@@ -179,7 +176,8 @@ describe("the rejected-evidence alert", () => {
   });
 
   test("Take the L survives a restart", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     await owner.acceptMiss(gym, MONDAY);

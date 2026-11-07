@@ -5,9 +5,9 @@
 // makes it stricter.
 
 import { describe, expect, test } from "vitest";
-import type { NewPact, Weekday } from "../shared/types.ts";
-import { ownerWithOura } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
+import type { NewPact } from "../shared/types.ts";
+import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
+import { cameraPact, EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle } from "./testing/scenario.ts";
 import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
 import { changed, heatMapDays, ok, pactOf, penaltyDays } from "./testing/queries.ts";
@@ -22,7 +22,6 @@ const SUNDAY = "2026-01-11";
 const NEXT_MONDAY = "2026-01-12";
 const NEXT_TUESDAY = "2026-01-13";
 const NEXT_WEDNESDAY = "2026-01-14";
-const EVERY_DAY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 function stageOf(owner: AccountHandle, pactId: string) {
   const pact = pactOf(owner, pactId);
@@ -56,7 +55,7 @@ describe("a due-by time", () => {
       rejection: null,
     });
     expect(penaltyDays(owner)).toEqual([WEDNESDAY]);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([
       expect.objectContaining({ payload: expect.objectContaining({ occurrenceDate: WEDNESDAY }) }),
     ]);
   });
@@ -138,20 +137,9 @@ describe("a due-by time", () => {
   test("is refused on an Oura Ring pact, at midnight, or when it isn't a time", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await ownerWithOura(s);
-    const oura: NewPact = {
-      evidenceKind: "oura",
-      name: "In bed by midnight",
-      description: "",
-      inBedBy: "00:00",
-      dueBy: "09:00",
-      schedule: { kind: "fixed-days", days: EVERY_DAY },
-      penaltyCents: 500,
-      recipientId: sam.id,
-      reviewerIds: [reviewer.id],
-    };
+    const oura: NewPact = { ...bedtimePact(sam.id, reviewer), dueBy: "09:00" };
     expect(await owner.createPact(oura)).toEqual({ ok: false, reason: "invalid-due-by" });
-    const camera: NewPact = { ...oura, evidenceKind: "camera", name: "Gym", description: "A photo of Gym" };
-    delete camera.inBedBy;
+    const camera = cameraPact("Gym", EVERY_DAY, { recipientId: sam.id, reviewers: [reviewer] });
     expect(await owner.createPact({ ...camera, dueBy: "00:00" })).toEqual({ ok: false, reason: "invalid-due-by" });
     expect(await owner.createPact({ ...camera, dueBy: "9am" })).toEqual({ ok: false, reason: "invalid-due-by" });
     expect(owner.pacts()).toEqual([]);
@@ -249,19 +237,7 @@ describe("an end date", () => {
   test("on a bedtime pact, the last night is judged at 6pm the next day, then the pact is Ended", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await ownerWithOura(s);
-    const created = ok(
-      await owner.createPact({
-        evidenceKind: "oura",
-        name: "In bed by midnight",
-        description: "",
-        inBedBy: "00:00",
-        endDate: FRIDAY,
-        schedule: { kind: "fixed-days", days: EVERY_DAY },
-        penaltyCents: 500,
-        recipientId: sam.id,
-        reviewerIds: [reviewer.id],
-      }),
-    );
+    const created = ok(await owner.createPact({ ...bedtimePact(sam.id, reviewer), endDate: FRIDAY }));
     const bed = created.pactId;
 
     await s.advanceTo("Sat 17:59");
@@ -498,18 +474,14 @@ describe("in the edit window", () => {
     const gym = await createPact("Gym", EVERY_DAY);
     s.setClockTo("Mon 09:05");
 
-    const edited = await owner.editPact(gym, {
-      evidenceKind: "camera",
-      name: "Gym",
-      description: "A photo of Gym",
-      dueBy: "07:00",
-      startDate: WEDNESDAY,
-      endDate: NEXT_MONDAY,
-      schedule: { kind: "fixed-days", days: EVERY_DAY },
-      penaltyCents: 500,
-      recipientId: sam.id,
-      reviewerIds: [reviewer.id, second.id],
-    });
+    const edited = await owner.editPact(
+      gym,
+      cameraPact("Gym", EVERY_DAY, {
+        recipientId: sam.id,
+        reviewers: [reviewer, second],
+        dates: { dueBy: "07:00", startDate: WEDNESDAY, endDate: NEXT_MONDAY },
+      }),
+    );
 
     expect(edited).toEqual({ ok: true });
     expect(pactOf(owner, gym)).toMatchObject({

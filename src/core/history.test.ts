@@ -3,14 +3,12 @@
 // yesterday did.
 
 import { describe, expect, test } from "vitest";
-import type { EvidenceRejection, OccurrenceDetail, OccurrenceRecord, Weekday } from "../shared/types.ts";
+import type { EvidenceRejection, OccurrenceDetail, OccurrenceRecord } from "../shared/types.ts";
 import { ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, submit } from "./testing/camera-pact.ts";
+import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
 import { changed, heatMapDays, ok } from "./testing/queries.ts";
-
-const EVERY_DAY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /** Files an excuse for `date` on `pactId` as `owner`, and has `reviewer` approve it. */
 async function excused(owner: AccountHandle, reviewer: AccountHandle, pactId: string, date: string, reason: string) {

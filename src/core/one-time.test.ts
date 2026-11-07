@@ -9,7 +9,7 @@
 import { describe, expect, test } from "vitest";
 import type { NewPact, PactChange, Schedule } from "../shared/types.ts";
 import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
+import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
 import { cards, changed, ok, owed, pactOf } from "./testing/queries.ts";
@@ -107,15 +107,10 @@ describe("making a One-time pact", () => {
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
     const evidenceId = await submit(owner, taxes);
 
-    const edited = await owner.editPact(taxes, {
-      evidenceKind: "camera",
-      name: "Taxes",
-      description: "A photo of Taxes",
-      schedule: oneTime(FRIDAY, true),
-      penaltyCents: 500,
-      recipientId: sam.id,
-      reviewerIds: [reviewer.id],
-    });
+    const edited = await owner.editPact(
+      taxes,
+      cameraPact("Taxes", oneTime(FRIDAY, true), { recipientId: sam.id, reviewers: [reviewer] }),
+    );
 
     expect(edited).toEqual({ ok: true });
     expect(owner.today().waiting).toEqual([
@@ -231,7 +226,7 @@ describe("judging", () => {
       expect(occurrenceOf(owner, taxes).occurrence?.status).toMatchObject({ kind: "missed", penaltyCents: 500 });
       expect(owed(owner)).toBe(500);
       expect(pactOf(owner, taxes).stage).toBe("ended");
-      expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([
+      expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([
         expect.objectContaining({
           payload: expect.objectContaining({ occurrenceDate: THURSDAY, body: "Thu Jan 8 · $5 to Sam" }),
         }),
@@ -373,7 +368,7 @@ describe("reminders", () => {
     await s.advanceTo("Sun 09:00");
     await s.advanceTo("Sat+1 09:00");
 
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "reminder")).toEqual([
+    expect(s.notifier.sentTo(owner, "reminder")).toEqual([
       expect.objectContaining({
         payload: expect.objectContaining({
           pactId: taxes,
@@ -481,7 +476,7 @@ describe("changing a One-time pact", () => {
     ]);
 
     await reviewer.decide(filed.outcome.changeRequestId, { kind: "approve" });
-    expect(s.notifier.sentTo(owner).find((n) => n.kind === "change-request-decided")?.payload.body).toBe(
+    expect(s.notifier.sentTo(owner, "change-request-decided")[0]?.payload.body).toBe(
       "Taxes · New terms start Sat Jan 10",
     );
     const evidenceId = await submit(owner, forms);
@@ -566,7 +561,7 @@ describe("changing a One-time pact", () => {
 
     expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(THURSDAY, true), waiting: [] });
     expect(occurrenceOf(owner, taxes)).toMatchObject({ date: THURSDAY, occurrence: { status: { kind: "missed" } } });
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([]);
+    expect(s.notifier.sentTo(owner, "change-request-decided")).toEqual([]);
   });
 
   test("a later deadline approved after the old one passed, before the scheduler's tick, doesn't rescue it", async () => {
@@ -596,9 +591,7 @@ describe("changing a One-time pact", () => {
 
     await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
 
-    const request = s.notifier
-      .sentTo(reviewer)
-      .find((n) => n.kind === "review-item" && n.payload.itemKind === "change-request");
+    const request = s.notifier.sentTo(reviewer, "review-item").find((n) => n.payload.itemKind === "change-request");
     expect(request?.payload.body).toBe("Deadline");
   });
 

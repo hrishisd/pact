@@ -177,11 +177,11 @@ describe("a recorded payment", () => {
         url: "/review",
       },
     };
-    const reviewItems = (account: AccountHandle) => s.notifier.sentTo(account).filter((n) => n.kind === "review-item");
+    const reviewItems = (account: AccountHandle) => s.notifier.sentTo(account, "review-item");
     expect(reviewItems(reviewer)).toEqual([{ ...reviewItem, recipient: reviewer.id }]);
     expect(reviewItems(second)).toEqual([{ ...reviewItem, recipient: second.id }]);
     expect(s.notifier.sentTo(friend)).toEqual([]);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "review-item")).toEqual([]);
+    expect(s.notifier.sentTo(owner, "review-item")).toEqual([]);
   });
 
   test("survives a restart, still awaiting approval", async () => {
@@ -306,9 +306,7 @@ describe("deciding a payment", () => {
 
     // Unpaid, the $5 to Sam is billed Wed+1 and overdue Wed+2.
     await s.advanceTo("Wed+2 18:00");
-    const aboutSam = s.notifier
-      .sentTo(reviewer)
-      .filter((n) => n.kind === "overdue-bill" && n.payload.recipientId === sam.id);
+    const aboutSam = s.notifier.sentTo(reviewer, "overdue-bill").filter((n) => n.payload.recipientId === sam.id);
     expect(aboutSam.map((n) => n.payload)).toEqual([
       expect.objectContaining({ title: "owner is overdue", body: "$5 to Sam, due Wed Jan 21" }),
     ]);
@@ -317,12 +315,7 @@ describe("deciding a payment", () => {
     ).toEqual([expect.objectContaining({ overdueCents: 500, reviewerNames: ["reviewer"] })]);
 
     const paymentId = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
-    expect(
-      s.notifier
-        .sentTo(reviewer)
-        .filter((n) => n.kind === "review-item")
-        .at(-1),
-    ).toMatchObject({
+    expect(s.notifier.sentTo(reviewer, "review-item").at(-1)).toMatchObject({
       payload: { itemKind: "payment", itemId: paymentId },
     });
     expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "payment", id: paymentId })]);
@@ -393,7 +386,7 @@ describe("deciding a payment", () => {
     await reviewer.decide(second, { kind: "reject", reason: "That's not Sam's account" });
 
     const decided = { recipient: owner.id, kind: "payment-decided" };
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "payment-decided")).toEqual([
+    expect(s.notifier.sentTo(owner, "payment-decided")).toEqual([
       {
         ...decided,
         payload: {

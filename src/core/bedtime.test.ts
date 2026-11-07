@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
+import { photo } from "./testing/camera-pact.ts";
 import { failOnCall } from "./testing/fakes.ts";
 import { scenario, type AccountHandle } from "./testing/scenario.ts";
 import { cards, ok, sectionKinds, statusOn } from "./testing/queries.ts";
@@ -139,7 +140,7 @@ describe("judging a night", () => {
         detail: { kind: "night", inBedAt: "01:00" },
       },
     ]);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toHaveLength(1);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toHaveLength(1);
   });
 
   test("a nap at 19:00 Tue is ignored; the long_sleep at 23:30 decides the night", async () => {
@@ -245,7 +246,7 @@ describe("judging a night", () => {
     await s.advanceTo("Wed 18:00");
     expect(statusOn(owner, pactId, TUE)).toBe("excused");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([]);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
   });
 
   test("an on-time bedtime that syncs the morning after beats an approved excuse", async () => {
@@ -308,7 +309,7 @@ describe("judging a night", () => {
 
     await s.advanceTo("Wed 18:00");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([]);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
   });
 });
 
@@ -548,7 +549,7 @@ test("photo evidence can't be submitted for a bedtime pact", async () => {
   const s = scenario();
   const { owner, createPact } = await ownerWithOura(s);
   const pactId = await createPact("00:00");
-  expect(await owner.submitEvidence(pactId, [{ bytes: new Uint8Array([1]), contentType: "image/jpeg" }])).toEqual({
+  expect(await owner.submitEvidence(pactId, [photo()])).toEqual({
     ok: false,
     reason: "not-open",
   });

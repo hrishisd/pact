@@ -4,27 +4,25 @@
 // sends it back to every reviewer. A reviewer can still decide it meanwhile.
 
 import { describe, expect, test } from "vitest";
-import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
+import {
+  fifteenOwed,
+  gymEvidenceWaiting,
+  MON_WED_FRI,
+  ownerWithReviewers,
+  photo,
+  recordPayment,
+} from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
 const MONDAY = "2026-01-05";
 
-/** An owner with a Mon/Wed/Fri "Gym" pact two friends review, and evidence for Monday submitted at Mon 18:00. */
-async function evidenceWaiting() {
-  const s = scenario();
-  const setup = await ownerWithReviewers(s);
-  const gym = await setup.createPact("Gym", MON_WED_FRI);
-  s.setClockTo("Mon 18:00");
-  const submitted = ok(await setup.owner.submitEvidence(gym, [photo()]));
-  return { s, ...setup, gym, evidenceId: submitted.evidenceId };
-}
-
 const ids = (items: { id: string }[]) => items.map((item) => item.id);
 
 describe("asking about evidence", () => {
   test("the question takes it out of both reviewers' queues and puts an alert on the owner's Today; the reply puts it back and resolves the alert", async () => {
-    const { s, owner, reviewer, second, gym, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, second, gym, evidenceId } = await gymEvidenceWaiting(s);
     s.setClockTo("Mon 19:00");
 
     ok(await reviewer.askOwner(evidenceId, "  Which gym is this? "));
@@ -83,7 +81,8 @@ describe("asking about evidence", () => {
   });
 
   test("an occurrence whose evidence is waiting on the owner's reply at midnight stays not judged yet", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s);
     ok(await reviewer.askOwner(evidenceId, "Which gym is this?"));
 
     await s.advanceTo("Tue 00:00");
@@ -100,7 +99,8 @@ describe("asking about evidence", () => {
   });
 
   test("a reviewer can still decide it while it waits on the owner's reply; the alert goes, and a reply is refused", async () => {
-    const { s, owner, reviewer, second, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, second, evidenceId } = await gymEvidenceWaiting(s);
     ok(await reviewer.askOwner(evidenceId, "Which gym is this?"));
 
     expect(await second.decide(evidenceId, { kind: "approve" })).toEqual({ ok: true });
@@ -110,11 +110,12 @@ describe("asking about evidence", () => {
     expect(owner.today().alerts).toEqual([]);
     expect(await owner.reply(evidenceId, "The one on 5th")).toEqual({ ok: false, reason: "not-waiting" });
     expect(await reviewer.askOwner(evidenceId, "And now?")).toEqual({ ok: false, reason: "already-decided" });
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["review-item"]);
   });
 
   test("a second question while it waits keeps it waiting, and the alert shows the latest", async () => {
-    const { s, owner, reviewer, second, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, second, evidenceId } = await gymEvidenceWaiting(s);
     s.setClockTo("Mon 19:00");
     ok(await reviewer.askOwner(evidenceId, "Which gym is this?"));
     s.setClockTo("Mon 19:30");
@@ -133,7 +134,7 @@ describe("asking about evidence", () => {
 
 describe("what can be asked and replied", () => {
   test("a blank question or reply is refused and changes nothing", async () => {
-    const { owner, reviewer, evidenceId } = await evidenceWaiting();
+    const { owner, reviewer, evidenceId } = await gymEvidenceWaiting(scenario());
 
     expect(await reviewer.askOwner(evidenceId, "  \n ")).toEqual({ ok: false, reason: "blank-question" });
     expect(ids(reviewer.reviewQueue())).toEqual([evidenceId]);
@@ -143,7 +144,8 @@ describe("what can be asked and replied", () => {
   });
 
   test("only a reviewer who may decide it can ask, and only its owner can reply, and only to a question", async () => {
-    const { s, owner, reviewer, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, evidenceId } = await gymEvidenceWaiting(s);
     const stranger = await s.befriend(owner, "stranger");
     const notFound = { ok: false, reason: "item-not-found" };
 
@@ -161,7 +163,8 @@ describe("what can be asked and replied", () => {
   });
 
   test("the owner's evidence page shows the photos, where it stands and the thread", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s);
     s.setClockTo("Mon 19:00");
     ok(await reviewer.askOwner(evidenceId, "Which gym is this?"));
 
@@ -199,7 +202,8 @@ describe("what can be asked and replied", () => {
 
 describe("notifications", () => {
   test("the question goes to the owner, opening the item's page; the reply goes to every reviewer, opening Review", async () => {
-    const { s, owner, reviewer, second, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, second, evidenceId } = await gymEvidenceWaiting(s);
     ok(await reviewer.askOwner(evidenceId, "Which gym is this?"));
 
     expect(s.notifier.sentTo(owner)).toEqual([
@@ -216,7 +220,7 @@ describe("notifications", () => {
       },
     ]);
     // The other reviewer isn't told: the item just leaves their queue.
-    expect(s.notifier.sentTo(second).map((n) => n.kind)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(second)).toEqual(["review-item"]);
 
     ok(await owner.reply(evidenceId, "The one on 5th"));
 
@@ -236,7 +240,8 @@ describe("notifications", () => {
   });
 
   test("Comment turned off records neither the question nor the reply for that account", async () => {
-    const { s, owner, reviewer, second, evidenceId } = await evidenceWaiting();
+    const s = scenario();
+    const { owner, reviewer, second, evidenceId } = await gymEvidenceWaiting(s);
     await owner.setNotificationSetting("comment", false);
     await second.setNotificationSetting("comment", false);
 
@@ -244,8 +249,8 @@ describe("notifications", () => {
     ok(await owner.reply(evidenceId, "The one on 5th"));
 
     expect(s.notifier.sentTo(owner)).toEqual([]);
-    expect(s.notifier.sentTo(second).map((n) => n.kind)).toEqual(["review-item"]);
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["review-item", "owner-replied"]);
+    expect(s.notifier.kindsSentTo(second)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["review-item", "owner-replied"]);
   });
 });
 

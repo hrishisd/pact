@@ -12,7 +12,7 @@ import { describe, expect, test } from "vitest";
 import { WEEKDAYS, type PactChange } from "../shared/types.ts";
 import { ankiPact, ownerWithAnki, SPANISH } from "./testing/anki-pact.ts";
 import { failOnCall } from "./testing/fakes.ts";
-import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { scenario, type Scenario } from "./testing/scenario.ts";
 import { cards, dayOn, ok, pactOf, statusOn } from "./testing/queries.ts";
 
 const TUE = "2026-01-06";
@@ -569,7 +569,7 @@ describe("reminders", () => {
     deckShows({ new: 10, review: 32 }, TUE, "Tue 20:50");
     await s.advanceTo("Tue 20:50");
     await s.advanceTo("Tue 21:00");
-    const reminders = () => s.notifier.sentTo(owner).filter((n) => n.kind === "reminder");
+    const reminders = () => s.notifier.sentTo(owner, "reminder");
     expect(reminders().map((n) => [n.payload.title, n.payload.body])).toEqual([
       ["Spanish", "42 cards left, due at midnight"],
     ]);
@@ -594,12 +594,10 @@ describe("reminders", () => {
 
     await s.advanceTo("Tue 23:00");
     await s.advanceTo("Wed 01:30");
-    expect(
-      s.notifier
-        .sentTo(owner)
-        .filter((n) => n.kind === "reminder")
-        .map((n) => n.payload.body),
-    ).toEqual(["Due at 2:00am. Not checked yet.", "Due at 2:00am. Not checked yet."]);
+    expect(s.notifier.sentTo(owner, "reminder").map((n) => n.payload.body)).toEqual([
+      "Due at 2:00am. Not checked yet.",
+      "Due at 2:00am. Not checked yet.",
+    ]);
   });
 });
 
@@ -676,7 +674,7 @@ describe("a reminder from the rollover hour", () => {
     const s = scenario();
     const { owner, reviewer, sam } = await ownerWithAnki(s);
     ok(await owner.createPact({ ...ankiPact(sam.id, reviewer, { days: ["tue"] }), reminders: ["09:00"] }));
-    const reminders = () => s.notifier.sentTo(owner).filter((n) => n.kind === "reminder");
+    const reminders = () => s.notifier.sentTo(owner, "reminder");
 
     await s.advanceTo("Tue 08:59");
     expect(reminders()).toEqual([]);
@@ -688,10 +686,6 @@ describe("a reminder from the rollover hour", () => {
 });
 
 describe("AnkiWeb refusing Pact's login", () => {
-  function connectionProblems(s: Scenario, owner: AccountHandle) {
-    return s.notifier.sentTo(owner).filter((n) => n.kind === "connection-problem");
-  }
-
   test("at 08:00: one alert and one push, then no calls; reconnected at 12:00, a finished deck satisfies the day", async () => {
     const s = scenario();
     const { owner, createPact, deckShows } = await ownerWithAnki(s);
@@ -711,7 +705,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
     expect(owner.today().alerts).toEqual([{ kind: "connection", service: "anki", status: "needs-reconnecting" }]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "needs-reconnecting" } });
-    expect(connectionProblems(s, owner)).toEqual([
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
       {
         recipient: owner.id,
         kind: "connection-problem",
@@ -732,7 +726,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
     expect(owner.today().alerts).toEqual([]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: null } });
-    expect(connectionProblems(s, owner)).toHaveLength(1);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toHaveLength(1);
   });
 
   test("a check now that finds it refused marks it the same way", async () => {
@@ -743,7 +737,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     s.setClockTo("Tue 09:00");
     await owner.checkAnki();
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
-    expect(connectionProblems(s, owner)).toHaveLength(1);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toHaveLength(1);
   });
 
   test("never reconnected: the day is Missed at its due time, as not reached", async () => {
@@ -777,7 +771,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     await ticking;
 
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
     s.ankiSource.reconnect(owner.id);
     deckShows({}, TUE, "Tue 08:15");
     await s.advanceTo("Tue 08:20");
@@ -810,7 +804,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     await s.advanceTo("Tue 08:00");
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
     expect(owner.today().alerts).toEqual([]);
-    expect(connectionProblems(s, owner)).toEqual([]);
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
   });
 
   test("disconnected on Profile: an alert to connect again, no calls, and the day is Missed", async () => {

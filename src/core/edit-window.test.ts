@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "vitest";
 import type { NewPact } from "../shared/types.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
@@ -13,13 +13,7 @@ async function newGym(s: Scenario) {
   s.setClockTo("Mon 10:00");
   const gym = await people.createPact("Gym", MON_WED_FRI, { reviewers: [people.reviewer] });
   const edited = (changes: Partial<NewPact> = {}): NewPact => ({
-    evidenceKind: "camera",
-    name: "Gym",
-    description: "A photo of Gym",
-    schedule: { kind: "fixed-days", days: MON_WED_FRI },
-    penaltyCents: 500,
-    recipientId: people.sam.id,
-    reviewerIds: [people.reviewer.id],
+    ...cameraPact("Gym", MON_WED_FRI, { recipientId: people.sam.id, reviewers: [people.reviewer] }),
     ...changes,
   });
   return { ...people, gym, edited };
@@ -104,16 +98,7 @@ describe("editing a pact in its edit window", () => {
     // Monday's midnight is exactly an hour after creation, so it still counts...
     s.setClockTo("Mon 23:00");
     const gym = await createPact("Gym", ["tue"], { reviewers: [reviewer] });
-    const daily = { kind: "fixed-days", days: ["mon", "tue"] } as const;
-    const terms: NewPact = {
-      evidenceKind: "camera",
-      name: "Gym",
-      description: "A photo of Gym",
-      schedule: { ...daily, days: [...daily.days] },
-      penaltyCents: 500,
-      recipientId: sam.id,
-      reviewerIds: [reviewer.id],
-    };
+    const terms = cameraPact("Gym", ["mon", "tue"], { recipientId: sam.id, reviewers: [reviewer] });
 
     // ...even when the edit, at 23:05, comes under an hour before it.
     s.setClockTo("Mon 23:05");
@@ -228,7 +213,7 @@ describe("when the edit window closes", () => {
 
     await s.advanceTo("Mon 15:00");
 
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["picked-as-reviewer"]);
   });
 
   test("an edit that swaps the reviewer notifies only the final one, with the final terms", async () => {
@@ -269,7 +254,7 @@ describe("evidence submitted in the edit window", () => {
 
     await s.advanceTo("Mon 10:10");
     expect(reviewer.reviewQueue()).toMatchObject([{ kind: "evidence", id: evidence.evidenceId }]);
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer", "review-item"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["picked-as-reviewer", "review-item"]);
 
     await s.advanceTo("Mon 10:11");
     expect(s.notifier.sentTo(reviewer)).toHaveLength(2);
@@ -280,10 +265,10 @@ describe("evidence submitted in the edit window", () => {
     const { owner, reviewer, gym } = await newGym(s);
     s.setClockTo("Mon 10:10");
     await owner.submitEvidence(gym, [photo()]);
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["review-item"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["review-item"]);
 
     await s.advanceTo("Mon 10:11");
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["review-item", "picked-as-reviewer"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["review-item", "picked-as-reviewer"]);
   });
 
   test("evidence still uploading when the window closes isn't lost", async () => {
@@ -295,11 +280,11 @@ describe("evidence submitted in the edit window", () => {
     const release = s.photoStore.hold();
     const submitting = owner.submitEvidence(gym, [photo()]);
     await s.advanceTo("Mon 10:10");
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["picked-as-reviewer"]);
     release();
     await submitting;
 
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer", "review-item"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["picked-as-reviewer", "review-item"]);
   });
 
   test("an edit that takes its day off the schedule removes it", async () => {
@@ -312,7 +297,7 @@ describe("evidence submitted in the edit window", () => {
     expect(owner.today().waiting).toEqual([]);
     await s.advanceTo("Mon 10:10");
     expect(reviewer.reviewQueue()).toEqual([]);
-    expect(s.notifier.sentTo(reviewer).map((n) => n.kind)).toEqual(["picked-as-reviewer"]);
+    expect(s.notifier.kindsSentTo(reviewer)).toEqual(["picked-as-reviewer"]);
   });
 
   test("an edit that swaps the reviewer sends it to the final one", async () => {
@@ -326,7 +311,7 @@ describe("evidence submitted in the edit window", () => {
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(s.notifier.sentTo(reviewer)).toEqual([]);
     expect(second.reviewQueue()).toHaveLength(1);
-    expect(s.notifier.sentTo(second).map((n) => n.kind)).toEqual(["picked-as-reviewer", "review-item"]);
+    expect(s.notifier.kindsSentTo(second)).toEqual(["picked-as-reviewer", "review-item"]);
   });
 });
 

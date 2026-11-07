@@ -9,7 +9,7 @@
 import { describe, expect, test } from "vitest";
 import type { NewPact, Schedule, TodayToDoCard } from "../shared/types.ts";
 import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
+import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
 import { cards, changed, ledgerHistory, ok, owed, pactOf } from "./testing/queries.ts";
@@ -45,10 +45,7 @@ async function sessionAt(s: Scenario, when: string, owner: AccountHandle, review
 }
 
 function reminderDays(s: Scenario, owner: AccountHandle) {
-  return s.notifier
-    .sentTo(owner)
-    .filter((n) => n.kind === "reminder")
-    .map((n) => n.payload.occurrenceDate);
+  return s.notifier.sentTo(owner, "reminder").map((n) => n.payload.occurrenceDate);
 }
 
 describe("the spec's examples", () => {
@@ -79,7 +76,7 @@ describe("the spec's examples", () => {
       },
     });
     expect(owed(owner)).toBe(500);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([
       expect.objectContaining({
         payload: expect.objectContaining({ occurrenceDate: WEEK_1, body: "Week of Mon Jan 12 · 1 short · $5 to Sam" }),
       }),
@@ -127,7 +124,7 @@ describe("the spec's examples", () => {
     await reviewer.decide(item!.id, { kind: "approve" });
 
     expect(pactOf(owner, piano)).toMatchObject({ schedule: weekly(2), newTerms: { appliesFrom: WEEK_2 } });
-    expect(s.notifier.sentTo(owner).find((n) => n.kind === "change-request-decided")?.payload.body).toBe(
+    expect(s.notifier.sentTo(owner, "change-request-decided")[0]?.payload.body).toBe(
       "Piano · New terms start Mon Jan 19",
     );
 
@@ -240,17 +237,11 @@ describe("making a Weekly count pact", () => {
     const s = scenario();
     const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
-    const pact = pactOf(owner, gym);
 
-    const edited = await owner.editPact(gym, {
-      evidenceKind: "camera",
-      name: pact.name,
-      description: pact.description,
-      schedule: weekly(2),
-      penaltyCents: 500,
-      recipientId: sam.id,
-      reviewerIds: [reviewer.id],
-    });
+    const edited = await owner.editPact(
+      gym,
+      cameraPact("Gym", weekly(2), { recipientId: sam.id, reviewers: [reviewer] }),
+    );
 
     expect(edited).toEqual({ ok: true });
     expect(pactOf(owner, gym)).toMatchObject({ schedule: weekly(2), firstOccurrence: { date: WEEK_1 } });
@@ -483,7 +474,7 @@ describe("excuses", () => {
       detail: null,
     });
     expect(owed(owner)).toBe(0);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([]);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
   });
 
   test("a short week can be excused within 48 hours, which removes all its penalties", async () => {
@@ -576,7 +567,7 @@ describe("reminders", () => {
     }
 
     expect(reminderDays(s, owner)).toEqual([TUESDAY_1]);
-    expect(s.notifier.sentTo(owner).find((n) => n.kind === "reminder")?.payload.body).toBe(
+    expect(s.notifier.sentTo(owner, "reminder")[0]?.payload.body).toBe(
       "1 of 3 this week. Today's photo is due at midnight.",
     );
   });
