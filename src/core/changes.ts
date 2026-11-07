@@ -12,7 +12,7 @@ import type {
   Schedule,
   TermChange,
 } from "../shared/types.ts";
-import { ankiDueByOrder, minutesFrom, NIGHT_STARTS_HOUR } from "./occurrences.ts";
+import { ankiDueByOrder, minutesFrom, NIGHT_STARTS_HOUR, type DayClock } from "./occurrences.ts";
 
 /** A pact's terms an owner can change: everything but its evidence kind. */
 export interface ChangeableTerms {
@@ -45,10 +45,10 @@ export type TermDiff =
 
 /**
  * Each term that differs between `before` and `after`, and what changing it
- * does. `ankiRollover` is an Anki pact's rollover hour, null for any other
- * pact: an Anki pact's due-by times are ordered by where they fall in its Anki day.
+ * does. `day` is the pact's day clock as it stands: an Anki pact's due-by
+ * times are ordered by where they fall in its Anki day.
  */
-export function termDiffs(before: ChangeableTerms, after: ChangeableTerms, ankiRollover: number | null): TermDiff[] {
+export function termDiffs(before: ChangeableTerms, after: ChangeableTerms, day: DayClock): TermDiff[] {
   const diffs: TermDiff[] = [];
   const add = (term: Exclude<TermDiff["term"], "deck" | "in-bed-by">, effect: ChangeEffect) =>
     diffs.push({ term, effect });
@@ -69,7 +69,7 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms, ankiR
   const schedule = scheduleEffect(before.schedule, after.schedule);
   if (schedule !== null) add("schedule", schedule);
   if (after.dueBy !== before.dueBy) {
-    const later = dueByOrder(after.dueBy, ankiRollover) > dueByOrder(before.dueBy, ankiRollover);
+    const later = dueByOrder(after.dueBy, day) > dueByOrder(before.dueBy, day);
     add("due-by", later ? "needs-approval" : "stricter");
   }
   // No start date is the earliest start, and no end date the latest end.
@@ -123,12 +123,19 @@ function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null 
 }
 
 /**
- * How late a due-by time (null for midnight) is in its day, in minutes. A
- * Camera day ends at midnight, so no due-by time is the latest. An Anki day
- * runs from its rollover hour, so a time the morning after is later than midnight.
+ * How late a due-by time (null for midnight) is in a day on the clock `day`,
+ * in minutes. A Camera day ends at midnight, so no due-by time is the latest.
+ * An Anki day runs from its rollover hour, so a time the morning after is
+ * later than midnight. A bedtime night has its in-bed-by time instead.
  */
-function dueByOrder(dueBy: ClockTime | null, ankiRollover: number | null): number {
-  // Both sides passed ankiDueByFits before this.
-  if (ankiRollover !== null) return ankiDueByOrder(dueBy, ankiRollover);
-  return dueBy === null ? 24 * 60 : minutesFrom(dueBy, 0);
+function dueByOrder(dueBy: ClockTime | null, day: DayClock): number {
+  switch (day.kind) {
+    case "day":
+      return dueBy === null ? 24 * 60 : minutesFrom(dueBy, 0);
+    case "night":
+      throw new Error("a bedtime night has no due-by time");
+    case "anki":
+      // Both sides passed ankiDueByFits before this.
+      return ankiDueByOrder(dueBy, day.rollover);
+  }
 }

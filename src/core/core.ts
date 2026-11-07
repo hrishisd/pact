@@ -22,8 +22,10 @@ import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
   ankiDueByFits,
   ankiDueByOrder,
+  dayStartHour,
   dueSoonEnough,
   firstWeekFrom,
+  hasSchedule,
   lastDayOf,
   minutesFrom,
   newOccurrenceTerms,
@@ -35,11 +37,15 @@ import {
   occurrencesOverTime,
   reminderAt,
   utcOffsetMs,
+  type DayClock,
   type EarlierTerms,
+  type NewTerms,
   type Occurrence,
   type Occurrences,
   type OccurrenceTerms,
+  type OneTimeTerms,
   type OuraOffset,
+  type RecurringTerms,
 } from "./occurrences.ts";
 import type {
   AnkiCountsResult,
@@ -896,6 +902,7 @@ class Core implements PactCore {
           if (!checked.ok) return checked;
 
           const id = this.#newId();
+          const times = timesOf(checked.terms);
           this.#db
             .prepare(
               `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, in_bed_by,
@@ -911,8 +918,8 @@ class Core implements PactCore {
               checked.description,
               pact.evidenceKind,
               JSON.stringify(checked.terms.schedule),
-              checked.terms.inBedBy,
-              checked.terms.dueBy,
+              times.inBedBy,
+              times.dueBy,
               checked.startDate,
               checked.terms.endDate,
               pact.penaltyCents,
@@ -922,7 +929,7 @@ class Core implements PactCore {
               JSON.stringify(checked.reminders),
               now.toISOString(),
               checked.ankiDeckId,
-              checked.terms.ankiRollover,
+              times.ankiRollover,
             );
           this.#setReviewers(id, checked.reviewerIds);
           return { ok: true, pactId: id };
@@ -937,6 +944,7 @@ class Core implements PactCore {
           const checked = this.#checkedPact(accountId, timezone, pact, new Date(row.created_at), row);
           if (!checked.ok) return checked;
 
+          const times = timesOf(checked.terms);
           this.#db
             .prepare(
               `UPDATE pact SET name = ?, description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?,
@@ -948,8 +956,8 @@ class Core implements PactCore {
               checked.name,
               checked.description,
               JSON.stringify(checked.terms.schedule),
-              checked.terms.inBedBy,
-              checked.terms.dueBy,
+              times.inBedBy,
+              times.dueBy,
               checked.startDate,
               checked.terms.endDate,
               pact.penaltyCents,
@@ -997,12 +1005,17 @@ class Core implements PactCore {
         // due-by time the Anki day can't be due by, which creating the pact refuses.
         const validDueBy =
           dueBy !== undefined && isDueBy(dueBy) && (ankiRollover === null || ankiDueByFits(dueBy, ankiRollover));
-        const timing = newOccurrenceTerms(schedule, pact ? new Date(pact.created_at) : this.#clock.now(), timezone, {
+        const times = {
           inBedBy: inBedBy !== undefined && isClockTime(inBedBy) ? inBedBy : null,
           dueBy: validDueBy ? dueBy : null,
           ankiRollover,
-          startDate: startDate !== undefined && isLocalDate(startDate) ? startDate : null,
-        });
+        };
+        const timing = newOccurrenceTerms(
+          newTermsOf(schedule, formDayClock(times), times.dueBy),
+          pact ? new Date(pact.created_at) : this.#clock.now(),
+          timezone,
+          startDate !== undefined && isLocalDate(startDate) ? startDate : null,
+        );
         if (!timing.ok) return timing;
         return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
       },
@@ -2887,17 +2900,18 @@ class Core implements PactCore {
     });
   }
 
-  /** The timing terms pact `pactId` had before each change, oldest first. */
-  #earlierTermsOf(pactId: string): EarlierTerms[] {
+  /**
+   * The timing terms `pact` had before each change, oldest first. A One-time
+   * change applies to its one occurrence, so it has none that count.
+   */
+  #earlierTermsOf(pact: PactClock & Pick<PactRow, "id">): EarlierTerms[] {
     const rows = this.#db
       .prepare(`SELECT until, schedule, in_bed_by, due_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`)
-      .all(pactId) as { until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }[];
-    return rows.map((row) => ({
-      until: row.until,
-      schedule: scheduleOf(row.schedule),
-      inBedBy: row.in_bed_by,
-      dueBy: row.due_by,
-    }));
+      .all(pact.id) as { until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }[];
+    return rows.flatMap((row) => {
+      const terms = scheduleTermsOf(pact, scheduleOf(row.schedule), row.in_bed_by, row.due_by);
+      return hasSchedule(terms, "one-time") ? [] : [{ ...terms, until: row.until }];
+    });
   }
 
   /**
@@ -2908,13 +2922,14 @@ class Core implements PactCore {
   #occurrencesOf(pactId: string, timezone: string): Occurrences {
     const pact = this.#db
       .prepare(
-        `SELECT schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id, evidence_kind,
-                anki_rollover_hour
+        `SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id,
+                evidence_kind, anki_rollover_hour
          FROM pact WHERE id = ?`,
       )
       .get(pactId) as
       | Pick<
           PactRow,
+          | "id"
           | "schedule"
           | "first_occurrence"
           | "in_bed_by"
@@ -2928,7 +2943,7 @@ class Core implements PactCore {
       | undefined;
     if (!pact) throw new Error(`no pact ${pactId}`);
     const ouraOffset = pact.evidence_kind === "oura" ? this.#ouraOffset(pact.owner_account_id, timezone) : null;
-    return occurrencesOverTime(occurrenceTermsOf(pact), this.#earlierTermsOf(pactId), timezone, ouraOffset);
+    return occurrencesOverTime(occurrenceTermsOf(pact), this.#earlierTermsOf(pact), timezone, ouraOffset);
   }
 
   /**
@@ -3080,15 +3095,11 @@ class Core implements PactCore {
     if (checked.terms.schedule.kind !== before.schedule.kind) return { ok: false, reason: "schedule-kind-fixed" };
     const after = changeableTermsOf(checked, change);
     // Reminders apply at once, so they go off before the due time in force now as well as the new one.
-    const current = {
-      oneTime: before.schedule.kind === "one-time",
-      ankiRollover: pact.anki_rollover_hour,
-      inBedBy: pact.in_bed_by,
-      dueBy: pact.due_by,
-      dueAt: this.#occurrencesOf(pact.id, zone).first.dueAt,
-    };
-    if (!remindersGoOffInTime(after.reminders, current, zone)) return { ok: false, reason: "reminder-after-due-time" };
-    const diffs = termDiffs(before, after, pact.anki_rollover_hour);
+    const currentDueAt = this.#occurrencesOf(pact.id, zone).first.dueAt;
+    if (!remindersGoOffInTime(after.reminders, occurrenceTermsOf(pact), currentDueAt, zone)) {
+      return { ok: false, reason: "reminder-after-due-time" };
+    }
+    const diffs = termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by));
     if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
       return { ok: false, reason: "change-request-waiting" };
     }
@@ -3149,17 +3160,17 @@ class Core implements PactCore {
     const today = localDateOf(at, timezone);
     const from = firstDayNotOpen(after.schedule, today);
     const current = occurrenceTermsOf(pact);
-    const earlier = this.#earlierTermsOf(pact.id);
+    const earlier = this.#earlierTermsOf(pact);
     const firstOccurrence = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
+    // A schedule keeps its kind once its edit window has closed, so the terms in force now are on a recurring schedule too.
+    if (hasSchedule(current, "one-time")) throw new Error(`pact ${pact.id} is One-time, but its change isn't`);
     // The terms in force now stay with the occurrences dated before `from`, unless a change made today put them there.
-    const planned = earlier.some((terms) => terms.until === from)
-      ? earlier
-      : [...earlier, { until: from, schedule: current.schedule, inBedBy: current.inBedBy, dueBy: current.dueBy }];
-    const { schedule, inBedBy, dueBy, endDate } = after;
+    const planned = earlier.some((terms) => terms.until === from) ? earlier : [...earlier, { ...current, until: from }];
     const start = laterDate(firstOccurrence, from);
+    const changed = scheduleTermsOf(pact, after.schedule, after.inBedBy, after.dueBy);
     // With no day left before its end date, the change still starts tomorrow (or next week).
     const [first] = occurrencesOverTime(
-      { ...current, schedule, firstOccurrence, inBedBy, dueBy, endDate },
+      { ...changed, firstOccurrence, endDate: after.endDate },
       planned,
       timezone,
     ).between(from, addDays(start, 7));
@@ -3286,8 +3297,9 @@ class Core implements PactCore {
     at: Date,
   ): boolean {
     const current = this.#occurrencesOf(pact.id, timezone).first;
+    const terms = scheduleTermsOf(pact, after.schedule, pact.in_bed_by, after.dueBy);
     const changed = occurrences(
-      { ...occurrenceTermsOf(pact), schedule: after.schedule, dueBy: after.dueBy },
+      { ...terms, firstOccurrence: pact.first_occurrence, endDate: pact.end_date },
       timezone,
     ).first;
     return changed.dueAt.getTime() === current.dueAt.getTime() || dueSoonEnough(changed, at);
@@ -3366,7 +3378,7 @@ class Core implements PactCore {
     const what =
       after === null
         ? []
-        : termDiffs(before, after, pact.anki_rollover_hour).map(({ term }) =>
+        : termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by)).map(({ term }) =>
             term === "schedule" && after.schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term],
           );
     const body = [...what, ...(trimmed === "" ? [] : [`“${trimmed}”`])].join(" · ");
@@ -3418,7 +3430,7 @@ class Core implements PactCore {
         pact.owner_account_id,
         request.before,
         request.after,
-        termDiffs(request.before, request.after, pact.anki_rollover_hour),
+        termDiffs(request.before, request.after, dayClockOf(pact, pact.in_bed_by, pact.due_by)),
       ),
       start: waiting
         ? this.#startOfNewTerms(pact, ownerZone(row.timezone, row.owner_account_id), request.after, this.#clock.now())
@@ -3789,7 +3801,7 @@ class Core implements PactCore {
       this.#tellPickedAsReviewer(this.#reviewersOf(pact.id), `${ownerName} picked you as a reviewer`, {
         id: pact.id,
         name: pact.name,
-        schedule: occurrenceTermsOf(pact).schedule,
+        schedule: scheduleOf(pact.schedule),
         penaltyCents: pact.penalty_cents,
       });
       const closedAt = editWindowEnd(pact).toISOString();
@@ -4684,14 +4696,24 @@ class Core implements PactCore {
     const pacts = this.#db
       .prepare(
         `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
-                pact.anki_rollover_hour, pact.owner_account_id, account.timezone
+                pact.anki_rollover_hour, pact.in_bed_by, pact.due_by, pact.created_at, pact.owner_account_id,
+                account.timezone
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.stage = 'active'
          ORDER BY pact.created_at, pact.id`,
       )
       .all() as (Pick<
       PactRow,
-      "id" | "name" | "evidence_kind" | "schedule" | "reminders" | "reminded_through" | "anki_rollover_hour"
+      | "id"
+      | "name"
+      | "evidence_kind"
+      | "schedule"
+      | "reminders"
+      | "reminded_through"
+      | "anki_rollover_hour"
+      | "in_bed_by"
+      | "due_by"
+      | "created_at"
     > & {
       owner_account_id: AccountId;
       timezone: string | null;
@@ -5545,22 +5567,98 @@ function editWindowClosesAt(pact: Pick<PactRow, "created_at">, now: Date): Date 
   return now.getTime() < closesAt.getTime() ? closesAt : null;
 }
 
+/** What a pact's day clock and One-time occurrence follow from, besides its times. */
+type PactClock = Pick<PactRow, "evidence_kind" | "anki_rollover_hour" | "created_at">;
+
 /** A pact row's occurrence terms, its stored schedule parsed. */
 function occurrenceTermsOf(
-  row: Pick<
-    PactRow,
-    "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "anki_rollover_hour" | "end_date" | "created_at"
-  >,
+  row: PactClock & Pick<PactRow, "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date">,
 ): OccurrenceTerms {
-  return {
-    schedule: scheduleOf(row.schedule),
-    firstOccurrence: row.first_occurrence,
-    inBedBy: row.in_bed_by,
-    dueBy: row.due_by,
-    ankiRollover: row.anki_rollover_hour,
-    endDate: row.end_date,
-    createdAt: new Date(row.created_at),
-  };
+  const terms = scheduleTermsOf(row, scheduleOf(row.schedule), row.in_bed_by, row.due_by);
+  return { ...terms, firstOccurrence: row.first_occurrence, endDate: row.end_date };
+}
+
+/** `pact`'s terms on `schedule` with the times `inBedBy` and `dueBy`, as its columns store them. */
+function scheduleTermsOf(
+  pact: PactClock,
+  schedule: Schedule,
+  inBedBy: ClockTime | null,
+  dueBy: ClockTime | null,
+): RecurringTerms | OneTimeTerms {
+  switch (schedule.kind) {
+    case "fixed-days":
+      return { schedule, day: dayClockOf(pact, inBedBy, dueBy) };
+    case "weekly-count":
+      return { schedule, dueBy };
+    case "one-time":
+      return { schedule, dueBy, createdAt: new Date(pact.created_at) };
+  }
+}
+
+/**
+ * The day clock of `pact` with the times `inBedBy` and `dueBy`: a Camera
+ * pact's days, an Oura Ring pact's nights, an Anki pact's Anki days. The
+ * schema keeps the rollover hour set on Anki pacts, and only on them.
+ */
+function dayClockOf(
+  pact: Pick<PactRow, "evidence_kind" | "anki_rollover_hour">,
+  inBedBy: ClockTime | null,
+  dueBy: ClockTime | null,
+): DayClock {
+  switch (pact.evidence_kind) {
+    case "camera":
+      return { kind: "day", dueBy };
+    case "oura":
+      if (inBedBy === null) throw new Error("an Oura Ring pact has no in-bed-by time");
+      return { kind: "night", inBedBy };
+    case "anki":
+      if (pact.anki_rollover_hour === null) throw new Error("an Anki pact has no rollover hour");
+      return { kind: "anki", rollover: pact.anki_rollover_hour, dueBy };
+  }
+}
+
+/** `schedule`'s terms for a new pact: Fixed days due on the day clock `day`, any other schedule by `dueBy`. */
+function newTermsOf(schedule: Schedule, day: DayClock, dueBy: ClockTime | null): NewTerms {
+  switch (schedule.kind) {
+    case "fixed-days":
+      return { schedule, day };
+    case "weekly-count":
+      return { schedule, dueBy };
+    case "one-time":
+      return { schedule, dueBy };
+  }
+}
+
+/**
+ * The day clock a pact form's times give as far as it has them: an Anki
+ * day's with a rollover hour, else a night's with an in-bed-by time, else a
+ * Camera day's.
+ */
+function formDayClock(times: ClockTimes): DayClock {
+  if (times.ankiRollover !== null) return { kind: "anki", rollover: times.ankiRollover, dueBy: times.dueBy };
+  if (times.inBedBy !== null) return { kind: "night", inBedBy: times.inBedBy };
+  return { kind: "day", dueBy: times.dueBy };
+}
+
+/** A pact's times as its columns store them: each null where its terms have none. */
+interface ClockTimes {
+  inBedBy: ClockTime | null;
+  dueBy: ClockTime | null;
+  ankiRollover: number | null;
+}
+
+/** `terms`' times as the pact's columns store them. */
+function timesOf(terms: OccurrenceTerms): ClockTimes {
+  if (!hasSchedule(terms, "fixed-days")) return { inBedBy: null, dueBy: terms.dueBy, ankiRollover: null };
+  const { day } = terms;
+  switch (day.kind) {
+    case "day":
+      return { inBedBy: null, dueBy: day.dueBy, ankiRollover: null };
+    case "night":
+      return { inBedBy: day.inBedBy, dueBy: null, ankiRollover: null };
+    case "anki":
+      return { inBedBy: null, dueBy: day.dueBy, ankiRollover: day.rollover };
+  }
 }
 
 /**
@@ -5699,28 +5797,26 @@ function checkedTerms(
   if (unique.length > MAX_REMINDERS || !unique.every(oneTime ? isDatedReminder : isClockTime)) {
     return { ok: false, reason: "invalid-reminders" };
   }
-  const reminders = sortedReminders(unique, oneTime, oura, ankiRollover);
   const name = pact.name.trim();
   // Oura Ring and Anki pacts have no photo to describe.
   const description = oura || anki ? "" : pact.description.trim();
   if (name === "") return { ok: false, reason: "blank-name" };
   if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
   if (timezone === null) return { ok: false, reason: "no-timezone" };
-  const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone, {
-    inBedBy: oura ? pact.inBedBy! : null,
-    dueBy: pact.dueBy ?? null,
-    ankiRollover,
-    startDate: pact.startDate ?? null,
-  });
+  const dueBy = pact.dueBy ?? null;
+  // The day clock is for Fixed days: Oura Ring and Anki pacts were refused any other schedule above.
+  const day = dayClockOf(
+    { evidence_kind: pact.evidenceKind, anki_rollover_hour: ankiRollover },
+    pact.inBedBy ?? null,
+    dueBy,
+  );
+  const terms = newTermsOf(pact.schedule, day, dueBy);
+  const timing = newOccurrenceTerms(terms, createdAt, timezone, pact.startDate ?? null);
   if (!timing.ok) return timing;
-  const due = {
-    oneTime,
-    ankiRollover,
-    inBedBy: oura ? pact.inBedBy! : null,
-    dueBy: timing.terms.dueBy,
-    dueAt: timing.first.dueAt,
-  };
-  if (!remindersGoOffInTime(reminders, due, timezone)) return { ok: false, reason: "reminder-after-due-time" };
+  const reminders = sortedReminders(unique, timing.terms);
+  if (!remindersGoOffInTime(reminders, timing.terms, timing.first.dueAt, timezone)) {
+    return { ok: false, reason: "reminder-after-due-time" };
+  }
   const endDate = pact.endDate ?? null;
   // The first occurrence has to end by the end date: a whole week, for Weekly count.
   if (endDate !== null && endDate < lastDayOf(timing.terms.schedule, timing.terms.firstOccurrence)) {
@@ -5741,36 +5837,39 @@ function checkedTerms(
 }
 
 /**
- * `reminders` in the order they go off: a One-time pact's by date and time
- * (`oneTime`), a night's from 18:00 to the morning after (`oura`), an Anki
+ * `reminders` in the order they go off on a pact with `terms`: a One-time
+ * pact's by date and time, any other's from the hour its day starts
+ * (`dayStartHour`): a night's from 18:00 to the morning after, an Anki
  * day's from its rollover hour, any other day's from midnight.
  */
-function sortedReminders(reminders: string[], oneTime: boolean, oura: boolean, ankiRollover: number | null): string[] {
+function sortedReminders(reminders: string[], terms: OccurrenceTerms): string[] {
   // "YYYY-MM-DDTHH:MM" sorts as text.
-  if (oneTime) return [...reminders].sort((a, b) => a.localeCompare(b, "en-US"));
-  const dayStarts = ankiRollover ?? (oura ? NIGHT_STARTS_HOUR : 0);
+  if (hasSchedule(terms, "one-time")) return [...reminders].sort((a, b) => a.localeCompare(b, "en-US"));
+  const dayStarts = dayStartHour(terms);
   return [...reminders].sort((a, b) => minutesFrom(a, dayStarts) - minutesFrom(b, dayStarts));
 }
 
 /**
- * Whether every reminder goes off before the due time `due` sets: a One-time
- * pact's deadline (`dueAt`), a bedtime's in-bed-by time (a night running from
- * 18:00), or else the due-by time, if there is one.
+ * Whether every reminder goes off before the due time a pact with `terms`
+ * has: a One-time pact's deadline (its occurrence's `dueAt`), a bedtime's
+ * in-bed-by time (a night running from 18:00), an Anki day's due-by time
+ * (from its rollover hour; midnight with none), or else the due-by time, if
+ * there is one.
  */
-function remindersGoOffInTime(
-  reminders: string[],
-  due: { oneTime: boolean; ankiRollover: number | null; inBedBy: string | null; dueBy: string | null; dueAt: Date },
-  timezone: string,
-): boolean {
-  const { ankiRollover } = due;
+function remindersGoOffInTime(reminders: string[], terms: OccurrenceTerms, dueAt: Date, timezone: string): boolean {
   return reminders.every((time) => {
-    if (due.oneTime) return oneTimeReminderAt(time, timezone).getTime() < due.dueAt.getTime();
-    if (due.inBedBy !== null) {
-      return minutesFrom(time, NIGHT_STARTS_HOUR) < minutesFrom(due.inBedBy, NIGHT_STARTS_HOUR);
+    if (hasSchedule(terms, "one-time")) return oneTimeReminderAt(time, timezone).getTime() < dueAt.getTime();
+    if (hasSchedule(terms, "weekly-count")) return terms.dueBy === null || time < terms.dueBy;
+    const { day } = terms;
+    switch (day.kind) {
+      case "day":
+        return day.dueBy === null || time < day.dueBy;
+      case "night":
+        return minutesFrom(time, NIGHT_STARTS_HOUR) < minutesFrom(day.inBedBy, NIGHT_STARTS_HOUR);
+      case "anki":
+        // A due-by time that can't fit is refused before this.
+        return minutesFrom(time, day.rollover) < ankiDueByOrder(day.dueBy, day.rollover);
     }
-    // Without a due-by time an Anki day is due at midnight. A due-by time that can't fit is refused before this.
-    if (ankiRollover !== null) return minutesFrom(time, ankiRollover) < ankiDueByOrder(due.dueBy, ankiRollover);
-    return due.dueBy === null || time < due.dueBy;
   });
 }
 
@@ -5937,11 +6036,12 @@ const TERM_LABELS: Record<TermDiff["term"], string> = {
 
 /** The terms a change would give a pact: `checked`, from `change`, with the penalty and recipient it names. */
 function changeableTermsOf(checked: CheckedPact, change: PactChange): ChangeableTerms {
+  const { inBedBy, dueBy } = timesOf(checked.terms);
   return {
     name: checked.name,
     description: checked.description,
-    inBedBy: checked.terms.inBedBy,
-    dueBy: checked.terms.dueBy,
+    inBedBy,
+    dueBy,
     startDate: checked.startDate,
     endDate: checked.terms.endDate,
     schedule: checked.terms.schedule,
@@ -6094,20 +6194,20 @@ interface ExcuseToDecide {
  * own date, and they're all about the one occurrence.
  */
 function remindersDue(
-  pact: Pick<PactRow, "schedule" | "evidence_kind" | "anki_rollover_hour">,
+  pact: PactClock & Pick<PactRow, "schedule" | "in_bed_by" | "due_by">,
   times: string[],
   occurrences: Occurrences,
   fromDate: LocalDate,
   toDate: LocalDate,
   timezone: string,
 ): { date: LocalDate; dueAt: Date; time: string; at: Date }[] {
-  const schedule = scheduleOf(pact.schedule);
-  if (schedule.kind === "one-time") {
+  const terms = scheduleTermsOf(pact, scheduleOf(pact.schedule), pact.in_bed_by, pact.due_by);
+  if (hasSchedule(terms, "one-time")) {
     const { date, dueAt } = occurrences.first;
     return times.map((time) => ({ date, dueAt, time, at: oneTimeReminderAt(time, timezone) }));
   }
   const days: { date: LocalDate; dueAt: Date }[] = [];
-  if (schedule.kind === "weekly-count") {
+  if (hasSchedule(terms, "weekly-count")) {
     for (let date = fromDate; date <= toDate; date = addDays(date, 1)) {
       const dueAt = occurrences.dayDueAt(date);
       if (dueAt) days.push({ date, dueAt });
@@ -6115,25 +6215,9 @@ function remindersDue(
   } else {
     days.push(...occurrences.between(fromDate, toDate));
   }
-  const kind = reminderKindOf(pact);
   return days.flatMap(({ date, dueAt }) =>
-    times.map((time) => ({ date, dueAt, time, at: reminderAt(date, time, timezone, kind) })),
+    times.map((time) => ({ date, dueAt, time, at: reminderAt(date, time, timezone, terms) })),
   );
-}
-
-/** What a pact's reminder times are about: a calendar day, a night, or an Anki day. */
-function reminderKindOf(
-  pact: Pick<PactRow, "evidence_kind" | "anki_rollover_hour">,
-): "day" | "night" | { ankiRollover: number } {
-  switch (pact.evidence_kind) {
-    case "camera":
-      return "day";
-    case "oura":
-      return "night";
-    case "anki":
-      // The schema keeps the rollover hour set on Anki pacts, and only on them.
-      return { ankiRollover: pact.anki_rollover_hour! };
-  }
 }
 
 /** A decision as its notification's details carry it: a rejection with its reason. */
