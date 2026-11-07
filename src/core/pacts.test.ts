@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { NewPact } from "../shared/types.ts";
+import { ankiPact, ownerWithAnki } from "./testing/anki-pact.ts";
+import { bedtimePact } from "./testing/bedtime-pact.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
 /** An owner in New York with one friend, "reviewer", and one saved recipient, "Sam". */
@@ -104,6 +106,64 @@ describe("what a pact needs", () => {
 
     if (!created.ok) throw new Error(created.reason);
     expect(owner.pact(created.pactId)).toMatchObject({ ok: true, pact: { name: "Gym", description: "A photo" } });
+  });
+});
+
+describe("when several refusals apply", () => {
+  // The evidence source is checked first, then the terms, then the recipient and reviewers.
+  test.each([
+    [{ evidenceKind: "oura", inBedBy: "25:00", name: " " }, "oura-not-connected"],
+    [{ evidenceKind: "oura", inBedBy: "00:00", recipientId: "no-such-recipient" }, "oura-not-connected"],
+    [{ evidenceKind: "anki", ankiDeckId: "999", schedule: { kind: "weekly-count", target: 3 } }, "anki-not-connected"],
+    [{ name: " ", recipientId: "no-such-recipient", reviewerIds: [] }, "blank-name"],
+    [{ penaltyCents: 0, reviewerIds: [] }, "invalid-penalty"],
+    [{ schedule: { kind: "fixed-days", days: [] }, penaltyCents: 0 }, "no-days"],
+    [{ reminders: ["9am"], name: " " }, "invalid-reminders"],
+    [{ dueBy: "09:00", reminders: ["10:00"], endDate: "2026-01-04", penaltyCents: 0 }, "reminder-after-due-time"],
+    [{ endDate: "2026-01-04", penaltyCents: 0, reviewerIds: [] }, "end-date-too-early"],
+    [{ recipientId: "no-such-recipient", reviewerIds: [] }, "unknown-recipient"],
+  ] as [Partial<NewPact>, string][])("%o is refused as %s", async (changes, reason) => {
+    const s = scenario();
+    const { owner, reviewer, recipient } = await ownerWithReviewer(s);
+
+    expect(await owner.createPact(gymPact(recipient.id, reviewer, changes))).toEqual({ ok: false, reason });
+    expect(owner.pacts()).toEqual([]);
+  });
+
+  test("an Anki pact's deck comes before its terms and its recipient", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await ownerWithAnki(s);
+
+    const weekly = { schedule: { kind: "weekly-count", target: 3 } } as const;
+    expect(
+      await owner.createPact({ ...ankiPact(sam.id, reviewer, { ankiDeckId: "999", name: " " }), ...weekly }),
+    ).toEqual({ ok: false, reason: "unknown-deck" });
+    expect(await owner.createPact({ ...ankiPact("no-such-recipient", reviewer), ...weekly })).toEqual({
+      ok: false,
+      reason: "invalid-schedule",
+    });
+  });
+
+  test("with no timezone, a blank description comes first, and the timezone before the recipient", async () => {
+    const s = scenario();
+    const owner = await s.signIn("owner");
+    const reviewer = await s.befriend(owner, "reviewer");
+    const stranger = await s.befriend(reviewer, "stranger");
+    const added = await owner.addRecipient({ name: "Sam" });
+    if (!added.ok) throw new Error(added.reason);
+
+    expect(await owner.createPact(gymPact(added.recipient.id, reviewer, { description: " " }))).toEqual({
+      ok: false,
+      reason: "blank-description",
+    });
+    expect(await owner.createPact(gymPact("no-such-recipient", reviewer, { reviewerIds: [stranger.id] }))).toEqual({
+      ok: false,
+      reason: "no-timezone",
+    });
+    expect(await owner.createPact(bedtimePact(added.recipient.id, reviewer, "25:00"))).toEqual({
+      ok: false,
+      reason: "oura-not-connected",
+    });
   });
 });
 

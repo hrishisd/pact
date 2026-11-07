@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { NewPact, Weekday } from "../shared/types.ts";
+import { ankiPact, ownerWithAnki } from "./testing/anki-pact.ts";
+import { bedtimePact } from "./testing/bedtime-pact.ts";
+import { MON_WED_FRI, photo } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 
 const DAILY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -194,6 +197,99 @@ describe("Today", () => {
           },
         ],
       },
+    ]);
+  });
+});
+
+describe("Today across evidence kinds", () => {
+  test("a pact of each kind not open yet has a Coming up card, soonest first", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await ownerWithAnki(s);
+    await owner.connectOura();
+    const create = async (pact: NewPact) => {
+      const created = await owner.createPact(pact);
+      if (!created.ok) throw new Error(created.reason);
+      return created.pactId;
+    };
+    const gym = await create({
+      evidenceKind: "camera",
+      name: "Gym",
+      description: "A photo of Gym",
+      schedule: { kind: "fixed-days", days: ["mon"] },
+      startDate: "2026-01-12",
+      penaltyCents: 700,
+      recipientId: sam.id,
+      reviewerIds: [reviewer.id],
+    });
+    const bed = await create({ ...bedtimePact(sam.id, reviewer, "23:00", ["wed"]), penaltyCents: 300 });
+    const spanish = await create({ ...ankiPact(sam.id, reviewer, { days: ["tue"] }), penaltyCents: 200 });
+
+    expect(owner.today().sections).toEqual([
+      {
+        kind: "coming-up",
+        cards: [
+          {
+            pactId: spanish,
+            name: "Spanish",
+            penaltyCents: 200,
+            editWindowClosesAt: s.at("Mon 09:10"),
+            opensOn: "2026-01-06",
+            startDate: null,
+          },
+          {
+            pactId: bed,
+            name: "In bed by midnight",
+            penaltyCents: 300,
+            editWindowClosesAt: s.at("Mon 09:10"),
+            opensOn: "2026-01-07",
+            startDate: null,
+          },
+          {
+            pactId: gym,
+            name: "Gym",
+            penaltyCents: 700,
+            editWindowClosesAt: s.at("Mon 09:10"),
+            opensOn: "2026-01-12",
+            startDate: "2026-01-12",
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("alerts: Oura's connection, then AnkiWeb's, then overdue bills, then the rest", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await ownerWithAnki(s);
+    await owner.connectOura();
+    const create = async (pact: NewPact) => {
+      const created = await owner.createPact(pact);
+      if (!created.ok) throw new Error(created.reason);
+      return created.pactId;
+    };
+    const gym = await create({
+      evidenceKind: "camera",
+      name: "Gym",
+      description: "A photo of Gym",
+      schedule: { kind: "fixed-days", days: MON_WED_FRI },
+      penaltyCents: 500,
+      recipientId: sam.id,
+      reviewerIds: [reviewer.id],
+    });
+    await create(bedtimePact(sam.id, reviewer));
+    await create(ankiPact(sam.id, reviewer));
+    await owner.disconnectOura();
+    await owner.disconnectAnki();
+    await s.advanceTo("Wed+2 12:00");
+    const submitted = await owner.submitEvidence(gym, [photo()]);
+    if (!submitted.ok) throw new Error(submitted.reason);
+    await reviewer.decide(submitted.evidenceId, { kind: "reject", reason: "Blurry" });
+    await s.advanceTo("Wed+2 18:00");
+
+    expect(owner.today().alerts.map((alert) => alert.kind)).toEqual([
+      "oura-connection",
+      "anki-connection",
+      "bill-overdue",
+      "evidence-rejected",
     ]);
   });
 });

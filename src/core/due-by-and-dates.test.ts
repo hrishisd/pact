@@ -482,6 +482,37 @@ describe("changing them after the edit window", () => {
     expect(pactOf(owner, ending).endDate).toBeNull();
   });
 
+  test("when several refusals apply: the edit window, then the terms, then the schedule's kind, then a waiting request, then what's open", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY);
+    expect(await changePact(owner, gym, { name: " " })).toEqual({ ok: false, reason: "edit-window-open" });
+    await s.advanceTo("Wed 12:00");
+    const weekly = { kind: "weekly-count", target: 3 } as const;
+
+    // Each refused on its own.
+    expect(await changePact(owner, gym, { startDate: TUESDAY })).toEqual({ ok: false, reason: "pact-started" });
+    expect(await changePact(owner, gym, { endDate: TUESDAY })).toEqual({ ok: false, reason: "end-date-too-early" });
+    // Together, the start date is the one refused.
+    expect(await changePact(owner, gym, { startDate: TUESDAY, endDate: TUESDAY })).toEqual({
+      ok: false,
+      reason: "pact-started",
+    });
+    expect(await changePact(owner, gym, { name: " ", schedule: weekly, startDate: TUESDAY })).toEqual({
+      ok: false,
+      reason: "blank-name",
+    });
+    expect(await changePact(owner, gym, { schedule: weekly, startDate: TUESDAY })).toEqual({
+      ok: false,
+      reason: "schedule-kind-fixed",
+    });
+    await change(owner, gym, { endDate: "2026-01-31" });
+    expect(await changePact(owner, gym, { startDate: TUESDAY, endDate: TUESDAY })).toEqual({
+      ok: false,
+      reason: "change-request-waiting",
+    });
+  });
+
   test("an approved end date ends the pact once it passes; one already past is refused", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
