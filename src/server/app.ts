@@ -843,7 +843,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Whether `value` is one of `list`'s members. */
 function isOneOf<T>(list: readonly T[], value: unknown): value is T {
-  return (list as readonly unknown[]).includes(value);
+  const members: readonly unknown[] = list;
+  return members.includes(value);
 }
 
 function isStringArray(value: unknown): value is string[] {

@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { scenario } from "../core/testing/scenario.ts";
-import { MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
+import { EVIDENCE_KINDS, MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
@@ -65,6 +65,7 @@ import {
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type RemovePushSubscriptionResponse,
   type MeResponse,
   type NotificationsResponse,
   type RecordPaymentResponse,
@@ -836,6 +837,7 @@ describe("pacts", () => {
       "not json",
       {},
       { ...pact, evidenceKind: 3 },
+      { ...pact, evidenceKind: "fitbit" },
       { ...pact, name: null },
       { ...pact, schedule: { kind: "fixed-days", days: ["monday"] } },
       { ...pact, schedule: { kind: "weekly-count", days: ["mon"] } },
@@ -865,6 +867,23 @@ describe("pacts", () => {
       status: 400,
       body: { error: "invalid-request" },
     });
+    for (const evidenceKind of ["fitbit", 3, null]) {
+      const kind = { schedule: pact.schedule, evidenceKind };
+      expect(await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: kind })).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+  });
+
+  test("the Check step takes each evidence kind", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+
+    for (const evidenceKind of EVIDENCE_KINDS) {
+      const body = { schedule: pact.schedule, evidenceKind };
+      const check = await s.api(API_PATHS.firstOccurrence, { cookie: owner.cookie, method: "POST", body });
+      expect({ evidenceKind, ...check }).toMatchObject({ evidenceKind, status: 200, body: { ok: true } });
+    }
   });
 
   test("a fractional penalty is the core's refusal, as data, like a fractional payment", async () => {
@@ -2327,7 +2346,7 @@ describe("notifications", () => {
       method: "DELETE",
       body: { endpoint: DEVICE.endpoint },
     });
-    expect(removed.status).toBe(200);
+    expect(removed).toEqual({ status: 200, body: { ok: true } satisfies RemovePushSubscriptionResponse });
   });
 
   test("an endpoint that isn't a push service is the core's refusal, a 200", async () => {
