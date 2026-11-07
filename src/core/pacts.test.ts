@@ -34,7 +34,7 @@ describe("creating a pact", () => {
         reviewers: [{ id: reviewer.id, name: "reviewer" }],
         reminders: [],
         stage: "active",
-        firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
+        firstOccurrence: { date: s.date("Mon"), dueAt: s.at("Tue 00:00") },
         editWindowClosesAt: s.at("Mon 09:10"),
         newTerms: null,
         waiting: [],
@@ -237,13 +237,13 @@ describe("first occurrence", () => {
   const daily = { kind: "fixed-days", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] } as const;
 
   test.each([
-    { createdAt: "Mon 10:00", date: "2026-01-05", dueAt: "Tue 00:00" },
+    { createdAt: "Mon 10:00", day: "Mon", dueAt: "Tue 00:00" },
     // Monday's midnight is exactly an hour away: still at least an hour.
-    { createdAt: "Mon 23:00", date: "2026-01-05", dueAt: "Tue 00:00" },
+    { createdAt: "Mon 23:00", day: "Mon", dueAt: "Tue 00:00" },
     // Monday's midnight is under an hour away.
-    { createdAt: "Mon 23:01", date: "2026-01-06", dueAt: "Wed 00:00" },
-    { createdAt: "Mon 23:30", date: "2026-01-06", dueAt: "Wed 00:00" },
-  ])("a daily pact created $createdAt first falls due on $date", async ({ createdAt, date, dueAt }) => {
+    { createdAt: "Mon 23:01", day: "Tue", dueAt: "Wed 00:00" },
+    { createdAt: "Mon 23:30", day: "Tue", dueAt: "Wed 00:00" },
+  ])("a daily pact created $createdAt first falls due on $day", async ({ createdAt, day, dueAt }) => {
     const s = scenario();
     const { owner, reviewer, sam } = await ownerWithReviewers(s);
     s.setClockTo(createdAt);
@@ -253,7 +253,7 @@ describe("first occurrence", () => {
       await owner.createPact(gymPact(sam.id, reviewer, { schedule: { ...daily, days: [...daily.days] } })),
     );
 
-    const expected = { date, dueAt: s.at(dueAt) };
+    const expected = { date: s.date(day), dueAt: s.at(dueAt) };
     expect(named).toEqual({ ok: true, firstOccurrence: expected });
     expect(owner.pact(created.pactId)).toMatchObject({ pact: { firstOccurrence: expected } });
   });
@@ -265,7 +265,7 @@ describe("first occurrence", () => {
 
     expect(owner.firstOccurrence({ schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] } })).toEqual({
       ok: true,
-      firstOccurrence: { date: "2026-01-07", dueAt: s.at("Thu 00:00") },
+      firstOccurrence: { date: s.date("Wed"), dueAt: s.at("Thu 00:00") },
     });
   });
 

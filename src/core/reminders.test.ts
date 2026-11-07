@@ -13,10 +13,6 @@ import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/ca
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 import { changed, ok, pactOf } from "./testing/queries.ts";
 
-const MONDAY = "2026-01-05";
-const WEDNESDAY = "2026-01-07";
-const FRIDAY = "2026-01-09";
-
 /** The reminders the owner was sent, as pact and occurrence date. */
 function reminders(s: Scenario, owner: AccountHandle) {
   return s.notifier
@@ -122,7 +118,7 @@ describe("reminders on a Fixed days Camera pact", () => {
         kind: "reminder",
         payload: {
           pactId: gym,
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           title: "Gym",
           body: "No photo yet today. Due at midnight.",
           url: "/",
@@ -151,9 +147,9 @@ describe("reminders on a Fixed days Camera pact", () => {
     for (const day of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) await s.advanceTo(`${day} 18:00`);
 
     expect(reminders(s, owner)).toEqual([
-      { pactId: gym, occurrenceDate: MONDAY },
-      { pactId: gym, occurrenceDate: WEDNESDAY },
-      { pactId: gym, occurrenceDate: FRIDAY },
+      { pactId: gym, occurrenceDate: s.date("Mon") },
+      { pactId: gym, occurrenceDate: s.date("Wed") },
+      { pactId: gym, occurrenceDate: s.date("Fri") },
     ]);
   });
 
@@ -166,7 +162,7 @@ describe("reminders on a Fixed days Camera pact", () => {
     await s.advanceTo("Wed 08:00");
 
     expect(s.notifier.sentTo(owner, "reminder")).toMatchObject([
-      { payload: { pactId: gym, occurrenceDate: WEDNESDAY, body: "No photo yet today. Due at 10:00am." } },
+      { payload: { pactId: gym, occurrenceDate: s.date("Wed"), body: "No photo yet today. Due at 10:00am." } },
     ]);
   });
 
@@ -175,23 +171,23 @@ describe("reminders on a Fixed days Camera pact", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI, { reminders: ["18:00"] });
     await s.advanceTo("Mon 09:30");
-    const filed = ok(await owner.fileExcuse(gym, { from: WEDNESDAY, to: WEDNESDAY, reason: "Travelling" }, []));
+    const filed = ok(await owner.fileExcuse(gym, { from: s.date("Wed"), to: s.date("Wed"), reason: "Travelling" }, []));
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
     await s.advanceTo("Mon 18:00");
     await s.advanceTo("Wed 18:00");
 
-    expect(reminders(s, owner)).toEqual([{ pactId: gym, occurrenceDate: MONDAY }]);
+    expect(reminders(s, owner)).toEqual([{ pactId: gym, occurrenceDate: s.date("Mon") }]);
   });
 
   test("stop once the pact has Ended", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    await createPact("Gym", MON_WED_FRI, { dates: { endDate: MONDAY }, reminders: ["18:00"] });
+    await createPact("Gym", MON_WED_FRI, { dates: { endDate: s.date("Mon") }, reminders: ["18:00"] });
 
     for (const time of ["Mon 18:00", "Wed 18:00", "Fri 18:00"]) await s.advanceTo(time);
 
-    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([MONDAY]);
+    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([s.date("Mon")]);
   });
 
   test("are times in the owner's timezone", async () => {
@@ -204,7 +200,7 @@ describe("reminders on a Fixed days Camera pact", () => {
     expect(reminders(s, owner)).toEqual([]);
 
     await s.advanceTo("Mon 21:00"); // 18:00 in Los Angeles
-    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([MONDAY]);
+    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([s.date("Mon")]);
   });
 });
 
@@ -221,13 +217,13 @@ describe("reminders on a bedtime pact", () => {
       {
         payload: {
           pactId: bed,
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           title: "In bed by midnight",
           body: "In bed by 12:00am tonight.",
         },
       },
-      { payload: { pactId: bed, occurrenceDate: "2026-01-06" } },
-      { payload: { pactId: bed, occurrenceDate: WEDNESDAY } },
+      { payload: { pactId: bed, occurrenceDate: s.date("Tue") } },
+      { payload: { pactId: bed, occurrenceDate: s.date("Wed") } },
     ]);
   });
 
@@ -237,7 +233,7 @@ describe("reminders on a bedtime pact", () => {
 
     for (const time of ["Mon 23:59", "Tue 00:30", "Wed 00:30"]) await s.advanceTo(time);
 
-    expect(reminders(s, owner)).toEqual([{ pactId: bed, occurrenceDate: MONDAY }]);
+    expect(reminders(s, owner)).toEqual([{ pactId: bed, occurrenceDate: s.date("Mon") }]);
     expect(s.notifier.sentTo(owner, "reminder")[0]?.payload.body).toBe("In bed by 1:00am tonight.");
   });
 });
@@ -278,7 +274,7 @@ describe("after downtime", () => {
 
     await s.advanceTo("Mon 18:10");
 
-    expect(reminders(s, owner)).toEqual([{ pactId: gym, occurrenceDate: MONDAY }]);
+    expect(reminders(s, owner)).toEqual([{ pactId: gym, occurrenceDate: s.date("Mon") }]);
     expect(s.notifier.sentTo(owner, "operator-alert")).toEqual([]);
   });
 
@@ -330,10 +326,10 @@ describe("a reminder fires once", () => {
     await s.advanceTo("Mon 20:00");
     await s.restart();
     await s.advanceTo("Mon 21:00"); // 18:00 Monday again, in Los Angeles
-    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([MONDAY]);
+    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([s.date("Mon")]);
 
     await s.advanceTo("Wed 21:00");
-    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([MONDAY, WEDNESDAY]);
+    expect(reminders(s, owner).map((r) => r.occurrenceDate)).toEqual([s.date("Mon"), s.date("Wed")]);
   });
 });
 

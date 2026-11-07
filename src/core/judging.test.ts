@@ -4,11 +4,9 @@
 
 import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers, submit } from "./testing/camera-pact.ts";
-import { scenario, type AccountHandle } from "./testing/scenario.ts";
+import { referenceDate, scenario, type AccountHandle } from "./testing/scenario.ts";
 import type { Today } from "../shared/types.ts";
 import { cards, ledgerHistory } from "./testing/queries.ts";
-
-const MONDAY = "2026-01-05";
 
 describe("judging at the end of a scheduled day", () => {
   test("Mon/Wed/Fri $5 pact: Monday ends with no evidence, so it's Missed and the ledger shows $5 owed to the recipient", async () => {
@@ -24,7 +22,7 @@ describe("judging at the end of a scheduled day", () => {
         pactId: gym,
         name: "Gym",
         penaltyCents: 500,
-        occurrenceDate: MONDAY,
+        occurrenceDate: s.date("Mon"),
         missedAt: s.at("Tue 00:00"),
         excusableUntil: s.at("Thu 00:00"),
         detail: null,
@@ -74,7 +72,9 @@ describe("judging at the end of a scheduled day", () => {
     expect(addedAt(owner)).toEqual([s.at("Tue 08:00")]);
     expect(owner.today()).toEqual({
       ...nothingOnToday,
-      alerts: [expect.objectContaining({ pactId: gym, occurrenceDate: MONDAY, reason: "That's last week's photo" })],
+      alerts: [
+        expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon"), reason: "That's last week's photo" }),
+      ],
       yesterday: gymMonday(expect.objectContaining({ kind: "missed" })),
     });
     // The next tick doesn't judge it again.
@@ -115,7 +115,7 @@ describe("judging at the end of a scheduled day", () => {
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
     expect(addedAt(owner)).toEqual([s.at("Mon 20:00")]);
-    expect(owner.today().alerts).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: MONDAY })]);
+    expect(owner.today().alerts).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon") })]);
   });
 
   test("evidence approved while Monday is open is judged Satisfied when Monday ends", async () => {
@@ -202,7 +202,7 @@ describe("judging over a week", () => {
         pactId: gym,
         name: "Gym",
         penaltyCents: 500,
-        occurrenceDate: "2026-01-07",
+        occurrenceDate: s.date("Wed"),
         missedAt: s.at("Thu 00:00"),
         excusableUntil: s.at("Sat 00:00"),
         detail: null,
@@ -242,8 +242,8 @@ describe("judging over a week", () => {
     await s.advanceTo("Thu 00:00");
 
     expect(cards(owner, "missed").map((card) => [card.name, card.occurrenceDate])).toEqual([
-      ["Gym", "2026-01-07"],
-      ["Swim", "2026-01-06"],
+      ["Gym", s.date("Wed")],
+      ["Swim", s.date("Tue")],
     ]);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
   });
@@ -289,7 +289,11 @@ const nothingOnToday: Today = { hasPacts: true, alerts: [], sections: [], waitin
 /** Today's Yesterday on Tuesday: Gym's Monday, with `status`. */
 function gymMonday(status: unknown) {
   return [
-    expect.objectContaining({ name: "Gym", occurrenceDate: MONDAY, occurrence: expect.objectContaining({ status }) }),
+    expect.objectContaining({
+      name: "Gym",
+      occurrenceDate: referenceDate("Mon"),
+      occurrence: expect.objectContaining({ status }),
+    }),
   ];
 }
 

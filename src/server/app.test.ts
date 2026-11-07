@@ -212,6 +212,7 @@ async function server({
 
   return {
     at: s.at,
+    date: s.date,
     clock: s.clock,
     advanceTo: s.advanceTo,
     setClockTo: s.setClockTo,
@@ -1424,19 +1425,19 @@ describe("excuses", () => {
     const { s, owner, friend, pactId } = await ownerWithPact();
     await s.advanceTo("Tue 00:00");
     s.setClockTo("Tue 08:00");
-    const monday = { from: "2026-01-05", to: "2026-01-05" };
+    const monday = { from: s.date("Mon"), to: s.date("Mon") };
 
     const preview = await owner.get<ExcusePreviewResponse>(
       `${API_PATHS.excusePreview(pactId)}?${new URLSearchParams(monday).toString()}`,
     );
     expect(preview.body).toMatchObject({
       ok: true,
-      preview: { covered: [{ date: "2026-01-05", status: { kind: "missed", held: false } }], heldCents: 500 },
+      preview: { covered: [{ date: s.date("Mon"), status: { kind: "missed", held: false } }], heldCents: 500 },
     });
     const options = await owner.get<ExcuseOptionsResponse>(API_PATHS.excuseOptions(pactId));
     expect(options.body).toMatchObject({
       ok: true,
-      options: { today: "2026-01-06", recentDays: [{ date: "2026-01-05" }] },
+      options: { today: s.date("Tue"), recentDays: [{ date: s.date("Mon") }] },
     });
 
     const filed = await fileExcuse(owner, pactId, { ...monday, reason: "Sick" }, [jpeg(3, 7)]);
@@ -1451,8 +1452,8 @@ describe("excuses", () => {
         id: excuseId,
         pactId,
         name: "Gym",
-        firstDate: "2026-01-05",
-        lastDate: "2026-01-05",
+        firstDate: s.date("Mon"),
+        lastDate: s.date("Mon"),
         filedAt: s.at("Tue 08:00").toISOString(),
       },
     ] satisfies TodayResponse["waiting"]);
@@ -1477,7 +1478,7 @@ describe("excuses", () => {
   test("a rejected excuse is an alert; Take the L on it is a 200, and so is its refusal", async () => {
     const { s, owner, friend, pactId } = await ownerWithPact();
     await s.advanceTo("Tue 00:00");
-    const filed = await fileExcuse(owner, pactId, { from: "2026-01-05", to: "2026-01-05", reason: "Sick" });
+    const filed = await fileExcuse(owner, pactId, { from: s.date("Mon"), to: s.date("Mon"), reason: "Sick" });
     const { excuseId } = filed.body as { excuseId: string };
     await friend.post(API_PATHS.decide(excuseId), { kind: "reject", reason: "No" } satisfies DecideRequest);
 
@@ -2367,7 +2368,7 @@ describe("connecting AnkiWeb", () => {
     expect(created.body).toMatchObject({ ok: true });
 
     s.setClockTo("Wed 20:00");
-    s.ankiSource.setAnkiDay(owner.accountId, "2026-01-07", s.at("Wed 20:00"));
+    s.ankiSource.setAnkiDay(owner.accountId, s.date("Wed"), s.at("Wed 20:00"));
     expect(await owner.post<CheckAnkiResponse>(API_PATHS.ankiCheck)).toMatchObject({ status: 200, body: { ok: true } });
     expect(s.ankiSource.countCalls).toEqual([{ account: owner.accountId, deckIds: ["1"] }]);
 

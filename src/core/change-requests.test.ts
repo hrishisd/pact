@@ -13,14 +13,6 @@ import type { Scenario } from "./testing/scenario.ts";
 import { changed, ok, pactOf, penalties, penaltyDays } from "./testing/queries.ts";
 import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
 
-const MONDAY = "2026-01-05";
-const TUESDAY = "2026-01-06";
-const WEDNESDAY = "2026-01-07";
-const THURSDAY = "2026-01-08";
-const FRIDAY = "2026-01-09";
-const SATURDAY = "2026-01-10";
-const NEXT_MONDAY = "2026-01-12";
-
 /** An every-day $5 Gym pact made Mon 09:00, its edit window long closed by Thu 15:00. */
 async function dailyGym(s: Scenario) {
   const setup = await ownerWithReviewers(s);
@@ -38,24 +30,27 @@ describe("a stricter change applies at once, from the first occurrence not open 
 
     expect(result).toEqual({
       ok: true,
-      outcome: { kind: "stricter", appliesFrom: FRIDAY, todayKeepsCents: 500 },
+      outcome: { kind: "stricter", appliesFrom: s.date("Fri"), todayKeepsCents: 500 },
     });
     expect(pactOf(owner, gym)).toMatchObject({
       penaltyCents: 1000,
-      newTerms: { appliesFrom: FRIDAY, todayKeepsCents: 500 },
+      newTerms: { appliesFrom: s.date("Fri"), todayKeepsCents: 500 },
     });
     // Today's card keeps today's terms.
     expect(owner.today().sections).toEqual([
-      { kind: "to-do", cards: [expect.objectContaining({ pactId: gym, occurrenceDate: THURSDAY, penaltyCents: 500 })] },
+      {
+        kind: "to-do",
+        cards: [expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Thu"), penaltyCents: 500 })],
+      },
       expect.objectContaining({ kind: "missed" }),
     ]);
     expect(reviewer.reviewQueue()).toEqual([]);
 
     await s.advanceTo("Sat 00:00");
 
-    expect(penalties(owner).filter((p) => p.date >= THURSDAY)).toEqual([
-      { date: THURSDAY, cents: 500, recipient: "Sam", pactName: "Gym" },
-      { date: FRIDAY, cents: 1000, recipient: "Sam", pactName: "Gym" },
+    expect(penalties(owner).filter((p) => p.date >= s.date("Thu"))).toEqual([
+      { date: s.date("Thu"), cents: 500, recipient: "Sam", pactName: "Gym" },
+      { date: s.date("Fri"), cents: 1000, recipient: "Sam", pactName: "Gym" },
     ]);
     expect(pactOf(owner, gym).newTerms).toBeNull();
   });
@@ -73,9 +68,9 @@ describe("a stricter change applies at once, from the first occurrence not open 
       ),
     );
 
-    expect(result.outcome).toEqual({ kind: "stricter", appliesFrom: THURSDAY, todayKeepsCents: null });
+    expect(result.outcome).toEqual({ kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null });
     await s.advanceTo("Sat 00:00");
-    expect(penalties(owner).map((p) => p.date)).toEqual([MONDAY, THURSDAY, FRIDAY]);
+    expect(penalties(owner).map((p) => p.date)).toEqual([s.date("Mon"), s.date("Thu"), s.date("Fri")]);
   });
 
   test("a rejection after the change still costs that day's penalty, to that day's recipient", async () => {
@@ -87,8 +82,8 @@ describe("a stricter change applies at once, from the first occurrence not open 
 
     await reviewer.decide(submitted.evidenceId, { kind: "reject", reason: "That's last week's photo" });
 
-    expect(penalties(owner).find((p) => p.date === THURSDAY)).toEqual({
-      date: THURSDAY,
+    expect(penalties(owner).find((p) => p.date === s.date("Thu"))).toEqual({
+      date: s.date("Thu"),
       cents: 500,
       recipient: "Sam",
       pactName: "Gym",
@@ -174,7 +169,7 @@ describe("a relaxing change waits for a reviewer", () => {
         note: "Money is tight this month",
         requestedAt: s.at("Thu 15:00"),
         changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
-        start: { appliesFrom: FRIDAY, todayKeepsCents: 500 },
+        start: { appliesFrom: s.date("Fri"), todayKeepsCents: 500 },
       }),
     ]);
 
@@ -183,7 +178,7 @@ describe("a relaxing change waits for a reviewer", () => {
 
     expect(pactOf(owner, gym)).toMatchObject({
       penaltyCents: 200,
-      newTerms: { appliesFrom: SATURDAY, todayKeepsCents: 500 },
+      newTerms: { appliesFrom: s.date("Sat"), todayKeepsCents: 500 },
     });
     expect(s.notifier.sentTo(owner, "change-request-decided")).toEqual([
       expect.objectContaining({
@@ -196,10 +191,10 @@ describe("a relaxing change waits for a reviewer", () => {
       }),
     ]);
     await s.advanceTo("Sun 00:00");
-    expect(penalties(owner).filter((p) => p.date >= THURSDAY)).toEqual([
-      { date: THURSDAY, cents: 500, recipient: "Sam", pactName: "Gym" },
-      { date: FRIDAY, cents: 500, recipient: "Sam", pactName: "Gym" },
-      { date: SATURDAY, cents: 200, recipient: "Sam", pactName: "Gym" },
+    expect(penalties(owner).filter((p) => p.date >= s.date("Thu"))).toEqual([
+      { date: s.date("Thu"), cents: 500, recipient: "Sam", pactName: "Gym" },
+      { date: s.date("Fri"), cents: 500, recipient: "Sam", pactName: "Gym" },
+      { date: s.date("Sat"), cents: 200, recipient: "Sam", pactName: "Gym" },
     ]);
   });
 
@@ -224,9 +219,9 @@ describe("a relaxing change waits for a reviewer", () => {
     });
     await reviewer.decide(changeRequestIdOf(result), { kind: "approve" });
     await s.advanceTo("Sat 00:00");
-    expect(penalties(owner).filter((p) => p.date >= THURSDAY)).toEqual([
-      { date: THURSDAY, cents: 500, recipient: "Sam", pactName: "Gym" },
-      { date: FRIDAY, cents: 500, recipient: "Red Cross", pactName: "Gym" },
+    expect(penalties(owner).filter((p) => p.date >= s.date("Thu"))).toEqual([
+      { date: s.date("Thu"), cents: 500, recipient: "Sam", pactName: "Gym" },
+      { date: s.date("Fri"), cents: 500, recipient: "Red Cross", pactName: "Gym" },
     ]);
   });
 
@@ -242,7 +237,7 @@ describe("a relaxing change waits for a reviewer", () => {
     expect(pactOf(owner, gym).description).toBe("A photo of any workout");
     ok(await owner.submitEvidence(gym, [photo()]));
     expect(reviewer.reviewQueue()).toEqual([
-      expect.objectContaining({ kind: "evidence", occurrenceDate: THURSDAY, description: "A photo of Gym" }),
+      expect.objectContaining({ kind: "evidence", occurrenceDate: s.date("Thu"), description: "A photo of Gym" }),
     ]);
   });
 
@@ -308,19 +303,19 @@ describe("a relaxing change waits for a reviewer", () => {
     expect(pactOf(owner, gym)).toMatchObject({ penaltyCents: 500, schedule: { days: MON_WED_FRI } });
     await s.advanceTo("Sat 00:00");
     expect(penalties(owner).map((p) => [p.date, p.cents])).toEqual([
-      [MONDAY, 500],
-      [WEDNESDAY, 500],
-      [FRIDAY, 500],
+      [s.date("Mon"), 500],
+      [s.date("Wed"), 500],
+      [s.date("Fri"), 500],
     ]);
 
     await reviewer.decide(changeRequestIdOf(result), { kind: "approve" });
     await s.advanceTo("Sat+1 00:00");
     expect(penalties(owner).map((p) => [p.date, p.cents])).toEqual([
-      [MONDAY, 500],
-      [WEDNESDAY, 500],
-      [FRIDAY, 500],
-      [NEXT_MONDAY, 1000],
-      ["2026-01-14", 1000],
+      [s.date("Mon"), 500],
+      [s.date("Wed"), 500],
+      [s.date("Fri"), 500],
+      [s.date("Mon+1"), 1000],
+      [s.date("Wed+1"), 1000],
     ]);
   });
 
@@ -352,7 +347,7 @@ describe("a relaxing change waits for a reviewer", () => {
     await s.advanceTo("Sat 00:00");
     expect(
       penalties(owner)
-        .filter((p) => p.date >= THURSDAY)
+        .filter((p) => p.date >= s.date("Thu"))
         .map((p) => p.cents),
     ).toEqual([500, 500]);
   });
@@ -376,7 +371,7 @@ describe("a relaxing change waits for a reviewer", () => {
       ok: true,
       preview: {
         changes: [{ term: "in-bed-by", before: "23:00", after: "22:30", effect: "stricter" }],
-        outcome: { kind: "stricter", appliesFrom: THURSDAY },
+        outcome: { kind: "stricter", appliesFrom: s.date("Thu") },
       },
     });
 
@@ -594,8 +589,8 @@ describe("ending a pact", () => {
     await s.advanceTo("Wed+1 18:00");
 
     // Wednesday was open when it ended: it's never judged.
-    expect(penaltyDays(owner, "Gym")).toEqual([MONDAY]);
-    expect(penaltyDays(owner, "Read")).toEqual([MONDAY, WEDNESDAY, FRIDAY, NEXT_MONDAY]);
+    expect(penaltyDays(owner, "Gym")).toEqual([s.date("Mon")]);
+    expect(penaltyDays(owner, "Read")).toEqual([s.date("Mon"), s.date("Wed"), s.date("Fri"), s.date("Mon+1")]);
     expect(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 1000 }))).toEqual({
       ok: false,
       reason: "pact-ended",
@@ -613,7 +608,7 @@ describe("ending a pact", () => {
     expect(pactOf(owner, gym)).toMatchObject({ stage: "active" });
     expect(pactOf(owner, gym)).not.toHaveProperty("endedAt");
     await s.advanceTo("Fri 00:00");
-    expect(penalties(owner).map((p) => p.date)).toEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY]);
+    expect(penalties(owner).map((p) => p.date)).toEqual([s.date("Mon"), s.date("Tue"), s.date("Wed"), s.date("Thu")]);
   });
 });
 
@@ -626,16 +621,16 @@ describe("once a pact has Ended", () => {
     await s.advanceTo("Fri 12:00");
 
     expect(await owner.submitEvidence(gym, [photo()])).toEqual({ ok: false, reason: "not-open" });
-    expect(await owner.fileExcuse(gym, { from: FRIDAY, to: SATURDAY, reason: "Away" }, [])).toEqual({
+    expect(await owner.fileExcuse(gym, { from: s.date("Fri"), to: s.date("Sat"), reason: "Away" }, [])).toEqual({
       ok: false,
       reason: "nothing-to-excuse",
     });
     // Wednesday, Missed at Thursday 00:00 before the end, is still inside its 48 hours.
-    expect(await owner.fileExcuse(gym, { from: WEDNESDAY, to: FRIDAY, reason: "Sick" }, [])).toMatchObject({
+    expect(await owner.fileExcuse(gym, { from: s.date("Wed"), to: s.date("Fri"), reason: "Sick" }, [])).toMatchObject({
       ok: true,
     });
     await s.advanceTo("Sun 12:00");
-    expect(penaltyDays(owner, "Gym")).toEqual([MONDAY, TUESDAY, WEDNESDAY]);
+    expect(penaltyDays(owner, "Gym")).toEqual([s.date("Mon"), s.date("Tue"), s.date("Wed")]);
   });
 
   test("evidence waiting for the day open when the end was approved, rejected afterwards, adds no penalty", async () => {
@@ -648,13 +643,13 @@ describe("once a pact has Ended", () => {
 
     await reviewer.decide(submitted.evidenceId, { kind: "reject", reason: "Blurry" });
 
-    expect(penaltyDays(owner, "Gym")).toEqual([MONDAY, TUESDAY, WEDNESDAY]);
+    expect(penaltyDays(owner, "Gym")).toEqual([s.date("Mon"), s.date("Tue"), s.date("Wed")]);
   });
 
   test("a change request still waiting when the end date passes is withdrawn: it leaves the queue and Today, and can't be decided", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const gym = await createPact("Gym", EVERY_DAY, { dates: { endDate: THURSDAY } });
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { endDate: s.date("Thu") } });
     await s.advanceTo("Tue 12:00");
     const sent = ok(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 100 })));
     await reviewer.askOwner(changeRequestIdOf(sent), "Why?");
@@ -662,7 +657,12 @@ describe("once a pact has Ended", () => {
 
     await s.advanceTo("Sat 12:00");
 
-    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endDate: THURSDAY, penaltyCents: 500, waiting: [] });
+    expect(pactOf(owner, gym)).toMatchObject({
+      stage: "ended",
+      endDate: s.date("Thu"),
+      penaltyCents: 500,
+      waiting: [],
+    });
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(reviewer.waitingOnReply()).toEqual([]);
     expect(owner.today().alerts.filter((alert) => alert.kind === "reviewer-question")).toEqual([]);
@@ -674,14 +674,14 @@ describe("once a pact has Ended", () => {
       ok: false,
       reason: "item-not-found",
     });
-    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endDate: THURSDAY, penaltyCents: 500 });
+    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endDate: s.date("Thu"), penaltyCents: 500 });
     expect(await owner.submitEvidence(gym, [photo()])).toEqual({ ok: false, reason: "not-open" });
   });
 
   test("an end request still waiting when the end date passes is withdrawn, and the pact keeps the end it had", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const gym = await createPact("Gym", EVERY_DAY, { dates: { endDate: THURSDAY } });
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { endDate: s.date("Thu") } });
     await s.advanceTo("Tue 12:00");
     const end = ok(await owner.requestEnd(gym));
     await s.advanceTo("Sat 12:00");
@@ -706,7 +706,7 @@ describe("once a pact has Ended", () => {
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     await s.advanceTo("Sat 12:00");
 
-    expect(penaltyDays(owner, "Gym")).toEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY]);
+    expect(penaltyDays(owner, "Gym")).toEqual([s.date("Mon"), s.date("Tue"), s.date("Wed"), s.date("Thu")]);
   });
 });
 
@@ -721,9 +721,9 @@ describe("ending a bedtime pact", () => {
 
     s.ouraSource.addSleep(owner.id, sleep("Tue 01:00"));
     await s.advanceTo("Tue 12:01");
-    expect(penaltyDays(owner, "In bed by midnight")).toEqual([MONDAY]);
+    expect(penaltyDays(owner, "In bed by midnight")).toEqual([s.date("Mon")]);
     await s.advanceTo("Fri 12:00");
-    expect(penaltyDays(owner, "In bed by midnight")).toEqual([MONDAY]);
+    expect(penaltyDays(owner, "In bed by midnight")).toEqual([s.date("Mon")]);
   });
 
   test("with no data, that night is Missed at 6pm the next day", async () => {
@@ -737,7 +737,7 @@ describe("ending a bedtime pact", () => {
     await s.advanceTo("Tue 17:59");
     expect(penaltyDays(owner, "In bed by midnight")).toEqual([]);
     await s.advanceTo("Tue 18:00");
-    expect(penaltyDays(owner, "In bed by midnight")).toEqual([MONDAY]);
+    expect(penaltyDays(owner, "In bed by midnight")).toEqual([s.date("Mon")]);
   });
 });
 

@@ -37,36 +37,36 @@ describe("a ledger's history", () => {
             penaltyId: expect.any(String),
             pactId: gym,
             pactName: "Gym",
-            occurrenceDate: "2026-01-07",
+            occurrenceDate: s.date("Wed"),
             amountCents: 500,
             addedAt: s.at("Thu 00:00"),
             paidCents: 0,
             held: false,
-            bill: { kind: "next-bill", billedOn: "2026-01-14" },
+            bill: { kind: "next-bill", billedOn: s.date("Wed+1") },
           },
           {
             kind: "penalty",
             penaltyId: expect.any(String),
             pactId: gym,
             pactName: "Gym",
-            occurrenceDate: "2026-01-05",
+            occurrenceDate: s.date("Mon"),
             amountCents: 500,
             addedAt: s.at("Tue 00:00"),
             paidCents: 0,
             held: false,
-            bill: { kind: "next-bill", billedOn: "2026-01-14" },
+            bill: { kind: "next-bill", billedOn: s.date("Wed+1") },
           },
           {
             kind: "penalty",
             penaltyId: expect.any(String),
             pactId: run,
             pactName: "Run",
-            occurrenceDate: "2026-01-05",
+            occurrenceDate: s.date("Mon"),
             amountCents: 500,
             addedAt: s.at("Tue 00:00"),
             paidCents: 0,
             held: false,
-            bill: { kind: "next-bill", billedOn: "2026-01-14" },
+            bill: { kind: "next-bill", billedOn: s.date("Wed+1") },
           },
         ],
       },
@@ -89,7 +89,7 @@ describe("a ledger's history", () => {
     s.setClockTo("Wed 09:00");
     await reject("Thu 10:00", second, "That's last week's photo");
     s.setClockTo("Thu 11:00");
-    await owner.acceptMiss(gym, "2026-01-07");
+    await owner.acceptMiss(gym, s.date("Wed"));
     // Friday: no evidence.
 
     await s.advanceTo("Sat 00:00");
@@ -97,14 +97,14 @@ describe("a ledger's history", () => {
     const [summary] = owner.ledgers();
     const ledger = owner.ledger(summary!.recipientId);
     expect(ledger.ok && ledger.ledger.history).toEqual([
-      expect.objectContaining({ occurrenceDate: "2026-01-09", addedAt: s.at("Sat 00:00") }),
+      expect.objectContaining({ occurrenceDate: s.date("Fri"), addedAt: s.at("Sat 00:00") }),
       expect.objectContaining({
-        occurrenceDate: "2026-01-07",
+        occurrenceDate: s.date("Wed"),
         addedAt: s.at("Thu 10:00"),
         rejection: { reviewerName: "second", reason: "That's last week's photo" },
       }),
       expect.objectContaining({
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         addedAt: s.at("Mon 15:00"),
         rejection: { reviewerName: "reviewer", reason: "Blurry" },
       }),
@@ -169,9 +169,9 @@ describe("paying off a ledger's penalties", () => {
     await reviewer.decide(await recordPayment(owner, { recipientId: sam.id, amountCents: 700 }), { kind: "approve" });
 
     expect(paidOldestFirst(owner, sam.id)).toEqual([
-      ["2026-01-05", 500],
-      ["2026-01-07", 200],
-      ["2026-01-09", 0],
+      [s.date("Mon"), 500],
+      [s.date("Wed"), 200],
+      [s.date("Fri"), 0],
     ]);
   });
 
@@ -184,9 +184,9 @@ describe("paying off a ledger's penalties", () => {
     await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
 
     expect(paidOldestFirst(owner, sam.id)).toEqual([
-      ["2026-01-05", 0],
-      ["2026-01-07", 0],
-      ["2026-01-09", 0],
+      [s.date("Mon"), 0],
+      [s.date("Wed"), 0],
+      [s.date("Fri"), 0],
     ]);
   });
 
@@ -199,9 +199,9 @@ describe("paying off a ledger's penalties", () => {
     }
 
     expect(paidOldestFirst(owner, sam.id)).toEqual([
-      ["2026-01-05", 500],
-      ["2026-01-07", 200],
-      ["2026-01-09", 0],
+      [s.date("Mon"), 500],
+      [s.date("Wed"), 200],
+      [s.date("Fri"), 0],
     ]);
   });
 });
@@ -234,7 +234,7 @@ describe("payments in a ledger's history", () => {
       addedAt: s.at(addedAt),
       paidCents,
       held: false,
-      bill: { kind: "next-bill", billedOn: "2026-01-14" },
+      bill: { kind: "next-bill", billedOn: s.date("Wed+1") },
     });
     expect(owner.ledger(sam.id)).toEqual({
       ok: true,
@@ -251,7 +251,7 @@ describe("payments in a ledger's history", () => {
           billDue: null,
         },
         history: [
-          penalty("2026-01-09", "Sat 00:00", 0),
+          penalty(s.date("Fri"), "Sat 00:00", 0),
           {
             kind: "payment",
             paymentId: awaiting,
@@ -281,8 +281,8 @@ describe("payments in a ledger's history", () => {
             recordedAt: s.at("Thu 09:00"),
             state: { kind: "approved", reviewerName: "reviewer", decidedAt: s.at("Thu 11:00") },
           },
-          penalty("2026-01-07", "Thu 00:00", 0),
-          penalty("2026-01-05", "Tue 00:00", 300),
+          penalty(s.date("Wed"), "Thu 00:00", 0),
+          penalty(s.date("Mon"), "Tue 00:00", 300),
         ],
       },
     });

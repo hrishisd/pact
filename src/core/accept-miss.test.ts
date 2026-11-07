@@ -7,8 +7,6 @@ import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts
 import { scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
-const MONDAY = "2026-01-05";
-
 describe("accepting a miss", () => {
   test("a day Missed with no evidence leaves Today's Missed section; owed is unchanged", async () => {
     const s = scenario();
@@ -17,10 +15,10 @@ describe("accepting a miss", () => {
     const run = await createPact("Run", ["mon"]);
     await s.advanceTo("Tue 08:00");
 
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual({ ok: true });
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual({ ok: true });
 
     expect(owner.today().sections).toEqual([
-      { kind: "missed", cards: [expect.objectContaining({ pactId: run, occurrenceDate: MONDAY })] },
+      { kind: "missed", cards: [expect.objectContaining({ pactId: run, occurrenceDate: s.date("Mon") })] },
     ]);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
   });
@@ -35,8 +33,8 @@ describe("accepting a miss is refused", () => {
     const today = owner.today();
 
     const notFound = { ok: false, reason: "pact-not-found" };
-    expect(await reviewer.acceptMiss(gym, MONDAY)).toEqual(notFound);
-    expect(await owner.acceptMiss("no-such-pact", MONDAY)).toEqual(notFound);
+    expect(await reviewer.acceptMiss(gym, s.date("Mon"))).toEqual(notFound);
+    expect(await owner.acceptMiss("no-such-pact", s.date("Mon"))).toEqual(notFound);
 
     expect(owner.today()).toEqual(today);
     expect(today.sections).toEqual([{ kind: "missed", cards: [expect.objectContaining({ pactId: gym })] }]);
@@ -50,16 +48,16 @@ describe("accepting a miss is refused", () => {
 
     // Monday, still open; then Monday with evidence waiting.
     s.setClockTo("Mon 12:00");
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual(nothing);
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual(nothing);
     const submitted = ok(await owner.submitEvidence(gym, [photo()]));
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual(nothing);
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual(nothing);
     // Monday, Satisfied.
     await reviewer.decide(submitted.evidenceId, { kind: "approve" });
     await s.advanceTo("Tue 08:00");
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual(nothing);
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual(nothing);
     // Tuesday isn't on the schedule; Wednesday hasn't come yet.
-    expect(await owner.acceptMiss(gym, "2026-01-06")).toEqual(nothing);
-    expect(await owner.acceptMiss(gym, "2026-01-07")).toEqual(nothing);
+    expect(await owner.acceptMiss(gym, s.date("Tue"))).toEqual(nothing);
+    expect(await owner.acceptMiss(gym, s.date("Wed"))).toEqual(nothing);
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
   });
@@ -69,9 +67,9 @@ describe("accepting a miss is refused", () => {
     const { owner, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     await s.advanceTo("Tue 08:00");
-    await owner.acceptMiss(gym, MONDAY);
+    await owner.acceptMiss(gym, s.date("Mon"));
 
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual({ ok: false, reason: "nothing-to-accept" });
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual({ ok: false, reason: "nothing-to-accept" });
     expect(owner.today().sections).toEqual([]);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
   });

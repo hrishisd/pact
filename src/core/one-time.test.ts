@@ -14,12 +14,6 @@ import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
 import { cards, changed, ok, owed, pactOf } from "./testing/queries.ts";
 
-// The reference week: Mon Jan 5 to Sun Jan 11, 2026; the clock starts Mon 09:00.
-const TUESDAY = "2026-01-06";
-const THURSDAY = "2026-01-08";
-const FRIDAY = "2026-01-09";
-const SATURDAY = "2026-01-10";
-const THURSDAY_1 = "2026-01-15";
 const DAY_MS = 24 * 3600_000;
 
 const oneTime = (deadline: string, submitAnytime = false): Schedule => ({ kind: "one-time", deadline, submitAnytime });
@@ -42,31 +36,31 @@ describe("making a One-time pact", () => {
     const { owner, createPact } = await ownerWithReviewers(s);
     s.setClockTo("Thu 08:30");
 
-    await expect(createPact("Dentist", oneTime(THURSDAY), { dates: { dueBy: "09:00" } })).rejects.toThrow(
+    await expect(createPact("Dentist", oneTime(s.date("Thu")), { dates: { dueBy: "09:00" } })).rejects.toThrow(
       "deadline-too-soon",
     );
-    expect(owner.firstOccurrence({ schedule: oneTime(THURSDAY), dueBy: "09:00" })).toEqual({
+    expect(owner.firstOccurrence({ schedule: oneTime(s.date("Thu")), dueBy: "09:00" })).toEqual({
       ok: false,
       reason: "deadline-too-soon",
     });
-    const dentist = await createPact("Dentist", oneTime(THURSDAY), { dates: { dueBy: "09:30" } });
-    expect(pactOf(owner, dentist).firstOccurrence).toEqual({ date: THURSDAY, dueAt: s.at("Thu 09:30") });
+    const dentist = await createPact("Dentist", oneTime(s.date("Thu")), { dates: { dueBy: "09:30" } });
+    expect(pactOf(owner, dentist).firstOccurrence).toEqual({ date: s.date("Thu"), dueAt: s.at("Thu 09:30") });
   });
 
   test("its deadline is the due-by time on its date, or midnight ending it", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
 
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
 
     expect(pactOf(owner, taxes)).toMatchObject({
-      schedule: oneTime(THURSDAY, true),
+      schedule: oneTime(s.date("Thu"), true),
       dueBy: null,
-      firstOccurrence: { date: THURSDAY, dueAt: s.at("Fri 00:00") },
+      firstOccurrence: { date: s.date("Thu"), dueAt: s.at("Fri 00:00") },
     });
-    expect(owner.firstOccurrence({ schedule: oneTime(THURSDAY), dueBy: "09:00" })).toEqual({
+    expect(owner.firstOccurrence({ schedule: oneTime(s.date("Thu")), dueBy: "09:00" })).toEqual({
       ok: true,
-      firstOccurrence: { date: THURSDAY, dueAt: s.at("Thu 09:00") },
+      firstOccurrence: { date: s.date("Thu"), dueAt: s.at("Thu 09:00") },
     });
   });
 
@@ -77,14 +71,14 @@ describe("making a One-time pact", () => {
       evidenceKind: "camera",
       name: "Taxes",
       description: "The e-file confirmation",
-      schedule: oneTime(THURSDAY),
+      schedule: oneTime(s.date("Thu")),
       penaltyCents: 500,
       recipientId: sam.id,
       reviewerIds: [reviewer.id],
     };
 
     expect(
-      await owner.createPact({ ...bedtimePact(sam.id, reviewer, "23:00", []), schedule: oneTime(THURSDAY) }),
+      await owner.createPact({ ...bedtimePact(sam.id, reviewer, "23:00", []), schedule: oneTime(s.date("Thu")) }),
     ).toEqual({
       ok: false,
       reason: "invalid-schedule",
@@ -93,33 +87,39 @@ describe("making a One-time pact", () => {
       ok: false,
       reason: "invalid-schedule",
     });
-    expect(await owner.createPact({ ...camera, startDate: TUESDAY })).toEqual({
+    expect(await owner.createPact({ ...camera, startDate: s.date("Tue") })).toEqual({
       ok: false,
       reason: "invalid-start-date",
     });
-    expect(await owner.createPact({ ...camera, endDate: FRIDAY })).toEqual({ ok: false, reason: "invalid-end-date" });
+    expect(await owner.createPact({ ...camera, endDate: s.date("Fri") })).toEqual({
+      ok: false,
+      reason: "invalid-end-date",
+    });
     expect(await owner.createPact(camera)).toMatchObject({ ok: true });
   });
 
   test("in the edit window, a new deadline takes the evidence already submitted with it", async () => {
     const s = scenario();
     const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     const evidenceId = await submit(owner, taxes);
 
     const edited = await owner.editPact(
       taxes,
-      cameraPact("Taxes", oneTime(FRIDAY, true), { recipientId: sam.id, reviewers: [reviewer] }),
+      cameraPact("Taxes", oneTime(s.date("Fri"), true), { recipientId: sam.id, reviewers: [reviewer] }),
     );
 
     expect(edited).toEqual({ ok: true });
     expect(owner.today().waiting).toEqual([
-      expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: FRIDAY }),
+      expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: s.date("Fri") }),
     ]);
     await s.advanceTo("Mon 09:11");
     await reviewer.decide(evidenceId, { kind: "approve" });
     await s.advanceTo("Sat 00:00");
-    expect(occurrenceOf(owner, taxes)).toMatchObject({ date: FRIDAY, occurrence: { status: { kind: "satisfied" } } });
+    expect(occurrenceOf(owner, taxes)).toMatchObject({
+      date: s.date("Fri"),
+      occurrence: { status: { kind: "satisfied" } },
+    });
   });
 });
 
@@ -127,7 +127,7 @@ describe("Submit anytime off", () => {
   test("deadline Thursday: evidence on Tuesday is refused; on Thursday at 15:00, approved, it's Satisfied and the pact Ended", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const dentist = await createPact("Dentist", oneTime(THURSDAY));
+    const dentist = await createPact("Dentist", oneTime(s.date("Thu")));
 
     s.setClockTo("Tue 10:00");
     expect(await owner.submitEvidence(dentist, [photo()])).toEqual({ ok: false, reason: "not-open" });
@@ -138,7 +138,7 @@ describe("Submit anytime off", () => {
     await s.advanceTo("Fri 00:00");
 
     expect(occurrenceOf(owner, dentist)).toEqual({
-      date: THURSDAY,
+      date: s.date("Thu"),
       occurrence: {
         status: { kind: "satisfied", approvedBy: "reviewer" },
         detail: null,
@@ -152,8 +152,8 @@ describe("Submit anytime off", () => {
   test("deadline Thursday 09:00: evidence at 08:59 is accepted, at 09:01 refused; with none it's Missed at 09:00", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const early = await createPact("Early", oneTime(THURSDAY), { dates: { dueBy: "09:00" } });
-    const late = await createPact("Late", oneTime(THURSDAY), { dates: { dueBy: "09:00" } });
+    const early = await createPact("Early", oneTime(s.date("Thu")), { dates: { dueBy: "09:00" } });
+    const late = await createPact("Late", oneTime(s.date("Thu")), { dates: { dueBy: "09:00" } });
 
     s.setClockTo("Thu 08:59");
     expect(await owner.submitEvidence(early, [photo()])).toMatchObject({ ok: true });
@@ -174,7 +174,11 @@ describe("Submit anytime off", () => {
     expect(occurrenceOf(owner, early).occurrence?.status).toMatchObject({ kind: "not-judged", evidenceWaiting: true });
     expect(pactOf(owner, early).stage).toBe("active");
     expect(cards(owner, "missed")).toEqual([
-      expect.objectContaining({ pactId: late, occurrenceDate: THURSDAY, detail: { kind: "closed", dueBy: "09:00" } }),
+      expect.objectContaining({
+        pactId: late,
+        occurrenceDate: s.date("Thu"),
+        detail: { kind: "closed", dueBy: "09:00" },
+      }),
     ]);
   });
 });
@@ -183,12 +187,12 @@ describe("Submit anytime on", () => {
   test("evidence three days before the deadline, approved, is Satisfied at the deadline and the pact Ended", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
 
     await s.advanceTo("Mon 10:00");
     const evidenceId = await submit(owner, taxes);
     expect(owner.today().waiting).toEqual([
-      expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: THURSDAY }),
+      expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: s.date("Thu") }),
     ]);
     await reviewer.decide(evidenceId, { kind: "approve" });
     expect(await owner.submitEvidence(taxes, [photo(2)])).toEqual({ ok: false, reason: "already-approved" });
@@ -203,8 +207,8 @@ describe("Submit anytime on", () => {
   test("the due-by time limits only the deadline's date", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true), { dates: { dueBy: "09:00" } });
-    const forms = await createPact("Forms", oneTime(THURSDAY, true), { dates: { dueBy: "09:00" } });
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true), { dates: { dueBy: "09:00" } });
+    const forms = await createPact("Forms", oneTime(s.date("Thu"), true), { dates: { dueBy: "09:00" } });
 
     s.setClockTo("Tue 22:00");
     expect(await owner.submitEvidence(taxes, [photo()])).toMatchObject({ ok: true });
@@ -219,7 +223,7 @@ describe("judging", () => {
     async (submitAnytime) => {
       const s = scenario();
       const { owner, createPact } = await ownerWithReviewers(s);
-      const taxes = await createPact("Taxes", oneTime(THURSDAY, submitAnytime));
+      const taxes = await createPact("Taxes", oneTime(s.date("Thu"), submitAnytime));
 
       await s.advanceTo("Fri 00:00");
 
@@ -228,7 +232,7 @@ describe("judging", () => {
       expect(pactOf(owner, taxes).stage).toBe("ended");
       expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([
         expect.objectContaining({
-          payload: expect.objectContaining({ occurrenceDate: THURSDAY, body: "Thu Jan 8 · $5 to Sam" }),
+          payload: expect.objectContaining({ occurrenceDate: s.date("Thu"), body: "Thu Jan 8 · $5 to Sam" }),
         }),
       ]);
       // Missed in the last 48 hours, it's on Today though the pact has Ended.
@@ -239,7 +243,7 @@ describe("judging", () => {
   test("evidence rejected before the deadline: Missed at once, its penalty owed, and new evidence is refused", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     s.setClockTo("Tue 10:00");
 
     await reviewer.decide(await submit(owner, taxes), { kind: "reject", reason: "That's last year's return" });
@@ -254,7 +258,7 @@ describe("judging", () => {
     expect(owed(owner)).toBe(500);
     expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", endedAt: s.at("Tue 10:00") });
     expect(owner.today().alerts).toEqual([
-      expect.objectContaining({ kind: "evidence-rejected", pactId: taxes, occurrenceDate: THURSDAY }),
+      expect.objectContaining({ kind: "evidence-rejected", pactId: taxes, occurrenceDate: s.date("Thu") }),
     ]);
     expect(await owner.submitEvidence(taxes, [photo(2)])).toEqual({ ok: false, reason: "already-judged" });
     await s.advanceTo("Fri 00:00");
@@ -264,12 +268,14 @@ describe("judging", () => {
   test("a Missed occurrence can be excused within 48 hours, and Yesterday shows it", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const dentist = await createPact("Dentist", oneTime(THURSDAY));
+    const dentist = await createPact("Dentist", oneTime(s.date("Thu")));
     await s.advanceTo("Fri 10:00");
 
-    expect(owner.today().yesterday).toEqual([expect.objectContaining({ pactId: dentist, occurrenceDate: THURSDAY })]);
+    expect(owner.today().yesterday).toEqual([
+      expect.objectContaining({ pactId: dentist, occurrenceDate: s.date("Thu") }),
+    ]);
     const filed = ok(
-      await owner.fileExcuse(dentist, { from: THURSDAY, to: THURSDAY, reason: "The dentist cancelled" }, []),
+      await owner.fileExcuse(dentist, { from: s.date("Thu"), to: s.date("Thu"), reason: "The dentist cancelled" }, []),
     );
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
@@ -283,10 +289,12 @@ describe("judging", () => {
   test("with Submit anytime, an excuse filed on any day before the deadline covers the occurrence", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await s.advanceTo("Tue 10:00");
 
-    const filed = ok(await owner.fileExcuse(taxes, { from: TUESDAY, to: TUESDAY, reason: "The forms never came" }, []));
+    const filed = ok(
+      await owner.fileExcuse(taxes, { from: s.date("Tue"), to: s.date("Tue"), reason: "The forms never came" }, []),
+    );
     expect(cards(owner, "to-do")).toEqual([]);
     await reviewer.decide(filed.excuseId, { kind: "approve" });
     await s.advanceTo("Fri 00:00");
@@ -304,7 +312,7 @@ describe("Today", () => {
   test("Submit anytime off: Coming up before its date, then To do on it", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const dentist = await createPact("Dentist", oneTime(THURSDAY));
+    const dentist = await createPact("Dentist", oneTime(s.date("Thu")));
     await s.advanceTo("Wed 10:00");
 
     expect(owner.today().sections).toEqual([
@@ -316,7 +324,7 @@ describe("Today", () => {
             name: "Dentist",
             penaltyCents: 500,
             editWindowClosesAt: null,
-            opensOn: THURSDAY,
+            opensOn: s.date("Thu"),
             startDate: null,
           },
         ],
@@ -333,7 +341,7 @@ describe("Today", () => {
             name: "Dentist",
             penaltyCents: 500,
             editWindowClosesAt: null,
-            occurrenceDate: THURSDAY,
+            occurrenceDate: s.date("Thu"),
             dueAt: s.at("Fri 00:00"),
             dueBy: null,
           },
@@ -345,12 +353,12 @@ describe("Today", () => {
   test("Submit anytime on: To do from creation, below things due today", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     // Named to come after Taxes, so only the sort by due time puts it first.
     const walk = await createPact("Walk", MON_WED_FRI);
 
     expect(cards(owner, "to-do").map((card) => ("pactId" in card ? card.pactId : null))).toEqual([walk, taxes]);
-    expect(cards(owner, "to-do")[1]).toMatchObject({ occurrenceDate: THURSDAY, dueAt: s.at("Fri 00:00") });
+    expect(cards(owner, "to-do")[1]).toMatchObject({ occurrenceDate: s.date("Thu"), dueAt: s.at("Fri 00:00") });
   });
 });
 
@@ -358,9 +366,9 @@ describe("reminders", () => {
   test("each has its own date and time and fires once, unless evidence was already submitted", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const reminders = [`${SATURDAY}T09:00`];
-    const taxes = await createPact("Taxes", oneTime(THURSDAY_1, true), { reminders });
-    const forms = await createPact("Forms", oneTime(THURSDAY_1, true), { reminders });
+    const reminders = [`${s.date("Sat")}T09:00`];
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu+1"), true), { reminders });
+    const forms = await createPact("Forms", oneTime(s.date("Thu+1"), true), { reminders });
     await s.advanceTo("Fri 10:00");
     await submit(owner, forms);
 
@@ -372,7 +380,7 @@ describe("reminders", () => {
       expect.objectContaining({
         payload: expect.objectContaining({
           pactId: taxes,
-          occurrenceDate: THURSDAY_1,
+          occurrenceDate: s.date("Thu+1"),
           body: "No photo yet. Due Thu Jan 15 at midnight.",
         }),
       }),
@@ -384,11 +392,15 @@ describe("reminders", () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
 
-    const taxes = await createPact("Taxes", oneTime(THURSDAY_1), {
-      reminders: [`${THURSDAY}T09:00`, `${TUESDAY}T18:00`, `${THURSDAY}T08:00`],
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu+1")), {
+      reminders: [`${s.date("Thu")}T09:00`, `${s.date("Tue")}T18:00`, `${s.date("Thu")}T08:00`],
     });
 
-    expect(pactOf(owner, taxes).reminders).toEqual([`${TUESDAY}T18:00`, `${THURSDAY}T08:00`, `${THURSDAY}T09:00`]);
+    expect(pactOf(owner, taxes).reminders).toEqual([
+      `${s.date("Tue")}T18:00`,
+      `${s.date("Thu")}T08:00`,
+      `${s.date("Thu")}T09:00`,
+    ]);
   });
 
   test("a reminder at or after the deadline, or with no date, is refused", async () => {
@@ -396,9 +408,11 @@ describe("reminders", () => {
     const { createPact } = await ownerWithReviewers(s);
 
     await expect(
-      createPact("Taxes", oneTime(THURSDAY), { dates: { dueBy: "17:00" }, reminders: [`${THURSDAY}T17:00`] }),
+      createPact("Taxes", oneTime(s.date("Thu")), { dates: { dueBy: "17:00" }, reminders: [`${s.date("Thu")}T17:00`] }),
     ).rejects.toThrow("reminder-after-due-time");
-    await expect(createPact("Taxes", oneTime(THURSDAY), { reminders: ["09:00"] })).rejects.toThrow("invalid-reminders");
+    await expect(createPact("Taxes", oneTime(s.date("Thu")), { reminders: ["09:00"] })).rejects.toThrow(
+      "invalid-reminders",
+    );
   });
 });
 
@@ -406,24 +420,24 @@ describe("changing a One-time pact", () => {
   test("turning Submit anytime on needs approval; turning it off applies at once, and evidence already submitted still counts", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const dentist = await createPact("Dentist", oneTime(THURSDAY));
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const dentist = await createPact("Dentist", oneTime(s.date("Thu")));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await pastEditWindow(s);
 
     expect(
-      await owner.changePact(dentist, changed(owner, dentist, { schedule: oneTime(THURSDAY, true) })),
+      await owner.changePact(dentist, changed(owner, dentist, { schedule: oneTime(s.date("Thu"), true) })),
     ).toMatchObject({
       ok: true,
       outcome: { kind: "needs-approval" },
     });
-    expect(pactOf(owner, dentist).schedule).toEqual(oneTime(THURSDAY));
+    expect(pactOf(owner, dentist).schedule).toEqual(oneTime(s.date("Thu")));
 
     const evidenceId = await submit(owner, taxes);
-    expect(await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(THURSDAY) }))).toMatchObject({
+    expect(await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Thu")) }))).toMatchObject({
       ok: true,
-      outcome: { kind: "stricter", appliesFrom: THURSDAY, todayKeepsCents: null },
+      outcome: { kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null },
     });
-    expect(pactOf(owner, taxes)).toMatchObject({ schedule: oneTime(THURSDAY), newTerms: null });
+    expect(pactOf(owner, taxes)).toMatchObject({ schedule: oneTime(s.date("Thu")), newTerms: null });
     await reviewer.decide(evidenceId, { kind: "approve" });
     await s.advanceTo("Fri 00:00");
     expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: "reviewer" });
@@ -432,15 +446,15 @@ describe("changing a One-time pact", () => {
   test("Submit anytime off: moving the date earlier or later needs approval", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const dentist = await createPact("Dentist", oneTime(THURSDAY));
+    const dentist = await createPact("Dentist", oneTime(s.date("Thu")));
     await pastEditWindow(s);
 
-    for (const deadline of [TUESDAY, FRIDAY]) {
+    for (const deadline of [s.date("Tue"), s.date("Fri")]) {
       expect(owner.changePreview(dentist, changed(owner, dentist, { schedule: oneTime(deadline) }))).toEqual({
         ok: true,
         preview: {
           changes: [
-            { term: "schedule", before: oneTime(THURSDAY), after: oneTime(deadline), effect: "needs-approval" },
+            { term: "schedule", before: oneTime(s.date("Thu")), after: oneTime(deadline), effect: "needs-approval" },
           ],
           outcome: { kind: "needs-approval", reviewerNames: ["reviewer", "second"], bundlesStricter: false },
         },
@@ -451,28 +465,28 @@ describe("changing a One-time pact", () => {
   test("Submit anytime on: an earlier deadline is stricter, a later one needs approval; due-by times follow the usual rule", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await pastEditWindow(s);
 
     const effect = (change: Partial<PactChange>) => {
       const preview = ok(owner.changePreview(taxes, changed(owner, taxes, change)));
       return preview.preview.changes.map((c) => `${c.term}: ${c.effect}`);
     };
-    expect(effect({ schedule: oneTime(TUESDAY, true) })).toEqual(["schedule: stricter"]);
-    expect(effect({ schedule: oneTime(FRIDAY, true) })).toEqual(["schedule: needs-approval"]);
+    expect(effect({ schedule: oneTime(s.date("Tue"), true) })).toEqual(["schedule: stricter"]);
+    expect(effect({ schedule: oneTime(s.date("Fri"), true) })).toEqual(["schedule: needs-approval"]);
     expect(effect({ dueBy: "17:00" })).toEqual(["due-by: stricter"]);
   });
 
   test("an approved later deadline applies to the open occurrence, and the evidence already submitted counts for it", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
-    const forms = await createPact("Forms", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
+    const forms = await createPact("Forms", oneTime(s.date("Thu"), true));
     await s.advanceTo("Tue 10:00");
-    const filed = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
+    const filed = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Sat"), true) }));
     if (!filed.ok || filed.outcome.kind !== "needs-approval") throw new Error("not sent");
     expect(reviewer.reviewQueue()).toEqual([
-      expect.objectContaining({ kind: "change-request", start: { appliesFrom: SATURDAY, todayKeepsCents: null } }),
+      expect.objectContaining({ kind: "change-request", start: { appliesFrom: s.date("Sat"), todayKeepsCents: null } }),
     ]);
 
     await reviewer.decide(filed.outcome.changeRequestId, { kind: "approve" });
@@ -480,57 +494,65 @@ describe("changing a One-time pact", () => {
       "Taxes · New terms start Sat Jan 10",
     );
     const evidenceId = await submit(owner, forms);
-    const moved = await owner.changePact(forms, changed(owner, forms, { schedule: oneTime(SATURDAY, true) }));
+    const moved = await owner.changePact(forms, changed(owner, forms, { schedule: oneTime(s.date("Sat"), true) }));
     if (!moved.ok || moved.outcome.kind !== "needs-approval") throw new Error("not sent");
     await reviewer.decide(moved.outcome.changeRequestId, { kind: "approve" });
     expect(owner.today().waiting).toEqual([
-      expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: SATURDAY }),
+      expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: s.date("Sat") }),
     ]);
     await s.advanceTo("Fri 10:00");
 
     expect(pactOf(owner, taxes)).toMatchObject({
       stage: "active",
-      schedule: oneTime(SATURDAY, true),
-      firstOccurrence: { date: SATURDAY, dueAt: s.at("Sun 00:00") },
+      schedule: oneTime(s.date("Sat"), true),
+      firstOccurrence: { date: s.date("Sat"), dueAt: s.at("Sun 00:00") },
       newTerms: null,
     });
     expect(owed(owner)).toBe(0);
     await s.advanceTo("Sun 00:00");
     expect(occurrenceOf(owner, taxes)).toMatchObject({
-      date: SATURDAY,
+      date: s.date("Sat"),
       occurrence: { status: { kind: "missed", penaltyCents: 500 } },
     });
     await reviewer.decide(evidenceId, { kind: "approve" });
-    expect(occurrenceOf(owner, forms)).toMatchObject({ date: SATURDAY, occurrence: { status: { kind: "satisfied" } } });
+    expect(occurrenceOf(owner, forms)).toMatchObject({
+      date: s.date("Sat"),
+      occurrence: { status: { kind: "satisfied" } },
+    });
   });
 
   test("an earlier deadline under an hour away is refused; one further off applies at once", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(FRIDAY, true));
-    const forms = await createPact("Forms", oneTime(FRIDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Fri"), true));
+    const forms = await createPact("Forms", oneTime(s.date("Fri"), true));
     await s.advanceTo("Thu 22:00");
 
-    expect(await owner.changePact(forms, changed(owner, forms, { schedule: oneTime(THURSDAY, true) }))).toMatchObject({
+    expect(
+      await owner.changePact(forms, changed(owner, forms, { schedule: oneTime(s.date("Thu"), true) })),
+    ).toMatchObject({
       ok: true,
       outcome: { kind: "stricter" },
     });
     s.setClockTo("Thu 23:30");
-    expect(await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(THURSDAY, true) }))).toEqual({
+    expect(await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Thu"), true) }))).toEqual({
       ok: false,
       reason: "deadline-too-soon",
     });
     await s.advanceTo("Fri 00:00");
-    expect(occurrenceOf(owner, forms)).toMatchObject({ date: THURSDAY, occurrence: { status: { kind: "missed" } } });
-    expect(pactOf(owner, taxes)).toMatchObject({ stage: "active", schedule: oneTime(FRIDAY, true) });
+    expect(occurrenceOf(owner, forms)).toMatchObject({
+      date: s.date("Thu"),
+      occurrence: { status: { kind: "missed" } },
+    });
+    expect(pactOf(owner, taxes)).toMatchObject({ stage: "active", schedule: oneTime(s.date("Fri"), true) });
   });
 
   test("approving a new deadline that's less than an hour away by then is refused; it can still be rejected", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const dentist = await createPact("Dentist", oneTime(FRIDAY));
+    const dentist = await createPact("Dentist", oneTime(s.date("Fri")));
     await pastEditWindow(s);
-    const sent = await owner.changePact(dentist, changed(owner, dentist, { schedule: oneTime(THURSDAY) }));
+    const sent = await owner.changePact(dentist, changed(owner, dentist, { schedule: oneTime(s.date("Thu")) }));
     if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("not sent");
 
     s.setClockTo("Thu 23:30");
@@ -541,15 +563,15 @@ describe("changing a One-time pact", () => {
     expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "reject", reason: "Too late" })).toEqual({
       ok: true,
     });
-    expect(pactOf(owner, dentist).schedule).toEqual(oneTime(FRIDAY));
+    expect(pactOf(owner, dentist).schedule).toEqual(oneTime(s.date("Fri")));
   });
 
   test("a change request still waiting when the occurrence is judged is withdrawn, and the Ended pact stays as it was", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await pastEditWindow(s);
-    const sent = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
+    const sent = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Sat"), true) }));
     if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("not sent");
     await s.advanceTo("Fri 00:00");
 
@@ -559,17 +581,20 @@ describe("changing a One-time pact", () => {
       reason: "item-not-found",
     });
 
-    expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(THURSDAY, true), waiting: [] });
-    expect(occurrenceOf(owner, taxes)).toMatchObject({ date: THURSDAY, occurrence: { status: { kind: "missed" } } });
+    expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(s.date("Thu"), true), waiting: [] });
+    expect(occurrenceOf(owner, taxes)).toMatchObject({
+      date: s.date("Thu"),
+      occurrence: { status: { kind: "missed" } },
+    });
     expect(s.notifier.sentTo(owner, "change-request-decided")).toEqual([]);
   });
 
   test("a later deadline approved after the old one passed, before the scheduler's tick, doesn't rescue it", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await pastEditWindow(s);
-    const sent = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
+    const sent = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Sat"), true) }));
     if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("not sent");
     s.setClockTo("Fri 00:00");
 
@@ -578,18 +603,21 @@ describe("changing a One-time pact", () => {
       reason: "item-not-found",
     });
 
-    expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(THURSDAY, true) });
-    expect(occurrenceOf(owner, taxes)).toMatchObject({ date: THURSDAY, occurrence: { status: { kind: "missed" } } });
+    expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(s.date("Thu"), true) });
+    expect(occurrenceOf(owner, taxes)).toMatchObject({
+      date: s.date("Thu"),
+      occurrence: { status: { kind: "missed" } },
+    });
     expect(owed(owner)).toBe(500);
   });
 
   test("its change request's push names the deadline", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await pastEditWindow(s);
 
-    await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
+    await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Sat"), true) }));
 
     const request = s.notifier.sentTo(reviewer, "review-item").find((n) => n.payload.itemKind === "change-request");
     expect(request?.payload.body).toBe("Deadline");
@@ -598,12 +626,12 @@ describe("changing a One-time pact", () => {
   test("a raised penalty applies to the occurrence even once it's open", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await s.advanceTo("Tue 10:00");
 
     expect(await owner.changePact(taxes, changed(owner, taxes, { penaltyCents: 900 }))).toMatchObject({
       ok: true,
-      outcome: { kind: "stricter", appliesFrom: THURSDAY, todayKeepsCents: null },
+      outcome: { kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null },
     });
     await s.advanceTo("Fri 00:00");
 
@@ -613,7 +641,7 @@ describe("changing a One-time pact", () => {
   test("can't become a recurring schedule, nor take a start or end date", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     const gym = await createPact("Gym", MON_WED_FRI);
     await pastEditWindow(s);
 
@@ -623,11 +651,11 @@ describe("changing a One-time pact", () => {
       ok: false,
       reason: "schedule-kind-fixed",
     });
-    expect(await owner.changePact(gym, changed(owner, gym, { schedule: oneTime(THURSDAY) }))).toEqual({
+    expect(await owner.changePact(gym, changed(owner, gym, { schedule: oneTime(s.date("Thu")) }))).toEqual({
       ok: false,
       reason: "schedule-kind-fixed",
     });
-    expect(await owner.changePact(taxes, changed(owner, taxes, { endDate: FRIDAY }))).toEqual({
+    expect(await owner.changePact(taxes, changed(owner, taxes, { endDate: s.date("Fri") }))).toEqual({
       ok: false,
       reason: "invalid-end-date",
     });
@@ -636,10 +664,10 @@ describe("changing a One-time pact", () => {
   test("once judged it's Ended, and can't be changed", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
-    const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
+    const taxes = await createPact("Taxes", oneTime(s.date("Thu"), true));
     await s.advanceTo("Fri 00:00");
 
-    expect(await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }))).toEqual({
+    expect(await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Sat"), true) }))).toEqual({
       ok: false,
       reason: "pact-ended",
     });

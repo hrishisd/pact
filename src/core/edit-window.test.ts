@@ -104,12 +104,12 @@ describe("editing a pact in its edit window", () => {
     s.setClockTo("Mon 23:05");
     expect(owner.firstOccurrence({ schedule: terms.schedule }, gym)).toEqual({
       ok: true,
-      firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
+      firstOccurrence: { date: s.date("Mon"), dueAt: s.at("Tue 00:00") },
     });
     expect(await owner.editPact(gym, terms)).toEqual({ ok: true });
 
     expect(owner.pact(gym)).toMatchObject({
-      pact: { firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") } },
+      pact: { firstOccurrence: { date: s.date("Mon"), dueAt: s.at("Tue 00:00") } },
     });
   });
 });

@@ -279,7 +279,7 @@ test("the dev stand-in reads decks from a file, and refuses the password 'wrong'
   // Mon 09:00 in New York, the scenario's start: Monday's Anki day.
   expect(await dev.deckCounts(owner.id, ["1", "9"])).toEqual({
     ok: true,
-    ankiDate: "2026-01-05",
+    ankiDate: s.date("Mon"),
     asOf: s.at("Mon 09:00"),
     decks: { "1": DECKS[0]!.counts, "9": null },
     names: { "1": "Spanish" },

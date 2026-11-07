@@ -9,9 +9,6 @@ import { ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 import { ok, sectionKinds, statusOn } from "./testing/queries.ts";
 
-const TUE = "2026-01-06";
-const WED = "2026-01-07";
-
 /** An owner whose Mon night was Satisfied, so Tue night is the one waiting on Oura. */
 async function tueNightWaiting(s: Scenario) {
   const setUp = await ownerWithOura(s);
@@ -35,9 +32,9 @@ describe("the No Oura data card", () => {
             pactId,
             name: "In bed by midnight",
             penaltyCents: 500,
-            occurrenceDate: TUE,
+            occurrenceDate: s.date("Tue"),
             closesAt: s.at("Wed 18:00"),
-            tonight: { occurrenceDate: WED, dueAt: s.at("Thu 00:00"), inBedBy: "00:00" },
+            tonight: { occurrenceDate: s.date("Wed"), dueAt: s.at("Thu 00:00"), inBedBy: "00:00" },
           },
         ],
       },
@@ -62,7 +59,7 @@ describe("the No Oura data card", () => {
 
     await s.advanceTo("Wed 00:00");
     expect(owner.today().sections).toEqual([
-      { kind: "no-oura-data", cards: [expect.objectContaining({ occurrenceDate: TUE, tonight: null })] },
+      { kind: "no-oura-data", cards: [expect.objectContaining({ occurrenceDate: s.date("Tue"), tonight: null })] },
     ]);
 
     s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
@@ -82,12 +79,20 @@ describe("the No Oura data card", () => {
     const { owner, pactId } = await tueNightWaiting(s);
     await s.advanceTo("Wed 09:00");
 
-    const filed = ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring was charging" }, []));
+    const filed = ok(
+      await owner.fileExcuse(pactId, { from: s.date("Tue"), to: s.date("Tue"), reason: "Ring was charging" }, []),
+    );
 
     const today = owner.today();
     expect(today.sections.map((section) => section.kind)).toEqual(["automatic"]);
     expect(today.waiting).toEqual([
-      expect.objectContaining({ kind: "excuse", id: filed.excuseId, pactId, firstDate: TUE, lastDate: TUE }),
+      expect.objectContaining({
+        kind: "excuse",
+        id: filed.excuseId,
+        pactId,
+        firstDate: s.date("Tue"),
+        lastDate: s.date("Tue"),
+      }),
     ]);
   });
 });
@@ -102,7 +107,7 @@ describe("checking Oura now", () => {
     s.setClockTo("2026-01-07T09:00:20-05:00");
     await owner.checkOura();
 
-    expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
     expect(sectionKinds(owner)).toEqual(["automatic"]);
   });
 
@@ -157,7 +162,7 @@ describe("checking Oura now", () => {
     s.setClockTo("2026-01-07T09:00:20-05:00");
     await owner.checkOura();
 
-    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("not-judged");
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
   });
 });
@@ -180,7 +185,7 @@ describe("the 15:00 push", () => {
         recipient: owner.id,
         kind: "connection-problem",
         payload: {
-          occurrenceDate: TUE,
+          occurrenceDate: s.date("Tue"),
           title: "No Oura data",
           body: "No Oura data for Tue night yet. Sync your ring before 6pm or it counts as missed.",
           url: "/",
@@ -212,7 +217,7 @@ describe("the 15:00 push", () => {
     const s = scenario();
     const { owner, pactId } = await tueNightWaiting(s);
     s.setClockTo("Wed 09:00");
-    ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring was charging" }, []));
+    ok(await owner.fileExcuse(pactId, { from: s.date("Tue"), to: s.date("Tue"), reason: "Ring was charging" }, []));
     await s.advanceTo("Wed 15:00");
     expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
   });
@@ -229,7 +234,9 @@ describe("the 15:00 push", () => {
     expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([]);
     await s.advanceTo("Wed 09:00");
     expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
-      expect.objectContaining({ payload: expect.objectContaining({ title: "No Oura data", occurrenceDate: TUE }) }),
+      expect.objectContaining({
+        payload: expect.objectContaining({ title: "No Oura data", occurrenceDate: s.date("Tue") }),
+      }),
     ]);
   });
 
@@ -269,7 +276,7 @@ describe("a disconnected connection", () => {
         },
       },
     ]);
-    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("not-judged");
 
     s.ouraSource.reconnect(owner.id);
     s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
@@ -277,7 +284,7 @@ describe("a disconnected connection", () => {
     await owner.connectOura();
     await s.advanceTo("Wed 12:01");
 
-    expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
     expect(owner.today().alerts).toEqual([]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: null } });
     expect(s.notifier.sentTo(owner, "connection-problem")).toHaveLength(1);
@@ -300,9 +307,9 @@ describe("a disconnected connection", () => {
     s.ouraSource.disconnect(owner.id);
     await s.advanceTo("Wed 08:00");
     await s.advanceTo("Wed 17:59");
-    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("not-judged");
     await s.advanceTo("Wed 18:00");
-    expect(statusOn(owner, pactId, TUE)).toBe("missed");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("missed");
   });
 
   test("a transient Oura failure doesn't count as disconnected", async () => {
@@ -352,7 +359,7 @@ describe("disconnecting Oura", () => {
     const calls = s.ouraSource.calls.length;
     await s.advanceTo("Wed 18:00");
     expect(s.ouraSource.calls).toHaveLength(calls);
-    expect(statusOn(owner, pactId, TUE)).toBe("missed");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("missed");
   });
 
   test("with no Active bedtime pact, no alert", async () => {

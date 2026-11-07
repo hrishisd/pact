@@ -67,34 +67,34 @@ describe("the heat map", () => {
     await reviewer.decide(await submit(owner, gym), { kind: "reject", reason: "That's Monday's photo" });
     // Friday: no photo.
     await s.advanceTo("Sun 10:00");
-    await excused(owner, reviewer, gym, "2026-01-12", "Away at a wedding");
+    await excused(owner, reviewer, gym, s.date("Mon+1"), "Away at a wedding");
     s.setClockTo("Wed+1 18:00");
     await submit(owner, gym);
     await s.advanceTo("Thu+1 10:00");
 
     expect(heatMapDays(owner, gym)).toEqual([
-      { date: "2026-01-05", occurrence: satisfied("reviewer") },
-      { date: "2026-01-06", occurrence: null },
+      { date: s.date("Mon"), occurrence: satisfied("reviewer") },
+      { date: s.date("Tue"), occurrence: null },
       {
-        date: "2026-01-07",
+        date: s.date("Wed"),
         occurrence: missed(s, "Wed 18:00", { reviewerName: "reviewer", reason: "That's Monday's photo" }),
       },
-      { date: "2026-01-08", occurrence: null },
-      { date: "2026-01-09", occurrence: missed(s, "Sat 00:00") },
-      { date: "2026-01-10", occurrence: null },
-      { date: "2026-01-11", occurrence: null },
+      { date: s.date("Thu"), occurrence: null },
+      { date: s.date("Fri"), occurrence: missed(s, "Sat 00:00") },
+      { date: s.date("Sat"), occurrence: null },
+      { date: s.date("Sun"), occurrence: null },
       {
-        date: "2026-01-12",
+        date: s.date("Mon+1"),
         occurrence: excusedBy("reviewer", "Away at a wedding"),
       },
-      { date: "2026-01-13", occurrence: null },
+      { date: s.date("Tue+1"), occurrence: null },
       // Its photo is still waiting for a reviewer, past its due time.
-      { date: "2026-01-14", occurrence: notJudged(s, "Wed+1", "Thu+1", true) },
-      { date: "2026-01-15", occurrence: null },
+      { date: s.date("Wed+1"), occurrence: notJudged(s, "Wed+1", "Thu+1", true) },
+      { date: s.date("Thu+1"), occurrence: null },
       // Ahead.
-      { date: "2026-01-16", occurrence: notJudged(s, "Fri+1", "Sat+1") },
-      { date: "2026-01-17", occurrence: null },
-      { date: "2026-01-18", occurrence: null },
+      { date: s.date("Fri+1"), occurrence: notJudged(s, "Fri+1", "Sat+1") },
+      { date: s.date("Sat+1"), occurrence: null },
+      { date: s.date("Sun+1"), occurrence: null },
     ]);
   });
 
@@ -105,9 +105,9 @@ describe("the heat map", () => {
     const gym = await createPact("Gym", ["fri"]);
 
     expect(heatMapDays(owner, gym)).toEqual([
-      { date: "2026-01-09", occurrence: notJudged(s, "Fri", "Sat") },
-      { date: "2026-01-10", occurrence: null },
-      { date: "2026-01-11", occurrence: null },
+      { date: s.date("Fri"), occurrence: notJudged(s, "Fri", "Sat") },
+      { date: s.date("Sat"), occurrence: null },
+      { date: s.date("Sun"), occurrence: null },
     ]);
   });
 
@@ -119,13 +119,13 @@ describe("the heat map", () => {
     const gym = await createPact("Gym", ["mon"]);
 
     expect(heatMapDays(owner, gym).map((day) => day.date)).toEqual([
-      "2026-01-12",
-      "2026-01-13",
-      "2026-01-14",
-      "2026-01-15",
-      "2026-01-16",
-      "2026-01-17",
-      "2026-01-18",
+      s.date("Mon+1"),
+      s.date("Tue+1"),
+      s.date("Wed+1"),
+      s.date("Thu+1"),
+      s.date("Fri+1"),
+      s.date("Sat+1"),
+      s.date("Sun+1"),
     ]);
   });
 
@@ -142,14 +142,14 @@ describe("the heat map", () => {
     expect(result).toMatchObject({ ok: true, outcome: { kind: "stricter" } });
 
     expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
-      ["2026-01-05", "not-judged"],
-      ["2026-01-06", null],
+      [s.date("Mon"), "not-judged"],
+      [s.date("Tue"), null],
       // Today was open before the change: it keeps Monday only.
-      ["2026-01-07", null],
-      ["2026-01-08", null],
-      ["2026-01-09", "not-judged"],
-      ["2026-01-10", null],
-      ["2026-01-11", null],
+      [s.date("Wed"), null],
+      [s.date("Thu"), null],
+      [s.date("Fri"), "not-judged"],
+      [s.date("Sat"), null],
+      [s.date("Sun"), null],
     ]);
   });
 
@@ -163,13 +163,13 @@ describe("the heat map", () => {
     await s.advanceTo("Wed+1 10:00");
 
     expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
-      ["2026-01-05", "missed"],
-      ["2026-01-06", null],
-      ["2026-01-07", null],
-      ["2026-01-08", null],
-      ["2026-01-09", null],
-      ["2026-01-10", null],
-      ["2026-01-11", null],
+      [s.date("Mon"), "missed"],
+      [s.date("Tue"), null],
+      [s.date("Wed"), null],
+      [s.date("Thu"), null],
+      [s.date("Fri"), null],
+      [s.date("Sat"), null],
+      [s.date("Sun"), null],
     ]);
   });
 
@@ -182,9 +182,9 @@ describe("the heat map", () => {
     await s.advanceTo("Thu 18:00");
 
     expect(heatMapDays(owner, bed).slice(0, 3)).toEqual([
-      { date: "2026-01-05", occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }) },
-      { date: "2026-01-06", occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: "01:10" }) },
-      { date: "2026-01-07", occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: null }) },
+      { date: s.date("Mon"), occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }) },
+      { date: s.date("Tue"), occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: "01:10" }) },
+      { date: s.date("Wed"), occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: null }) },
     ]);
   });
 });
@@ -199,7 +199,7 @@ describe("Yesterday on Today", () => {
     await createPact("Run", ["tue", "wed"]);
     s.setClockTo("Mon 18:00");
     await reviewer.decide(await submit(owner, gym), { kind: "approve" });
-    await excused(owner, reviewer, piano, "2026-01-05", "Sick with the flu");
+    await excused(owner, reviewer, piano, s.date("Mon"), "Sick with the flu");
     await s.advanceTo("Tue 10:00");
 
     expect(owner.today().yesterday).toEqual([
@@ -207,21 +207,21 @@ describe("Yesterday on Today", () => {
         pactId: gym,
         name: "Gym",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: satisfied("reviewer"),
       },
       {
         pactId: piano,
         name: "Piano",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: excusedBy("reviewer", "Sick with the flu"),
       },
       {
         pactId: read,
         name: "Read",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: missed(s, "Tue 00:00"),
       },
     ]);
@@ -240,7 +240,7 @@ describe("Yesterday on Today", () => {
         pactId: gym,
         name: "Gym",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: notJudged(s, "Mon", "Tue", true),
       },
     ]);
@@ -258,7 +258,7 @@ describe("Yesterday on Today", () => {
         pactId: bed,
         name: "In bed by midnight",
         evidenceKind: "oura",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }),
       },
     ]);
@@ -274,7 +274,7 @@ describe("Yesterday on Today", () => {
     const end = ok(await owner.requestEnd(gym));
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     // Ended Tuesday: Monday's day is still yesterday's on Tuesday, but there's no Tuesday on Wednesday.
-    expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual(["2026-01-05"]);
+    expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual([s.date("Mon")]);
     await s.advanceTo("Wed 10:00");
     expect(owner.today().yesterday).toEqual([]);
   });

@@ -3,7 +3,7 @@
 
 import { WEEKDAYS, type NewPact, type Weekday } from "../../shared/types.ts";
 import type { OuraSleepPeriod } from "../ports.ts";
-import type { AccountHandle, Scenario } from "./scenario.ts";
+import { referenceDate, type AccountHandle, type Scenario } from "./scenario.ts";
 import { ok } from "./queries.ts";
 
 /**
@@ -42,12 +42,11 @@ export function bedtimePact(
   };
 }
 
-const REFERENCE_DATES = { Mon: 5, Tue: 6, Wed: 7, Thu: 8, Fri: 9, Sat: 10, Sun: 11 } as const;
-
 /**
  * A sleep period as Oura reports it, starting at `start` and lasting 7 hours.
  * `start` is "Tue 23:40" (New York, the scenario's reference week, written as
- * Oura writes it, with "-05:00") or a full ISO 8601 string with Oura's offset.
+ * Oura writes it, with "-05:00"; "+N" moves N weeks on as in the scenario's
+ * time strings) or a full ISO 8601 string with Oura's offset.
  */
 export function sleep(start: string, type: OuraSleepPeriod["type"] = "long_sleep"): OuraSleepPeriod {
   const bedtimeStart = isoWithOffset(start);
@@ -70,8 +69,8 @@ export function sleep(start: string, type: OuraSleepPeriod["type"] = "long_sleep
 
 function isoWithOffset(start: string): string {
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(start)) return start;
-  const match = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{2}):(\d{2})$/.exec(start);
+  const match = /^(\S+) (\d{2}):(\d{2})$/.exec(start);
   if (!match) throw new Error(`unreadable sleep start "${start}"`);
-  const [, day, hh, mm] = match as unknown as [string, keyof typeof REFERENCE_DATES, string, string];
-  return `2026-01-${String(REFERENCE_DATES[day]).padStart(2, "0")}T${hh}:${mm}:00-05:00`;
+  const [, day, hh, mm] = match as unknown as [string, string, string, string];
+  return `${referenceDate(day)}T${hh}:${mm}:00-05:00`;
 }

@@ -15,8 +15,6 @@ import {
 import { scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
-const MONDAY = "2026-01-05";
-
 const ids = (items: { id: string }[]) => items.map((item) => item.id);
 
 describe("asking about evidence", () => {
@@ -52,7 +50,7 @@ describe("asking about evidence", () => {
           id: evidenceId,
           pactId: gym,
           name: "Gym",
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           submittedAt: s.at("Mon 18:00"),
         },
         reviewerName: "reviewer",
@@ -87,10 +85,10 @@ describe("asking about evidence", () => {
 
     await s.advanceTo("Tue 00:00");
 
-    const preview = ok(owner.excusePreview(gym, { from: MONDAY, to: MONDAY }));
+    const preview = ok(owner.excusePreview(gym, { from: s.date("Mon"), to: s.date("Mon") }));
     expect(preview.preview.covered).toEqual([
       expect.objectContaining({
-        date: MONDAY,
+        date: s.date("Mon"),
         status: expect.objectContaining({ kind: "not-judged", evidenceWaiting: true }),
       }),
     ]);
@@ -174,7 +172,7 @@ describe("what can be asked and replied", () => {
         id: evidenceId,
         pactId: gym,
         pactName: "Gym",
-        occurrenceDate: MONDAY,
+        occurrenceDate: s.date("Mon"),
         description: "A photo of Gym",
         photoIds: s.photoStore.photoIds,
         submittedAt: s.at("Mon 18:00"),
@@ -260,7 +258,7 @@ describe("every item kind", () => {
     const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 10:00");
-    const filed = ok(await owner.fileExcuse(gym, { from: MONDAY, to: MONDAY, reason: "Sick" }, []));
+    const filed = ok(await owner.fileExcuse(gym, { from: s.date("Mon"), to: s.date("Mon"), reason: "Sick" }, []));
     const { excuseId } = filed;
 
     ok(await second.askOwner(excuseId, "Did you see a doctor?"));
@@ -270,7 +268,12 @@ describe("every item kind", () => {
     expect(owner.today().alerts).toEqual([
       expect.objectContaining({
         kind: "reviewer-question",
-        item: expect.objectContaining({ kind: "excuse", id: excuseId, firstDate: MONDAY, lastDate: MONDAY }),
+        item: expect.objectContaining({
+          kind: "excuse",
+          id: excuseId,
+          firstDate: s.date("Mon"),
+          lastDate: s.date("Mon"),
+        }),
         reviewerName: "second",
       }),
     ]);

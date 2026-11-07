@@ -9,8 +9,6 @@ import { gymEvidenceWaiting, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
-const MONDAY = "2026-01-05";
-
 describe("a rejection is final straight away", () => {
   test("rejected Monday afternoon, while the day is still open: Missed at once, $5 owed; the pact leaves To do; Today shows only the alert", async () => {
     const s = scenario();
@@ -28,7 +26,7 @@ describe("a rejection is final straight away", () => {
           name: "Gym",
           reviewerName: "reviewer",
           reason: "Blurry",
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Wed 15:00"),
@@ -40,7 +38,7 @@ describe("a rejection is final straight away", () => {
     } satisfies Today);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 500 })]);
     expect(owner.ledger(owner.ledgers()[0]!.recipientId)).toMatchObject({
-      ledger: { history: [{ pactId: gym, occurrenceDate: MONDAY, addedAt: s.at("Mon 15:00") }] },
+      ledger: { history: [{ pactId: gym, occurrenceDate: s.date("Mon"), addedAt: s.at("Mon 15:00") }] },
     });
   });
 
@@ -61,7 +59,7 @@ describe("a rejection is final straight away", () => {
           name: "Gym",
           reviewerName: "reviewer",
           reason: "That's last week's photo",
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Thu 08:00"),
@@ -71,7 +69,7 @@ describe("a rejection is final straight away", () => {
       waiting: [],
       yesterday: [
         expect.objectContaining({
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           occurrence: expect.objectContaining({
             status: expect.objectContaining({
               kind: "missed",
@@ -95,10 +93,10 @@ describe("a rejection is final straight away", () => {
     expect(owner.ledger(owner.ledgers()[0]!.recipientId)).toMatchObject({
       ledger: {
         summary: { owedCents: 500 },
-        history: [{ pactId: gym, occurrenceDate: MONDAY, addedAt: s.at("Mon 15:00") }],
+        history: [{ pactId: gym, occurrenceDate: s.date("Mon"), addedAt: s.at("Mon 15:00") }],
       },
     });
-    expect(owner.today()).toMatchObject({ alerts: [{ pactId: gym, occurrenceDate: MONDAY }], sections: [] });
+    expect(owner.today()).toMatchObject({ alerts: [{ pactId: gym, occurrenceDate: s.date("Mon") }], sections: [] });
   });
 
   test("evidence for a day whose evidence was rejected is refused, and nothing reaches the reviewers", async () => {
@@ -130,13 +128,15 @@ describe("the rejected-evidence alert", () => {
     const ledger = owner.ledger(summary!.recipientId);
 
     s.setClockTo("Mon 16:00");
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual({ ok: true });
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual({ ok: true });
 
     expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
     expect(owner.ledgers()).toEqual([summary]);
     expect(owner.ledger(summary!.recipientId)).toEqual(ledger);
     expect(ledger).toMatchObject({
-      ledger: { history: [{ occurrenceDate: MONDAY, rejection: { reviewerName: "reviewer", reason: "Blurry" } }] },
+      ledger: {
+        history: [{ occurrenceDate: s.date("Mon"), rejection: { reviewerName: "reviewer", reason: "Blurry" } }],
+      },
     });
   });
 
@@ -150,7 +150,12 @@ describe("the rejected-evidence alert", () => {
     await s.restart();
 
     expect(owner.today().alerts).toEqual([
-      expect.objectContaining({ kind: "evidence-rejected", pactId: gym, occurrenceDate: MONDAY, reason: "Blurry" }),
+      expect.objectContaining({
+        kind: "evidence-rejected",
+        pactId: gym,
+        occurrenceDate: s.date("Mon"),
+        reason: "Blurry",
+      }),
     ]);
   });
 
@@ -165,13 +170,13 @@ describe("the rejected-evidence alert", () => {
     await second.decide(wednesday.evidenceId, { kind: "reject", reason: "That's last week's photo" });
 
     expect(owner.today().alerts).toEqual([
-      expect.objectContaining({ occurrenceDate: "2026-01-07", reviewerName: "second" }),
-      expect.objectContaining({ occurrenceDate: MONDAY, reviewerName: "reviewer" }),
+      expect.objectContaining({ occurrenceDate: s.date("Wed"), reviewerName: "second" }),
+      expect.objectContaining({ occurrenceDate: s.date("Mon"), reviewerName: "reviewer" }),
     ]);
 
-    await owner.acceptMiss(gym, "2026-01-07");
+    await owner.acceptMiss(gym, s.date("Wed"));
 
-    expect(owner.today().alerts).toEqual([expect.objectContaining({ occurrenceDate: MONDAY })]);
+    expect(owner.today().alerts).toEqual([expect.objectContaining({ occurrenceDate: s.date("Mon") })]);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
   });
 
@@ -180,11 +185,11 @@ describe("the rejected-evidence alert", () => {
     const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
-    await owner.acceptMiss(gym, MONDAY);
+    await owner.acceptMiss(gym, s.date("Mon"));
 
     await s.restart();
 
     expect(owner.today().alerts).toEqual([]);
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual({ ok: false, reason: "nothing-to-accept" });
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual({ ok: false, reason: "nothing-to-accept" });
   });
 });

@@ -20,7 +20,7 @@ describe("the Review Queue", () => {
       description: "A photo of Gym",
       photoIds: s.photoStore.photoIds,
       submittedAt: s.at("Mon 18:00"),
-      occurrenceDate: "2026-01-05",
+      occurrenceDate: s.date("Mon"),
       penaltyCents: 500,
       recipientName: "Sam",
       thread: { comments: [], waitingOnReply: false },
@@ -48,9 +48,9 @@ describe("the Review Queue", () => {
         .reviewQueue()
         .map((item) => item.kind === "evidence" && [item.pactName, item.occurrenceDate, item.submittedAt]),
     ).toEqual([
-      ["Run", "2026-01-05", s.at("Mon 20:00")],
-      ["Gym", "2026-01-05", s.at("Mon 21:00")],
-      ["Run", "2026-01-06", s.at("Tue 07:00")],
+      ["Run", s.date("Mon"), s.at("Mon 20:00")],
+      ["Gym", s.date("Mon"), s.at("Mon 21:00")],
+      ["Run", s.date("Tue"), s.at("Tue 07:00")],
     ]);
   });
 });

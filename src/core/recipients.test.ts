@@ -62,7 +62,7 @@ describe("people are listed by name the same way on every page", () => {
       recipientId: aliceRecipient.recipient.id,
     });
     s.setClockTo("Mon 10:00"); // after the edit window
-    const filed = ok(await owner.fileExcuse(run, { from: "2026-01-07", to: "2026-01-07", reason: "Trip" }, []));
+    const filed = ok(await owner.fileExcuse(run, { from: s.date("Wed"), to: s.date("Wed"), reason: "Trip" }, []));
 
     expect(owner.friends().map((f) => f.name)).toEqual(["alice", "Bob", "reviewer", "second"]);
     expect(owner.recipients().map((r) => r.name)).toEqual(["alice", "Bob", "Sam"]);

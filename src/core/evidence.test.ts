@@ -24,7 +24,7 @@ describe("submitting evidence", () => {
           id: submitted.ok && submitted.evidenceId,
           pactId: gym,
           name: "Gym",
-          occurrenceDate: "2026-01-05",
+          occurrenceDate: s.date("Mon"),
           submittedAt: s.at("Mon 18:00"),
         },
       ],
