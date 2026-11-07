@@ -10,6 +10,7 @@ import {
   nightStartsAt,
   noOuraDataPushAt,
   occurrences,
+  type NewOccurrenceOptions,
   type OccurrenceTerms,
 } from "./occurrences.ts";
 
@@ -21,6 +22,16 @@ function fixedDays(...days: Weekday[]) {
   return { kind: "fixed-days" as const, days };
 }
 
+/** A pact's occurrence terms: `terms`, and none of the optional times or dates it leaves out. */
+function termsOf(terms: Pick<OccurrenceTerms, "schedule" | "firstOccurrence"> & Partial<OccurrenceTerms>) {
+  return { inBedBy: null, dueBy: null, ankiRollover: null, endDate: null, createdAt: null, ...terms };
+}
+
+/** A new pact's options: `options`, and none of the others. */
+function optionsOf(options: Partial<NewOccurrenceOptions> = {}): NewOccurrenceOptions {
+  return { inBedBy: null, dueBy: null, ankiRollover: null, startDate: null, ...options };
+}
+
 describe("a new pact's first occurrence", () => {
   test.each([
     { createdAt: "2026-01-05T23:00:00-05:00", first: "2026-01-05", why: "due exactly an hour later" },
@@ -28,16 +39,18 @@ describe("a new pact's first occurrence", () => {
   ])("a daily pact created at $createdAt starts $first: Monday is $why", ({ createdAt, first }) => {
     const daily = fixedDays("mon", "tue", "wed", "thu", "fri", "sat", "sun");
 
-    expect(newOccurrenceTerms(daily, new Date(createdAt), NEW_YORK)).toMatchObject({
+    expect(newOccurrenceTerms(daily, new Date(createdAt), NEW_YORK, optionsOf())).toMatchObject({
       ok: true,
       terms: { firstOccurrence: first },
     });
   });
 
   test("a Monday-only pact created late on a Monday starts 7 days later", () => {
-    expect(newOccurrenceTerms(fixedDays("mon"), new Date("2026-01-05T23:30:00-05:00"), NEW_YORK)).toEqual({
+    const createdAt = new Date("2026-01-05T23:30:00-05:00");
+
+    expect(newOccurrenceTerms(fixedDays("mon"), createdAt, NEW_YORK, optionsOf())).toEqual({
       ok: true,
-      terms: { schedule: fixedDays("mon"), firstOccurrence: "2026-01-12" },
+      terms: termsOf({ schedule: fixedDays("mon"), firstOccurrence: "2026-01-12", createdAt }),
       first: {
         date: "2026-01-12",
         opensAt: new Date("2026-01-12T00:00:00-05:00"),
@@ -48,13 +61,18 @@ describe("a new pact's first occurrence", () => {
   });
 
   test("the schedule is stored with its days Monday first and without repeats", () => {
-    const result = newOccurrenceTerms(fixedDays("fri", "mon", "fri"), new Date("2026-01-05T09:00:00-05:00"), NEW_YORK);
+    const result = newOccurrenceTerms(
+      fixedDays("fri", "mon", "fri"),
+      new Date("2026-01-05T09:00:00-05:00"),
+      NEW_YORK,
+      optionsOf(),
+    );
 
     expect(result).toMatchObject({ ok: true, terms: { schedule: fixedDays("mon", "fri") } });
   });
 
   test("a schedule with no days is refused", () => {
-    expect(newOccurrenceTerms(fixedDays(), new Date("2026-01-05T09:00:00-05:00"), NEW_YORK)).toEqual({
+    expect(newOccurrenceTerms(fixedDays(), new Date("2026-01-05T09:00:00-05:00"), NEW_YORK, optionsOf())).toEqual({
       ok: false,
       reason: "no-days",
     });
@@ -63,7 +81,7 @@ describe("a new pact's first occurrence", () => {
 
 describe("the occurrence open at a time", () => {
   // Mon/Wed/Fri, first occurrence Wed 7 Jan 2026.
-  const terms: OccurrenceTerms = { schedule: fixedDays("mon", "wed", "fri"), firstOccurrence: "2026-01-07" };
+  const terms = termsOf({ schedule: fixedDays("mon", "wed", "fri"), firstOccurrence: "2026-01-07" });
   const pact = occurrences(terms, NEW_YORK);
 
   test("on a scheduled day, it's that day's, open all day and due at the midnight ending it", () => {
@@ -100,7 +118,7 @@ describe("the occurrence open at a time", () => {
 
 describe("the occurrences due after a date, by a time", () => {
   // Mon/Wed/Fri, first occurrence Wed 7 Jan 2026.
-  const terms: OccurrenceTerms = { schedule: fixedDays("mon", "wed", "fri"), firstOccurrence: "2026-01-07" };
+  const terms = termsOf({ schedule: fixedDays("mon", "wed", "fri"), firstOccurrence: "2026-01-07" });
   const pact = occurrences(terms, NEW_YORK);
   const dates = (after: string | null, t: string) => pact.dueAfter(after, new Date(t)).map((o) => o.date);
 
@@ -131,10 +149,10 @@ describe("the occurrences due after a date, by a time", () => {
 });
 
 describe("daylight saving time", () => {
-  const daily: OccurrenceTerms = {
+  const daily = termsOf({
     schedule: fixedDays("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
     firstOccurrence: "2026-01-01",
-  };
+  });
 
   test.each([
     // New York changes at 02:00, so midnight stays put and the day is 23 or 25 hours long.
@@ -188,14 +206,14 @@ describe("daylight saving time", () => {
 
   test("a pact created late on Santiago's short Saturday gets the full hour before its jump", () => {
     // 22:30 Saturday is 90 minutes before the day ends at the jump, not 30.
-    const result = newOccurrenceTerms(daily.schedule, new Date("2026-09-05T22:30:00-04:00"), SANTIAGO);
+    const result = newOccurrenceTerms(daily.schedule, new Date("2026-09-05T22:30:00-04:00"), SANTIAGO, optionsOf());
 
     expect(result).toMatchObject({ ok: true, terms: { firstOccurrence: "2026-09-05" } });
   });
 });
 
 describe("bedtime nights", () => {
-  const mondays = { schedule: { kind: "fixed-days" as const, days: ["mon" as const] }, firstOccurrence: "2026-01-05" };
+  const mondays = termsOf({ schedule: fixedDays("mon"), firstOccurrence: "2026-01-05" });
 
   test.each([
     { inBedBy: "22:30", dueAt: "2026-01-05T22:30:00-05:00" },
@@ -227,10 +245,7 @@ describe("bedtime nights", () => {
 
   test("a night's 18:00 on the account's clock follows its daylight saving change", () => {
     // Clocks go back at 02:00 Sun Nov 1 2026 in New York.
-    const sundays = {
-      schedule: { kind: "fixed-days" as const, days: ["sun" as const] },
-      firstOccurrence: "2026-11-01",
-    };
+    const sundays = termsOf({ schedule: fixedDays("sun"), firstOccurrence: "2026-11-01" });
     expect(occurrences({ ...sundays, inBedBy: "00:00" }, NEW_YORK).first.closesAt).toEqual(
       new Date("2026-11-02T18:00:00-05:00"),
     );
@@ -240,11 +255,11 @@ describe("bedtime nights", () => {
   test("the first night is the first whose in-bed-by time is at least an hour after creation", () => {
     const created = new Date("2026-01-05T23:10:00-05:00");
     const schedule = { kind: "fixed-days" as const, days: ["mon" as const, "tue" as const] };
-    expect(newOccurrenceTerms(schedule, created, NEW_YORK, { inBedBy: "00:00" })).toMatchObject({
+    expect(newOccurrenceTerms(schedule, created, NEW_YORK, optionsOf({ inBedBy: "00:00" }))).toMatchObject({
       terms: { firstOccurrence: "2026-01-06", inBedBy: "00:00" },
     });
     // Exactly an hour is enough.
-    expect(newOccurrenceTerms(schedule, created, NEW_YORK, { inBedBy: "00:10" })).toMatchObject({
+    expect(newOccurrenceTerms(schedule, created, NEW_YORK, optionsOf({ inBedBy: "00:10" }))).toMatchObject({
       terms: { firstOccurrence: "2026-01-05" },
     });
   });
@@ -255,7 +270,7 @@ describe("due-by times", () => {
 
   test("a day is due at its due-by time on its own date, whatever the clocks do that night", () => {
     // New York springs forward at 02:00 on Sun Mar 8 2026: 09:00 that day is EDT.
-    const pact = occurrences({ schedule: daily, firstOccurrence: "2026-03-07", dueBy: "09:00" }, NEW_YORK);
+    const pact = occurrences(termsOf({ schedule: daily, firstOccurrence: "2026-03-07", dueBy: "09:00" }), NEW_YORK);
 
     expect(pact.between("2026-03-07", "2026-03-08").map((o) => o.dueAt)).toEqual([
       new Date("2026-03-07T09:00:00-05:00"),
@@ -264,7 +279,10 @@ describe("due-by times", () => {
   });
 
   test("no day after the end date is an occurrence, or ever falls due", () => {
-    const pact = occurrences({ schedule: daily, firstOccurrence: "2026-01-05", endDate: "2026-01-07" }, NEW_YORK);
+    const pact = occurrences(
+      termsOf({ schedule: daily, firstOccurrence: "2026-01-05", endDate: "2026-01-07" }),
+      NEW_YORK,
+    );
 
     expect(pact.includes("2026-01-07")).toBe(true);
     expect(pact.includes("2026-01-08")).toBe(false);
@@ -277,7 +295,7 @@ describe("due-by times", () => {
 });
 
 describe("Weekly count weeks", () => {
-  const twice: OccurrenceTerms = { schedule: { kind: "weekly-count", target: 2 }, firstOccurrence: "2026-10-26" };
+  const twice = termsOf({ schedule: { kind: "weekly-count", target: 2 }, firstOccurrence: "2026-10-26" });
 
   test("the week New York falls back runs from Monday's midnight to the next, 169 hours", () => {
     const week = occurrences(twice, NEW_YORK).openAt(new Date("2026-11-01T12:00:00-05:00"));
@@ -307,7 +325,7 @@ describe("Weekly count weeks", () => {
   });
 
   test("a pact made late on Sunday starts the next day", () => {
-    const result = newOccurrenceTerms(twice.schedule, new Date("2026-11-01T23:30:00-05:00"), NEW_YORK);
+    const result = newOccurrenceTerms(twice.schedule, new Date("2026-11-01T23:30:00-05:00"), NEW_YORK, optionsOf());
 
     expect(result).toMatchObject({ ok: true, terms: { firstOccurrence: "2026-11-02" } });
   });
@@ -318,7 +336,7 @@ describe("a One-time occurrence", () => {
   const oneTime = (submitAnytime: boolean) => ({ kind: "one-time" as const, deadline: "2026-03-08", submitAnytime });
 
   test("on the day New York springs forward, a 9:00am deadline is 9:00am daylight time", () => {
-    const made = newOccurrenceTerms(oneTime(false), createdAt, NEW_YORK, { dueBy: "09:00" });
+    const made = newOccurrenceTerms(oneTime(false), createdAt, NEW_YORK, optionsOf({ dueBy: "09:00" }));
 
     expect(made).toMatchObject({
       ok: true,
@@ -331,7 +349,7 @@ describe("a One-time occurrence", () => {
   });
 
   test("with Submit anytime it covers every day from the pact's creation to the deadline", () => {
-    const made = newOccurrenceTerms(oneTime(true), createdAt, NEW_YORK);
+    const made = newOccurrenceTerms(oneTime(true), createdAt, NEW_YORK, optionsOf());
     if (!made.ok) throw new Error(made.reason);
     const { first, openAt, covering, includes } = occurrences(made.terms, NEW_YORK);
 
@@ -347,7 +365,12 @@ describe("an Anki due-by time that can't fit its Anki day", () => {
   // 09:00 with a 4am rollover is neither that evening nor the morning after.
   // Pacts refuse it before storing it, so meeting one is a bug: it throws rather than guess a time.
   test("throws when it's read as a due time, or sorted against another", () => {
-    const terms = { schedule: fixedDays("mon"), firstOccurrence: "2026-01-05", dueBy: "09:00", ankiRollover: 4 };
+    const terms = termsOf({
+      schedule: fixedDays("mon"),
+      firstOccurrence: "2026-01-05",
+      dueBy: "09:00",
+      ankiRollover: 4,
+    });
 
     expect(() => occurrences(terms, NEW_YORK).covering("2026-01-05")).toThrow("can't be due by 09:00");
     expect(() => ankiDueByOrder("09:00", 4)).toThrow("can't be due by 09:00");

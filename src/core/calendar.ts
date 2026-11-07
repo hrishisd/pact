@@ -23,6 +23,12 @@ export function zonedWallTimeToInstant(
   return new Date(instant);
 }
 
+/** The instant the wall-clock time `hour`:`minute` on `date` names in `timezone`. */
+export function wallTime(date: LocalDate, hour: number, minute: number, timezone: string): Date {
+  const [year, month, day] = splitDate(date);
+  return zonedWallTimeToInstant(year, month, day, hour, minute, timezone);
+}
+
 /** The calendar day `instant` falls on in `timezone`. */
 export function localDateOf(instant: Date, timezone: string): LocalDate {
   const parts = new Intl.DateTimeFormat("en-US", {

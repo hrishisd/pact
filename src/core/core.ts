@@ -13,8 +13,8 @@ import {
   localDateOf,
   mondayOf,
   startOfDay,
+  wallTime,
   weekdayOf,
-  zonedWallTimeToInstant,
   zoneOffsetAt,
   type LocalDate,
 } from "./calendar.ts";
@@ -23,11 +23,13 @@ import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
   ankiDueByFits,
   ankiDueByOrder,
-  ankiReminderOrder,
+  clockOf,
   dueSoonEnough,
   firstWeekFrom,
   lastDayOf,
+  minutesFrom,
   newOccurrenceTerms,
+  NIGHT_STARTS_HOUR,
   oneTimeReminderAt,
   nightStartsAt,
   noOuraDataPushAt,
@@ -35,11 +37,11 @@ import {
   occurrencesOverTime,
   reminderAt,
   utcOffsetMs,
+  type EarlierTerms,
   type Occurrence,
   type Occurrences,
   type OccurrenceTerms,
   type OuraOffset,
-  type TermsEra,
 } from "./occurrences.ts";
 import type {
   AnkiCountsResult,
@@ -902,10 +904,10 @@ class Core implements PactCore {
               checked.description,
               pact.evidenceKind,
               JSON.stringify(checked.terms.schedule),
-              checked.terms.inBedBy ?? null,
-              checked.terms.dueBy ?? null,
+              checked.terms.inBedBy,
+              checked.terms.dueBy,
               checked.startDate,
-              checked.terms.endDate ?? null,
+              checked.terms.endDate,
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
@@ -913,7 +915,7 @@ class Core implements PactCore {
               JSON.stringify(checked.reminders),
               now.toISOString(),
               checked.ankiDeckId,
-              checked.terms.ankiRollover ?? null,
+              checked.terms.ankiRollover,
             );
           this.#setReviewers(id, checked.reviewerIds);
           return { ok: true, pactId: id };
@@ -939,10 +941,10 @@ class Core implements PactCore {
               checked.name,
               checked.description,
               JSON.stringify(checked.terms.schedule),
-              checked.terms.inBedBy ?? null,
-              checked.terms.dueBy ?? null,
+              checked.terms.inBedBy,
+              checked.terms.dueBy,
               checked.startDate,
-              checked.terms.endDate ?? null,
+              checked.terms.endDate,
               pact.penaltyCents,
               pact.recipientId,
               checked.terms.firstOccurrence,
@@ -2908,25 +2910,17 @@ class Core implements PactCore {
     });
   }
 
-  /** The pact's terms over time, oldest first: those it had before each change, then those it has now. */
-  #erasOf(
-    pact: Pick<PactRow, "id" | "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date" | "created_at"> &
-      Partial<Pick<PactRow, "anki_rollover_hour">>,
-  ): TermsEra[] {
-    const earlier = this.#db
+  /** The timing terms pact `pactId` had before each change, oldest first. */
+  #earlierTermsOf(pactId: string): EarlierTerms[] {
+    const rows = this.#db
       .prepare(`SELECT until, schedule, in_bed_by, due_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`)
-      .all(pact.id) as { until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }[];
-    return [
-      ...earlier.map((row) => ({
-        until: row.until,
-        terms: occurrenceTermsOf({
-          ...row,
-          first_occurrence: pact.first_occurrence,
-          anki_rollover_hour: pact.anki_rollover_hour ?? null,
-        }),
-      })),
-      { until: null, terms: occurrenceTermsOf(pact) },
-    ];
+      .all(pactId) as { until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }[];
+    return rows.map((row) => ({
+      until: row.until,
+      schedule: scheduleOf(row.schedule),
+      inBedBy: row.in_bed_by,
+      dueBy: row.due_by,
+    }));
   }
 
   /**
@@ -2937,14 +2931,13 @@ class Core implements PactCore {
   #occurrencesOf(pactId: string, timezone: string): Occurrences {
     const pact = this.#db
       .prepare(
-        `SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id, evidence_kind,
+        `SELECT schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id, evidence_kind,
                 anki_rollover_hour
          FROM pact WHERE id = ?`,
       )
       .get(pactId) as
       | Pick<
           PactRow,
-          | "id"
           | "schedule"
           | "first_occurrence"
           | "in_bed_by"
@@ -2958,7 +2951,7 @@ class Core implements PactCore {
       | undefined;
     if (!pact) throw new Error(`no pact ${pactId}`);
     const ouraOffset = pact.evidence_kind === "oura" ? this.#ouraOffset(pact.owner_account_id, timezone) : null;
-    return occurrencesOverTime(this.#erasOf(pact), timezone, ouraOffset);
+    return occurrencesOverTime(occurrenceTermsOf(pact), this.#earlierTermsOf(pactId), timezone, ouraOffset);
   }
 
   /**
@@ -3168,42 +3161,35 @@ class Core implements PactCore {
     if (after.schedule.kind === "one-time") return { appliesFrom: after.schedule.deadline, todayKeepsCents: null };
     const today = localDateOf(at, timezone);
     const from = firstDayNotOpen(after.schedule, today);
-    const eras = this.#erasOf(pact);
-    const earlier = eras.slice(0, -1);
+    const current = occurrenceTermsOf(pact);
+    const earlier = this.#earlierTermsOf(pact.id);
     const firstOccurrence = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
-    const planned: TermsEra[] = [
-      ...earlier,
-      ...(earlier.some((era) => era.until === from) ? [] : [{ until: from, terms: eras.at(-1)!.terms }]),
-      {
-        until: null,
-        terms: {
-          schedule: after.schedule,
-          firstOccurrence,
-          inBedBy: after.inBedBy,
-          dueBy: after.dueBy,
-          ankiRollover: pact.anki_rollover_hour,
-          endDate: after.endDate,
-        },
-      },
-    ];
+    // The terms in force now stay with the occurrences dated before `from`, unless a change made today put them there.
+    const planned = earlier.some((terms) => terms.until === from)
+      ? earlier
+      : [...earlier, { until: from, schedule: current.schedule, inBedBy: current.inBedBy, dueBy: current.dueBy }];
+    const { schedule, inBedBy, dueBy, endDate } = after;
     const start = laterDate(firstOccurrence, from);
     // With no day left before its end date, the change still starts tomorrow (or next week).
-    const [first] = occurrencesOverTime(planned, timezone).between(from, addDays(start, 7));
+    const [first] = occurrencesOverTime(
+      { ...current, schedule, firstOccurrence, inBedBy, dueBy, endDate },
+      planned,
+      timezone,
+    ).between(from, addDays(start, 7));
     return {
       appliesFrom: first?.date ?? from,
-      todayKeepsCents: this.#todayKeeps(pact.id, eras, timezone, today, after),
+      todayKeepsCents: this.#todayKeeps(pact.id, occurrencesOverTime(current, earlier, timezone), today, after),
     };
   }
 
-  /** The penalty the occurrence open `today` keeps, when it differs from `after`'s; else null. */
+  /** The penalty the occurrence of `occurrences` open `today` keeps, when it differs from `after`'s; else null. */
   #todayKeeps(
     pactId: string,
-    eras: TermsEra[],
-    timezone: string,
+    occurrences: Occurrences,
     today: LocalDate,
     after: Pick<ChangeableTerms, "penaltyCents">,
   ): number | null {
-    const open = occurrencesOverTime(eras, timezone).covering(today);
+    const open = occurrences.covering(today);
     if (!open) return null;
     const { penalty_cents: penalty } = this.#termsOn(pactId, open.date);
     return penalty !== after.penaltyCents ? penalty : null;
@@ -3314,7 +3300,7 @@ class Core implements PactCore {
   ): boolean {
     const current = this.#occurrencesOf(pact.id, timezone).first;
     const changed = occurrences(
-      { schedule: after.schedule, firstOccurrence: current.date, dueBy: after.dueBy },
+      { ...occurrenceTermsOf(pact), schedule: after.schedule, dueBy: after.dueBy },
       timezone,
     ).first;
     return changed.dueAt.getTime() === current.dueAt.getTime() || dueSoonEnough(changed, at);
@@ -3583,9 +3569,7 @@ class Core implements PactCore {
     const [start] = occurrences.between(from, addDays(from, 7));
     const today = localDateOf(now, timezone);
     if (!start || start.date <= today) return null;
-    const todayKeepsCents = this.#todayKeeps(pact.id, this.#erasOf(pact), timezone, today, {
-      penaltyCents: pact.penalty_cents,
-    });
+    const todayKeepsCents = this.#todayKeeps(pact.id, occurrences, today, { penaltyCents: pact.penalty_cents });
     return { startsOn: start.date, todayKeepsCents };
   }
 
@@ -5567,22 +5551,19 @@ function editWindowClosesAt(pact: Pick<PactRow, "created_at">, now: Date): Date 
 
 /** A pact row's occurrence terms, its stored schedule parsed. */
 function occurrenceTermsOf(
-  row: Pick<PactRow, "schedule" | "first_occurrence"> & {
-    in_bed_by?: string | null;
-    due_by?: string | null;
-    anki_rollover_hour?: number | null;
-    end_date?: string | null;
-    created_at?: string;
-  },
+  row: Pick<
+    PactRow,
+    "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "anki_rollover_hour" | "end_date" | "created_at"
+  >,
 ): OccurrenceTerms {
   return {
     schedule: scheduleOf(row.schedule),
     firstOccurrence: row.first_occurrence,
-    inBedBy: row.in_bed_by ?? null,
-    dueBy: row.due_by ?? null,
-    ankiRollover: row.anki_rollover_hour ?? null,
-    endDate: row.end_date ?? null,
-    createdAt: row.created_at === undefined ? null : new Date(row.created_at),
+    inBedBy: row.in_bed_by,
+    dueBy: row.due_by,
+    ankiRollover: row.anki_rollover_hour,
+    endDate: row.end_date,
+    createdAt: new Date(row.created_at),
   };
 }
 
@@ -5651,12 +5632,12 @@ function utcOffsetOf(timestamp: string): string | null {
 /** The night a sleep starting at `timestamp` counts for: its day from 18:00, else the day before. */
 function nightOf(timestamp: string): LocalDate {
   const date = timestamp.slice(0, 10);
-  return Number(timestamp.slice(11, 13)) >= 18 ? date : addDays(date, -1);
+  return Number(timestamp.slice(11, 13)) >= NIGHT_STARTS_HOUR ? date : addDays(date, -1);
 }
 
 /** The night of `date`'s in-bed-by deadline as a wall-clock "YYYY-MM-DDTHH:MM". */
 function deadlineWallClock(date: LocalDate, inBedBy: string): string {
-  return `${Number(inBedBy.slice(0, 2)) >= 18 ? date : addDays(date, 1)}T${inBedBy}`;
+  return `${clockOf(inBedBy)[0] >= NIGHT_STARTS_HOUR ? date : addDays(date, 1)}T${inBedBy}`;
 }
 
 /** A pact's terms as `#checkedPact` checks them. */
@@ -5740,7 +5721,7 @@ function checkedTerms(
     oneTime,
     ankiRollover,
     inBedBy: oura ? pact.inBedBy! : null,
-    dueBy: timing.terms.dueBy ?? null,
+    dueBy: timing.terms.dueBy,
     dueAt: timing.first.dueAt,
   };
   if (!remindersGoOffInTime(reminders, due, timezone)) return { ok: false, reason: "reminder-after-due-time" };
@@ -5757,7 +5738,7 @@ function checkedTerms(
     timezone,
     name,
     description,
-    terms: endDate === null ? timing.terms : { ...timing.terms, endDate },
+    terms: { ...timing.terms, endDate },
     startDate: pact.startDate ?? null,
     reminders,
   };
@@ -5769,11 +5750,8 @@ function checkedTerms(
  * day's from midnight.
  */
 function sortedReminders(reminders: string[], oura: boolean, ankiRollover: number | null): string[] {
-  if (ankiRollover !== null) {
-    return [...reminders].sort((a, b) => ankiReminderOrder(a, ankiRollover) - ankiReminderOrder(b, ankiRollover));
-  }
-  const order = oura ? nightOrder : (time: string) => time;
-  return [...reminders].sort((a, b) => order(a).localeCompare(order(b), "en-US"));
+  const dayStarts = ankiRollover ?? (oura ? NIGHT_STARTS_HOUR : 0);
+  return [...reminders].sort((a, b) => minutesFrom(a, dayStarts) - minutesFrom(b, dayStarts));
 }
 
 /**
@@ -5789,11 +5767,11 @@ function remindersGoOffInTime(
   const { ankiRollover } = due;
   return reminders.every((time) => {
     if (due.oneTime) return oneTimeReminderAt(time, timezone).getTime() < due.dueAt.getTime();
-    if (due.inBedBy !== null) return nightOrder(time) < nightOrder(due.inBedBy);
-    // Without a due-by time an Anki day is due at midnight. A due-by time that can't fit is refused before this.
-    if (ankiRollover !== null) {
-      return ankiReminderOrder(time, ankiRollover) < ankiDueByOrder(due.dueBy ?? "00:00", ankiRollover);
+    if (due.inBedBy !== null) {
+      return minutesFrom(time, NIGHT_STARTS_HOUR) < minutesFrom(due.inBedBy, NIGHT_STARTS_HOUR);
     }
+    // Without a due-by time an Anki day is due at midnight. A due-by time that can't fit is refused before this.
+    if (ankiRollover !== null) return minutesFrom(time, ankiRollover) < ankiDueByOrder(due.dueBy, ankiRollover);
     return due.dueBy === null || time < due.dueBy;
   });
 }
@@ -5812,11 +5790,6 @@ function withoutReminders({
   ...terms
 }: CurrentTerms & Pick<PactTerms, "reminders">): CurrentTerms {
   return terms;
-}
-
-/** A clock time "HH:MM" as it sorts in a night, which runs from 18:00 to 17:59 the next day. */
-function nightOrder(time: string): string {
-  return `${Number(time.slice(0, 2)) < 18 ? 1 : 0}${time}`;
 }
 
 /** "HH:MM" on a 24-hour clock. */
@@ -5969,10 +5942,10 @@ function changeableTermsOf(checked: CheckedPact, change: PactChange): Changeable
   return {
     name: checked.name,
     description: checked.description,
-    inBedBy: checked.terms.inBedBy ?? null,
-    dueBy: checked.terms.dueBy ?? null,
+    inBedBy: checked.terms.inBedBy,
+    dueBy: checked.terms.dueBy,
     startDate: checked.startDate,
-    endDate: checked.terms.endDate ?? null,
+    endDate: checked.terms.endDate,
     schedule: checked.terms.schedule,
     penaltyCents: change.penaltyCents,
     recipientId: change.recipientId,
@@ -6266,8 +6239,7 @@ const BILL_CLOCK = `${String(BILL_TIME.hour).padStart(2, "0")}:${String(BILL_TIM
 
 /** Wednesday `date` (or any day) at the bill time, in `timezone`. */
 function billInstant(date: LocalDate, timezone: string): Date {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
-  return zonedWallTimeToInstant(year, month, day, BILL_TIME.hour, BILL_TIME.minute, timezone);
+  return wallTime(date, BILL_TIME.hour, BILL_TIME.minute, timezone);
 }
 
 /** The Wednesdays whose bill time falls after `from` and by `to`, in `timezone`. */

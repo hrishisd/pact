@@ -4,7 +4,7 @@
 // what counts (applies at once), like the name and the reminders.
 
 import type { AccountId, ChangeEffect, Schedule, TermChange } from "../shared/types.ts";
-import { ankiDueByOrder } from "./occurrences.ts";
+import { ankiDueByOrder, minutesFrom, NIGHT_STARTS_HOUR } from "./occurrences.ts";
 
 /** A pact's terms an owner can change: everything but its evidence kind. */
 export interface ChangeableTerms {
@@ -55,7 +55,9 @@ export function termDiffs(before: ChangeableTerms, after: ChangeableTerms, ankiR
     diffs.push({ term: "deck", before: before.ankiDeckId, after: after.ankiDeckId, effect: "needs-approval" });
   }
   if (after.inBedBy !== before.inBedBy && before.inBedBy !== null && after.inBedBy !== null) {
-    const effect = lateness(after.inBedBy) > lateness(before.inBedBy) ? "needs-approval" : "stricter";
+    // A night starts at 18:00, so 23:00 is earlier in it than 00:30.
+    const later = minutesFrom(after.inBedBy, NIGHT_STARTS_HOUR) > minutesFrom(before.inBedBy, NIGHT_STARTS_HOUR);
+    const effect = later ? "needs-approval" : "stricter";
     diffs.push({ term: "in-bed-by", before: before.inBedBy, after: after.inBedBy, effect });
   }
   const schedule = scheduleEffect(before.schedule, after.schedule);
@@ -120,19 +122,7 @@ function scheduleEffect(before: Schedule, after: Schedule): ChangeEffect | null 
  * runs from its rollover hour, so a time the morning after is later than midnight.
  */
 function dueByOrder(dueBy: string | null, ankiRollover: number | null): number {
-  if (ankiRollover !== null) {
-    // Both sides passed ankiDueByFits before this.
-    return ankiDueByOrder(dueBy ?? "00:00", ankiRollover);
-  }
-  const [hour, minute] = (dueBy ?? "24:00").split(":").map(Number) as [number, number];
-  return hour * 60 + minute;
-}
-
-/**
- * How late an in-bed-by time is in its night: minutes after 18:00, when the
- * night starts, so 23:00 comes before 00:30.
- */
-function lateness(inBedBy: string): number {
-  const [hour, minute] = inBedBy.split(":").map(Number) as [number, number];
-  return (hour * 60 + minute - 18 * 60 + 24 * 60) % (24 * 60);
+  // Both sides passed ankiDueByFits before this.
+  if (ankiRollover !== null) return ankiDueByOrder(dueBy, ankiRollover);
+  return dueBy === null ? 24 * 60 : minutesFrom(dueBy, 0);
 }

@@ -3,15 +3,7 @@
 // an occurrence is Satisfied, Missed or Excused is judging's to decide.
 
 import { WEEKDAYS, type Schedule } from "../shared/types.ts";
-import {
-  addDays,
-  localDateOf,
-  mondayOf,
-  startOfDay,
-  weekdayOf,
-  zonedWallTimeToInstant,
-  type LocalDate,
-} from "./calendar.ts";
+import { addDays, localDateOf, mondayOf, startOfDay, wallTime, weekdayOf, type LocalDate } from "./calendar.ts";
 
 /** One occurrence's timing. */
 export interface Occurrence {
@@ -37,31 +29,31 @@ export interface OccurrenceTerms {
   schedule: Schedule;
   firstOccurrence: LocalDate;
   /** Bedtime pacts only: the in-bed-by time, "HH:MM". */
-  inBedBy?: string | null;
+  inBedBy: string | null;
   /**
    * Camera and Anki pacts, optional: the due-by time, "HH:MM", each day's due
    * time instead of midnight. On Weekly count it limits each day's evidence
    * only. On an Anki pact a time before noon is the morning after.
    */
-  dueBy?: string | null;
+  dueBy: string | null;
   /**
    * Anki pacts only: the hour, 0–23, the collection's Anki day starts at.
    * Each day opens then, and is still open after midnight until its due time.
    */
-  ankiRollover?: number | null;
+  ankiRollover: number | null;
   /** Optional: the pact's last day. Every occurrence ends by it: a Weekly count week counts only if its Sunday does. */
-  endDate?: LocalDate | null;
-  /** One-time only: when the pact was created, which opens its occurrence with Submit anytime. */
-  createdAt?: Date | null;
+  endDate: LocalDate | null;
+  /** When the pact was created: with Submit anytime, a One-time pact's occurrence opens then. */
+  createdAt: Date | null;
 }
 
 /** The optional times a new pact's first occurrence depends on. */
 export interface NewOccurrenceOptions {
-  inBedBy?: string | null;
-  dueBy?: string | null;
-  ankiRollover?: number | null;
+  inBedBy: string | null;
+  dueBy: string | null;
+  ankiRollover: number | null;
   /** The first occurrence is on this day or later. */
-  startDate?: LocalDate | null;
+  startDate: LocalDate | null;
 }
 
 export type NewOccurrenceTermsResult =
@@ -83,28 +75,25 @@ export function newOccurrenceTerms(
   schedule: Schedule,
   createdAt: Date,
   timezone: string,
-  { inBedBy = null, dueBy = null, ankiRollover = null, startDate = null }: NewOccurrenceOptions = {},
+  { inBedBy, dueBy, ankiRollover, startDate }: NewOccurrenceOptions,
 ): NewOccurrenceTermsResult {
   const created = localDateOf(createdAt, timezone);
+  // Only Fixed days has bedtime nights or Anki days.
+  const terms = { inBedBy: null, dueBy, ankiRollover: null, endDate: null, createdAt };
   if (schedule.kind === "one-time") {
-    const terms: OccurrenceTerms = {
-      schedule: { kind: "one-time", deadline: schedule.deadline, submitAnytime: schedule.submitAnytime },
-      firstOccurrence: schedule.deadline,
-      ...(dueBy !== null && { dueBy }),
-      createdAt,
-    };
-    const first = oneTimeOccurrence(terms, timezone);
+    const { deadline, submitAnytime } = schedule;
+    const oneTime = { kind: "one-time", deadline, submitAnytime } as const;
+    const first = oneTimeOccurrence(oneTime, dueBy, createdAt, timezone);
     if (!dueSoonEnough(first, createdAt)) return { ok: false, reason: "deadline-too-soon" };
-    return { ok: true, terms, first };
+    return { ok: true, terms: { ...terms, schedule: oneTime, firstOccurrence: deadline }, first };
   }
   if (schedule.kind === "weekly-count") {
     const firstOccurrence = firstWeekFrom(addDays(created, 1), startDate);
-    const terms: OccurrenceTerms = {
-      schedule: { kind: "weekly-count", target: schedule.target },
-      firstOccurrence,
-      ...(dueBy !== null && { dueBy }),
+    return {
+      ok: true,
+      terms: { ...terms, schedule: { kind: "weekly-count", target: schedule.target }, firstOccurrence },
+      first: weekOccurrence(firstOccurrence, timezone),
     };
-    return { ok: true, terms, first: weekOccurrence(firstOccurrence, timezone) };
   }
   const days = WEEKDAYS.filter((day) => schedule.days.includes(day));
   if (days.length === 0) return { ok: false, reason: "no-days" };
@@ -114,14 +103,12 @@ export function newOccurrenceTerms(
     if (!days.includes(weekdayOf(date))) continue;
     const first = fixedDaysOccurrence(date, timezone, inBedBy, dueBy, null, ankiRollover);
     if (dueSoonEnough(first, createdAt)) {
-      const terms: OccurrenceTerms = {
-        schedule: { kind: "fixed-days", days },
-        firstOccurrence: date,
-        ...(inBedBy !== null && { inBedBy }),
-        ...(dueBy !== null && { dueBy }),
-        ...(ankiRollover !== null && { ankiRollover }),
+      const fixedDays = { kind: "fixed-days", days } as const;
+      return {
+        ok: true,
+        terms: { ...terms, inBedBy, ankiRollover, schedule: fixedDays, firstOccurrence: date },
+        first,
       };
-      return { ok: true, terms, first };
     }
   }
   throw new Error("unreachable: every scheduled weekday recurs within 8 days");
@@ -190,60 +177,50 @@ export type OuraOffset = string | null;
  * night closes at 18:00 the next day on `ouraOffset`'s clock, if there is one.
  */
 export function occurrences(terms: OccurrenceTerms, timezone: string, ouraOffset: OuraOffset = null): Occurrences {
-  return occurrencesOverTime([{ until: null, terms }], timezone, ouraOffset);
+  return occurrencesOverTime(terms, [], timezone, ouraOffset);
 }
 
 /**
- * Terms a pact had for a while: they apply to its occurrences dated before
- * `until` ("YYYY-MM-DD"), or from then on when it's null. A change starts a
- * new era from the first date not open yet.
+ * Terms a pact had before a change: they apply to its occurrences dated
+ * before `until` ("YYYY-MM-DD"). A change starts new terms from the first
+ * date not open yet.
  */
-export interface TermsEra {
-  until: LocalDate | null;
-  terms: OccurrenceTerms;
+export interface EarlierTerms extends Pick<OccurrenceTerms, "schedule" | "inBedBy" | "dueBy"> {
+  until: LocalDate;
 }
 
 /**
  * The occurrences of a pact whose terms changed over time: each date follows
- * the era it falls in. `eras` are oldest first, the last with `until` null,
- * and the pact's first occurrence and end date are the last era's.
+ * the first of `earlier` (oldest first) it's dated before, else `current`.
+ * The first occurrence, end date, creation time and Anki rollover hour are
+ * always `current`'s.
  */
 export function occurrencesOverTime(
-  eras: readonly TermsEra[],
+  current: OccurrenceTerms,
+  earlier: readonly EarlierTerms[],
   timezone: string,
   ouraOffset: OuraOffset = null,
 ): Occurrences {
-  const termsOn = (date: LocalDate) =>
-    (eras.find((era) => era.until === null || date < era.until) ?? eras.at(-1)!).terms;
-  const current = eras.at(-1)!.terms;
-  // One occurrence, which a change applies to even once it's open: no era but the last.
-  if (current.schedule.kind === "one-time") return oneTimeOccurrences(current, timezone);
-  const { firstOccurrence, endDate = null } = current;
-  // A pact's schedule keeps its kind once its edit window has closed, so every era has the same.
-  const weekly = eras.at(-1)!.terms.schedule.kind === "weekly-count";
+  const { schedule, firstOccurrence, endDate, ankiRollover } = current;
+  // One occurrence, which a change applies to even once it's open: only the current terms count.
+  if (schedule.kind === "one-time") return oneTimeOccurrences(schedule, current.dueBy, current.createdAt, timezone);
+  const termsOn = (date: LocalDate) => earlier.find((terms) => date < terms.until) ?? current;
+  // A pact's schedule keeps its kind once its edit window has closed, so earlier terms have the same.
+  const weekly = schedule.kind === "weekly-count";
   // The day the period with `day` in it starts: the day itself, or its week's Monday.
   const periodOf = (day: LocalDate) => (weekly ? mondayOf(day) : day);
   // For a day that isn't an occurrence's, as one would be: due times then only grow with the date.
   const occurrence = (date: LocalDate) => {
     if (weekly) return weekOccurrence(mondayOf(date), timezone);
-    const terms = termsOn(date);
-    return fixedDaysOccurrence(
-      date,
-      timezone,
-      terms.inBedBy ?? null,
-      terms.dueBy ?? null,
-      ouraOffset,
-      terms.ankiRollover ?? null,
-    );
+    const { inBedBy, dueBy } = termsOn(date);
+    return fixedDaysOccurrence(date, timezone, inBedBy, dueBy, ouraOffset, ankiRollover);
   };
-  // An Anki pact's rollover hour is the collection's when it was made, in every era.
-  const { ankiRollover = null } = current;
-  const ended = (date: LocalDate) => endDate !== null && lastDayOf(termsOn(date).schedule, periodOf(date)) > endDate;
+  const ended = (date: LocalDate) => endDate !== null && lastDayOf(schedule, periodOf(date)) > endDate;
   const scheduled = (date: LocalDate) => {
     if (ended(date)) return false;
-    const { schedule } = termsOn(date);
-    if (schedule.kind === "one-time") return date === schedule.deadline;
-    return schedule.kind === "weekly-count" ? date === mondayOf(date) : schedule.days.includes(weekdayOf(date));
+    if (weekly) return date === mondayOf(date);
+    const on = termsOn(date).schedule;
+    return on.kind === "fixed-days" && on.days.includes(weekdayOf(date));
   };
   const includes = (date: LocalDate) => date >= firstOccurrence && scheduled(date);
   const covering = (day: LocalDate) => (includes(periodOf(day)) ? occurrence(periodOf(day)) : null);
@@ -267,8 +244,7 @@ export function occurrencesOverTime(
     dayDueAt(day) {
       const found = covering(day);
       if (!found || !weekly) return found?.dueAt ?? null;
-      const { dueBy = null } = termsOn(found.date);
-      return dueBy === null ? startOfDay(addDays(day, 1), timezone) : wallTime(day, ...clockOf(dueBy), timezone);
+      return dueOnDay(day, termsOn(found.date).dueBy, timezone);
     },
     includes,
     dueAfter(after, t) {
@@ -289,13 +265,20 @@ export function occurrencesOverTime(
   };
 }
 
+type OneTimeSchedule = Extract<Schedule, { kind: "one-time" }>;
+
 /**
  * A One-time pact's occurrences: just the one, dated by the deadline's date.
  * Its period runs from that date (from the pact's creation, with Submit
  * anytime) to the deadline, and evidence on any day of it is due then.
  */
-function oneTimeOccurrences(terms: OccurrenceTerms, timezone: string): Occurrences {
-  const only = oneTimeOccurrence(terms, timezone);
+function oneTimeOccurrences(
+  schedule: OneTimeSchedule,
+  dueBy: string | null,
+  createdAt: Date | null,
+  timezone: string,
+): Occurrences {
+  const only = oneTimeOccurrence(schedule, dueBy, createdAt, timezone);
   const firstDay = localDateOf(only.opensAt, timezone);
   const covering = (day: LocalDate) => (day >= firstDay && day <= only.date ? only : null);
   const between = (from: LocalDate, to: LocalDate) => (from <= only.date && only.date <= to ? [only] : []);
@@ -317,14 +300,22 @@ function oneTimeOccurrences(terms: OccurrenceTerms, timezone: string): Occurrenc
  * midnight ending it. It opens at the start of that date, or with Submit
  * anytime when the pact was created.
  */
-function oneTimeOccurrence(terms: OccurrenceTerms, timezone: string): Occurrence {
-  const { schedule, dueBy = null, createdAt = null } = terms;
-  if (schedule.kind !== "one-time") throw new Error(`not One-time: ${schedule.kind}`);
+function oneTimeOccurrence(
+  schedule: OneTimeSchedule,
+  dueBy: string | null,
+  createdAt: Date | null,
+  timezone: string,
+): Occurrence {
   const date = schedule.deadline;
-  const dueAt = dueBy === null ? startOfDay(addDays(date, 1), timezone) : wallTime(date, ...clockOf(dueBy), timezone);
+  const dueAt = dueOnDay(date, dueBy, timezone);
   const dayStarts = startOfDay(date, timezone);
   const opensAt = schedule.submitAnytime && createdAt !== null && createdAt < dayStarts ? createdAt : dayStarts;
   return { date, opensAt, dueAt, closesAt: dueAt };
+}
+
+/** When a day `date` is due: at its due-by time `dueBy` ("HH:MM") that day, or with none, the midnight ending it. */
+function dueOnDay(date: LocalDate, dueBy: string | null, timezone: string): Date {
+  return dueBy === null ? startOfDay(addDays(date, 1), timezone) : wallTime(date, ...clockOf(dueBy), timezone);
 }
 
 /** A Weekly count week starting on the Monday `date`: open from its start, due at the end of its Sunday. */
@@ -334,7 +325,7 @@ function weekOccurrence(date: LocalDate, timezone: string): Occurrence {
 }
 
 /** A bedtime night starts, and the night before closes, at this hour. */
-const NIGHT_STARTS_HOUR = 18;
+export const NIGHT_STARTS_HOUR = 18;
 
 /** An Anki day can't be due on its own day before this hour. */
 const ANKI_EVENING_HOUR = 12;
@@ -349,9 +340,8 @@ const MINUTES_PER_DAY = 24 * 60;
  * usual 4am rollover. "00:00" is the midnight ending its day.
  */
 function ankiDueByDayAfter(dueBy: string, rolloverHour: number): 0 | 1 | null {
-  const [hour, minute] = clockOf(dueBy);
-  const time = hour * 60 + minute;
-  if (hour >= ANKI_EVENING_HOUR && time > rolloverHour * 60) return 0;
+  const time = minutesFrom(dueBy, 0);
+  if (time >= ANKI_EVENING_HOUR * 60 && time > rolloverHour * 60) return 0;
   return time <= rolloverHour * 60 ? 1 : null;
 }
 
@@ -368,25 +358,25 @@ function fittingAnkiDueByDayAfter(dueBy: string, rolloverHour: number): 0 | 1 {
 }
 
 /**
- * Minutes from when an Anki day opens (its rollover hour) to `time`
- * ("HH:MM"), reading a time before the rollover hour as the morning after:
- * how a reminder sorts in its Anki day.
+ * Minutes from `startHour`:00 to `time` ("HH:MM"), reading a time before
+ * `startHour` as the day after: how times sort in a day that starts then,
+ * such as a bedtime night (`NIGHT_STARTS_HOUR`) or an Anki day (its rollover hour).
  */
-export function ankiReminderOrder(time: string, rolloverHour: number): number {
+export function minutesFrom(time: string, startHour: number): number {
   const [hour, minute] = clockOf(time);
-  return (hour * 60 + minute - rolloverHour * 60 + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  return (hour * 60 + minute - startHour * 60 + MINUTES_PER_DAY) % MINUTES_PER_DAY;
 }
 
 /**
  * Minutes from when an Anki day opens to its due-by time `dueBy` ("HH:MM",
- * "00:00" for midnight), read as `ankiDueByDayAfter` reads it: how due-by
+ * null for midnight), read as `ankiDueByDayAfter` reads it: how due-by
  * times sort, the later the looser. Throws for a time it can't be due by,
  * which is refused before this.
  */
-export function ankiDueByOrder(dueBy: string, rolloverHour: number): number {
-  const dayAfter = fittingAnkiDueByDayAfter(dueBy, rolloverHour);
-  const [hour, minute] = clockOf(dueBy);
-  return dayAfter * MINUTES_PER_DAY + hour * 60 + minute - rolloverHour * 60;
+export function ankiDueByOrder(dueBy: string | null, rolloverHour: number): number {
+  const time = dueBy ?? "00:00";
+  const dayAfter = fittingAnkiDueByDayAfter(time, rolloverHour);
+  return dayAfter * MINUTES_PER_DAY + minutesFrom(time, 0) - rolloverHour * 60;
 }
 
 /**
@@ -402,22 +392,19 @@ function fixedDaysOccurrence(
   timezone: string,
   inBedBy: string | null,
   dueBy: string | null,
-  ouraOffset: OuraOffset = null,
-  ankiRollover: number | null = null,
+  ouraOffset: OuraOffset,
+  ankiRollover: number | null,
 ): Occurrence {
   if (ankiRollover !== null) {
     const opensAt = wallTime(date, ankiRollover, 0, timezone);
-    let dueAt = startOfDay(addDays(date, 1), timezone);
-    if (dueBy !== null) {
-      const [hour, minute] = clockOf(dueBy);
-      // A due-by time that can't fit is refused before this.
-      dueAt = wallTime(addDays(date, fittingAnkiDueByDayAfter(dueBy, ankiRollover)), hour, minute, timezone);
-    }
+    // A due-by time that can't fit is refused before this.
+    const dueDay = dueBy === null ? date : addDays(date, fittingAnkiDueByDayAfter(dueBy, ankiRollover));
+    const dueAt = dueOnDay(dueDay, dueBy, timezone);
     return { date, opensAt, dueAt, closesAt: dueAt };
   }
   const opensAt = startOfDay(date, timezone);
   if (inBedBy === null) {
-    const dueAt = dueBy === null ? startOfDay(addDays(date, 1), timezone) : wallTime(date, ...clockOf(dueBy), timezone);
+    const dueAt = dueOnDay(date, dueBy, timezone);
     return { date, opensAt, dueAt, closesAt: dueAt };
   }
   const [hour, minute] = clockOf(inBedBy);
@@ -485,11 +472,6 @@ export function utcOffsetMs(offset: string): number {
 }
 
 /** "HH:MM" as hour and minute. */
-function clockOf(time: string): [number, number] {
+export function clockOf(time: string): [number, number] {
   return time.split(":").map(Number) as [number, number];
-}
-
-function wallTime(date: LocalDate, hour: number, minute: number, timezone: string): Date {
-  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
-  return zonedWallTimeToInstant(year, month, day, hour, minute, timezone);
 }
