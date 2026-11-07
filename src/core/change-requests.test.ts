@@ -424,6 +424,13 @@ describe("a relaxing change waits for a reviewer", () => {
         outcome: { kind: "stricter", appliesFrom: THURSDAY },
       },
     });
+
+    // Its change request shows the in-bed-by time it leaves alone, and no due-by time or deck.
+    const sent = await change(owner, created.pactId, { penaltyCents: 200 });
+    const view = owner.changeRequest(changeRequestIdOf(sent));
+    expect(view).toMatchObject({ ok: true, changeRequest: { current: { evidenceKind: "oura", inBedBy: "23:00" } } });
+    expect(view).not.toHaveProperty("changeRequest.current.dueBy");
+    expect(view).not.toHaveProperty("changeRequest.current.anki");
   });
 });
 

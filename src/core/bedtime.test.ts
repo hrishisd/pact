@@ -88,6 +88,8 @@ describe("creating a bedtime pact", () => {
       ok: true,
       pact: { evidenceKind: "oura", description: "", inBedBy: "23:30" },
     });
+    expect(owner.pact(pactId)).not.toHaveProperty("pact.dueBy");
+    expect(owner.pact(pactId)).not.toHaveProperty("pact.anki");
   });
 
   test("the first night is the first whose in-bed-by time is at least an hour after creation", async () => {
