@@ -615,9 +615,10 @@ describe("changing a One-time pact", () => {
 
     await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
 
-    expect(s.notifier.sentTo(reviewer).find((n) => n.payload.itemKind === "change-request")?.payload.body).toBe(
-      "Deadline",
-    );
+    const request = s.notifier
+      .sentTo(reviewer)
+      .find((n) => n.kind === "review-item" && n.payload.itemKind === "change-request");
+    expect(request?.payload.body).toBe("Deadline");
   });
 
   test("a raised penalty applies to the occurrence even once it's open", async () => {

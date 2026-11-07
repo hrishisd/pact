@@ -47,6 +47,7 @@ import type {
   Clock,
   Notification,
   NotificationKind,
+  NotificationOf,
   Notifier,
   OuraSleepPeriod,
   OuraSource,
@@ -499,6 +500,12 @@ const ANKI_POLL_INTERVAL_MS = 10 * 60 * 1000;
  * (anki.ts), plus a margin.
  */
 const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
+/** The service a pact of each evidence kind is judged from; Camera has none. */
+const SERVICE_OF_KIND: Record<EvidenceKind, ConnectionService | null> = {
+  camera: null,
+  oura: "oura",
+  anki: "anki",
+};
 /** The push when a connection needs reconnecting, by service. */
 const RECONNECT_PUSH: Record<ConnectionService, { title: string; body: string }> = {
   oura: { title: "Oura needs reconnecting", body: RECONNECT_TEXT.oura },
@@ -634,7 +641,7 @@ class Core implements PactCore {
   }
 
   /** Queues a notification in the current command's transaction. */
-  #enqueue(notification: Notification): void {
+  #enqueue<K extends NotificationKind>(notification: NotificationOf<K>): void {
     if (!this.#db.inTransaction) throw new Error("notifications are enqueued only inside a command");
     const setting = SETTING_OF_KIND[notification.kind];
     if (setting !== null && this.#settingIsOff(notification.recipient, setting)) return;
@@ -650,6 +657,15 @@ class Core implements PactCore {
         JSON.stringify(notification.payload),
         this.#clock.now().toISOString(),
       );
+  }
+
+  /** Queues the same notification to each of `recipients`. */
+  #tellAll<K extends NotificationKind>(
+    recipients: readonly AccountId[],
+    kind: K,
+    payload: NotificationOf<K>["payload"],
+  ): void {
+    for (const recipient of recipients) this.#enqueue({ recipient, kind, payload });
   }
 
   #settingIsOff(accountId: AccountId, setting: NotificationSetting): boolean {
@@ -679,11 +695,12 @@ class Core implements PactCore {
       )
       .all() as OutboxRow[];
     for (const row of rows) {
-      const notification: Notification = {
+      // Stored by `#enqueue`, so the kind and its payload match.
+      const notification = {
         recipient: row.recipient_account_id,
-        kind: row.kind as Notification["kind"],
-        payload: JSON.parse(row.payload) as Notification["payload"],
-      };
+        kind: row.kind,
+        payload: JSON.parse(row.payload) as unknown,
+      } as Notification;
       try {
         const devices = this.#db
           .prepare(`SELECT endpoint, p256dh, auth FROM push_subscription WHERE account_id = ? ORDER BY endpoint`)
@@ -1030,6 +1047,7 @@ class Core implements PactCore {
         } else {
           history = { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) };
         }
+        const service = SERVICE_OF_KIND[row.evidence_kind];
         const pact: PactTerms = {
           id: row.id,
           ...this.#currentTerms(row),
@@ -1046,13 +1064,7 @@ class Core implements PactCore {
           ) as PactWaitingItem[],
           history,
           connectionProblem:
-            row.stage !== "active"
-              ? null
-              : row.evidence_kind === "oura"
-                ? this.#connectionProblem(accountId, "oura")
-                : row.evidence_kind === "anki"
-                  ? this.#connectionProblem(accountId, "anki")
-                  : null,
+            row.stage === "active" && service !== null ? this.#connectionProblem(accountId, service) : null,
         };
         return { ok: true, pact };
       },
@@ -1078,18 +1090,12 @@ class Core implements PactCore {
           this.#db.prepare(`UPDATE pact SET reminders = ? WHERE id = ?`).run(JSON.stringify(after.reminders), pactId);
           const added = after.reviewerIds.filter((id) => !before.reviewerIds.includes(id));
           this.#setReviewers(pactId, added);
-          for (const reviewerId of added) {
-            this.#enqueue({
-              recipient: reviewerId,
-              kind: "picked-as-reviewer",
-              payload: {
-                pactId,
-                title: `${ownerName} added you as a reviewer`,
-                body: `${after.name} · ${scheduleText(before.schedule)} · ${money(before.penaltyCents)} per miss`,
-                url: APP_PATHS.review,
-              },
-            });
-          }
+          this.#tellPickedAsReviewer(added, `${ownerName} added you as a reviewer`, {
+            id: pactId,
+            name: after.name,
+            schedule: before.schedule,
+            penaltyCents: before.penaltyCents,
+          });
           if (outcome.kind === "needs-approval") {
             const sent = {
               ...before,
@@ -1152,15 +1158,14 @@ class Core implements PactCore {
           service: row.service,
           status: row.status,
           connectedAt: new Date(row.connected_at),
-          activePacts: row.service === "oura" ? this.#activeOuraPacts(accountId) : this.#activeAnkiPacts(accountId),
+          activePacts: this.#activePactsUsing(accountId, row.service),
         }));
         return { email, name, timezone, connections };
       },
       checkOura: async () => {
         account();
         const now = this.#clock.now();
-        const last = this.#ouraChecks.get(accountId);
-        if (last !== undefined && now.getTime() - last < OURA_CHECK_INTERVAL_MS) return;
+        if (checkedWithin(this.#ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS)) return;
         this.#ouraChecks.set(accountId, now.getTime());
         const fetched = await this.#fetchSleep(now, accountId);
         await this.#command(() => {
@@ -1172,19 +1177,14 @@ class Core implements PactCore {
       disconnectOura: () =>
         this.#command(() => {
           account();
-          this.#db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = 'oura'`).run(accountId);
+          this.#disconnect(accountId, "oura");
         }),
       connectAnki: () =>
         this.#command(() => {
           account();
           // A new login: the next tick checks at once, whenever the last check was.
           this.#ankiPolls.delete(accountId);
-          this.#db
-            .prepare(
-              `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, 'anki', 'connected', ?)
-               ON CONFLICT (account_id, service) DO UPDATE SET status = 'connected', connected_at = excluded.connected_at`,
-            )
-            .run(accountId, this.#clock.now().toISOString());
+          this.#connect(accountId, "anki");
         }),
       ankiDecks: async () => {
         account();
@@ -1216,8 +1216,7 @@ class Core implements PactCore {
       checkAnki: async () => {
         account();
         const now = this.#clock.now();
-        const last = this.#ankiChecks.get(accountId);
-        if (last !== undefined && now.getTime() - last < ANKI_CHECK_INTERVAL_MS) return;
+        if (checkedWithin(this.#ankiChecks, accountId, now, ANKI_CHECK_INTERVAL_MS)) return;
         if (this.#ankiDaysWaiting(now, accountId).length === 0) return;
         this.#ankiChecks.set(accountId, now.getTime());
         const fetched = await this.#fetchAnki(now, accountId);
@@ -1226,17 +1225,12 @@ class Core implements PactCore {
       disconnectAnki: () =>
         this.#command(() => {
           account();
-          this.#db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = 'anki'`).run(accountId);
+          this.#disconnect(accountId, "anki");
         }),
       connectOura: () =>
         this.#command(() => {
           account();
-          this.#db
-            .prepare(
-              `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, 'oura', 'connected', ?)
-               ON CONFLICT (account_id, service) DO UPDATE SET status = 'connected', connected_at = excluded.connected_at`,
-            )
-            .run(accountId, this.#clock.now().toISOString());
+          this.#connect(accountId, "oura");
         }),
       today: () => {
         const { timezone } = account();
@@ -1414,20 +1408,14 @@ class Core implements PactCore {
           });
           const pactName = this.#pactName(pactId);
           const dates = this.#excuseDatesText(excuseId);
-          for (const reviewerId of this.#reviewersOf(pactId)) {
-            this.#enqueue({
-              recipient: reviewerId,
-              kind: "review-item",
-              payload: {
-                itemKind: "excuse",
-                itemId: excuseId,
-                pactId,
-                title: `${ownerName} filed an excuse`,
-                body: `${pactName} · ${dates}`,
-                url: APP_PATHS.review,
-              },
-            });
-          }
+          this.#tellAll(this.#reviewersOf(pactId), "review-item", {
+            itemKind: "excuse",
+            itemId: excuseId,
+            pactId,
+            title: `${ownerName} filed an excuse`,
+            body: `${pactName} · ${dates}`,
+            url: APP_PATHS.review,
+          });
           return { ok: true, excuseId };
         });
       },
@@ -1506,28 +1494,22 @@ class Core implements PactCore {
               photoId,
               this.#clock.now().toISOString(),
             );
-          for (const reviewerId of this.#paymentReviewers(accountId, payment.recipientId)) {
-            this.#enqueue({
-              recipient: reviewerId,
-              kind: "review-item",
-              payload: {
-                itemKind: "payment",
-                itemId: paymentId,
-                recipientId: payment.recipientId,
-                title: `${ownerName} recorded a payment`,
-                body: `${money(payment.amountCents)} to ${this.#recipientName(payment.recipientId)}`,
-                url: APP_PATHS.review,
-              },
-            });
-          }
+          this.#tellAll(this.#paymentReviewers(accountId, payment.recipientId), "review-item", {
+            itemKind: "payment",
+            itemId: paymentId,
+            recipientId: payment.recipientId,
+            title: `${ownerName} recorded a payment`,
+            body: `${money(payment.amountCents)} to ${this.#recipientName(payment.recipientId)}`,
+            url: APP_PATHS.review,
+          });
           return { ok: true, paymentId };
         });
       },
       photo: async (photoId) => {
         account();
         const viewable =
-          this.#mayViewEvidencePhoto(photoId, accountId) ||
-          this.#mayViewExcusePhoto(photoId, accountId) ||
+          this.#mayViewPactItemPhoto("evidence", photoId, accountId) ||
+          this.#mayViewPactItemPhoto("excuse", photoId, accountId) ||
           this.#mayViewPaymentPhoto(photoId, accountId);
         const photo = viewable ? await this.#photoStore.fetch(photoId) : null;
         return photo ? { ok: true, photo } : { ok: false, reason: "photo-not-found" };
@@ -1651,20 +1633,13 @@ class Core implements PactCore {
           const text = reply.trim();
           if (text === "") return { ok: false, reason: "blank-reply" };
           this.#addComment(itemId, accountId, true, text);
-          const what = this.#itemWhat(item.kind, itemId);
-          for (const reviewerId of item.reviewerIds) {
-            this.#enqueue({
-              recipient: reviewerId,
-              kind: "owner-replied",
-              payload: {
-                itemKind: item.kind,
-                itemId,
-                title: `${name} replied about their ${what}`,
-                body: `“${text}” It's back in your queue.`,
-                url: APP_PATHS.review,
-              },
-            });
-          }
+          this.#tellAll(item.reviewerIds, "owner-replied", {
+            itemKind: item.kind,
+            itemId,
+            title: `${name} replied about their ${this.#itemWhat(item.kind, itemId)}`,
+            body: `“${text}” It's back in your queue.`,
+            url: APP_PATHS.review,
+          });
           return { ok: true };
         }),
       decide: (itemId, decision) =>
@@ -1675,7 +1650,8 @@ class Core implements PactCore {
           if (item.row.decision !== null) return { ok: false, reason: "already-decided" };
           const reason = decision.kind === "reject" ? decision.reason.trim() : null;
           if (reason === "") return { ok: false, reason: "blank-reason" };
-          const decided: Decided = { outcome: reason === null ? "approved" : "rejected", reason };
+          const decided: Decided =
+            reason === null ? { outcome: "approved", reason: null } : { outcome: "rejected", reason };
           switch (item.kind) {
             case "evidence":
               this.#decideEvidence(item.row, decided, accountId);
@@ -1791,37 +1767,31 @@ class Core implements PactCore {
            WHERE evidence.id = ? AND pact.created_at <= ?`,
       )
       .get(reviewerId, itemId, this.#editWindowCutoff()) as EvidenceToDecide | undefined;
-    const excuse = evidence
-      ? undefined
-      : (this.#db
-          .prepare(
-            `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
-               FROM excuse
-               JOIN pact ON pact.id = excuse.pact_id
-               JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-               WHERE excuse.id = ?`,
-          )
-          .get(reviewerId, itemId) as ExcuseToDecide | undefined);
-    const payment = evidence || excuse ? undefined : this.#paymentToDecide(reviewerId, itemId);
-    const changeRequest =
-      evidence || excuse || payment
-        ? undefined
-        : this.#db
-              .prepare(
-                `SELECT 1 FROM change_request
-                 JOIN pact ON pact.id = change_request.pact_id
-                 JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
-                                   AND pact_reviewer.reviewer_account_id = ?
-                 WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL AND pact.stage = 'active'`,
-              )
-              .get(reviewerId, itemId) === undefined
-          ? undefined
-          : this.#changeRequestRow(itemId);
     if (evidence) return { kind: "evidence", row: evidence };
+    const excuse = this.#db
+      .prepare(
+        `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
+         FROM excuse
+         JOIN pact ON pact.id = excuse.pact_id
+         JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
+         WHERE excuse.id = ?`,
+      )
+      .get(reviewerId, itemId) as ExcuseToDecide | undefined;
     if (excuse) return { kind: "excuse", row: excuse };
+    const payment = this.#paymentToDecide(reviewerId, itemId);
     if (payment) return { kind: "payment", row: payment };
-    if (changeRequest) return { kind: "change-request", row: changeRequest };
-    return undefined;
+    const mayDecideRequest =
+      this.#db
+        .prepare(
+          `SELECT 1 FROM change_request
+           JOIN pact ON pact.id = change_request.pact_id
+           JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
+                             AND pact_reviewer.reviewer_account_id = ?
+           WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL AND pact.stage = 'active'`,
+        )
+        .get(reviewerId, itemId) !== undefined;
+    const changeRequest = mayDecideRequest ? this.#changeRequestRow(itemId) : undefined;
+    return changeRequest && { kind: "change-request", row: changeRequest };
   }
 
   /**
@@ -1948,6 +1918,21 @@ class Core implements PactCore {
    * change requests first, then the rest oldest first.
    */
   #reviewItems(reviewerId: AccountId): ReviewItem[] {
+    // Change requests first: one waiting holds up any other change to its pact.
+    return [
+      ...this.#changeRequestsToReview(reviewerId),
+      ...mergeByTime(
+        reviewItemSince,
+        "oldest-first",
+        this.#evidenceToReview(reviewerId),
+        this.#excusesToReview(reviewerId),
+        this.#paymentsToReview(reviewerId),
+      ),
+    ];
+  }
+
+  /** Evidence waiting for approval that `reviewerId` may decide: for pacts they review, past the edit window. */
+  #evidenceToReview(reviewerId: AccountId): ReviewItem[] {
     const rows = this.#db
       .prepare(
         `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
@@ -1969,7 +1954,7 @@ class Core implements PactCore {
       day: string;
       weekly: 0 | 1;
     }[];
-    const evidence = rows.map((row): ReviewItem => {
+    return rows.map((row): ReviewItem => {
       // What counts, and what rejecting costs: the terms of the occurrence's day.
       const terms = this.#termsOn(row.pact_id, row.occurrence_date);
       return {
@@ -1988,24 +1973,6 @@ class Core implements PactCore {
         thread: this.#thread(row.id, true),
       };
     });
-    // Change requests first: one waiting holds up any other change to its pact.
-    return [
-      ...this.#changeRequestsToReview(reviewerId),
-      ...mergeByTime(
-        (item) =>
-          item.kind === "evidence"
-            ? item.submittedAt
-            : item.kind === "excuse"
-              ? item.filedAt
-              : item.kind === "payment"
-                ? item.recordedAt
-                : item.requestedAt,
-        "oldest-first",
-        evidence,
-        this.#excusesToReview(reviewerId),
-        this.#paymentsToReview(reviewerId),
-      ),
-    ];
   }
 
   /**
@@ -2383,14 +2350,10 @@ class Core implements PactCore {
    * since it was waiting on this decision; before that, judging at the due
    * time will.
    */
-  #decideEvidence(evidence: EvidenceToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
+  #decideEvidence(evidence: EvidenceToDecide, decided: Decided, reviewerId: AccountId): void {
+    const { outcome, reason } = decided;
     const now = this.#clock.now();
-    this.#db
-      .prepare(
-        `UPDATE evidence SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
-         WHERE id = ?`,
-      )
-      .run(outcome, reviewerId, now.toISOString(), reason, evidence.id);
+    this.#recordDecision("evidence", evidence.id, decided, reviewerId, now);
     // A day ahead with an approved excuse stays for judging at its due time, which makes it Excused.
     const excusedAhead = this.#excuseOn(evidence.pact_id, evidence.occurrence_date) === "approved";
     const occurrence = this.#occurrencesOf(evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date);
@@ -2752,14 +2715,10 @@ class Core implements PactCore {
    * has after it Ended are left alone. Rejected: nothing to change, as its
    * holds are released by no longer waiting and its days are judged as usual.
    */
-  #decideExcuse(excuse: ExcuseToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
+  #decideExcuse(excuse: ExcuseToDecide, decided: Decided, reviewerId: AccountId): void {
+    const { outcome, reason } = decided;
     const now = this.#clock.now();
-    this.#db
-      .prepare(
-        `UPDATE excuse SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
-         WHERE id = ?`,
-      )
-      .run(outcome, reviewerId, now.toISOString(), reason, excuse.id);
+    this.#recordDecision("excuse", excuse.id, decided, reviewerId, now);
     if (outcome === "approved") {
       const dates = this.#db.prepare(`SELECT date FROM excuse_day WHERE excuse_id = ?`).all(excuse.id) as {
         date: LocalDate;
@@ -3457,20 +3416,14 @@ class Core implements PactCore {
             term === "schedule" && after.schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term],
           );
     const body = [...what, ...(trimmed === "" ? [] : [`“${trimmed}”`])].join(" · ");
-    for (const reviewerId of this.#reviewersOf(pact.id)) {
-      this.#enqueue({
-        recipient: reviewerId,
-        kind: "review-item",
-        payload: {
-          itemKind: "change-request",
-          itemId: id,
-          pactId: pact.id,
-          title: `${ownerName} asked to ${after === null ? "end" : "change"} ${pact.name}`,
-          body: body === "" ? "It needs your approval" : body,
-          url: APP_PATHS.review,
-        },
-      });
-    }
+    this.#tellAll(this.#reviewersOf(pact.id), "review-item", {
+      itemKind: "change-request",
+      itemId: id,
+      pactId: pact.id,
+      title: `${ownerName} asked to ${after === null ? "end" : "change"} ${pact.name}`,
+      body: body === "" ? "It needs your approval" : body,
+      url: APP_PATHS.review,
+    });
     return id;
   }
 
@@ -3577,23 +3530,21 @@ class Core implements PactCore {
    * from the first occurrence not open yet, and takes off the reviewers it
    * removes. Rejected, nothing changes.
    */
-  #decideChangeRequest(row: StoredChangeRequest, { outcome, reason }: Decided, reviewerId: AccountId): void {
+  #decideChangeRequest(row: StoredChangeRequest, decided: Decided, reviewerId: AccountId): void {
+    const { outcome, reason } = decided;
     const now = this.#clock.now();
-    this.#db
-      .prepare(
-        `UPDATE change_request SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
-         WHERE id = ?`,
-      )
-      .run(outcome, reviewerId, now.toISOString(), reason, row.id);
+    this.#recordDecision("change_request", row.id, decided, reviewerId, now);
     const { request } = row;
     const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
     const reviewerName = this.#accountName(reviewerId);
     const title = `${reviewerName} ${outcome} ${request.kind === "end" ? `ending ${pact.name}` : "your change"}`;
-    let body = `${pact.name} · “${reason}”`;
-    if (outcome === "approved" && request.kind === "end") {
+    let body: string;
+    if (decided.outcome === "rejected") {
+      body = `${pact.name} · “${decided.reason}”`;
+    } else if (request.kind === "end") {
       this.#endPact(pact.id, now);
       body = `${pact.name} is Ended`;
-    } else if (outcome === "approved" && request.kind === "change") {
+    } else {
       const { before, after } = request;
       for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
         this.#db
@@ -3847,14 +3798,27 @@ class Core implements PactCore {
     };
   }
 
-  /** How many of the account's Active pacts are judged from AnkiWeb. */
-  #activeAnkiPacts(accountId: AccountId): number {
+  /** How many of the account's Active pacts are judged from `service`. */
+  #activePactsUsing(accountId: AccountId, service: ConnectionService): number {
+    // Each service supplies the evidence kind of the same name (SERVICE_OF_KIND).
     const row = this.#db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM pact WHERE owner_account_id = ? AND stage = 'active' AND evidence_kind = 'anki'`,
-      )
-      .get(accountId) as { n: number };
+      .prepare(`SELECT COUNT(*) AS n FROM pact WHERE owner_account_id = ? AND stage = 'active' AND evidence_kind = ?`)
+      .get(accountId, service) as { n: number };
     return row.n;
+  }
+
+  /** Connects the account to `service`, or marks a connection that needs reconnecting connected again. */
+  #connect(accountId: AccountId, service: ConnectionService): void {
+    this.#db
+      .prepare(
+        `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, ?, 'connected', ?)
+         ON CONFLICT (account_id, service) DO UPDATE SET status = 'connected', connected_at = excluded.connected_at`,
+      )
+      .run(accountId, service, this.#clock.now().toISOString());
+  }
+
+  #disconnect(accountId: AccountId, service: ConnectionService): void {
+    this.#db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = ?`).run(accountId, service);
   }
 
   /** Why the service can't be read for the account, or null when its connection works. */
@@ -3864,16 +3828,6 @@ class Core implements PactCore {
       .get(accountId, service) as { status: Connection["status"] } | undefined;
     if (!row) return "not-connected";
     return row.status === "connected" ? null : row.status;
-  }
-
-  /** How many of the account's Active pacts are judged from Oura. */
-  #activeOuraPacts(accountId: AccountId): number {
-    const row = this.#db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM pact WHERE owner_account_id = ? AND stage = 'active' AND evidence_kind = 'oura'`,
-      )
-      .get(accountId) as { n: number };
-    return row.n;
   }
 
   #setReviewers(pactId: string, reviewerIds: AccountId[]): void {
@@ -3911,21 +3865,28 @@ class Core implements PactCore {
   }
 
   #enqueueEvidenceReviewItems(pactId: string, evidenceId: string, date: LocalDate, ownerName: string): void {
-    const pactName = this.#pactName(pactId);
-    for (const reviewerId of this.#reviewersOf(pactId)) {
-      this.#enqueue({
-        recipient: reviewerId,
-        kind: "review-item",
-        payload: {
-          itemKind: "evidence",
-          itemId: evidenceId,
-          pactId,
-          title: `${ownerName} submitted evidence`,
-          body: `${pactName} · ${formatDate(date)}`,
-          url: APP_PATHS.review,
-        },
-      });
-    }
+    this.#tellAll(this.#reviewersOf(pactId), "review-item", {
+      itemKind: "evidence",
+      itemId: evidenceId,
+      pactId,
+      title: `${ownerName} submitted evidence`,
+      body: `${this.#pactName(pactId)} · ${formatDate(date)}`,
+      url: APP_PATHS.review,
+    });
+  }
+
+  /** Tells each of `reviewerIds` they now review the pact, and what it asks. */
+  #tellPickedAsReviewer(
+    reviewerIds: readonly AccountId[],
+    title: string,
+    pact: { id: string; name: string; schedule: Schedule; penaltyCents: number },
+  ): void {
+    this.#tellAll(reviewerIds, "picked-as-reviewer", {
+      pactId: pact.id,
+      title,
+      body: `${pact.name} · ${scheduleText(pact.schedule)} · ${money(pact.penaltyCents)} per miss`,
+      url: APP_PATHS.review,
+    });
   }
 
   /**
@@ -3939,19 +3900,12 @@ class Core implements PactCore {
       .all(this.#editWindowCutoff(t)) as PactRow[];
     for (const pact of pacts) {
       const ownerName = this.#accountName(pact.owner_account_id);
-      const { schedule } = occurrenceTermsOf(pact);
-      for (const reviewerId of this.#reviewersOf(pact.id)) {
-        this.#enqueue({
-          recipient: reviewerId,
-          kind: "picked-as-reviewer",
-          payload: {
-            pactId: pact.id,
-            title: `${ownerName} picked you as a reviewer`,
-            body: `${pact.name} · ${scheduleText(schedule)} · ${money(pact.penalty_cents)} per miss`,
-            url: APP_PATHS.review,
-          },
-        });
-      }
+      this.#tellPickedAsReviewer(this.#reviewersOf(pact.id), `${ownerName} picked you as a reviewer`, {
+        id: pact.id,
+        name: pact.name,
+        schedule: occurrenceTermsOf(pact).schedule,
+        penaltyCents: pact.penalty_cents,
+      });
       const closedAt = editWindowEnd(pact).toISOString();
       const held = this.#db
         .prepare(
@@ -4051,13 +4005,9 @@ class Core implements PactCore {
    * Records a reviewer's decision on a payment awaiting approval and tells
    * the owner. Approved, it counts against the ledger; rejected, it never did.
    */
-  #decidePayment(payment: PaymentToDecide, { outcome, reason }: Decided, reviewerId: AccountId): void {
-    this.#db
-      .prepare(
-        `UPDATE payment SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
-         WHERE id = ?`,
-      )
-      .run(outcome, reviewerId, this.#clock.now().toISOString(), reason, payment.id);
+  #decidePayment(payment: PaymentToDecide, decided: Decided, reviewerId: AccountId): void {
+    const { outcome, reason } = decided;
+    this.#recordDecision("payment", payment.id, decided, reviewerId, this.#clock.now());
     const { amount_cents } = this.#db.prepare(`SELECT amount_cents FROM payment WHERE id = ?`).get(payment.id) as {
       amount_cents: number;
     };
@@ -4076,6 +4026,22 @@ class Core implements PactCore {
         url: APP_PATHS.ledger(payment.recipient_id),
       },
     });
+  }
+
+  /** Stores a reviewer's decision on the review item `id` in `table`. */
+  #recordDecision(
+    table: "evidence" | "excuse" | "payment" | "change_request",
+    id: string,
+    { outcome, reason }: Decided,
+    reviewerId: AccountId,
+    at: Date,
+  ): void {
+    this.#db
+      .prepare(
+        `UPDATE ${table} SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
+         WHERE id = ?`,
+      )
+      .run(outcome, reviewerId, at.toISOString(), reason, id);
   }
 
   /**
@@ -4105,32 +4071,15 @@ class Core implements PactCore {
       .some((occurrence) => occurrence.date === date);
   }
 
-  /** Whether `photoId` is a photo of some evidence and `accountId` owns or reviews its pact. */
-  #mayViewEvidencePhoto(photoId: string, accountId: AccountId): boolean {
+  /** Whether `photoId` is a photo of some evidence or excuse (`table`) and `accountId` owns or reviews its pact. */
+  #mayViewPactItemPhoto(table: "evidence" | "excuse", photoId: string, accountId: AccountId): boolean {
     return (
       this.#db
         .prepare(
-          `SELECT 1 FROM evidence_photo
-           JOIN evidence ON evidence.id = evidence_photo.evidence_id
-           JOIN pact ON pact.id = evidence.pact_id
-           WHERE evidence_photo.photo_id = ?
-             AND (pact.owner_account_id = ?
-                  OR EXISTS (SELECT 1 FROM pact_reviewer
-                             WHERE pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?))`,
-        )
-        .get(photoId, accountId, accountId) !== undefined
-    );
-  }
-
-  /** Whether `photoId` is a photo of some excuse and `accountId` owns or reviews its pact. */
-  #mayViewExcusePhoto(photoId: string, accountId: AccountId): boolean {
-    return (
-      this.#db
-        .prepare(
-          `SELECT 1 FROM excuse_photo
-           JOIN excuse ON excuse.id = excuse_photo.excuse_id
-           JOIN pact ON pact.id = excuse.pact_id
-           WHERE excuse_photo.photo_id = ?
+          `SELECT 1 FROM ${table}_photo
+           JOIN ${table} ON ${table}.id = ${table}_photo.${table}_id
+           JOIN pact ON pact.id = ${table}.pact_id
+           WHERE ${table}_photo.photo_id = ?
              AND (pact.owner_account_id = ?
                   OR EXISTS (SELECT 1 FROM pact_reviewer
                              WHERE pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?))`,
@@ -4231,7 +4180,19 @@ class Core implements PactCore {
 
   /** The owner's evidence, excuses and payments still waiting for a decision, newest first. */
   #waiting(ownerId: AccountId): TodayWaitingItem[] {
-    const payments = (
+    return mergeByTime(
+      waitingSince,
+      "newest-first",
+      this.#waitingChangeRequests(ownerId),
+      this.#waitingEvidence(ownerId),
+      this.#waitingExcuses(ownerId),
+      this.#waitingPayments(ownerId),
+    );
+  }
+
+  /** The owner's payments still waiting for a decision, newest first. */
+  #waitingPayments(ownerId: AccountId): TodayWaitingItem[] {
+    return (
       this.#db
         .prepare(
           `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
@@ -4255,14 +4216,6 @@ class Core implements PactCore {
       amountCents: row.amount_cents,
       recordedAt: new Date(row.recorded_at),
     }));
-    return mergeByTime(
-      waitingSince,
-      "newest-first",
-      this.#waitingChangeRequests(ownerId),
-      this.#waitingEvidence(ownerId),
-      this.#waitingExcuses(ownerId),
-      payments,
-    );
   }
 
   /** The owner's evidence still waiting for a decision (or just that for `pactId`), newest first. */
@@ -4316,76 +4269,98 @@ class Core implements PactCore {
       });
       const { editWindowClosesAt } = pact;
       const { first, openAt, between, dayDueAt } = this.#occurrencesOf(pact.id, timezone);
-      if (pact.terms.inBedBy) {
-        if (now.getTime() < first.opensAt.getTime()) {
-          comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date, startDate: pact.startDate });
-          continue;
+      switch (pact.evidenceKind) {
+        case "oura": {
+          if (now.getTime() < first.opensAt.getTime()) {
+            comingUp.push({
+              ...cardOn(first.date),
+              editWindowClosesAt,
+              opensOn: first.date,
+              startDate: pact.startDate,
+            });
+            continue;
+          }
+          // Nights the owner needn't hear about: judged, or with an excuse filed (it's under Waiting for approval).
+          const today = localDateOf(now, timezone);
+          const open = (night: Occurrence) =>
+            !this.#isJudged(pact.id, night.date) && this.#excuseOn(pact.id, night.date) === null;
+          const nights = between(addDays(today, -2), today);
+          // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
+          const tonight = nights.find(
+            (night) => night.opensAt.getTime() <= now.getTime() && now.getTime() < night.dueAt.getTime() && open(night),
+          );
+          // Last night: past its deadline, and Oura hasn't reported it before it closes.
+          const lastNight = nights.find(
+            (night) =>
+              night.dueAt.getTime() <= now.getTime() && now.getTime() < night.closesAt.getTime() && open(night),
+          );
+          const tonightCard = tonight && {
+            occurrenceDate: tonight.date,
+            dueAt: tonight.dueAt,
+            inBedBy: this.#termsOn(pact.id, tonight.date).in_bed_by!,
+          };
+          if (lastNight) {
+            // Tonight's deadline rides on this card.
+            noOuraData.push({
+              ...cardOn(lastNight.date),
+              occurrenceDate: lastNight.date,
+              closesAt: lastNight.closesAt,
+              tonight: tonightCard ?? null,
+            });
+          } else if (tonightCard) {
+            automatic.push({ ...cardOn(tonightCard.occurrenceDate), editWindowClosesAt, ...tonightCard });
+          }
+          break;
         }
-        // Nights the owner needn't hear about: judged, or with an excuse filed (it's under Waiting for approval).
-        const today = localDateOf(now, timezone);
-        const open = (night: Occurrence) =>
-          !this.#isJudged(pact.id, night.date) && this.#excuseOn(pact.id, night.date) === null;
-        const nights = between(addDays(today, -2), today);
-        // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
-        const tonight = nights.find(
-          (night) => night.opensAt.getTime() <= now.getTime() && now.getTime() < night.dueAt.getTime() && open(night),
-        );
-        // Last night: past its deadline, and Oura hasn't reported it before it closes.
-        const lastNight = nights.find(
-          (night) => night.dueAt.getTime() <= now.getTime() && now.getTime() < night.closesAt.getTime() && open(night),
-        );
-        const tonightCard = tonight && {
-          occurrenceDate: tonight.date,
-          dueAt: tonight.dueAt,
-          inBedBy: this.#termsOn(pact.id, tonight.date).in_bed_by!,
-        };
-        if (lastNight) {
-          // Tonight's deadline rides on this card.
-          noOuraData.push({
-            ...cardOn(lastNight.date),
-            occurrenceDate: lastNight.date,
-            closesAt: lastNight.closesAt,
-            tonight: tonightCard ?? null,
-          });
-        } else if (tonightCard) {
-          automatic.push({ ...cardOn(tonightCard.occurrenceDate), editWindowClosesAt, ...tonightCard });
+        case "anki": {
+          const open = openAt(now);
+          // Leaves Today once judged: Satisfied the moment Pact sees the deck finished.
+          if (open && !this.#isJudged(pact.id, open.date) && now.getTime() < open.dueAt.getTime()) {
+            if (this.#excuseOn(pact.id, open.date) === null) toDo.push(this.#ankiCard(pact, ownerId, open, cardOn));
+          } else if (!open && now.getTime() < first.opensAt.getTime()) {
+            comingUp.push({
+              ...cardOn(first.date),
+              editWindowClosesAt,
+              opensOn: first.date,
+              startDate: pact.startDate,
+            });
+          }
+          break;
         }
-        continue;
-      }
-      const open = openAt(now);
-      if (pact.evidenceKind === "anki") {
-        // Leaves Today once judged: Satisfied the moment Pact sees the deck finished.
-        if (open && !this.#isJudged(pact.id, open.date) && now.getTime() < open.dueAt.getTime()) {
-          if (this.#excuseOn(pact.id, open.date) === null) toDo.push(this.#ankiCard(pact, ownerId, open, cardOn));
-        } else if (!open && now.getTime() < first.opensAt.getTime()) {
-          comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date, startDate: pact.startDate });
+        case "camera": {
+          const open = openAt(now);
+          // Judged while still open: its evidence was rejected, so it's an alert, or
+          // it's past its due-by time, so it's Missed. Past it and not judged yet,
+          // the next tick judges it.
+          if (open && (this.#isJudged(pact.id, open.date) || now.getTime() >= open.dueAt.getTime())) continue;
+          if (open && pact.terms.schedule.kind === "weekly-count") {
+            const today = localDateOf(now, timezone);
+            const week = this.#weekToDo(pact.id, open, today, dayDueAt(today)!, now);
+            if (week) toDo.push({ kind: "evidence", ...cardOn(open.date), editWindowClosesAt, ...week });
+          } else if (open) {
+            // Evidence waiting or approved: Waiting for approval, or done.
+            const decision = this.#evidenceDecision(pact.id, open.date);
+            if (decision === "waiting" || decision === "approved") continue;
+            // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
+            if (this.#excuseOn(pact.id, open.date) !== null) continue;
+            toDo.push({
+              kind: "evidence",
+              ...cardOn(open.date),
+              editWindowClosesAt,
+              occurrenceDate: open.date,
+              dueAt: open.dueAt,
+              dueBy: this.#termsOn(pact.id, open.date).due_by,
+            });
+          } else if (now.getTime() < first.opensAt.getTime()) {
+            comingUp.push({
+              ...cardOn(first.date),
+              editWindowClosesAt,
+              opensOn: first.date,
+              startDate: pact.startDate,
+            });
+          }
+          break;
         }
-        continue;
-      }
-      // Judged while still open: its evidence was rejected, so it's an alert, or
-      // it's past its due-by time, so it's Missed. Past it and not judged yet,
-      // the next tick judges it.
-      if (open && (this.#isJudged(pact.id, open.date) || now.getTime() >= open.dueAt.getTime())) continue;
-      if (open && pact.terms.schedule.kind === "weekly-count") {
-        const today = localDateOf(now, timezone);
-        const week = this.#weekToDo(pact.id, open, today, dayDueAt(today)!, now);
-        if (week) toDo.push({ kind: "evidence", ...cardOn(open.date), editWindowClosesAt, ...week });
-      } else if (open) {
-        // Evidence waiting or approved: Waiting for approval, or done.
-        const decision = this.#evidenceDecision(pact.id, open.date);
-        if (decision === "waiting" || decision === "approved") continue;
-        // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
-        if (this.#excuseOn(pact.id, open.date) !== null) continue;
-        toDo.push({
-          kind: "evidence",
-          ...cardOn(open.date),
-          editWindowClosesAt,
-          occurrenceDate: open.date,
-          dueAt: open.dueAt,
-          dueBy: this.#termsOn(pact.id, open.date).due_by,
-        });
-      } else if (now.getTime() < first.opensAt.getTime()) {
-        comingUp.push({ ...cardOn(first.date), editWindowClosesAt, opensOn: first.date, startDate: pact.startDate });
       }
     }
     const bills = this.#billsForToday(ownerId, now);
@@ -4408,11 +4383,14 @@ class Core implements PactCore {
       ...this.#rejectedExcuseAlerts(ownerId, now),
       ...this.#questionAlerts(ownerId),
     ];
-    const connectionProblem = this.#activeOuraPacts(ownerId) > 0 ? this.#connectionProblem(ownerId, "oura") : null;
-    const ankiProblem = this.#activeAnkiPacts(ownerId) > 0 ? this.#connectionProblem(ownerId, "anki") : null;
+    // A connection matters only while an Active pact is judged from it.
+    const problemWith = (service: ConnectionService) =>
+      this.#activePactsUsing(ownerId, service) > 0 ? this.#connectionProblem(ownerId, service) : null;
+    const ouraProblem = problemWith("oura");
+    const ankiProblem = problemWith("anki");
     return {
       alerts: [
-        ...(connectionProblem ? [{ kind: "oura-connection" as const, status: connectionProblem }] : []),
+        ...(ouraProblem ? [{ kind: "oura-connection" as const, status: ouraProblem }] : []),
         ...(ankiProblem ? [{ kind: "anki-connection" as const, status: ankiProblem }] : []),
         ...bills.alerts,
         ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert),
@@ -4763,12 +4741,7 @@ class Core implements PactCore {
       const times = remindersOf(pact.reminders);
       if (times.length === 0) continue;
       const timezone = ownerZone(pact.timezone, pact.owner_account_id);
-      const kind =
-        pact.evidence_kind === "oura"
-          ? "night"
-          : pact.anki_rollover_hour !== null
-            ? { ankiRollover: pact.anki_rollover_hour }
-            : "day";
+      const kind = reminderKindOf(pact);
       const occurrences = this.#occurrencesOf(pact.id, timezone);
       // A night's or an Anki day's reminder can go off the morning after, so start a day early.
       const fromDate = addDays(localDateOf(from, timezone), -1);
@@ -6012,6 +5985,46 @@ interface ExcuseToDecide {
   owner_account_id: AccountId;
 }
 
+/** What a pact's reminder times are about: a calendar day, a night, or an Anki day. */
+function reminderKindOf(
+  pact: Pick<PactRow, "evidence_kind" | "anki_rollover_hour">,
+): "day" | "night" | { ankiRollover: number } {
+  switch (pact.evidence_kind) {
+    case "camera":
+      return "day";
+    case "oura":
+      return "night";
+    case "anki":
+      // The schema keeps the rollover hour set on Anki pacts, and only on them.
+      return { ankiRollover: pact.anki_rollover_hour! };
+  }
+}
+
+/** Whether `accountId` checked a service within `intervalMs` before `now`, as `checks` records. */
+function checkedWithin(
+  checks: ReadonlyMap<AccountId, number>,
+  accountId: AccountId,
+  now: Date,
+  intervalMs: number,
+): boolean {
+  const last = checks.get(accountId);
+  return last !== undefined && now.getTime() - last < intervalMs;
+}
+
+/** When a review item was sent for a decision: for ordering the Review Queue. */
+function reviewItemSince(item: ReviewItem): Date {
+  switch (item.kind) {
+    case "evidence":
+      return item.submittedAt;
+    case "excuse":
+      return item.filedAt;
+    case "payment":
+      return item.recordedAt;
+    case "change-request":
+      return item.requestedAt;
+  }
+}
+
 /** When a waiting item was sent for a decision: for ordering them. */
 function waitingSince(item: TodayWaitingItem): Date {
   switch (item.kind) {
@@ -6127,10 +6140,7 @@ interface PaymentToDecide {
 type ReviewOutcome = "approved" | "rejected";
 
 /** A checked review decision, as `decide` hands it on: a rejection's reason is trimmed and never blank. */
-interface Decided {
-  outcome: ReviewOutcome;
-  reason: string | null;
-}
+type Decided = { outcome: "approved"; reason: null } | { outcome: "rejected"; reason: string };
 
 /**
  * `lists` merged into one sorted by `at`, oldest or newest first. Ties keep
