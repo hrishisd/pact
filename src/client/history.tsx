@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.ts";
 import { DayChip } from "./excuse-days.tsx";
 import { listNames } from "./change-terms.tsx";
-import { ankiMissText, clockText, clockTime, formatDate, formatDay, money } from "./format.ts";
+import { ankiMissText, clockText, clockTime, dateIn, formatDate, money } from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
@@ -178,7 +178,7 @@ function OneTimeHistory({
     !status.evidenceWaiting &&
     status.excuse === null &&
     square === "open" &&
-    formatDay(new Date(now).toISOString(), timezone) !== formatDate(day.date);
+    dateIn(now, timezone) !== day.date;
   return (
     <section className="card">
       <h3>History</h3>

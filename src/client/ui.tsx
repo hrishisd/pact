@@ -28,21 +28,44 @@ export function useLoad<T>(load: () => Promise<T>): {
   const [data, setData] = useState<T | null>(null);
   const [failed, setFailed] = useState<{ error: unknown } | null>(null);
   const [loads, setLoads] = useState(0);
-  useEffect(() => {
-    let newest = true;
-    load().then(
-      (loaded) => {
-        if (!newest) return;
-        setData(loaded);
-        setFailed(null);
-      },
-      (error: unknown) => newest && setFailed({ error }),
-    );
-    return () => {
-      newest = false;
-    };
-  }, [loads]);
+  // A reload runs the cleanup first, which drops the load before it.
+  useEffect(
+    () =>
+      settleUnlessDropped(
+        load(),
+        (loaded) => {
+          setData(loaded);
+          setFailed(null);
+        },
+        (error) => setFailed({ error }),
+      ),
+    [loads],
+  );
   return { data, failed, reload: () => setLoads((n) => n + 1) };
+}
+
+/**
+ * Passes `promise`'s value to `onLoaded`, or its error to `onFailed`, unless
+ * the returned drop function ran first. It is an effect's cleanup, so only
+ * the newest load's answer counts.
+ */
+export function settleUnlessDropped<T>(
+  promise: Promise<T>,
+  onLoaded: (value: T) => void,
+  onFailed: (error: unknown) => void,
+): () => void {
+  let dropped = false;
+  promise.then(
+    (value) => {
+      if (!dropped) onLoaded(value);
+    },
+    (error: unknown) => {
+      if (!dropped) onFailed(error);
+    },
+  );
+  return () => {
+    dropped = true;
+  };
 }
 
 /** The current time, updated every second, so countdowns stay right and end on time. */

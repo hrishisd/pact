@@ -226,11 +226,11 @@ export interface PactSummary {
 /** Active from creation; Ended once its end date passes, an approved change request ends it, or a One-time occurrence is judged. */
 export type PactStage = "active" | "ended";
 
-/** The pact page: the pact's terms. */
 /**
- * A pact as its owner sees it. Ended, it says when: when an approved change
- * request ended it, when its end date passed (once its last occurrence
- * closed), or for One-time when its occurrence was judged.
+ * The pact page: a pact's terms as its owner sees them. Ended, it says
+ * when: when an approved change request ended it, when its end date passed
+ * (once its last occurrence closed), or for One-time when its occurrence was
+ * judged.
  */
 export type PactTerms = PactTermsCommon & ({ stage: "active" } | { stage: "ended"; endedAt: Date });
 

@@ -73,6 +73,18 @@ function wallClockIn(instant: string, timeZone: string): string {
   return `${part("hour")}:${part("minute")}`;
 }
 
+/** `now` (ms) as its date in `timeZone` (the profile's), not this device's: "YYYY-MM-DD". */
+export function dateIn(now: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(now));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
 /** Time left as "16h 19m", or "1d 21h" from 24 hours up. Never negative. */
 export function timeLeft(ms: number): string {
   const minutes = Math.floor(Math.max(0, ms) / 60_000);

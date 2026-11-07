@@ -3,6 +3,7 @@ import {
   ankiMissText,
   clockText,
   clockTime,
+  dateIn,
   dueClockText,
   formatDueAt,
   inBedByName,
@@ -86,5 +87,18 @@ describe("timeLeft", () => {
     [-1, "0h 0m"],
   ])("%d ms reads %s", (ms, text) => {
     expect(timeLeft(ms)).toBe(text);
+  });
+});
+
+describe("dateIn", () => {
+  // 03:00 UTC on Jan 8 is still Jan 7 in New York, and already Jan 8 in Tokyo, whatever this device says.
+  const instant = Date.parse("2026-01-08T03:00:00.000Z");
+
+  test.each([
+    ["America/New_York", "2026-01-07"],
+    ["Asia/Tokyo", "2026-01-08"],
+    ["UTC", "2026-01-08"],
+  ])("in %s, %s", (timeZone, date) => {
+    expect(dateIn(instant, timeZone)).toBe(date);
   });
 });

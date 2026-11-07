@@ -158,6 +158,15 @@ describe("creating an Anki pact", () => {
       firstOccurrence: { date: TUE, dueAt: s.at("Wed 00:00") },
     });
   });
+
+  test("the Check step reads a due-by time the Anki day can't be due by as none; creating refuses it", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    expect(
+      owner.firstOccurrence({ evidenceKind: "anki", schedule: { kind: "fixed-days", days: ["tue"] }, dueBy: "09:00" }),
+    ).toEqual({ ok: true, firstOccurrence: { date: TUE, dueAt: s.at("Wed 00:00") } });
+    await expect(createPact({ dueBy: "09:00" })).rejects.toThrow("invalid-due-by");
+  });
 });
 
 describe("judging an Anki day", () => {

@@ -965,10 +965,13 @@ class Core implements PactCore {
           : evidenceKind === "anki"
             ? (this.#ankiDeckList(accountId)?.rolloverHour ?? null)
             : null;
-        // The form may not have a valid time or date yet: those count as not set.
+        // The form may not have a valid time or date yet: those count as not set. So does a
+        // due-by time the Anki day can't be due by, which creating the pact refuses.
+        const validDueBy =
+          dueBy !== undefined && isDueBy(dueBy) && (ankiRollover === null || ankiDueByFits(dueBy, ankiRollover));
         const timing = newOccurrenceTerms(schedule, pact ? new Date(pact.created_at) : this.#clock.now(), timezone, {
           inBedBy: inBedBy !== undefined && isClockTime(inBedBy) ? inBedBy : null,
-          dueBy: dueBy !== undefined && isDueBy(dueBy) ? dueBy : null,
+          dueBy: validDueBy ? dueBy : null,
           ankiRollover,
           startDate: startDate !== undefined && isLocalDate(startDate) ? startDate : null,
         });

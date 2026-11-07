@@ -430,4 +430,25 @@ describe("Overdue", () => {
     await s.advanceTo("Wed+2 20:00");
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "overdue-bill")).toHaveLength(1);
   });
+
+  test('alerts, bill cards and the reviewers they name go by name as everywhere: "alice" before "Bob"', async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const bob = await s.befriend(owner, "Bob");
+    const alice = await s.befriend(owner, "alice");
+    const toBob = await owner.addRecipient({ name: "Bob" });
+    const toAlice = await owner.addRecipient({ name: "alice" });
+    if (!toBob.ok || !toAlice.ok) throw new Error("recipient refused");
+    await createPact("Gym", MON_WED_FRI, { reviewers: [bob, alice], recipientId: toBob.recipient.id });
+    await createPact("Run", MON_WED_FRI, { reviewers: [bob, alice], recipientId: toAlice.recipient.id });
+    await s.advanceTo("Wed+2 18:00");
+
+    const today = owner.today();
+    const cards = today.sections.flatMap((section) => (section.kind === "to-do" ? section.cards : []));
+    expect(cards.flatMap((card) => (card.kind === "bill" ? [card.recipientName] : []))).toEqual(["alice", "Bob"]);
+    expect(today.alerts).toEqual([
+      expect.objectContaining({ kind: "bill-overdue", recipientName: "alice", reviewerNames: ["alice", "Bob"] }),
+      expect.objectContaining({ kind: "bill-overdue", recipientName: "Bob", reviewerNames: ["alice", "Bob"] }),
+    ]);
+  });
 });
