@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { loadFailure, loadedData, sendOnce, settledLoad, settleUnlessDropped, type Load } from "./ui.tsx";
+import {
+  loadFailure,
+  loadedData,
+  sendOnce,
+  settledLoad,
+  settleUnlessDropped,
+  type Load,
+  type SendOptions,
+} from "./ui.tsx";
 
 /** A load still on its way, settled by the test. */
 function deferred() {
@@ -105,13 +113,14 @@ describe("a load that fails", () => {
 
 describe("a send", () => {
   /** Runs `send` through sendOnce, recording each state update in order. */
-  async function updates(send: () => Promise<string | void>) {
+  async function updates(send: () => Promise<string | void>, options?: SendOptions) {
     const seen: string[] = [];
     await sendOnce(
       send,
       (error) => `failed: ${String(error)}`,
       (busy) => seen.push(`busy ${busy}`),
       (error) => seen.push(`error ${error}`),
+      options,
     );
     return seen;
   }
@@ -138,5 +147,27 @@ describe("a send", () => {
         throw new Error("offline");
       }),
     ).toEqual(["busy true", "error null", "error failed: Error: offline", "busy false"]);
+  });
+
+  describe("that leaves the screen", () => {
+    const leaves = { leavesScreen: true };
+
+    test("stays busy once it goes through, so its button stays disabled until the screen goes", async () => {
+      expect(await updates(async () => undefined, leaves)).toEqual(["busy true", "error null"]);
+    });
+
+    test("is free to send again after a refusal or a failure", async () => {
+      expect(await updates(async () => "A change request is already waiting.", leaves)).toEqual([
+        "busy true",
+        "error null",
+        "error A change request is already waiting.",
+        "busy false",
+      ]);
+      expect(
+        await updates(async () => {
+          throw new Error("offline");
+        }, leaves),
+      ).toEqual(["busy true", "error null", "error failed: Error: offline", "busy false"]);
+    });
   });
 });

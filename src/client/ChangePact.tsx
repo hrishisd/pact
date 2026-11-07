@@ -155,6 +155,8 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
       onDone();
     },
     (error) => `Couldn't send it. ${failureText(error, "Check your connection and try again.")}`,
+    // Done goes Back, which lands a moment later: the button stays disabled till then.
+    { leavesScreen: true },
   );
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
 

@@ -156,6 +156,15 @@ function isFound<T extends { ok: boolean }>(result: T): result is Extract<T, { o
 type FailureText = (error: unknown) => string;
 
 /**
+ * How a send ends. `leavesScreen`: once it goes through, the screen goes
+ * away, but not at once (Back waits for the browser), so it stays busy until
+ * then rather than offering the button again.
+ */
+export interface SendOptions {
+  leavesScreen?: boolean;
+}
+
+/**
  * One send from a button, and what it says: busy while it runs, then
  * `send`'s answer. `send` returns the text of a refusal, to show as the
  * error, or nothing once it went through (having done what follows). If it
@@ -166,17 +175,18 @@ export async function sendOnce(
   failure: FailureText,
   setBusy: (busy: boolean) => void,
   setError: (error: string | null) => void,
+  { leavesScreen = false }: SendOptions = {},
 ): Promise<void> {
   setBusy(true);
   setError(null);
   try {
     const refusal = await send();
     if (typeof refusal === "string") setError(refusal);
+    else if (leavesScreen) return;
   } catch (error) {
     setError(failure(error));
-  } finally {
-    setBusy(false);
   }
+  setBusy(false);
 }
 
 /**
@@ -187,10 +197,11 @@ export async function sendOnce(
 export function useSend<Args extends unknown[]>(
   send: (...args: Args) => Promise<string | void>,
   failure: FailureText,
+  options: SendOptions = {},
 ): { busy: boolean; error: string | null; setError: (error: string | null) => void; run: (...args: Args) => void } {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = (...args: Args) => void sendOnce(() => send(...args), failure, setBusy, setError);
+  const run = (...args: Args) => void sendOnce(() => send(...args), failure, setBusy, setError, options);
   return { busy, error, setError, run };
 }
 

@@ -408,8 +408,15 @@ function changedAtOnce(
   return { ...termsOf(pact), ...change };
 }
 
-/** The create form's words for the refusals a change shares with it; a sheet has its own words for the rest. */
-const SHARED_PROBLEMS: Partial<Record<ChangePactRefusal, string>> = PROBLEMS;
+/**
+ * The create form's words for a refusal a change shares with it; a sheet has
+ * its own words for the rest. Read when called, not when this file loads:
+ * CreatePact imports this file, so PROBLEMS may not exist yet then.
+ */
+function sharedProblem(reason: ChangePactRefusal): string | undefined {
+  const problems: Partial<Record<ChangePactRefusal, string>> = PROBLEMS;
+  return problems[reason];
+}
 
 /** The reminders step's words for its refusals; the reminders sheet has its own for the rest. */
 const REMINDERS_PROBLEMS: Partial<Record<ChangePactRefusal, string>> = REMINDER_PROBLEMS;
@@ -424,7 +431,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
     async () => {
       const result = await api.changePact(pact.id, changedAtOnce(pact, { name: name.trim() }));
       if (!result.ok && result.reason !== "nothing-changed") {
-        return SHARED_PROBLEMS[result.reason] ?? "Couldn't save it. Reopen the pact and try again.";
+        return sharedProblem(result.reason) ?? "Couldn't save it. Reopen the pact and try again.";
       }
       onSaved();
     },
@@ -484,7 +491,7 @@ function AddReviewerSheet({
   } = useSend(
     async () => {
       const result = await api.changePact(pact.id, changedAtOnce(pact, { reviewerIds: [...current, ...picked] }));
-      if (!result.ok) return SHARED_PROBLEMS[result.reason] ?? "Couldn't add them. Reopen the pact and try again.";
+      if (!result.ok) return sharedProblem(result.reason) ?? "Couldn't add them. Reopen the pact and try again.";
       onSaved();
     },
     (cause) => `Couldn't add them. ${failureText(cause, "Check your connection and try again.")}`,
