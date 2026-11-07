@@ -3,7 +3,6 @@
 
 import type {
   AnkiDecksResult,
-  EvidenceKind,
   AcceptExcuseRejectionResult,
   AcceptInviteResult,
   AcceptMissResult,
@@ -37,6 +36,7 @@ import type {
   NotificationSetting,
   NotificationSettingState,
   PactResult,
+  PactTiming,
   PactSummary,
   Profile,
   PushDevice,
@@ -45,7 +45,6 @@ import type {
   ReviewDecision,
   ReviewItem,
   SavePushSubscriptionResult,
-  Schedule,
   SetTimezoneResult,
   SubmitEvidenceResult,
   Today,
@@ -271,19 +270,10 @@ export type EditPactResponse = EditPactResult;
 export type DeletePactResponse = DeletePactResult;
 
 /** POST /api/pacts/first-occurrence: the form's Check step, before the pact exists or its edit is saved. */
-export interface FirstOccurrenceRequest {
-  schedule: Schedule;
-  /** Anki days open at the collection's rollover hour. Default Camera. */
-  evidenceKind?: EvidenceKind;
-  /** Oura Ring only: the in-bed-by time, "HH:MM". */
-  inBedBy?: string;
-  /** Camera and Anki: the due-by time, "HH:MM". */
-  dueBy?: string;
-  /** The start date, "YYYY-MM-DD". */
-  startDate?: string;
+export type FirstOccurrenceRequest = PactTiming & {
   /** The pact being edited: the rule then counts from when it was created. */
   editing?: string;
-}
+};
 export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
 
 /**

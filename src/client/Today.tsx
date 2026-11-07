@@ -583,7 +583,7 @@ function missedLine(card: Json<TodayMissedCard>): string {
     const { sessions, target } = card.week;
     return `Week of ${formatDate(card.occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
   }
-  if (card.anki) return `${formatDate(card.occurrenceDate)} · ${ankiMissText(card.anki)}`;
+  if (card.anki !== undefined) return `${formatDate(card.occurrenceDate)} · ${ankiMissText(card.anki)}`;
   if (!card.night) return formatDate(card.occurrenceDate);
   const { inBedAt } = card.night;
   return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;

@@ -139,7 +139,6 @@ describe("deciding on evidence", () => {
       {
         recipient: owner.id,
         kind: "evidence-decided",
-        channel: "push",
         payload: {
           itemKind: "evidence",
           itemId: evidenceId,

@@ -167,7 +167,6 @@ describe("reminders on a Fixed days Camera pact", () => {
       {
         recipient: owner.id,
         kind: "reminder",
-        channel: "push",
         payload: {
           pactId: gym,
           occurrenceDate: MONDAY,
@@ -408,7 +407,7 @@ describe("changing reminders on an Active pact", () => {
     });
     const result = await owner.changePact(gym, changed(owner, gym, { reminders: ["17:00", "20:00"] }));
 
-    expect(result).toEqual({ ok: true, outcome: { kind: "at-once" }, changeRequestId: null });
+    expect(result).toEqual({ ok: true, outcome: { kind: "at-once" } });
     expect(pactOf(owner, gym).reminders).toEqual(["17:00", "20:00"]);
     expect(reviewer.reviewQueue()).toEqual([]);
     for (const time of ["Mon 17:00", "Mon 18:00", "Mon 20:00"]) await s.advanceTo(time);
@@ -418,13 +417,13 @@ describe("changing reminders on an Active pact", () => {
   test("may change while a change request waits, and approving it keeps them", async () => {
     const { s, owner, reviewer, gym } = await pastEditWindow();
     const requested = await owner.changePact(gym, changed(owner, gym, { penaltyCents: 300 }));
-    if (!requested.ok || requested.changeRequestId === null) throw new Error("expected a change request");
+    if (!requested.ok || requested.outcome.kind !== "needs-approval") throw new Error("expected a change request");
 
     const result = await owner.changePact(gym, changed(owner, gym, { reminders: [] }));
-    expect(result).toEqual({ ok: true, outcome: { kind: "at-once" }, changeRequestId: null });
+    expect(result).toEqual({ ok: true, outcome: { kind: "at-once" } });
     expect(pactOf(owner, gym).reminders).toEqual([]);
 
-    await reviewer.decide(requested.changeRequestId, { kind: "approve" });
+    await reviewer.decide(requested.outcome.changeRequestId, { kind: "approve" });
     expect(pactOf(owner, gym).reminders).toEqual([]);
     await s.advanceTo("Mon 18:00");
     expect(reminders(s, owner)).toEqual([]);
@@ -450,10 +449,10 @@ describe("changing reminders on an Active pact", () => {
     const { owner, gym } = await pastEditWindow();
 
     const result = await owner.changePact(gym, changed(owner, gym, { penaltyCents: 300, reminders: ["19:00"] }));
-    if (!result.ok || result.changeRequestId === null) throw new Error("expected a change request");
+    if (!result.ok || result.outcome.kind !== "needs-approval") throw new Error("expected a change request");
 
     expect(pactOf(owner, gym).reminders).toEqual(["19:00"]);
-    const request = owner.changeRequest(result.changeRequestId);
+    const request = owner.changeRequest(result.outcome.changeRequestId);
     if (!request.ok) throw new Error(request.reason);
     expect(request.changeRequest.changes.map((c) => c.term)).toEqual(["penalty"]);
   });

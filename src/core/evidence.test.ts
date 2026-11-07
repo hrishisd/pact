@@ -42,7 +42,6 @@ describe("submitting evidence", () => {
 
     const reviewItem = {
       kind: "review-item",
-      channel: "push",
       payload: {
         itemKind: "evidence",
         itemId: submitted.evidenceId,

@@ -259,7 +259,7 @@ describe("payments in a ledger's history", () => {
             amountCents: 400,
             note: null,
             recordedAt: s.at("Fri 09:00"),
-            state: { kind: "awaiting-approval" },
+            state: { kind: "waiting" },
           },
           {
             kind: "payment",

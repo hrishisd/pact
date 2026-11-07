@@ -36,7 +36,6 @@ describe("each kind records one notification for each person it's for", () => {
       {
         recipient: owner.id,
         kind: "evidence-decided",
-        channel: "push",
         payload: {
           itemKind: "evidence",
           itemId: evidenceId,
@@ -62,7 +61,6 @@ describe("each kind records one notification for each person it's for", () => {
       {
         recipient: owner.id,
         kind: "missed-occurrence",
-        channel: "push",
         payload: {
           pactId: gym,
           occurrenceDate: "2026-01-05",

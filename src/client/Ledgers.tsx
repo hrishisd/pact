@@ -190,7 +190,7 @@ function PaymentRow({ payment, timezone }: { payment: Json<LedgerPayment>; timez
   let stateText: string;
   let amount: ReactNode;
   switch (state.kind) {
-    case "awaiting-approval":
+    case "waiting":
       stateText = "Awaiting approval";
       amount = <span className="num muted">{money(payment.amountCents)}</span>;
       break;

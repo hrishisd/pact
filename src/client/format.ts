@@ -1,6 +1,8 @@
 // How the client writes money, schedules, dates and time left.
 
 import { clockText, formatDate, formatDay } from "../shared/format.ts";
+import type { Json } from "../shared/api.ts";
+import type { AnkiCheck } from "../shared/types.ts";
 
 export { clockText, formatDate, formatDay, inBedByName, money, scheduleText } from "../shared/format.ts";
 
@@ -101,7 +103,8 @@ export function initial(name: string): string {
  * that counted for it ("12 cards left at 11:50pm"), or that no check reached
  * AnkiWeb that day.
  */
-export function ankiMissText({ cardsLeft, checkedAt }: { cardsLeft: number | null; checkedAt: string | null }): string {
-  if (cardsLeft === null || checkedAt === null) return "AnkiWeb not reached";
+export function ankiMissText(check: Json<AnkiCheck> | null): string {
+  if (check === null) return "AnkiWeb not reached";
+  const { cardsLeft, checkedAt } = check;
   return `${cardsLeft} ${cardsLeft === 1 ? "card" : "cards"} left at ${clockTime(checkedAt)}`;
 }

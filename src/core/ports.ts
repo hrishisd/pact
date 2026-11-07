@@ -98,7 +98,6 @@ export type NotificationKind =
   | "overdue-bill"
   /** To the owner: Oura refused its tokens, or at 15:00 a bedtime night still has no sleep data. */
   | "connection-problem";
-export type NotificationChannel = "push";
 
 export interface NotificationPayload {
   /** What the notification says, and the app path it opens. */
@@ -111,7 +110,6 @@ export interface NotificationPayload {
 export interface Notification {
   recipient: AccountId;
   kind: NotificationKind;
-  channel: NotificationChannel;
   payload: NotificationPayload;
 }
 

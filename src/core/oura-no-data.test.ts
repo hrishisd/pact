@@ -192,7 +192,6 @@ describe("the 15:00 push", () => {
       {
         recipient: owner.id,
         kind: "connection-problem",
-        channel: "push",
         payload: {
           occurrenceDate: TUE,
           title: "No Oura data",
@@ -277,7 +276,6 @@ describe("a disconnected connection", () => {
       {
         recipient: owner.id,
         kind: "connection-problem",
-        channel: "push",
         payload: {
           title: "Oura needs reconnecting",
           body: "A night with no data by 6pm counts as Missed. Reconnect before then.",

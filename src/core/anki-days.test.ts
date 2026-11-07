@@ -236,7 +236,7 @@ describe("judging an Anki day", () => {
     await s.advanceTo("Tue 21:59");
     await s.advanceTo("Tue 22:00");
     expect(status(owner, pactId, TUE)).toBe("missed");
-    expect(day(owner, pactId, TUE)?.anki).toEqual({ cardsLeft: null, checkedAt: null });
+    expect(day(owner, pactId, TUE)?.anki).toBeNull();
   });
 
   test("a day no check reached AnkiWeb for is Missed, as not reached", async () => {
@@ -250,7 +250,7 @@ describe("judging an Anki day", () => {
     await s.advanceTo("Wed 00:00");
 
     expect(status(owner, pactId, TUE)).toBe("missed");
-    expect(missedCards(owner)).toEqual([expect.objectContaining({ anki: { cardsLeft: null, checkedAt: null } })]);
+    expect(missedCards(owner)).toEqual([expect.objectContaining({ anki: null })]);
   });
 
   test("with nothing due and no answers yet, the first check satisfies the day", async () => {
@@ -718,7 +718,6 @@ describe("AnkiWeb refusing Pact's login", () => {
       {
         recipient: owner.id,
         kind: "connection-problem",
-        channel: "push",
         payload: {
           title: "AnkiWeb needs reconnecting",
           body: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
@@ -761,7 +760,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     await s.advanceTo("Wed 00:00");
     expect(day(owner, pactId, TUE)).toMatchObject({
       status: { kind: "missed" },
-      anki: { cardsLeft: null, checkedAt: null },
+      anki: null,
     });
   });
 
@@ -918,12 +917,15 @@ describe("changing an Anki pact's deck", () => {
       reason: "unknown-deck",
     });
     const sent = await owner.changePact(pactId, change({ ankiDeckId: ITALIAN }));
-    if (!sent.ok || !sent.changeRequestId) throw new Error("no change request");
+    if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("no change request");
     expect(deckId()).toBe(SPANISH);
-    expect(owner.changeRequest(sent.changeRequestId)).toMatchObject({ ok: true, changeRequest: { changes: [deck] } });
+    expect(owner.changeRequest(sent.outcome.changeRequestId)).toMatchObject({
+      ok: true,
+      changeRequest: { changes: [deck] },
+    });
     expect(s.notifier.sentTo(reviewer).at(-1)?.payload.body).toBe("Deck");
 
-    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({ ok: true });
+    expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "approve" })).toEqual({ ok: true });
     expect(deckId()).toBe(ITALIAN);
     // Tuesday is open, so it keeps Spanish: Italian finished doesn't satisfy it, Spanish finished does.
     deckShows({}, TUE, "Tue 20:00", ITALIAN);
@@ -947,8 +949,8 @@ describe("changing an Anki pact's deck", () => {
     const { owner, pactId, change } = await spanishAndItalian(s);
     await s.advanceTo("Tue 09:00");
     const sent = await owner.changePact(pactId, change({ penaltyCents: 300 }));
-    if (!sent.ok || !sent.changeRequestId) throw new Error("no change request");
-    expect(owner.changeRequest(sent.changeRequestId)).toMatchObject({
+    if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("no change request");
+    expect(owner.changeRequest(sent.outcome.changeRequestId)).toMatchObject({
       ok: true,
       changeRequest: { current: { anki: { deckId: SPANISH, deckName: "Spanish" } } },
     });

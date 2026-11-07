@@ -219,7 +219,6 @@ describe("notifications", () => {
       {
         recipient: owner.id,
         kind: "reviewer-question",
-        channel: "push",
         payload: {
           itemKind: "evidence",
           itemId: evidenceId,
@@ -238,7 +237,6 @@ describe("notifications", () => {
       expect(s.notifier.sentTo(each).at(-1)).toEqual({
         recipient: each.id,
         kind: "owner-replied",
-        channel: "push",
         payload: {
           itemKind: "evidence",
           itemId: evidenceId,

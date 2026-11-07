@@ -22,11 +22,18 @@ import { join } from "node:path";
 import { onTestFinished } from "vitest";
 import { zonedWallTimeToInstant } from "../calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
-import type { AccountId, SignInResult } from "../../shared/types.ts";
+import type { AccountId, ChangePactResult, SignInResult } from "../../shared/types.ts";
 import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
 
 /** A named account. Every AccountView query and command, plus its id. */
 export type AccountHandle = AccountView & { readonly id: AccountId; readonly name: string };
+
+/** The id of the change request a sent change became; throws if it became none. */
+export function changeRequestIdOf(result: ChangePactResult): string {
+  if (!result.ok || result.outcome.kind !== "needs-approval")
+    throw new Error(`no change request: ${JSON.stringify(result)}`);
+  return result.outcome.changeRequestId;
+}
 
 /** As on the invite page: sign in carrying the invite link's token. */
 interface SignInOptions {

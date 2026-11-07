@@ -3,7 +3,7 @@
 // (applies without approval to occurrences not open yet), or doesn't change
 // what counts (applies at once), like the name and the reminders.
 
-import type { AccountId, ChangeEffect, Schedule } from "../shared/types.ts";
+import type { AccountId, ChangeEffect, Schedule, TermChange } from "../shared/types.ts";
 import { ankiDueByOrder } from "./occurrences.ts";
 
 /** A pact's terms an owner can change: everything but its evidence kind. */
@@ -29,23 +29,13 @@ export interface ChangeableTerms {
   ankiDeckId: string | null;
 }
 
-/** One changed term, with its effect, in the Request change form's order. */
-export interface TermDiff {
-  term:
-    | "name"
-    | "description"
-    | "deck"
-    | "in-bed-by"
-    | "schedule"
-    | "due-by"
-    | "start-date"
-    | "end-date"
-    | "penalty"
-    | "recipient"
-    | "reviewers"
-    | "reminders";
-  effect: ChangeEffect;
-}
+/**
+ * One changed term, with its effect, in the Request change form's order. The
+ * deck and the in-bed-by time differ only when both are set, so they carry both.
+ */
+export type TermDiff =
+  | { term: "deck" | "in-bed-by"; before: string; after: string; effect: ChangeEffect }
+  | { term: Exclude<TermChange["term"], "deck" | "in-bed-by">; effect: ChangeEffect };
 
 /**
  * Each term that differs between `before` and `after`, and what changing it
@@ -54,17 +44,19 @@ export interface TermDiff {
  */
 export function termDiffs(before: ChangeableTerms, after: ChangeableTerms, ankiRollover: number | null): TermDiff[] {
   const diffs: TermDiff[] = [];
-  const add = (term: TermDiff["term"], effect: ChangeEffect) => diffs.push({ term, effect });
+  const add = (term: Exclude<TermDiff["term"], "deck" | "in-bed-by">, effect: ChangeEffect) =>
+    diffs.push({ term, effect });
   // The name doesn't change what counts.
   if (after.name !== before.name) add("name", "at-once");
   // It defines what a photo must show; only a reviewer can judge a new one.
   if (after.description !== before.description) add("description", "needs-approval");
   // Pact can't tell whether another deck is easier: only a reviewer can judge it.
   if (after.ankiDeckId !== before.ankiDeckId && before.ankiDeckId !== null && after.ankiDeckId !== null) {
-    add("deck", "needs-approval");
+    diffs.push({ term: "deck", before: before.ankiDeckId, after: after.ankiDeckId, effect: "needs-approval" });
   }
   if (after.inBedBy !== before.inBedBy && before.inBedBy !== null && after.inBedBy !== null) {
-    add("in-bed-by", lateness(after.inBedBy) > lateness(before.inBedBy) ? "needs-approval" : "stricter");
+    const effect = lateness(after.inBedBy) > lateness(before.inBedBy) ? "needs-approval" : "stricter";
+    diffs.push({ term: "in-bed-by", before: before.inBedBy, after: after.inBedBy, effect });
   }
   const schedule = scheduleEffect(before.schedule, after.schedule);
   if (schedule !== null) add("schedule", schedule);

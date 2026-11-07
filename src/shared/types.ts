@@ -90,11 +90,16 @@ export interface NewPact {
    * day once its Anki day has opened.
    */
   dueBy?: string;
-  /** Anki only: the deck's id, from the owner's deck list (`AnkiDecksResult`). Its subdecks count in it. */
+  /**
+   * Anki only: the deck's id, from the owner's deck list (`AnkiDecksResult`).
+   * Its subdecks count in it. On a change: left out to keep the deck it has;
+   * changing it always needs approval.
+   */
   ankiDeckId?: string;
   /**
    * Optional, "YYYY-MM-DD": the pact starts no earlier than this day. It can
    * only push the first occurrence later. Recurring pacts only: One-time has none.
+   * On a change: it can change only before the first occurrence opens.
    */
   startDate?: string;
   /**
@@ -104,7 +109,8 @@ export interface NewPact {
   endDate?: string;
   /**
    * Optional: when to remind the owner, each "HH:MM" in their timezone, or on
-   * a One-time pact "YYYY-MM-DDTHH:MM". See `PactTerms.reminders`.
+   * a One-time pact "YYYY-MM-DDTHH:MM". See `PactTerms.reminders`. On a
+   * change: they apply at once, even while a change request waits.
    */
   reminders?: string[];
   schedule: Schedule;
@@ -221,7 +227,14 @@ export interface PactSummary {
 export type PactStage = "active" | "ended";
 
 /** The pact page: the pact's terms. */
-export interface PactTerms {
+/**
+ * A pact as its owner sees it. Ended, it says when: when an approved change
+ * request ended it, when its end date passed (once its last occurrence
+ * closed), or for One-time when its occurrence was judged.
+ */
+export type PactTerms = PactTermsCommon & ({ stage: "active" } | { stage: "ended"; endedAt: Date });
+
+interface PactTermsCommon {
   id: string;
   name: string;
   description: string;
@@ -252,13 +265,6 @@ export interface PactTerms {
    * evidence was already submitted.
    */
   reminders: string[];
-  stage: PactStage;
-  /**
-   * When it Ended: when an approved change request ended it, when its end
-   * date passed (once its last occurrence closed), or for One-time when its
-   * occurrence was judged; null while Active.
-   */
-  endedAt: Date | null;
   firstOccurrence: FirstOccurrence;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
@@ -387,18 +393,17 @@ export interface OccurrenceRecord {
    * 18:00 the next day.
    */
   night?: { inBedAt: string | null };
-  /** Anki pacts only, once judged Satisfied or Missed: the check that decided it. */
-  anki?: AnkiResult;
+  /**
+   * Anki pacts only, once judged Satisfied or Missed: the check that decided
+   * it, or null when no check reached AnkiWeb that day.
+   */
+  anki?: AnkiCheck | null;
 }
 
-/**
- * How the last check that counted for an Anki day found its deck: cards
- * left (new, learning and due together) and when Pact checked; both null
- * when no check reached AnkiWeb that day.
- */
-export interface AnkiResult {
-  cardsLeft: number | null;
-  checkedAt: Date | null;
+/** A check of an Anki pact's deck: cards left (new, learning and due together) and when Pact checked. */
+export interface AnkiCheck {
+  cardsLeft: number;
+  checkedAt: Date;
 }
 
 /** A reviewer's decision that settled an occurrence. `reason` is the rejection's, or the excuse's. */
@@ -872,7 +877,7 @@ export interface TodayAnkiCard extends TodayPactCard {
   /** Whether the last check found the deck gone from the collection. */
   deckMissing: boolean;
   /** The latest check of the deck for this Anki day, or null before the first. */
-  lastCheck: { cardsLeft: number; checkedAt: Date } | null;
+  lastCheck: AnkiCheck | null;
 }
 
 /**
@@ -909,8 +914,8 @@ export interface TodayMissedCard extends TodayPactCard {
    * Oura's clock, or null when Oura reported no sleep by 18:00 the next day.
    */
   night?: { inBedAt: string | null };
-  /** Anki pacts only: why the day is Missed. */
-  anki?: AnkiResult;
+  /** Anki pacts only: why the day is Missed: the last check that counted for it, or null when none reached AnkiWeb. */
+  anki?: AnkiCheck | null;
   /**
    * Today's occurrence of a Camera pact, Missed at its due-by time ("HH:MM")
    * with no evidence: it shows as Closed.
@@ -1108,18 +1113,12 @@ export interface LedgerPayment {
   /** The owner's note, or null when there's none. */
   note: string | null;
   recordedAt: Date;
-  state: LedgerPaymentState;
+  /**
+   * Where its review stands. Only an approved payment pays off penalties. A
+   * rejected one says who rejected it and why: that's how the owner learns of it.
+   */
+  state: ReviewState;
 }
-
-/**
- * Where a payment's review stands. Only an approved payment pays off
- * penalties. A rejected one says who rejected it and why: that's how the
- * owner learns of it.
- */
-export type LedgerPaymentState =
-  | { kind: "awaiting-approval" }
-  | { kind: "approved"; reviewerName: string; decidedAt: Date }
-  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
 
 /** One recipient's ledger: its summary and its history, newest first. */
 export interface Ledger {
@@ -1231,9 +1230,6 @@ export type FileExcuseRefusal =
 
 export type FileExcuseResult = { ok: true; excuseId: string } | { ok: false; reason: FileExcuseRefusal };
 
-/** Where an excuse's review stands. */
-export type ExcuseState = ReviewState;
-
 /** The excuse page. */
 export interface ExcuseDetail {
   id: string;
@@ -1244,7 +1240,7 @@ export interface ExcuseDetail {
   filedAt: Date;
   /** Oldest first, as they stand now. */
   days: ExcuseDay[];
-  state: ExcuseState;
+  state: ReviewState;
   /** The pact's reviewers, sorted by name: who it was sent to. */
   reviewerNames: string[];
   thread: QuestionThread;
@@ -1263,34 +1259,13 @@ export interface Health {
 
 /**
  * The terms an owner sends to change a pact after its edit window: all of
- * them, changed or not, as the Request change form holds them. The evidence
- * kind never changes.
+ * them, changed or not, as the Request change form holds them. An optional
+ * term left out is none, except the deck. The evidence kind never changes.
  */
-export interface PactChange {
-  name: string;
-  /** For Camera: what the photo will show. Oura Ring pacts have none. */
-  description: string;
-  /** Oura Ring only: see `NewPact.inBedBy`. */
-  inBedBy?: string;
-  /** Camera and Anki: see `NewPact.dueBy`. Left out to have none. */
-  dueBy?: string;
-  /** See `NewPact.startDate`. It can change only before the first occurrence opens. Left out to have none. */
-  startDate?: string;
-  /** See `NewPact.endDate`. Left out to have none. */
-  endDate?: string;
-  /** See `PactTerms.reminders`. Left out to have none. They apply at once, even while a change request waits. */
-  reminders?: string[];
-  schedule: Schedule;
-  /** In US cents: a positive whole number. */
-  penaltyCents: number;
-  recipientId: string;
-  /** One or more of the owner's friends. */
-  reviewerIds: AccountId[];
-  /** Anki only: the deck, from the owner's deck list. Left out to keep the deck it has. Changing it always needs approval. */
-  ankiDeckId?: string;
+export type PactChange = Omit<NewPact, "evidenceKind"> & {
   /** Why, for the reviewers, when part of it needs approval. Optional; trimmed, and a blank note is none. */
   note?: string;
-}
+};
 
 /**
  * What changing one term does: it relaxes the pact, so it waits for a
@@ -1378,9 +1353,12 @@ export type ChangePactRefusal =
 
 export type ChangePreviewResult = { ok: true; preview: ChangePreview } | { ok: false; reason: ChangePactRefusal };
 
-export type ChangePactResult =
-  | { ok: true; outcome: Exclude<ChangeOutcome, { kind: "nothing" }>; changeRequestId: string | null }
-  | { ok: false; reason: ChangePactRefusal };
+/** What a sent change did: a change request carries its id. */
+export type ChangePactOutcome =
+  | Exclude<ChangeOutcome, { kind: "nothing" | "needs-approval" }>
+  | (Extract<ChangeOutcome, { kind: "needs-approval" }> & { changeRequestId: string });
+
+export type ChangePactResult = { ok: true; outcome: ChangePactOutcome } | { ok: false; reason: ChangePactRefusal };
 
 export type RequestEndResult =
   | { ok: true; changeRequestId: string }
@@ -1432,11 +1410,7 @@ export interface ChangeRequestView {
 }
 
 /** Where a change request stands. */
-export type ChangeRequestState =
-  | { kind: "waiting" }
-  | { kind: "approved"; reviewerName: string; decidedAt: Date }
-  | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string }
-  | { kind: "withdrawn"; withdrawnAt: Date };
+export type ChangeRequestState = ReviewState | { kind: "withdrawn"; withdrawnAt: Date };
 
 /** The change request's page, for its owner. */
 export interface ChangeRequestDetail extends ChangeRequestView {

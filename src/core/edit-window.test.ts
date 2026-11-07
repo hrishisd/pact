@@ -206,7 +206,6 @@ describe("when the edit window closes", () => {
     await s.advanceTo("Mon 10:10");
     const picked = {
       kind: "picked-as-reviewer",
-      channel: "push",
       payload: {
         pactId: gym,
         title: "owner picked you as a reviewer",

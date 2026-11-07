@@ -68,7 +68,7 @@ import {
   type AccountId,
   type AnkiDeck,
   type AnkiDecksResult,
-  type AnkiResult,
+  type AnkiCheck,
   type AnkiTerms,
   type AskOwnerResult,
   type AddRecipientResult,
@@ -101,7 +101,6 @@ import {
   type ExcusePreviewResult,
   type ExcuseResult,
   type ExcuseSkipReason,
-  type ExcuseState,
   type FileExcuseRefusal,
   type FileExcuseResult,
   type FirstOccurrenceResult,
@@ -114,7 +113,6 @@ import {
   type InviteLookup,
   type LedgerEntry,
   type LedgerPayment,
-  type LedgerPaymentState,
   type LedgerPenalty,
   type LedgerResult,
   type LedgerSummary,
@@ -637,15 +635,15 @@ class Core implements PactCore {
     if (!this.#db.inTransaction) throw new Error("notifications are enqueued only inside a command");
     const setting = SETTING_OF_KIND[notification.kind];
     if (setting !== null && this.#settingIsOff(notification.recipient, setting)) return;
+    // Push is the only channel; the column stays from the first migration.
     this.#db
       .prepare(
         `INSERT INTO outbox (recipient_account_id, kind, channel, payload, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, 'push', ?, ?)`,
       )
       .run(
         notification.recipient,
         notification.kind,
-        notification.channel,
         JSON.stringify(notification.payload),
         this.#clock.now().toISOString(),
       );
@@ -673,7 +671,7 @@ class Core implements PactCore {
   async #deliverPending(): Promise<void> {
     const rows = this.#db
       .prepare(
-        `SELECT id, recipient_account_id, kind, channel, payload, sent_to
+        `SELECT id, recipient_account_id, kind, payload, sent_to
          FROM outbox WHERE delivered_at IS NULL ORDER BY id`,
       )
       .all() as OutboxRow[];
@@ -681,7 +679,6 @@ class Core implements PactCore {
       const notification: Notification = {
         recipient: row.recipient_account_id,
         kind: row.kind as Notification["kind"],
-        channel: row.channel as Notification["channel"],
         payload: JSON.parse(row.payload) as Notification["payload"],
       };
       try {
@@ -1031,8 +1028,7 @@ class Core implements PactCore {
         const pact: PactTerms = {
           id: row.id,
           ...this.#currentTerms(row),
-          stage: row.stage,
-          endedAt: row.ended_at === null ? null : new Date(row.ended_at),
+          ...stageOf(row),
           firstOccurrence: { date: first.date, dueAt: first.dueAt },
           editWindowClosesAt: editWindowClosesAt(row, now),
           newTerms: this.#newTerms(row, timezone, now),
@@ -1081,7 +1077,6 @@ class Core implements PactCore {
             this.#enqueue({
               recipient: reviewerId,
               kind: "picked-as-reviewer",
-              channel: "push",
               payload: {
                 pactId,
                 title: `${ownerName} added you as a reviewer`,
@@ -1098,10 +1093,10 @@ class Core implements PactCore {
               reminders: after.reminders,
             };
             const id = this.#sendChangeRequest({ ...pact, name: after.name }, ownerName, sent, after, change.note);
-            return { ok: true, outcome, changeRequestId: id };
+            return { ok: true, outcome: { ...outcome, changeRequestId: id } };
           }
           if (outcome.kind === "stricter") this.#applyTerms(pact, after, now, checked.timezone);
-          return { ok: true, outcome, changeRequestId: null };
+          return { ok: true, outcome };
         }),
       requestEnd: (pactId, note) =>
         this.#command((): RequestEndResult => {
@@ -1118,18 +1113,11 @@ class Core implements PactCore {
         account();
         const row = this.#changeRequestRow(changeRequestId);
         if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
-        let state: ChangeRequestState = { kind: "waiting" };
-        if (row.withdrawn_at !== null) state = { kind: "withdrawn", withdrawnAt: new Date(row.withdrawn_at) };
-        if (row.decision !== null) {
-          const decided = {
-            reviewerName: this.#accountName(row.decided_by_account_id!),
-            decidedAt: new Date(row.decided_at!),
-          };
-          state =
-            row.decision === "approved"
-              ? { kind: "approved", ...decided }
-              : { kind: "rejected", ...decided, reason: row.reject_reason! };
-        }
+        // A decision outranks a withdrawal.
+        const state: ChangeRequestState =
+          row.withdrawn_at !== null && row.decision === null
+            ? { kind: "withdrawn", withdrawnAt: new Date(row.withdrawn_at) }
+            : reviewStateOf(row);
         const changeRequest = {
           ...this.#changeRequestView(row),
           state,
@@ -1423,7 +1411,6 @@ class Core implements PactCore {
             this.#enqueue({
               recipient: reviewerId,
               kind: "review-item",
-              channel: "push",
               payload: {
                 itemKind: "excuse",
                 itemId: excuseId,
@@ -1443,27 +1430,11 @@ class Core implements PactCore {
         if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
         const row = this.#db
           .prepare(
-            `SELECT excuse.reason, excuse.filed_at, excuse.decision, excuse.decided_at, excuse.reject_reason,
-                    reviewer.name AS reviewer_name
+            `SELECT excuse.reason, excuse.filed_at, ${reviewStateColumns("excuse")}
              FROM excuse LEFT JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
              WHERE excuse.id = ?`,
           )
-          .get(excuseId) as {
-          reason: string;
-          filed_at: string;
-          decision: ReviewOutcome | null;
-          decided_at: string | null;
-          reject_reason: string | null;
-          reviewer_name: string | null;
-        };
-        let state: ExcuseState = { kind: "waiting" };
-        if (row.decision !== null) {
-          const decided = { reviewerName: row.reviewer_name!, decidedAt: new Date(row.decided_at!) };
-          state =
-            row.decision === "approved"
-              ? { kind: "approved", ...decided }
-              : { kind: "rejected", ...decided, reason: row.reject_reason! };
-        }
+          .get(excuseId) as ReviewStateRow & { reason: string; filed_at: string };
         const reviewerNames = (
           this.#db
             .prepare(
@@ -1480,7 +1451,7 @@ class Core implements PactCore {
           photoIds: this.#excusePhotoIds(excuseId),
           filedAt: new Date(row.filed_at),
           days: this.#excuseDays(excuseId, pact.id, pact.timezone),
-          state,
+          state: reviewStateOf(row),
           reviewerNames,
           thread: this.#thread(excuseId, row.decision === null),
         };
@@ -1539,7 +1510,6 @@ class Core implements PactCore {
             this.#enqueue({
               recipient: reviewerId,
               kind: "review-item",
-              channel: "push",
               payload: {
                 itemKind: "payment",
                 itemId: paymentId,
@@ -1661,7 +1631,6 @@ class Core implements PactCore {
           this.#enqueue({
             recipient: item.row.owner_account_id,
             kind: "reviewer-question",
-            channel: "push",
             payload: {
               itemKind: item.kind,
               itemId,
@@ -1687,7 +1656,6 @@ class Core implements PactCore {
             this.#enqueue({
               recipient: reviewerId,
               kind: "owner-replied",
-              channel: "push",
               payload: {
                 itemKind: item.kind,
                 itemId,
@@ -2219,7 +2187,6 @@ class Core implements PactCore {
       this.#enqueue({
         recipient: ownerId,
         kind: "new-bill",
-        channel: "push",
         payload: {
           recipientId,
           title: `New bill: ${money(bill.unpaidCents)} to ${this.#recipientName(recipientId)}`,
@@ -2259,7 +2226,6 @@ class Core implements PactCore {
         this.#enqueue({
           recipient: ownerId,
           kind: "overdue-bill",
-          channel: "push",
           payload: {
             recipientId,
             title: `${money(overdue.cents)} overdue to ${recipientName}`,
@@ -2273,7 +2239,6 @@ class Core implements PactCore {
           this.#enqueue({
             recipient: reviewerId,
             kind: "overdue-bill",
-            channel: "push",
             payload: {
               recipientId,
               title: `${ownerName} is overdue`,
@@ -2386,40 +2351,25 @@ class Core implements PactCore {
   #ledgerPayments(ownerId: AccountId, recipientId: string): LedgerPayment[] {
     const rows = this.#db
       .prepare(
-        `SELECT payment.id, payment.amount_cents, payment.note, payment.recorded_at, payment.decision,
-                payment.decided_at, payment.reject_reason, reviewer.name AS reviewer_name
+        `SELECT payment.id, payment.amount_cents, payment.note, payment.recorded_at, ${reviewStateColumns("payment")}
          FROM payment LEFT JOIN account AS reviewer ON reviewer.id = payment.decided_by_account_id
          WHERE payment.owner_account_id = ? AND payment.recipient_id = ?
          ORDER BY payment.recorded_at DESC, payment.id`,
       )
-      .all(ownerId, recipientId) as {
+      .all(ownerId, recipientId) as (ReviewStateRow & {
       id: string;
       amount_cents: number;
       note: string | null;
       recorded_at: string;
-      decision: ReviewOutcome | null;
-      decided_at: string | null;
-      reject_reason: string | null;
-      reviewer_name: string | null;
-    }[];
-    return rows.map((row) => {
-      let state: LedgerPaymentState = { kind: "awaiting-approval" };
-      if (row.decision !== null) {
-        const decided = { reviewerName: row.reviewer_name!, decidedAt: new Date(row.decided_at!) };
-        state =
-          row.decision === "approved"
-            ? { kind: "approved", ...decided }
-            : { kind: "rejected", ...decided, reason: row.reject_reason! };
-      }
-      return {
-        kind: "payment",
-        paymentId: row.id,
-        amountCents: row.amount_cents,
-        note: row.note,
-        recordedAt: new Date(row.recorded_at),
-        state,
-      };
-    });
+    })[];
+    return rows.map((row) => ({
+      kind: "payment",
+      paymentId: row.id,
+      amountCents: row.amount_cents,
+      note: row.note,
+      recordedAt: new Date(row.recorded_at),
+      state: reviewStateOf(row),
+    }));
   }
 
   /**
@@ -2483,7 +2433,6 @@ class Core implements PactCore {
     this.#enqueue({
       recipient: evidence.owner_account_id,
       kind: "evidence-decided",
-      channel: "push",
       payload: {
         itemKind: "evidence",
         itemId: evidence.id,
@@ -2637,7 +2586,7 @@ class Core implements PactCore {
       record.night = { inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
     }
     if (pact.evidence_kind === "anki" && row && (status.kind === "satisfied" || status.kind === "missed")) {
-      record.anki = ankiResultOf(row);
+      record.anki = ankiCheckOf(row);
     }
     return record;
   }
@@ -2852,7 +2801,6 @@ class Core implements PactCore {
     this.#enqueue({
       recipient: excuse.owner_account_id,
       kind: "excuse-decided",
-      channel: "push",
       payload: {
         itemKind: "excuse",
         itemId: excuse.id,
@@ -3447,36 +3395,37 @@ class Core implements PactCore {
   /** The changed terms, old and new, with names for the recipient and reviewers. */
   #termChanges(ownerId: AccountId, before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
     const deck = (id: string) => ({ id, name: this.#ankiDeckName(ownerId, id) });
-    return diffs.map(({ term, effect }): TermChange => {
-      switch (term) {
+    return diffs.map((diff): TermChange => {
+      const { effect } = diff;
+      switch (diff.term) {
         case "deck":
-          return { term, before: deck(before.ankiDeckId!), after: deck(after.ankiDeckId!), effect };
+          return { term: diff.term, before: deck(diff.before), after: deck(diff.after), effect };
         case "name":
-          return { term, before: before.name, after: after.name, effect };
+          return { term: diff.term, before: before.name, after: after.name, effect };
         case "description":
-          return { term, before: before.description, after: after.description, effect };
+          return { term: diff.term, before: before.description, after: after.description, effect };
         case "in-bed-by":
-          return { term, before: before.inBedBy!, after: after.inBedBy!, effect };
+          return { term: diff.term, before: diff.before, after: diff.after, effect };
         case "due-by":
-          return { term, before: before.dueBy, after: after.dueBy, effect };
+          return { term: diff.term, before: before.dueBy, after: after.dueBy, effect };
         case "start-date":
-          return { term, before: before.startDate, after: after.startDate, effect };
+          return { term: diff.term, before: before.startDate, after: after.startDate, effect };
         case "end-date":
-          return { term, before: before.endDate, after: after.endDate, effect };
+          return { term: diff.term, before: before.endDate, after: after.endDate, effect };
         case "schedule":
-          return { term, before: before.schedule, after: after.schedule, effect };
+          return { term: diff.term, before: before.schedule, after: after.schedule, effect };
         case "penalty":
-          return { term, before: before.penaltyCents, after: after.penaltyCents, effect };
+          return { term: diff.term, before: before.penaltyCents, after: after.penaltyCents, effect };
         case "recipient":
           return {
-            term,
+            term: diff.term,
             before: { id: before.recipientId, name: this.#recipientName(before.recipientId) },
             after: { id: after.recipientId, name: this.#recipientName(after.recipientId) },
             effect,
           };
         case "reviewers":
           return {
-            term,
+            term: diff.term,
             before: this.#friendsSortedByName(before.reviewerIds),
             after: this.#friendsSortedByName(after.reviewerIds),
             added: this.#friendsSortedByName(after.reviewerIds.filter((id) => !before.reviewerIds.includes(id))),
@@ -3484,7 +3433,7 @@ class Core implements PactCore {
             effect,
           };
         case "reminders":
-          return { term, before: before.reminders, after: after.reminders, effect };
+          return { term: diff.term, before: before.reminders, after: after.reminders, effect };
       }
     });
   }
@@ -3524,7 +3473,6 @@ class Core implements PactCore {
       this.#enqueue({
         recipient: reviewerId,
         kind: "review-item",
-        channel: "push",
         payload: {
           itemKind: "change-request",
           itemId: id,
@@ -3538,14 +3486,16 @@ class Core implements PactCore {
     return id;
   }
 
-  /** A change request with its pact's owner and their timezone. */
+  /** A change request with its pact's owner and their timezone, and the reviewer who decided it. */
   #changeRequestRow(id: string): ChangeRequestRow | undefined {
     return this.#db
       .prepare(
-        `SELECT change_request.*, pact.owner_account_id, owner.name AS owner_name, owner.timezone
+        `SELECT change_request.*, pact.owner_account_id, owner.name AS owner_name, owner.timezone,
+                reviewer.name AS reviewer_name
          FROM change_request
          JOIN pact ON pact.id = change_request.pact_id
          JOIN account AS owner ON owner.id = pact.owner_account_id
+         LEFT JOIN account AS reviewer ON reviewer.id = change_request.decided_by_account_id
          WHERE change_request.id = ?`,
       )
       .get(id) as ChangeRequestRow | undefined;
@@ -3666,7 +3616,6 @@ class Core implements PactCore {
     this.#enqueue({
       recipient: row.owner_account_id,
       kind: "change-request-decided",
-      channel: "push",
       payload: {
         itemKind: "change-request",
         itemId: request.id,
@@ -3969,7 +3918,6 @@ class Core implements PactCore {
       this.#enqueue({
         recipient: reviewerId,
         kind: "review-item",
-        channel: "push",
         payload: {
           itemKind: "evidence",
           itemId: evidenceId,
@@ -3998,7 +3946,6 @@ class Core implements PactCore {
         this.#enqueue({
           recipient: reviewerId,
           kind: "picked-as-reviewer",
-          channel: "push",
           payload: {
             pactId: pact.id,
             title: `${ownerName} picked you as a reviewer`,
@@ -4122,7 +4069,6 @@ class Core implements PactCore {
     this.#enqueue({
       recipient: payment.owner_account_id,
       kind: "payment-decided",
-      channel: "push",
       payload: {
         itemKind: "payment",
         itemId: payment.id,
@@ -4683,7 +4629,7 @@ class Core implements PactCore {
         ...(row.evidence_kind === "oura" && {
           night: { inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) },
         }),
-        ...(row.evidence_kind === "anki" && { anki: ankiResultOf(row) }),
+        ...(row.evidence_kind === "anki" && { anki: ankiCheckOf(row) }),
         ...(dueBy !== null && row.evidence_kind !== "anki" && { closed: { dueBy } }),
         ...(weekly && { week: this.#weekProgress(row.id, row.date) }),
       };
@@ -4882,7 +4828,6 @@ class Core implements PactCore {
       this.#enqueue({
         recipient: operator.id,
         kind: "operator-alert",
-        channel: "push",
         payload: {
           alert: "reminders-dropped",
           dropped: dropped.length,
@@ -4937,7 +4882,6 @@ class Core implements PactCore {
     this.#enqueue({
       recipient: pact.owner_account_id,
       kind: "reminder",
-      channel: "push",
       payload: { pactId: pact.id, occurrenceDate: date, title: pact.name, body, url: APP_PATHS.today },
     });
   }
@@ -5100,7 +5044,6 @@ class Core implements PactCore {
     this.#enqueue({
       recipient: account,
       kind: "connection-problem",
-      channel: "push",
       payload: { ...RECONNECT_PUSH[service], url: APP_PATHS.today },
     });
   }
@@ -5125,7 +5068,6 @@ class Core implements PactCore {
       this.#enqueue({
         recipient: pact.owner_account_id,
         kind: "connection-problem",
-        channel: "push",
         payload: {
           occurrenceDate: night.date,
           title: "No Oura data",
@@ -5353,7 +5295,7 @@ class Core implements PactCore {
       .get(pact.id, day.date) as { outcome: string | null } | undefined;
     if (row?.outcome !== "missed") return;
     const check = this.#lastAnkiCheck(pact.id, day.date, day.dueAt);
-    this.#noteAnkiResult(pact.id, day.date, check ?? { cardsLeft: null, checkedAt: null });
+    this.#noteAnkiResult(pact.id, day.date, check);
   }
 
   /**
@@ -5361,7 +5303,7 @@ class Core implements PactCore {
    * them, or with `before`, only those that count for a day due then, made
    * and evaluated before it.
    */
-  #lastAnkiCheck(pactId: string, date: LocalDate, before?: Date): { cardsLeft: number; checkedAt: Date } | null {
+  #lastAnkiCheck(pactId: string, date: LocalDate, before?: Date): AnkiCheck | null {
     const until = before?.toISOString() ?? "9999-12-31T23:59:59.999Z";
     const row = this.#db
       .prepare(
@@ -5378,10 +5320,11 @@ class Core implements PactCore {
     return row ? { cardsLeft: row.cards_left, checkedAt: new Date(row.checked_at) } : null;
   }
 
-  #noteAnkiResult(pactId: string, date: LocalDate, result: AnkiResult): void {
+  /** Stores the check that decided an Anki day; null when none reached AnkiWeb. */
+  #noteAnkiResult(pactId: string, date: LocalDate, check: AnkiCheck | null): void {
     this.#db
       .prepare(`UPDATE occurrence SET anki_cards_left = ?, anki_checked_at = ? WHERE pact_id = ? AND date = ?`)
-      .run(result.cardsLeft, result.checkedAt?.toISOString() ?? null, pactId, date);
+      .run(check?.cardsLeft ?? null, check?.checkedAt.toISOString() ?? null, pactId, date);
   }
 
   /**
@@ -5490,7 +5433,6 @@ class Core implements PactCore {
     this.#enqueue({
       recipient: pact.owner_account_id,
       kind: "missed-occurrence",
-      channel: "push",
       payload: { pactId, occurrenceDate: date, title: `${pact.name} is Missed`, body, url: APP_PATHS.pact(pactId) },
     });
   }
@@ -5586,7 +5528,6 @@ class Core implements PactCore {
           this.#enqueue({
             recipient: operator.id,
             kind: "operator-alert",
-            channel: "push",
             payload: {
               alert: "database-restored",
               lastTick,
@@ -5712,12 +5653,19 @@ function cardsText(n: number): string {
   return `${n} ${n === 1 ? "card" : "cards"}`;
 }
 
-/** An Anki day's result as its occurrence row stores it. */
-function ankiResultOf(row: { anki_cards_left: number | null; anki_checked_at: string | null }): AnkiResult {
-  return {
-    cardsLeft: row.anki_cards_left,
-    checkedAt: row.anki_checked_at === null ? null : new Date(row.anki_checked_at),
-  };
+/** A pact's stage, and when it ended. Ending a pact sets both columns at once. */
+function stageOf(
+  row: Pick<PactRow, "id" | "stage" | "ended_at">,
+): { stage: "active" } | { stage: "ended"; endedAt: Date } {
+  if (row.stage === "active") return { stage: "active" };
+  if (row.ended_at === null) throw new Error(`pact ${row.id} ended with no ended_at`);
+  return { stage: "ended", endedAt: new Date(row.ended_at) };
+}
+
+/** An Anki day's deciding check as its occurrence row stores it; null when no check reached AnkiWeb. */
+function ankiCheckOf(row: { anki_cards_left: number | null; anki_checked_at: string | null }): AnkiCheck | null {
+  if (row.anki_cards_left === null || row.anki_checked_at === null) return null;
+  return { cardsLeft: row.anki_cards_left, checkedAt: new Date(row.anki_checked_at) };
 }
 
 /**
@@ -5840,8 +5788,8 @@ type DatedTerms = Pick<
   "description" | "schedule" | "in_bed_by" | "due_by" | "penalty_cents" | "recipient_id" | "anki_deck_id"
 >;
 
-/** A change request as stored, with its pact's owner, their name and timezone. */
-interface ChangeRequestRow {
+/** A change request as stored, with its pact's owner, their name and timezone, and its deciding reviewer's name. */
+interface ChangeRequestRow extends ReviewStateRow {
   id: string;
   pact_id: string;
   ends_pact: 0 | 1;
@@ -5850,10 +5798,7 @@ interface ChangeRequestRow {
   after_terms: string | null;
   note: string | null;
   requested_at: string;
-  decision: ReviewOutcome | null;
   decided_by_account_id: AccountId | null;
-  decided_at: string | null;
-  reject_reason: string | null;
   withdrawn_at: string | null;
   owner_account_id: AccountId;
   owner_name: string;
@@ -5876,7 +5821,7 @@ type ItemToDecide =
   | { kind: "change-request"; row: ChangeRequestToDecide };
 
 /** SQL: the columns `reviewStateOf` reads from `table`, joined to its deciding reviewer as `reviewer`. */
-function reviewStateColumns(table: "evidence" | "payment"): string {
+function reviewStateColumns(table: "evidence" | "excuse" | "payment"): string {
   return `${table}.decision, ${table}.decided_at, ${table}.reject_reason, reviewer.name AS reviewer_name`;
 }
 
@@ -6152,7 +6097,6 @@ interface OutboxRow {
   id: number;
   recipient_account_id: string;
   kind: string;
-  channel: string;
   payload: string;
   sent_to: string;
 }

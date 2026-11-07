@@ -105,7 +105,7 @@ export function PactPage({
           <History pact={state.pact} />
           <Terms pact={state.pact} onSaved={load} onInvite={onInvite} />
           <EndPact pact={state.pact} onSent={load} />
-          {state.pact.endedAt !== null && (
+          {state.pact.stage === "ended" && (
             <p className="small muted">
               Ended {formatDay(state.pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on
               the ledger.

@@ -51,7 +51,6 @@ describe("creating a pact", () => {
         reviewers: [{ id: reviewer.id, name: "reviewer" }],
         reminders: [],
         stage: "active",
-        endedAt: null,
         firstOccurrence: { date: "2026-01-05", dueAt: s.at("Tue 00:00") },
         editWindowClosesAt: s.at("Mon 09:10"),
         newTerms: null,

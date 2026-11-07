@@ -751,7 +751,6 @@ describe("pacts", () => {
         reviewers: [{ id: friendId, name: "friend" }],
         reminders: [],
         stage: "active",
-        endedAt: null,
         firstOccurrence,
         editWindowClosesAt,
         newTerms: null,
@@ -1086,7 +1085,7 @@ describe("pacts", () => {
       },
     });
     const sent = await s.api(API_PATHS.changePact(pactId), { cookie, method: "POST", body: changed });
-    expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" }, changeRequestId: null });
+    expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" } });
     expect((await s.api<PactResponse>(API_PATHS.pact(pactId), { cookie })).body).toMatchObject({
       ok: true,
       pact: { reminders: ["19:30"] },
@@ -1573,8 +1572,8 @@ describe("change requests", () => {
       },
     } satisfies ChangePreviewResponse);
     const sent = await s.api<ChangePactResponse>(API_PATHS.changePact(pactId), { cookie, method: "POST", body: lower });
-    if (!sent.body.ok) throw new Error(sent.body.reason);
-    const id = sent.body.changeRequestId!;
+    if (!sent.body.ok || sent.body.outcome.kind !== "needs-approval") throw new Error(JSON.stringify(sent.body));
+    const id = sent.body.outcome.changeRequestId;
     const page = await s.api<ChangeRequestResponse>(API_PATHS.changeRequest(id), { cookie });
     expect(page.body).toMatchObject({ ok: true, changeRequest: { note: "Tight month", state: { kind: "waiting" } } });
     expect((await s.api(API_PATHS.changeRequest(id), { cookie: friend.cookie })).body).toEqual({

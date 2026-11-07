@@ -28,7 +28,6 @@ const vapid = (() => {
 const notification: Notification = {
   recipient: "reviewer-id",
   kind: "review-item",
-  channel: "push",
   payload: { title: "Sam submitted evidence", body: "Gym · Mon Jan 5", url: "/review", itemId: "secret-detail" },
 };
 

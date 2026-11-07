@@ -494,19 +494,19 @@ describe("changing a One-time pact", () => {
     const forms = await createPact("Forms", oneTime(THURSDAY, true));
     await s.advanceTo("Tue 10:00");
     const filed = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
-    if (!filed.ok || filed.changeRequestId === null) throw new Error("not sent");
+    if (!filed.ok || filed.outcome.kind !== "needs-approval") throw new Error("not sent");
     expect(reviewer.reviewQueue()).toEqual([
       expect.objectContaining({ kind: "change-request", appliesFrom: SATURDAY, todayKeepsCents: null }),
     ]);
 
-    await reviewer.decide(filed.changeRequestId, { kind: "approve" });
+    await reviewer.decide(filed.outcome.changeRequestId, { kind: "approve" });
     expect(s.notifier.sentTo(owner).find((n) => n.kind === "change-request-decided")?.payload.body).toBe(
       "Taxes · New terms start Sat Jan 10",
     );
     const evidenceId = await submit(owner, forms);
     const moved = await owner.changePact(forms, changed(owner, forms, { schedule: oneTime(SATURDAY, true) }));
-    if (!moved.ok || moved.changeRequestId === null) throw new Error("not sent");
-    await reviewer.decide(moved.changeRequestId, { kind: "approve" });
+    if (!moved.ok || moved.outcome.kind !== "needs-approval") throw new Error("not sent");
+    await reviewer.decide(moved.outcome.changeRequestId, { kind: "approve" });
     expect(owner.today().waiting).toEqual([
       expect.objectContaining({ kind: "evidence", id: evidenceId, occurrenceDate: SATURDAY }),
     ]);
@@ -555,14 +555,16 @@ describe("changing a One-time pact", () => {
     const dentist = await createPact("Dentist", oneTime(FRIDAY));
     await pastEditWindow(s);
     const sent = await owner.changePact(dentist, changed(owner, dentist, { schedule: oneTime(THURSDAY) }));
-    if (!sent.ok || sent.changeRequestId === null) throw new Error("not sent");
+    if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("not sent");
 
     s.setClockTo("Thu 23:30");
-    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({
+    expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "approve" })).toEqual({
       ok: false,
       reason: "deadline-too-soon",
     });
-    expect(await reviewer.decide(sent.changeRequestId, { kind: "reject", reason: "Too late" })).toEqual({ ok: true });
+    expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "reject", reason: "Too late" })).toEqual({
+      ok: true,
+    });
     expect(pactOf(owner, dentist).schedule).toEqual(oneTime(FRIDAY));
   });
 
@@ -572,11 +574,11 @@ describe("changing a One-time pact", () => {
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
     await pastEditWindow(s);
     const sent = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
-    if (!sent.ok || sent.changeRequestId === null) throw new Error("not sent");
+    if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("not sent");
     await s.advanceTo("Fri 00:00");
 
     expect(reviewer.reviewQueue()).toEqual([]);
-    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({
+    expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "approve" })).toEqual({
       ok: false,
       reason: "item-not-found",
     });
@@ -592,10 +594,10 @@ describe("changing a One-time pact", () => {
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
     await pastEditWindow(s);
     const sent = await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(SATURDAY, true) }));
-    if (!sent.ok || sent.changeRequestId === null) throw new Error("not sent");
+    if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("not sent");
     s.setClockTo("Fri 00:00");
 
-    expect(await reviewer.decide(sent.changeRequestId, { kind: "approve" })).toEqual({
+    expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "approve" })).toEqual({
       ok: false,
       reason: "item-not-found",
     });

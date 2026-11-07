@@ -20,7 +20,13 @@ import type {
   Schedule,
   Weekday,
 } from "../core/index.ts";
-import { MAX_EVIDENCE_PHOTOS, MAX_EXCUSE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
+import {
+  MAX_EVIDENCE_PHOTOS,
+  MAX_EXCUSE_PHOTOS,
+  NOTIFICATION_SETTINGS,
+  WEEKDAYS,
+  type NewPact,
+} from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
@@ -896,14 +902,13 @@ function parseReminders(value: Record<string, unknown>): { reminders?: string[] 
   return isStringArray(value.reminders) ? { reminders: value.reminders } : false;
 }
 
-function parseNewPact(value: unknown): CreatePactRequest | null {
-  if (!isRecord(value)) return null;
-  const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
+/** The terms a new pact and a change share; null if any is malformed. */
+function parsePactTerms(value: Record<string, unknown>): Omit<NewPact, "evidenceKind"> | null {
+  const { name, description, penaltyCents, recipientId, reviewerIds } = value;
   const schedule = parseSchedule(value.schedule);
   const times = parseOptionalStrings(value, [...PACT_TIMES, "ankiDeckId"]);
   const reminders = parseReminders(value);
   if (
-    !isEvidenceKind(evidenceKind) ||
     !times ||
     !reminders ||
     typeof name !== "string" ||
@@ -916,40 +921,23 @@ function parseNewPact(value: unknown): CreatePactRequest | null {
   ) {
     return null;
   }
-  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times, ...reminders };
+  return { name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times, ...reminders };
+}
+
+function parseNewPact(value: unknown): CreatePactRequest | null {
+  if (!isRecord(value)) return null;
+  const { evidenceKind } = value;
+  if (!isEvidenceKind(evidenceKind)) return null;
+  const terms = parsePactTerms(value);
+  return terms && { evidenceKind, ...terms };
 }
 
 function parsePactChange(value: unknown): ChangePactRequest | null {
   if (!isRecord(value)) return null;
-  const { name, description, penaltyCents, recipientId, reviewerIds, note } = value;
-  const schedule = parseSchedule(value.schedule);
-  const times = parseOptionalStrings(value, [...PACT_TIMES, "ankiDeckId"]);
-  const reminders = parseReminders(value);
-  if (
-    !times ||
-    !reminders ||
-    (note !== undefined && typeof note !== "string") ||
-    typeof name !== "string" ||
-    typeof description !== "string" ||
-    !schedule ||
-    typeof penaltyCents !== "number" ||
-    !Number.isSafeInteger(penaltyCents) ||
-    typeof recipientId !== "string" ||
-    !isStringArray(reviewerIds)
-  ) {
-    return null;
-  }
-  return {
-    name,
-    description,
-    schedule,
-    penaltyCents,
-    recipientId,
-    reviewerIds,
-    ...times,
-    ...reminders,
-    ...(note !== undefined && { note }),
-  };
+  const { note } = value;
+  if (note !== undefined && typeof note !== "string") return null;
+  const terms = parsePactTerms(value);
+  return terms && { ...terms, ...(note !== undefined && { note }) };
 }
 
 function parseDecision(value: unknown): DecideRequest | null {

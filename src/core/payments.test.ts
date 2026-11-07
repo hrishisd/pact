@@ -169,7 +169,6 @@ describe("a recorded payment", () => {
 
     const reviewItem = {
       kind: "review-item",
-      channel: "push",
       payload: {
         itemKind: "payment",
         itemId: paymentId,
@@ -315,8 +314,8 @@ describe("deciding a payment", () => {
       recipientId: redCross.recipient.id,
       reviewerIds: [reviewer.id],
     });
-    if (!changed.ok || changed.changeRequestId === null) throw new Error(JSON.stringify(changed));
-    await reviewer.decide(changed.changeRequestId, { kind: "approve" });
+    if (!changed.ok || changed.outcome.kind !== "needs-approval") throw new Error(JSON.stringify(changed));
+    await reviewer.decide(changed.outcome.changeRequestId, { kind: "approve" });
 
     // Unpaid, the $5 to Sam is billed Wed+1 and overdue Wed+2.
     await s.advanceTo("Wed+2 18:00");
@@ -406,7 +405,7 @@ describe("deciding a payment", () => {
     await reviewer.decide(paymentId, { kind: "approve" });
     await reviewer.decide(second, { kind: "reject", reason: "That's not Sam's account" });
 
-    const decided = { recipient: owner.id, kind: "payment-decided", channel: "push" };
+    const decided = { recipient: owner.id, kind: "payment-decided" };
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "payment-decided")).toEqual([
       {
         ...decided,

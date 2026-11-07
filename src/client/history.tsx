@@ -68,7 +68,7 @@ function occurrenceLine(record: Occurrence, reviewerNames: string[] = []): strin
         : `${money(status.penaltyCents)} to ${recipientName ?? "your recipient"}.`;
       if (decidedBy?.kind === "evidence-rejected")
         return `${decidedBy.reviewerName} rejected the photo: “${sentence(decidedBy.reason)}” ${cost}`;
-      if (anki) return `${ankiMissText(anki)}. ${cost}`;
+      if (anki !== undefined) return `${ankiMissText(anki)}. ${cost}`;
       return `${bed ?? "No photo."} ${cost}`;
     }
     case "excused":
