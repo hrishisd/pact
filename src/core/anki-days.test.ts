@@ -796,6 +796,24 @@ describe("AnkiWeb refusing Pact's login", () => {
     expect(status(owner, pactId, TUE)).toBe("satisfied");
   });
 
+  test("reconnecting starts a fresh check at the next tick, however recent the refused one", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    s.ankiSource.disconnect(owner.id);
+    await s.advanceTo("Tue 08:00");
+    const calls = s.ankiSource.countCalls.length;
+
+    s.ankiSource.reconnect(owner.id);
+    s.setClockTo("Tue 08:03");
+    await owner.connectAnki();
+    deckShows({}, TUE, "Tue 08:03");
+    await s.advanceTo("Tue 08:04");
+
+    expect(s.ankiSource.countCalls).toHaveLength(calls + 1);
+    expect(status(owner, pactId, TUE)).toBe("satisfied");
+  });
+
   test("a failed check doesn't count as refused", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithAnki(s);

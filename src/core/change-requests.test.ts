@@ -163,10 +163,16 @@ describe("a stricter change applies at once, from the first occurrence not open 
       newTerms: null,
     });
     expect(s.notifier.sentTo(third)).toEqual([
-      expect.objectContaining({
+      {
+        recipient: third.id,
         kind: "picked-as-reviewer",
-        payload: expect.objectContaining({ pactId: gym, title: "owner added you as a reviewer" }),
-      }),
+        payload: {
+          pactId: gym,
+          title: "owner added you as a reviewer",
+          body: "Morning gym · Mon, Wed, Fri · $5 per miss",
+          url: "/review",
+        },
+      },
     ]);
   });
 });
@@ -483,6 +489,13 @@ describe("one change request at a time", () => {
       reviewers: [{ name: "reviewer" }, { name: "third" }],
     });
     expect(s.notifier.sentTo(third).map((n) => n.kind)).toEqual(["picked-as-reviewer", "review-item"]);
+    // The penalty in force until the change is approved.
+    expect(s.notifier.sentTo(third)[0]?.payload).toEqual({
+      pactId: gym,
+      title: "owner added you as a reviewer",
+      body: "Gym · Every day · $5 per miss",
+      url: "/review",
+    });
     expect(third.reviewQueue()).toEqual([
       expect.objectContaining({
         kind: "change-request",

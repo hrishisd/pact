@@ -108,7 +108,7 @@ interface NotificationText {
 }
 
 /** What a reviewer decided, on a "...-decided" notification; a rejection has its reason. */
-type DecisionDetails = { decision: "approved" | "rejected"; reason?: string };
+type DecisionDetails = { decision: "approved" } | { decision: "rejected"; reason: string };
 
 /**
  * By kind, what a notification is about, stored beside its text. Never

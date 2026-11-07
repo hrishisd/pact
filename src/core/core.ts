@@ -2382,8 +2382,7 @@ class Core implements PactCore {
         itemKind: "evidence",
         itemId: evidence.id,
         pactId: evidence.pact_id,
-        decision: outcome,
-        ...(reason !== null && { reason }),
+        ...decisionDetails(decided),
         title: `${this.#accountName(reviewerId)} ${outcome} your evidence`,
         body: `${this.#pactName(evidence.pact_id)} · ${reason === null ? formatDate(evidence.day) : `“${reason}”`}`,
         // A rejection shows as an alert on Today, where the owner can respond to it.
@@ -2755,8 +2754,7 @@ class Core implements PactCore {
         itemKind: "excuse",
         itemId: excuse.id,
         pactId: excuse.pact_id,
-        decision: outcome,
-        ...(reason !== null && { reason }),
+        ...decisionDetails(decided),
         title: `${this.#accountName(reviewerId)} ${outcome} your excuse`,
         body: `${this.#pactName(excuse.pact_id)} · ${reason === null ? dates : `“${reason}”`}`,
         // A rejection shows as an alert on Today, where the owner can respond to it.
@@ -3531,7 +3529,7 @@ class Core implements PactCore {
    * removes. Rejected, nothing changes.
    */
   #decideChangeRequest(row: StoredChangeRequest, decided: Decided, reviewerId: AccountId): void {
-    const { outcome, reason } = decided;
+    const { outcome } = decided;
     const now = this.#clock.now();
     this.#recordDecision("change_request", row.id, decided, reviewerId, now);
     const { request } = row;
@@ -3563,8 +3561,7 @@ class Core implements PactCore {
         itemKind: "change-request",
         itemId: row.id,
         pactId: pact.id,
-        decision: outcome,
-        ...(reason !== null && { reason }),
+        ...decisionDetails(decided),
         title,
         body,
         url: APP_PATHS.pact(pact.id),
@@ -4019,8 +4016,7 @@ class Core implements PactCore {
         itemKind: "payment",
         itemId: payment.id,
         recipientId: payment.recipient_id,
-        decision: outcome,
-        ...(reason !== null && { reason }),
+        ...decisionDetails(decided),
         title: `${this.#accountName(reviewerId)} ${outcome} your payment`,
         body: reason === null ? paid : `${paid} · “${reason}”`,
         url: APP_PATHS.ledger(payment.recipient_id),
@@ -5998,6 +5994,11 @@ function reminderKindOf(
       // The schema keeps the rollover hour set on Anki pacts, and only on them.
       return { ankiRollover: pact.anki_rollover_hour! };
   }
+}
+
+/** A decision as its notification's details carry it: a rejection with its reason. */
+function decisionDetails(decided: Decided): { decision: "approved" } | { decision: "rejected"; reason: string } {
+  return decided.outcome === "approved" ? { decision: "approved" } : { decision: "rejected", reason: decided.reason };
 }
 
 /** Whether `accountId` checked a service within `intervalMs` before `now`, as `checks` records. */
