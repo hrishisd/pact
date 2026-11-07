@@ -42,8 +42,8 @@ function termsOf(owner: AccountHandle, pactId: string): PactChange {
   return {
     name: pact.name,
     description: pact.description,
-    ...(pact.inBedBy !== null && { inBedBy: pact.inBedBy }),
-    ...(pact.dueBy !== null && { dueBy: pact.dueBy }),
+    ...(pact.evidenceKind === "oura" && { inBedBy: pact.inBedBy }),
+    ...(pact.evidenceKind !== "oura" && pact.dueBy !== null && { dueBy: pact.dueBy }),
     ...(pact.startDate !== null && { startDate: pact.startDate }),
     ...(pact.endDate !== null && { endDate: pact.endDate }),
     schedule: pact.schedule,
@@ -371,7 +371,7 @@ describe("changing them after the edit window", () => {
         appliesFrom: FRIDAY,
       }),
     ]);
-    expect(pactOf(owner, gym).dueBy).toBe("09:00");
+    expect(pactOf(owner, gym)).toMatchObject({ dueBy: "09:00" });
     await reviewer.decide(changeRequestIdOf(result), { kind: "approve" });
     expect(pactOf(owner, gym)).toMatchObject({ dueBy: "10:00", newTerms: { startsOn: FRIDAY, todayKeepsCents: null } });
 

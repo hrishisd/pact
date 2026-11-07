@@ -56,7 +56,7 @@ function changed(owner: AccountHandle, pactId: string, change: Partial<PactChang
   return {
     name: pact.name,
     description: pact.description,
-    ...(pact.dueBy !== null && { dueBy: pact.dueBy }),
+    ...(pact.evidenceKind !== "oura" && pact.dueBy !== null && { dueBy: pact.dueBy }),
     reminders: pact.reminders,
     schedule: pact.schedule,
     penaltyCents: pact.penaltyCents,

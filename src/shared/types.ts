@@ -239,28 +239,10 @@ export type PactStage = "active" | "ended";
  * (once its last occurrence closed), or for One-time when its occurrence was
  * judged.
  */
-export type PactTerms = PactTermsCommon & ({ stage: "active" } | { stage: "ended"; endedAt: Date });
+export type PactTerms = CurrentTerms & PactPageTerms & ({ stage: "active" } | { stage: "ended"; endedAt: Date });
 
-interface PactTermsCommon {
+interface PactPageTerms {
   id: string;
-  name: string;
-  description: string;
-  evidenceKind: EvidenceKind;
-  /** Oura Ring only: the in-bed-by time, "HH:MM". Null for Camera. */
-  inBedBy: string | null;
-  /** Camera and Anki: the due-by time, "HH:MM", or null for midnight. */
-  dueBy: string | null;
-  /** Anki only, else null: the pact's deck and the Anki day it's judged on. */
-  anki: AnkiTerms | null;
-  /** "YYYY-MM-DD", or null: see `NewPact.startDate`. */
-  startDate: string | null;
-  /** "YYYY-MM-DD", or null: see `NewPact.endDate`. */
-  endDate: string | null;
-  schedule: Schedule;
-  penaltyCents: number;
-  recipient: Recipient;
-  /** Sorted by name. */
-  reviewers: { id: AccountId; name: string }[];
   /**
    * When the owner is reminded, each "HH:MM" in their timezone, in the order
    * they go off. On a Camera pact: that time on each scheduled day, before
@@ -288,6 +270,50 @@ interface PactTermsCommon {
   /** An Active Oura Ring or Anki pact whose owner's Oura or AnkiWeb can't be read: the same alert as on Today. Else null. */
   connectionProblem: ConnectionProblem | null;
 }
+
+/**
+ * A pact's terms as they stand, as its page and a change request show them.
+ * Reminders aren't terms and are the owner's own, so reviewers never see them.
+ */
+export type CurrentTerms = TermsByKind & {
+  name: string;
+  /** For Camera: what the photo will show. Empty for the others. */
+  description: string;
+  /** "YYYY-MM-DD", or null: see `NewPact.startDate`. */
+  startDate: string | null;
+  /** "YYYY-MM-DD", or null: see `NewPact.endDate`. */
+  endDate: string | null;
+  penaltyCents: number;
+  recipient: Recipient;
+  /** Sorted by name. */
+  reviewers: { id: AccountId; name: string }[];
+};
+
+/** The terms that depend on how the pact's evidence is gathered. */
+export type TermsByKind =
+  | {
+      evidenceKind: "camera";
+      schedule: Schedule;
+      /** The due-by time, "HH:MM", or null for midnight. */
+      dueBy: string | null;
+    }
+  | {
+      evidenceKind: "oura";
+      schedule: FixedDays;
+      /** The in-bed-by time, "HH:MM". */
+      inBedBy: string;
+    }
+  | {
+      evidenceKind: "anki";
+      schedule: FixedDays;
+      /** The due-by time, "HH:MM", or null for midnight. */
+      dueBy: string | null;
+      /** The pact's deck and the Anki day it's judged on. */
+      anki: AnkiTerms;
+    };
+
+/** Oura Ring and Anki pacts have Fixed days schedules only. */
+type FixedDays = Extract<Schedule, { kind: "fixed-days" }>;
 
 /** Cards in a deck as Anki's deck list counts them, the deck's daily limits applied and its subdecks included. */
 export interface AnkiCounts {
@@ -725,17 +751,12 @@ export interface Today {
 /** Something that needs the owner, shown first. */
 export type TodayAlert =
   /**
-   * The owner has an Active bedtime pact but Pact can't read their Oura: a
-   * night with no data by 18:00 the next day counts as Missed. First of all
-   * alerts; it goes once the owner reconnects.
+   * The owner has an Active pact judged from `service` but Pact can't read
+   * it. On Oura, a night with no data by 18:00 the next day counts as Missed;
+   * on AnkiWeb, a day whose deck isn't finished by its due time. First of all
+   * alerts, Oura before AnkiWeb; it goes once the owner reconnects.
    */
-  | { kind: "oura-connection"; status: ConnectionProblem }
-  /**
-   * The same for AnkiWeb, while the owner has an Active Anki pact: a day
-   * whose deck isn't finished by its due time counts as Missed. It goes once
-   * the owner reconnects.
-   */
-  | { kind: "anki-connection"; status: ConnectionProblem }
+  | { kind: "connection"; service: ConnectionService; status: ConnectionProblem }
   /**
    * A reviewer asked about one of the owner's items still waiting for a
    * decision, and the owner hasn't replied yet. One per item, with its latest
@@ -1370,27 +1391,6 @@ export type ChangePactResult = { ok: true; outcome: ChangePactOutcome } | { ok: 
 export type RequestEndResult =
   | { ok: true; changeRequestId: string }
   | { ok: false; reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" };
-
-/**
- * A pact's terms as they stand, as a change request shows those it leaves
- * alone. Reminders aren't terms and are the owner's own, so reviewers never
- * see them.
- */
-export type CurrentTerms = Pick<
-  PactTerms,
-  | "name"
-  | "description"
-  | "evidenceKind"
-  | "inBedBy"
-  | "dueBy"
-  | "startDate"
-  | "endDate"
-  | "schedule"
-  | "penaltyCents"
-  | "recipient"
-  | "reviewers"
-  | "anki"
->;
 
 /** A change request, as its reviewers and its owner see it. */
 export interface ChangeRequestView {

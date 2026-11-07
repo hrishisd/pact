@@ -285,11 +285,7 @@ describe("Today across evidence kinds", () => {
     await reviewer.decide(submitted.evidenceId, { kind: "reject", reason: "Blurry" });
     await s.advanceTo("Wed+2 18:00");
 
-    expect(owner.today().alerts.map((alert) => alert.kind)).toEqual([
-      "oura-connection",
-      "anki-connection",
-      "bill-overdue",
-      "evidence-rejected",
-    ]);
+    const kinds = owner.today().alerts.map((alert) => (alert.kind === "connection" ? alert.service : alert.kind));
+    expect(kinds).toEqual(["oura", "anki", "bill-overdue", "evidence-rejected"]);
   });
 });

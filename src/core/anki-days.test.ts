@@ -141,9 +141,9 @@ describe("creating an Anki pact", () => {
       evidenceKind: "anki",
       description: "",
       dueBy: "01:00",
-      inBedBy: null,
       anki: { deckId: SPANISH, deckName: "Spanish", deckMissing: false, rolloverHour: 4 },
     });
+    expect(result.pact).not.toHaveProperty("inBedBy");
     expect(owner.profile().connections).toEqual([expect.objectContaining({ service: "anki", activePacts: 1 })]);
   });
 
@@ -552,7 +552,7 @@ describe("Today", () => {
     expect(toDo(owner)).toEqual([expect.objectContaining({ pactId, deckName: "Languages::Spanish" })]);
     const result = owner.pact(pactId);
     if (!result.ok) throw new Error(result.reason);
-    expect(result.pact.anki).toMatchObject({ deckId: SPANISH, deckName: "Languages::Spanish" });
+    expect(result.pact).toMatchObject({ anki: { deckId: SPANISH, deckName: "Languages::Spanish" } });
   });
 
   test("an Anki day is still open past midnight when it's due later", async () => {
@@ -628,8 +628,7 @@ describe("the edit window", () => {
       reason: "invalid-due-by",
     });
     expect(await owner.editPact(pactId, ankiPact(sam.id, reviewer, { dueBy: "03:30" }))).toEqual({ ok: true });
-    const result = owner.pact(pactId);
-    expect(result.ok && result.pact.dueBy).toBe("03:30");
+    expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { dueBy: "03:30" } });
   });
 });
 
@@ -721,7 +720,7 @@ describe("AnkiWeb refusing Pact's login", () => {
 
     expect(s.ankiSource.countCalls).toHaveLength(calls);
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
-    expect(owner.today().alerts).toEqual([{ kind: "anki-connection", status: "needs-reconnecting" }]);
+    expect(owner.today().alerts).toEqual([{ kind: "connection", service: "anki", status: "needs-reconnecting" }]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "needs-reconnecting" } });
     expect(connectionProblems(s, owner)).toEqual([
       {
@@ -833,7 +832,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     expect(owner.profile().connections).toEqual([expect.objectContaining({ service: "anki", activePacts: 2 })]);
     await owner.disconnectAnki();
 
-    expect(owner.today().alerts).toEqual([{ kind: "anki-connection", status: "not-connected" }]);
+    expect(owner.today().alerts).toEqual([{ kind: "connection", service: "anki", status: "not-connected" }]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "not-connected" } });
     await s.advanceTo("Tue 12:00");
     await s.advanceTo("Wed 00:00");
@@ -905,7 +904,7 @@ describe("changing an Anki pact's deck", () => {
     const deckId = () => {
       const result = setUp.owner.pact(pactId);
       if (!result.ok) throw new Error(result.reason);
-      return result.pact.anki?.deckId;
+      return result.pact.evidenceKind === "anki" ? result.pact.anki.deckId : undefined;
     };
     return { ...setUp, pactId, change, deckId };
   }

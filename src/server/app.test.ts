@@ -755,9 +755,7 @@ describe("pacts", () => {
         name: "Gym",
         description: "Me at the gym",
         evidenceKind: "camera",
-        inBedBy: null,
         dueBy: null,
-        anki: null,
         startDate: null,
         endDate: null,
         schedule: pact.schedule,
@@ -2766,7 +2764,7 @@ describe("connecting Oura", () => {
     expect(response.body).toMatchObject({ connections: [], ouraAvailable: true });
     expect(s.ouraForgets).toEqual([accountId]);
     const today = await s.api<TodayResponse>(API_PATHS.today, { cookie });
-    expect(today.body.alerts).toEqual([{ kind: "oura-connection", status: "not-connected" }]);
+    expect(today.body.alerts).toEqual([{ kind: "connection", service: "oura", status: "not-connected" }]);
   });
 
   test("checking and disconnecting need a session", async () => {

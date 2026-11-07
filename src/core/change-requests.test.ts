@@ -28,7 +28,7 @@ function termsOf(owner: AccountHandle, pactId: string): PactChange {
   return {
     name: pact.name,
     description: pact.description,
-    ...(pact.inBedBy !== null && { inBedBy: pact.inBedBy }),
+    ...(pact.evidenceKind === "oura" && { inBedBy: pact.inBedBy }),
     schedule: pact.schedule,
     penaltyCents: pact.penaltyCents,
     recipientId: pact.recipient.id,

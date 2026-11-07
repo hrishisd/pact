@@ -142,6 +142,7 @@ import {
   type PactSummary,
   type PactResult,
   type PactTerms,
+  type TermsByKind,
   type Recipient,
   type NewPayment,
   type Profile,
@@ -3021,20 +3022,30 @@ class Core implements PactCore {
     const [recipient] = this.#selectRecipients(`id = ?`, pact.recipient_id);
     if (!recipient) throw new Error(`pact ${pact.id} has no recipient ${pact.recipient_id}`);
     return {
+      ...this.#termsByKind(pact),
       name: pact.name,
       description: pact.description,
-      evidenceKind: pact.evidence_kind,
-      inBedBy: pact.in_bed_by,
-      dueBy: pact.due_by,
       startDate: pact.start_date,
       endDate: pact.end_date,
-      schedule: scheduleOf(pact.schedule),
       penaltyCents: pact.penalty_cents,
       recipient,
       reviewers: this.#friendsSortedByName(this.#reviewersOf(pact.id)),
-      anki: this.#ankiTerms(pact),
       reminders: remindersOf(pact.reminders),
     };
+  }
+
+  /** The terms that depend on the pact's evidence kind. */
+  #termsByKind(pact: PactRow): TermsByKind {
+    const schedule = scheduleOf(pact.schedule);
+    if (pact.evidence_kind === "camera") return { evidenceKind: "camera", schedule, dueBy: pact.due_by };
+    if (schedule.kind !== "fixed-days") throw new Error(`${pact.evidence_kind} pact ${pact.id} isn't on Fixed days`);
+    if (pact.evidence_kind === "oura") {
+      if (pact.in_bed_by === null) throw new Error(`Oura Ring pact ${pact.id} has no in-bed-by time`);
+      return { evidenceKind: "oura", schedule, inBedBy: pact.in_bed_by };
+    }
+    const anki = this.#ankiTerms(pact);
+    if (!anki) throw new Error(`Anki pact ${pact.id} has no deck`);
+    return { evidenceKind: "anki", schedule, dueBy: pact.due_by, anki };
   }
 
   /** The accounts `ids` as friends, sorted by name. */
@@ -4171,11 +4182,12 @@ class Core implements PactCore {
     // A connection matters only while an Active pact is judged from it.
     const problemWith = (service: ConnectionService) =>
       this.#activePactsUsing(ownerId, service) > 0 ? this.#connectionProblem(ownerId, service) : null;
-    const ouraProblem = problemWith("oura");
-    const ankiProblem = problemWith("anki");
+    const connectionAlerts = (["oura", "anki"] as const).flatMap((service): TodayAlert[] => {
+      const status = problemWith(service);
+      return status ? [{ kind: "connection", service, status }] : [];
+    });
     return [
-      ...(ouraProblem ? [{ kind: "oura-connection" as const, status: ouraProblem }] : []),
-      ...(ankiProblem ? [{ kind: "anki-connection" as const, status: ankiProblem }] : []),
+      ...connectionAlerts,
       ...billAlerts,
       ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert),
     ];

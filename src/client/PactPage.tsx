@@ -15,7 +15,7 @@ import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
 import { listNames, openOccurrenceText } from "./change-terms.tsx";
-import { PROBLEMS, ReviewersStep } from "./CreatePact.tsx";
+import { dueTimesForm, PROBLEMS, ReviewersStep } from "./CreatePact.tsx";
 import { clockText, formatDate, formatDay, minutesLeft, money, remindersText, scheduleText } from "./format.ts";
 import { CameraIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
@@ -88,7 +88,7 @@ export function PactPage({
             ) : (
               <OuraConnectionAlert status={state.pact.connectionProblem} />
             ))}
-          {state.pact.stage === "active" && state.pact.anki?.deckMissing && (
+          {state.pact.stage === "active" && state.pact.evidenceKind === "anki" && state.pact.anki.deckMissing && (
             <AnkiDeckMissing deckName={state.pact.anki.deckName} />
           )}
           <EditWindowBar pact={state.pact} onEdit={onEdit} onDeleted={onDeleted} />
@@ -176,7 +176,9 @@ function StageLine({ pact }: { pact: Pact }) {
     <div className="row2">
       <span className={`chip ${chip.className}`}>{chip.label}</span>
       <span className="muted">
-        {pact.inBedBy === null ? pact.description : `In bed by ${clockText(pact.inBedBy)}, judged from your ring`}
+        {pact.evidenceKind === "oura"
+          ? `In bed by ${clockText(pact.inBedBy)}, judged from your ring`
+          : pact.description}
       </span>
     </div>
   );
@@ -411,7 +413,7 @@ function Terms({ pact, onSaved, onInvite }: { pact: Pact; onSaved: () => void; o
       <h3>Terms</h3>
       <TermsList
         terms={pact}
-        deckName={pact.anki ? pact.anki.deckName : undefined}
+        deckName={pact.evidenceKind === "anki" ? pact.anki.deckName : undefined}
         name={pact.name}
         onRename={changeable ? () => setChanging("name") : undefined}
         onAddReviewer={changeable ? () => setChanging("reviewers") : undefined}
@@ -432,8 +434,8 @@ function changedAtOnce(
   return {
     name: pact.name,
     description: pact.description,
-    ...(pact.inBedBy !== null && { inBedBy: pact.inBedBy }),
-    ...(pact.dueBy !== null && { dueBy: pact.dueBy }),
+    ...(pact.evidenceKind === "oura" && { inBedBy: pact.inBedBy }),
+    ...(pact.evidenceKind !== "oura" && pact.dueBy !== null && { dueBy: pact.dueBy }),
     ...(pact.startDate !== null && { startDate: pact.startDate }),
     ...(pact.endDate !== null && { endDate: pact.endDate }),
     schedule: pact.schedule,
@@ -476,7 +478,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
         <input
           className="inp"
           value={name}
-          placeholder={pact.inBedBy === null ? "e.g. Gym" : "e.g. In bed by midnight"}
+          placeholder={pact.evidenceKind === "oura" ? "e.g. In bed by midnight" : "e.g. Gym"}
           onChange={(e) => setName(e.target.value)}
         />
         <small>Shown on Today. A new name applies at once, with no approval.</small>
@@ -589,9 +591,7 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
     weekly: pact.schedule.kind === "weekly-count",
     oneTime: pact.schedule.kind === "one-time",
     deadline: pact.schedule.kind === "one-time" ? pact.schedule.deadline : "",
-    inBedBy: pact.inBedBy ?? "",
-    dueByOn: pact.dueBy !== null,
-    dueBy: pact.dueBy ?? "",
+    ...dueTimesForm(pact),
     reminders,
   };
 
@@ -633,16 +633,12 @@ export function TermsList({
 }: {
   terms: Pick<
     Pact,
-    | "evidenceKind"
-    | "inBedBy"
-    | "dueBy"
-    | "startDate"
-    | "endDate"
-    | "schedule"
-    | "penaltyCents"
-    | "recipient"
-    | "reminders"
+    "evidenceKind" | "startDate" | "endDate" | "schedule" | "penaltyCents" | "recipient" | "reminders"
   > & {
+    /** Oura Ring only. */
+    inBedBy?: string;
+    /** Camera and Anki: null for midnight. */
+    dueBy?: string | null;
     reviewers: { name: string }[];
   };
   /** Anki only: the deck's name, or null once it's gone from the deck list. */
@@ -656,7 +652,7 @@ export function TermsList({
   /** Offers Change on the reminders, when they can change on their own. */
   onChangeReminders?: () => void;
 }) {
-  const { recipient, reviewers } = terms;
+  const { recipient, reviewers, inBedBy, dueBy = null } = terms;
   return (
     <dl className="kv">
       {name !== undefined && (
@@ -676,18 +672,18 @@ export function TermsList({
           <dd>{deckName ?? "Gone from your deck list"}</dd>
         </>
       )}
-      {terms.inBedBy !== null && (
+      {inBedBy !== undefined && (
         <>
           <dt>In bed by</dt>
-          <dd>{clockText(terms.inBedBy)}</dd>
+          <dd>{clockText(inBedBy)}</dd>
         </>
       )}
       <dt>Schedule</dt>
       <dd>{scheduleText(terms.schedule)}</dd>
-      {terms.dueBy !== null && (
+      {dueBy !== null && (
         <>
           <dt>Due by</dt>
-          <dd>{clockText(terms.dueBy)}</dd>
+          <dd>{clockText(dueBy)}</dd>
         </>
       )}
       {terms.startDate !== null && (

@@ -79,15 +79,15 @@ export function currentValue(term: Exclude<Term, "reminders">, current: Current)
     case "name":
       return current.name;
     case "deck":
-      return deckText(current.anki?.deckName ?? null);
+      return deckText(current.evidenceKind === "anki" ? current.anki.deckName : null);
     case "description":
       return current.description;
     case "in-bed-by":
-      return current.inBedBy === null ? "—" : clockText(current.inBedBy);
+      return current.evidenceKind === "oura" ? clockText(current.inBedBy) : "—";
     case "schedule":
       return scheduleText(current.schedule);
     case "due-by":
-      return dueByText(current.dueBy);
+      return dueByText(current.evidenceKind === "oura" ? null : current.dueBy);
     case "start-date":
       return dateText(current.startDate, "No start date");
     case "end-date":

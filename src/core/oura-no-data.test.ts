@@ -270,7 +270,7 @@ describe("a disconnected connection", () => {
 
     expect(s.ouraSource.calls).toHaveLength(calls);
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "needs-reconnecting" })]);
-    expect(owner.today().alerts).toEqual([{ kind: "oura-connection", status: "needs-reconnecting" }]);
+    expect(owner.today().alerts).toEqual([{ kind: "connection", service: "oura", status: "needs-reconnecting" }]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "needs-reconnecting" } });
     expect(connectionProblems(s, owner)).toEqual([
       {
@@ -361,7 +361,7 @@ describe("disconnecting Oura", () => {
     await owner.disconnectOura();
 
     expect(owner.profile().connections).toEqual([]);
-    expect(owner.today().alerts).toEqual([{ kind: "oura-connection", status: "not-connected" }]);
+    expect(owner.today().alerts).toEqual([{ kind: "connection", service: "oura", status: "not-connected" }]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: "not-connected" } });
     const calls = s.ouraSource.calls.length;
     await s.advanceTo("Wed 18:00");

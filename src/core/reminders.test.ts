@@ -40,8 +40,8 @@ function changed(owner: AccountHandle, pactId: string, change: Partial<PactChang
   return {
     name: pact.name,
     description: pact.description,
-    ...(pact.inBedBy !== null && { inBedBy: pact.inBedBy }),
-    ...(pact.dueBy !== null && { dueBy: pact.dueBy }),
+    ...(pact.evidenceKind === "oura" && { inBedBy: pact.inBedBy }),
+    ...(pact.evidenceKind !== "oura" && pact.dueBy !== null && { dueBy: pact.dueBy }),
     schedule: pact.schedule,
     penaltyCents: pact.penaltyCents,
     recipientId: pact.recipient.id,

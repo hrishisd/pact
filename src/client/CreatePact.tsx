@@ -14,6 +14,7 @@ import {
   MAX_WEEKLY_TARGET,
   WEEKDAYS,
   type AnkiDeck,
+  type CurrentTerms,
   type EditPactRefusal,
   type EvidenceKind,
   type FirstOccurrence,
@@ -22,6 +23,7 @@ import {
   type Recipient,
   type Refusal,
   type Schedule,
+  type TermsByKind,
   type Weekday,
 } from "../shared/types.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
@@ -129,29 +131,13 @@ const EMPTY_FORM: Form = {
   reminders: [],
 };
 
-export function formOf(
-  pact: Pick<
-    Pact,
-    | "evidenceKind"
-    | "inBedBy"
-    | "dueBy"
-    | "startDate"
-    | "endDate"
-    | "name"
-    | "description"
-    | "schedule"
-    | "penaltyCents"
-    | "recipient"
-    | "reviewers"
-    | "reminders"
-  > &
-    Partial<Pick<Pact, "anki">>,
-): Form {
+export function formOf(pact: Json<CurrentTerms> & Pick<Pact, "reminders">): Form {
+  const anki = pact.evidenceKind === "anki" ? pact.anki : null;
   return {
     kind: pact.evidenceKind,
-    inBedBy: pact.inBedBy ?? "",
-    ankiDeckId: pact.anki?.deckId ?? null,
-    ankiDeckName: pact.anki?.deckName ?? "",
+    ...dueTimesForm(pact),
+    ankiDeckId: anki?.deckId ?? null,
+    ankiDeckName: anki?.deckName ?? "",
     named: true,
     name: pact.name,
     description: pact.description,
@@ -161,8 +147,6 @@ export function formOf(
     oneTime: pact.schedule.kind === "one-time",
     deadline: pact.schedule.kind === "one-time" ? pact.schedule.deadline : "",
     submitAnytime: pact.schedule.kind === "one-time" && pact.schedule.submitAnytime,
-    dueByOn: pact.dueBy !== null,
-    dueBy: pact.dueBy ?? "",
     startDate: pact.startDate ?? "",
     endDate: pact.endDate ?? "",
     penalty: centsInputText(pact.penaltyCents),
@@ -170,6 +154,12 @@ export function formOf(
     reviewerIds: pact.reviewers.map((reviewer) => reviewer.id),
     reminders: pact.reminders,
   };
+}
+
+/** The form's in-bed-by and due-by fields, as a pact's terms have them. */
+export function dueTimesForm(terms: Json<TermsByKind>): Pick<Form, "inBedBy" | "dueByOn" | "dueBy"> {
+  if (terms.evidenceKind === "oura") return { inBedBy: terms.inBedBy, dueByOn: false, dueBy: "" };
+  return { inBedBy: "", dueByOn: terms.dueBy !== null, dueBy: terms.dueBy ?? "" };
 }
 
 /**
@@ -1330,7 +1320,7 @@ function CheckStep({
             deckName={form.kind === "anki" ? form.ankiDeckName : undefined}
             terms={{
               evidenceKind: form.kind,
-              inBedBy: inBedBy ?? null,
+              inBedBy,
               dueBy: dueBy ?? null,
               startDate: startDate ?? null,
               endDate: endDate ?? null,

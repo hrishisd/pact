@@ -17,6 +17,7 @@ import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptExcuseRejectionResult,
   type AcceptMissRefusal,
+  type ConnectionService,
   type LedgerSummary,
   type Refusal,
   type SubmitEvidenceRefusal,
@@ -91,17 +92,18 @@ export function Today({
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
   // Back from reconnecting Oura: say so if it didn't work.
   const [ouraError] = useState(() => ouraResultText(takeOuraResult()));
-  const connectionProblem = today?.alerts.some((alert) => alert.kind === "oura-connection") ?? false;
+  const brokenConnection = (service: ConnectionService) =>
+    today?.alerts.some((alert) => alert.kind === "connection" && alert.service === service) ?? false;
+  const ouraConnectionProblem = brokenConnection("oura");
   // Checking can't help while the connection is broken.
   const checking = useCheckNow(
-    !connectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
+    !ouraConnectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
     api.checkOura,
     reload,
     CHECK_OURA_EVERY_MS,
   );
-  const ankiProblem = today?.alerts.some((alert) => alert.kind === "anki-connection") ?? false;
   const checkingAnki = useCheckNow(
-    !ankiProblem &&
+    !brokenConnection("anki") &&
       (today?.sections.some((section) => section.kind === "to-do" && section.cards.some((c) => c.kind === "anki")) ??
         false),
     api.checkAnki,
@@ -171,7 +173,7 @@ export function Today({
           now={now}
           checkingOura={checking}
           checkingAnki={checkingAnki}
-          connectionProblem={connectionProblem}
+          ouraConnectionProblem={ouraConnectionProblem}
           onOpenPact={onOpenPact}
           onOpenLedger={onOpenLedger}
           onFileExcuse={setExcusing}
@@ -216,10 +218,8 @@ function alertKey(alert: Json<TodayAlert>): string {
       return `overdue:${alert.recipientId}`;
     case "reviewer-question":
       return `question:${alert.item.id}`;
-    case "oura-connection":
-      return "oura";
-    case "anki-connection":
-      return "anki";
+    case "connection":
+      return alert.service;
   }
 }
 
@@ -278,7 +278,7 @@ function Section({
   now,
   checkingOura,
   checkingAnki,
-  connectionProblem,
+  ouraConnectionProblem,
   onOpenPact,
   onOpenLedger,
   onFileExcuse,
@@ -292,7 +292,7 @@ function Section({
   /** Whether a check of AnkiWeb is running now. */
   checkingAnki: boolean;
   /** Whether Pact can't read the owner's Oura: syncing won't help, reconnecting will. */
-  connectionProblem: boolean;
+  ouraConnectionProblem: boolean;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onFileExcuse: OnFileExcuse;
@@ -307,7 +307,7 @@ function Section({
           card={card}
           now={now}
           checking={checkingOura}
-          connectionProblem={connectionProblem}
+          ouraConnectionProblem={ouraConnectionProblem}
           onOpen={() => onOpenPact(card.pactId, card.name)}
           onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
         />
@@ -468,14 +468,14 @@ function NoOuraDataCard({
   card,
   now,
   checking,
-  connectionProblem,
+  ouraConnectionProblem,
   onOpen,
   onFileExcuse,
 }: {
   card: Json<TodayNoOuraDataCard>;
   now: number;
   checking: boolean;
-  connectionProblem: boolean;
+  ouraConnectionProblem: boolean;
   onOpen: () => void;
   onFileExcuse: () => void;
 }) {
@@ -493,7 +493,7 @@ function NoOuraDataCard({
       <div className="meta">
         {checking
           ? "Checking Oura…"
-          : `${night} night hasn't synced. ${connectionProblem ? "Reconnect Oura to count it." : "Open the Oura app."}`}
+          : `${night} night hasn't synced. ${ouraConnectionProblem ? "Reconnect Oura to count it." : "Open the Oura app."}`}
       </div>
       <div className="meta due">Counts as missed at 6pm · {timeLeft(Date.parse(card.closesAt) - now)}</div>
       {tonight && (
@@ -742,10 +742,12 @@ function Alert({
       return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "bill-overdue":
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
-    case "oura-connection":
-      return <OuraConnectionAlert status={alert.status} error={ouraError} />;
-    case "anki-connection":
-      return <AnkiConnectionAlert status={alert.status} onReconnected={onChanged} />;
+    case "connection":
+      return alert.service === "oura" ? (
+        <OuraConnectionAlert status={alert.status} error={ouraError} />
+      ) : (
+        <AnkiConnectionAlert status={alert.status} onReconnected={onChanged} />
+      );
   }
 }
 
