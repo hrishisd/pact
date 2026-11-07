@@ -3,9 +3,10 @@
 // to the owner's ledger for the pact's recipient.
 
 import { describe, expect, test } from "vitest";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { MON_WED_FRI, ownerWithReviewers, submit } from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle } from "./testing/scenario.ts";
 import type { Today } from "../shared/types.ts";
+import { cards, ledgerHistory } from "./testing/queries.ts";
 
 const MONDAY = "2026-01-05";
 
@@ -18,7 +19,7 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Tue 00:00");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 500, paidCents: 0 })]);
-    expect(missedOn(owner.today())).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       {
         pactId: gym,
         name: "Gym",
@@ -129,7 +130,7 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Wed 12:00");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
-    expect(missedOn(owner.today())).toEqual([]);
+    expect(cards(owner, "missed")).toEqual([]);
   });
 
   test("two pacts with the same recipient share one ledger", async () => {
@@ -153,7 +154,7 @@ describe("judging at the end of a scheduled day", () => {
         billDue: null,
       },
     ]);
-    expect(missedOn(owner.today()).map((card) => card.pactId)).toEqual([gym, run]);
+    expect(cards(owner, "missed").map((card) => card.pactId)).toEqual([gym, run]);
   });
 
   test("a restart between submission and the day ending changes nothing", async () => {
@@ -196,7 +197,7 @@ describe("judging over a week", () => {
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
     // Monday was Missed at Tue 00:00, over 48 hours ago, so only Wednesday is on Today.
-    expect(missedOn(owner.today())).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       {
         pactId: gym,
         name: "Gym",
@@ -240,7 +241,7 @@ describe("judging over a week", () => {
 
     await s.advanceTo("Thu 00:00");
 
-    expect(missedOn(owner.today()).map((card) => [card.name, card.occurrenceDate])).toEqual([
+    expect(cards(owner, "missed").map((card) => [card.name, card.occurrenceDate])).toEqual([
       ["Gym", "2026-01-07"],
       ["Swim", "2026-01-06"],
     ]);
@@ -254,10 +255,10 @@ describe("judging over a week", () => {
     await s.advanceTo("Tue 00:00");
 
     s.setClockTo("Wed 23:59");
-    expect(missedOn(owner.today())).toHaveLength(1);
+    expect(cards(owner, "missed")).toHaveLength(1);
 
     s.setClockTo("Thu 00:00");
-    expect(missedOn(owner.today())).toEqual([]);
+    expect(cards(owner, "missed")).toEqual([]);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
   });
 });
@@ -292,21 +293,7 @@ function gymMonday(status: unknown) {
   ];
 }
 
-/** The owner submits a photo for the occurrence of `pactId` open now; returns the evidence's id. */
-async function submit(owner: AccountHandle, pactId: string): Promise<string> {
-  const submitted = await owner.submitEvidence(pactId, [photo()]);
-  if (!submitted.ok) throw new Error(submitted.reason);
-  return submitted.evidenceId;
-}
-
 /** When each penalty on the owner's only ledger was added, newest first. */
 function addedAt(owner: AccountHandle): Date[] {
-  const ledger = owner.ledger(owner.ledgers()[0]!.recipientId);
-  if (!ledger.ok) throw new Error(ledger.reason);
-  return ledger.ledger.history.flatMap((entry) => (entry.kind === "penalty" ? [entry.addedAt] : []));
-}
-
-/** The cards in Today's Missed section. */
-function missedOn(today: Today) {
-  return today.sections.find((section) => section.kind === "missed")?.cards ?? [];
+  return ledgerHistory(owner).flatMap((entry) => (entry.kind === "penalty" ? [entry.addedAt] : []));
 }

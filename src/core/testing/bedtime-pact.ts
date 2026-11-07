@@ -4,6 +4,7 @@
 import { WEEKDAYS, type NewPact, type Weekday } from "../../shared/types.ts";
 import type { OuraSleepPeriod } from "../ports.ts";
 import type { AccountHandle, Scenario } from "./scenario.ts";
+import { ok } from "./queries.ts";
 
 /**
  * An owner in New York (the operator "owner", or `signedIn`) with Oura connected, a friend "reviewer" and a
@@ -14,12 +15,10 @@ export async function ownerWithOura(s: Scenario, signedIn?: AccountHandle) {
   const owner = signedIn ?? (await s.signIn("owner"));
   await owner.setTimezone("America/New_York");
   const reviewer = await s.befriend(owner, `${owner.name}-reviewer`);
-  const added = await owner.addRecipient({ name: "Sam" });
-  if (!added.ok) throw new Error(added.reason);
+  const added = ok(await owner.addRecipient({ name: "Sam" }));
   await owner.connectOura();
   const createPact = async (inBedBy = "00:00", days: Weekday[] = [...WEEKDAYS]) => {
-    const created = await owner.createPact(bedtimePact(added.recipient.id, reviewer, inBedBy, days));
-    if (!created.ok) throw new Error(created.reason);
+    const created = ok(await owner.createPact(bedtimePact(added.recipient.id, reviewer, inBedBy, days)));
     return created.pactId;
   };
   return { owner, reviewer, sam: added.recipient, createPact };

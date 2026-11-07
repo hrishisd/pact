@@ -3,40 +3,18 @@
 // yesterday did.
 
 import { describe, expect, test } from "vitest";
-import type {
-  EvidenceRejection,
-  HeatMapDay,
-  OccurrenceDetail,
-  OccurrenceRecord,
-  PactChange,
-  Weekday,
-} from "../shared/types.ts";
+import type { EvidenceRejection, OccurrenceDetail, OccurrenceRecord, Weekday } from "../shared/types.ts";
 import { ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { MON_WED_FRI, ownerWithReviewers, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
+import { changed, heatMapDays, ok } from "./testing/queries.ts";
 
 const EVERY_DAY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-function historyOf(owner: AccountHandle, pactId: string): HeatMapDay[] {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  const { history } = result.pact;
-  if (history.kind !== "fixed-days") throw new Error(`a ${history.kind} heat map`);
-  return history.days;
-}
-
-/** Submits a photo for today's occurrence as `owner`; returns the evidence's id. */
-async function submit(owner: AccountHandle, pactId: string): Promise<string> {
-  const submitted = await owner.submitEvidence(pactId, [photo()]);
-  if (!submitted.ok) throw new Error(submitted.reason);
-  return submitted.evidenceId;
-}
-
 /** Files an excuse for `date` on `pactId` as `owner`, and has `reviewer` approve it. */
 async function excused(owner: AccountHandle, reviewer: AccountHandle, pactId: string, date: string, reason: string) {
-  const filed = await owner.fileExcuse(pactId, { from: date, to: date, reason }, []);
-  if (!filed.ok) throw new Error(filed.reason);
+  const filed = ok(await owner.fileExcuse(pactId, { from: date, to: date, reason }, []));
   await reviewer.decide(filed.excuseId, { kind: "approve" });
 }
 
@@ -96,7 +74,7 @@ describe("the heat map", () => {
     await submit(owner, gym);
     await s.advanceTo("Thu+1 10:00");
 
-    expect(historyOf(owner, gym)).toEqual([
+    expect(heatMapDays(owner, gym)).toEqual([
       { date: "2026-01-05", occurrence: satisfied("reviewer") },
       { date: "2026-01-06", occurrence: null },
       {
@@ -128,7 +106,7 @@ describe("the heat map", () => {
     s.setClockTo("Wed 10:00");
     const gym = await createPact("Gym", ["fri"]);
 
-    expect(historyOf(owner, gym)).toEqual([
+    expect(heatMapDays(owner, gym)).toEqual([
       { date: "2026-01-09", occurrence: notJudged(s, "Fri", "Sat") },
       { date: "2026-01-10", occurrence: null },
       { date: "2026-01-11", occurrence: null },
@@ -142,7 +120,7 @@ describe("the heat map", () => {
     s.setClockTo("Sun 23:30");
     const gym = await createPact("Gym", ["mon"]);
 
-    expect(historyOf(owner, gym).map((day) => day.date)).toEqual([
+    expect(heatMapDays(owner, gym).map((day) => day.date)).toEqual([
       "2026-01-12",
       "2026-01-13",
       "2026-01-14",
@@ -159,13 +137,13 @@ describe("the heat map", () => {
     const gym = await createPact("Gym", ["mon"]);
     // A stricter change applies from the first day not open yet.
     s.setClockTo("Wed 10:00");
-    const result = await owner.changePact(gym, {
-      ...termsOf(owner, gym),
-      schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
-    });
+    const result = await owner.changePact(
+      gym,
+      changed(owner, gym, { schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] } }),
+    );
     expect(result).toMatchObject({ ok: true, outcome: { kind: "stricter" } });
 
-    expect(historyOf(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
+    expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
       ["2026-01-05", "not-judged"],
       ["2026-01-06", null],
       // Today was open before the change: it keeps Monday only.
@@ -182,12 +160,11 @@ describe("the heat map", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", EVERY_DAY);
     await s.advanceTo("Tue 10:00");
-    const end = await owner.requestEnd(gym);
-    if (!end.ok) throw new Error(end.reason);
+    const end = ok(await owner.requestEnd(gym));
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     await s.advanceTo("Wed+1 10:00");
 
-    expect(historyOf(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
+    expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
       ["2026-01-05", "missed"],
       ["2026-01-06", null],
       ["2026-01-07", null],
@@ -206,7 +183,7 @@ describe("the heat map", () => {
     // Wednesday's night: nothing from Oura by 18:00 Thursday.
     await s.advanceTo("Thu 18:00");
 
-    expect(historyOf(owner, bed).slice(0, 3)).toEqual([
+    expect(heatMapDays(owner, bed).slice(0, 3)).toEqual([
       { date: "2026-01-05", occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }) },
       { date: "2026-01-06", occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: "01:10" }) },
       { date: "2026-01-07", occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: null }) },
@@ -296,8 +273,7 @@ describe("Yesterday on Today", () => {
     expect(owner.today().yesterday).toEqual([]);
 
     await s.advanceTo("Tue 10:00");
-    const end = await owner.requestEnd(gym);
-    if (!end.ok) throw new Error(end.reason);
+    const end = ok(await owner.requestEnd(gym));
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     // Ended Tuesday: Monday's day is still yesterday's on Tuesday, but there's no Tuesday on Wednesday.
     expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual(["2026-01-05"]);
@@ -305,18 +281,3 @@ describe("Yesterday on Today", () => {
     expect(owner.today().yesterday).toEqual([]);
   });
 });
-
-/** The pact's terms as the Request change form starts out: as they stand. */
-function termsOf(owner: AccountHandle, pactId: string): PactChange {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  const { pact } = result;
-  return {
-    name: pact.name,
-    description: pact.description,
-    schedule: pact.schedule,
-    penaltyCents: pact.penaltyCents,
-    recipientId: pact.recipient.id,
-    reviewerIds: pact.reviewers.map((r) => r.id),
-  };
-}

@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import type { NewPact } from "../shared/types.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 /** A pact created at "Mon 10:00", so its window closes at "Mon 10:10". */
 async function newGym(s: Scenario) {
@@ -181,8 +182,7 @@ describe("deleting a pact in its edit window", () => {
   test("its waiting evidence goes with it", async () => {
     const s = scenario();
     const { owner, reviewer, gym } = await newGym(s);
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    ok(await owner.submitEvidence(gym, [photo()]));
 
     expect(await owner.deletePact(gym)).toEqual({ ok: true });
 
@@ -260,8 +260,7 @@ describe("evidence submitted in the edit window", () => {
     const s = scenario();
     const { owner, reviewer, gym } = await newGym(s);
     s.setClockTo("Mon 10:05");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
 
     expect(owner.today().waiting).toMatchObject([{ kind: "evidence", id: evidence.evidenceId }]);
     expect(reviewer.reviewQueue()).toEqual([]);

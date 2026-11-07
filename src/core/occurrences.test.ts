@@ -16,6 +16,7 @@ import {
   type NewOccurrenceOptions,
   type OccurrenceTerms,
 } from "./occurrences.ts";
+import { ok } from "./testing/queries.ts";
 
 const NEW_YORK = "America/New_York";
 // Chile moves its clocks at midnight, so some days have no midnight and some have it twice.
@@ -352,8 +353,7 @@ describe("a One-time occurrence", () => {
   });
 
   test("with Submit anytime it covers every day from the pact's creation to the deadline", () => {
-    const made = newOccurrenceTerms(oneTime(true), createdAt, NEW_YORK, optionsOf());
-    if (!made.ok) throw new Error(made.reason);
+    const made = ok(newOccurrenceTerms(oneTime(true), createdAt, NEW_YORK, optionsOf()));
     const { first, openAt, covering, includes } = occurrences(made.terms, NEW_YORK);
 
     expect(first.opensAt).toEqual(createdAt);

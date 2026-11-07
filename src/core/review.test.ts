@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 describe("the Review Queue", () => {
   test("shows each reviewer the evidence submitted, with the pact's description, the photos in order, and what rejecting would cost", async () => {
@@ -8,8 +9,7 @@ describe("the Review Queue", () => {
     const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 18:00");
-    const submitted = await owner.submitEvidence(gym, [photo(1), photo(2)]);
-    if (!submitted.ok) throw new Error(submitted.reason);
+    const submitted = ok(await owner.submitEvidence(gym, [photo(1), photo(2)]));
 
     const item = {
       kind: "evidence",
@@ -62,9 +62,8 @@ describe("a restart", () => {
     const gym = await createPact("Gym", MON_WED_FRI);
     const run = await createPact("Run", MON_WED_FRI);
     s.setClockTo("Mon 18:00");
-    const gymEvidence = await owner.submitEvidence(gym, [photo(1)]);
-    const runEvidence = await owner.submitEvidence(run, [photo(2)]);
-    if (!gymEvidence.ok || !runEvidence.ok) throw new Error("evidence refused");
+    const gymEvidence = ok(await owner.submitEvidence(gym, [photo(1)]));
+    const runEvidence = ok(await owner.submitEvidence(run, [photo(2)]));
     await reviewer.decide(gymEvidence.evidenceId, { kind: "reject", reason: "Blurry" });
     const queue = second.reviewQueue();
     const today = owner.today();
@@ -88,8 +87,7 @@ async function evidenceWaiting() {
   const setup = await ownerWithReviewers(s);
   const gym = await setup.createPact("Gym", MON_WED_FRI);
   s.setClockTo("Mon 18:00");
-  const submitted = await setup.owner.submitEvidence(gym, [photo()]);
-  if (!submitted.ok) throw new Error(submitted.reason);
+  const submitted = ok(await setup.owner.submitEvidence(gym, [photo()]));
   return { s, ...setup, gym, evidenceId: submitted.evidenceId };
 }
 

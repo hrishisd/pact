@@ -4,7 +4,8 @@
 
 import { describe, expect, test } from "vitest";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
-import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { changeRequestIdOf, scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { changed, ok } from "./testing/queries.ts";
 
 /** A friend of the owner's who reviews only a pact of theirs with another recipient, "Food bank". */
 async function reviewerForAnotherRecipient(
@@ -12,8 +13,7 @@ async function reviewerForAnotherRecipient(
   { owner, createPact }: Pick<Awaited<ReturnType<typeof ownerWithReviewers>>, "owner" | "createPact">,
 ) {
   const friend = await s.befriend(owner, "friend");
-  const added = await owner.addRecipient({ name: "Food bank" });
-  if (!added.ok) throw new Error(added.reason);
+  const added = ok(await owner.addRecipient({ name: "Food bank" }));
   await createPact("Read", ["sun"], { reviewers: [friend], recipientId: added.recipient.id });
   return friend;
 }
@@ -84,8 +84,7 @@ describe("a refused payment", () => {
   test("a recipient that isn't the owner's, or none", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await fifteenOwed(s);
-    const theirs = await reviewer.addRecipient({ name: "Sam" });
-    if (!theirs.ok) throw new Error(theirs.reason);
+    const theirs = ok(await reviewer.addRecipient({ name: "Sam" }));
 
     const notFound = { ok: false, reason: "recipient-not-found" };
     expect(await owner.recordPayment({ recipientId: theirs.recipient.id, amountCents: 500 }, photo())).toEqual(
@@ -301,21 +300,9 @@ describe("deciding a payment", () => {
     const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
     await s.advanceTo("Tue 12:00"); // Monday Missed: $5 to Sam
-    const redCross = await owner.addRecipient({ name: "Red Cross" });
-    if (!redCross.ok) throw new Error(redCross.reason);
-    const current = owner.pact(gym);
-    if (!current.ok) throw new Error(current.reason);
-    const { pact } = current;
-    const changed = await owner.changePact(gym, {
-      name: pact.name,
-      description: pact.description,
-      schedule: pact.schedule,
-      penaltyCents: pact.penaltyCents,
-      recipientId: redCross.recipient.id,
-      reviewerIds: [reviewer.id],
-    });
-    if (!changed.ok || changed.outcome.kind !== "needs-approval") throw new Error(JSON.stringify(changed));
-    await reviewer.decide(changed.outcome.changeRequestId, { kind: "approve" });
+    const redCross = ok(await owner.addRecipient({ name: "Red Cross" }));
+    const sent = await owner.changePact(gym, changed(owner, gym, { recipientId: redCross.recipient.id }));
+    await reviewer.decide(changeRequestIdOf(sent), { kind: "approve" });
 
     // Unpaid, the $5 to Sam is billed Wed+1 and overdue Wed+2.
     await s.advanceTo("Wed+2 18:00");
@@ -446,12 +433,11 @@ async function evidencePaymentEvidence(s: Scenario) {
   await createPact("Gym", ["mon"]);
   const run = await createPact("Run", ["mon", "tue"]);
   s.setClockTo("Mon 20:00");
-  const monday = await owner.submitEvidence(run, [photo(1)]);
+  const monday = ok(await owner.submitEvidence(run, [photo(1)]));
   await s.advanceTo("Tue 09:00");
   const payment = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 }, photo(2));
   s.setClockTo("Tue 10:00");
-  const tuesday = await owner.submitEvidence(run, [photo(3)]);
-  if (!monday.ok || !tuesday.ok) throw new Error("refused");
+  const tuesday = ok(await owner.submitEvidence(run, [photo(3)]));
   return { ...setup, monday: monday.evidenceId, payment, tuesday: tuesday.evidenceId };
 }
 
@@ -500,8 +486,7 @@ describe("a payment in the Review Queue", () => {
   test("says what's owed to that payment's recipient, not to the owner's others", async () => {
     const s = scenario();
     const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
-    const foodBank = await owner.addRecipient({ name: "Food bank" });
-    if (!foodBank.ok) throw new Error(foodBank.reason);
+    const foodBank = ok(await owner.addRecipient({ name: "Food bank" }));
     await createPact("Gym", MON_WED_FRI);
     await createPact("Read", ["mon"], { recipientId: foodBank.recipient.id });
     await s.advanceTo("Sat 00:00");

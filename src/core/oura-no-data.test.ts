@@ -7,18 +7,10 @@
 import { describe, expect, test } from "vitest";
 import { ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { ok, sectionKinds, statusOn } from "./testing/queries.ts";
 
 const TUE = "2026-01-06";
 const WED = "2026-01-07";
-
-/** The night of `date` as the pact's heat map shows it. */
-function judged(owner: AccountHandle, pactId: string, date: string) {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  const { history } = result.pact;
-  if (history.kind !== "fixed-days") throw new Error(`a ${history.kind} heat map`);
-  return history.days.find((day) => day.date === date)?.occurrence?.status.kind;
-}
 
 function connectionProblems(s: Scenario, owner: AccountHandle) {
   return s.notifier.sentTo(owner).filter((n) => n.kind === "connection-problem");
@@ -62,7 +54,7 @@ describe("the No Oura data card", () => {
     s.setClockTo("Tue 08:00");
     await createPact("00:00", ["thu"]);
     await s.advanceTo("Wed 09:00");
-    expect(owner.today().sections.map((section) => section.kind)).toEqual(["no-oura-data", "coming-up"]);
+    expect(sectionKinds(owner)).toEqual(["no-oura-data", "coming-up"]);
   });
 
   test("shows from the in-bed-by time until the night is judged; a night with no pact tonight carries no deadline", async () => {
@@ -70,7 +62,7 @@ describe("the No Oura data card", () => {
     const { owner, createPact } = await ownerWithOura(s);
     await createPact("00:00", ["tue"]);
     await s.advanceTo("Tue 23:59");
-    expect(owner.today().sections.map((section) => section.kind)).toEqual(["automatic"]);
+    expect(sectionKinds(owner)).toEqual(["automatic"]);
 
     await s.advanceTo("Wed 00:00");
     expect(owner.today().sections).toEqual([
@@ -86,7 +78,7 @@ describe("the No Oura data card", () => {
     const s = scenario();
     const { owner } = await tueNightWaiting(s);
     await s.advanceTo("Wed 18:00");
-    expect(owner.today().sections.map((section) => section.kind)).toEqual(["missed", "automatic"]);
+    expect(sectionKinds(owner)).toEqual(["missed", "automatic"]);
   });
 
   test("an excuse filed for the night from the card moves it to Waiting for approval", async () => {
@@ -94,8 +86,7 @@ describe("the No Oura data card", () => {
     const { owner, pactId } = await tueNightWaiting(s);
     await s.advanceTo("Wed 09:00");
 
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring was charging" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring was charging" }, []));
 
     const today = owner.today();
     expect(today.sections.map((section) => section.kind)).toEqual(["automatic"]);
@@ -115,8 +106,8 @@ describe("checking Oura now", () => {
     s.setClockTo("2026-01-07T09:00:20-05:00");
     await owner.checkOura();
 
-    expect(judged(owner, pactId, TUE)).toBe("satisfied");
-    expect(owner.today().sections.map((section) => section.kind)).toEqual(["automatic"]);
+    expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
+    expect(sectionKinds(owner)).toEqual(["automatic"]);
   });
 
   test("two checks 10 s apart make one Oura call; 16 s apart, two", async () => {
@@ -170,7 +161,7 @@ describe("checking Oura now", () => {
     s.setClockTo("2026-01-07T09:00:20-05:00");
     await owner.checkOura();
 
-    expect(judged(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);
   });
 });
@@ -225,8 +216,7 @@ describe("the 15:00 push", () => {
     const s = scenario();
     const { owner, pactId } = await tueNightWaiting(s);
     s.setClockTo("Wed 09:00");
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring was charging" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring was charging" }, []));
     await s.advanceTo("Wed 15:00");
     expect(connectionProblems(s, owner)).toEqual([]);
   });
@@ -283,7 +273,7 @@ describe("a disconnected connection", () => {
         },
       },
     ]);
-    expect(judged(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
 
     s.ouraSource.reconnect(owner.id);
     s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
@@ -291,7 +281,7 @@ describe("a disconnected connection", () => {
     await owner.connectOura();
     await s.advanceTo("Wed 12:01");
 
-    expect(judged(owner, pactId, TUE)).toBe("satisfied");
+    expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
     expect(owner.today().alerts).toEqual([]);
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { connectionProblem: null } });
     expect(connectionProblems(s, owner)).toHaveLength(1);
@@ -314,9 +304,9 @@ describe("a disconnected connection", () => {
     s.ouraSource.disconnect(owner.id);
     await s.advanceTo("Wed 08:00");
     await s.advanceTo("Wed 17:59");
-    expect(judged(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
     await s.advanceTo("Wed 18:00");
-    expect(judged(owner, pactId, TUE)).toBe("missed");
+    expect(statusOn(owner, pactId, TUE)).toBe("missed");
   });
 
   test("a transient Oura failure doesn't count as disconnected", async () => {
@@ -366,7 +356,7 @@ describe("disconnecting Oura", () => {
     const calls = s.ouraSource.calls.length;
     await s.advanceTo("Wed 18:00");
     expect(s.ouraSource.calls).toHaveLength(calls);
-    expect(judged(owner, pactId, TUE)).toBe("missed");
+    expect(statusOn(owner, pactId, TUE)).toBe("missed");
   });
 
   test("with no Active bedtime pact, no alert", async () => {

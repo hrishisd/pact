@@ -9,9 +9,10 @@
 import { describe, expect, test } from "vitest";
 import type { NewPact, PactChange, Schedule } from "../shared/types.ts";
 import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
+import { cards, changed, ok, owed, pactOf } from "./testing/queries.ts";
 
 // The reference week: Mon Jan 5 to Sun Jan 11, 2026; the clock starts Mon 09:00.
 const TUESDAY = "2026-01-06";
@@ -23,47 +24,11 @@ const DAY_MS = 24 * 3600_000;
 
 const oneTime = (deadline: string, submitAnytime = false): Schedule => ({ kind: "one-time", deadline, submitAnytime });
 
-function pactOf(owner: AccountHandle, pactId: string) {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  return result.pact;
-}
-
 /** The pact's one square on its heat map. */
 function occurrenceOf(owner: AccountHandle, pactId: string) {
   const { history } = pactOf(owner, pactId);
   if (history.kind !== "one-time") throw new Error(`a ${history.kind} heat map`);
   return history.day;
-}
-
-function owed(owner: AccountHandle): number {
-  return owner.ledgers()[0]?.owedCents ?? 0;
-}
-
-async function submit(owner: AccountHandle, pactId: string): Promise<string> {
-  const submitted = await owner.submitEvidence(pactId, [photo()]);
-  if (!submitted.ok) throw new Error(submitted.reason);
-  return submitted.evidenceId;
-}
-
-function sectionCards(owner: AccountHandle, kind: string) {
-  return owner.today().sections.find((section) => section.kind === kind)?.cards ?? [];
-}
-
-/** The pact's terms as they stand, with `change` made, as the Request change form sends them. */
-function changed(owner: AccountHandle, pactId: string, change: Partial<PactChange>): PactChange {
-  const pact = pactOf(owner, pactId);
-  return {
-    name: pact.name,
-    description: pact.description,
-    ...(pact.evidenceKind !== "oura" && pact.dueBy !== null && { dueBy: pact.dueBy }),
-    reminders: pact.reminders,
-    schedule: pact.schedule,
-    penaltyCents: pact.penaltyCents,
-    recipientId: pact.recipient.id,
-    reviewerIds: pact.reviewers.map((r) => r.id),
-    ...change,
-  };
 }
 
 /** Past the edit window, so changes follow the rules for an Active pact. */
@@ -213,7 +178,7 @@ describe("Submit anytime off", () => {
     // Waiting evidence holds the outcome: the pact stays Active until it's decided.
     expect(occurrenceOf(owner, early).occurrence?.status).toMatchObject({ kind: "not-judged", evidenceWaiting: true });
     expect(pactOf(owner, early).stage).toBe("active");
-    expect(sectionCards(owner, "missed")).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       expect.objectContaining({ pactId: late, occurrenceDate: THURSDAY, detail: { kind: "closed", dueBy: "09:00" } }),
     ]);
   });
@@ -272,7 +237,7 @@ describe("judging", () => {
         }),
       ]);
       // Missed in the last 48 hours, it's on Today though the pact has Ended.
-      expect(sectionCards(owner, "missed")).toEqual([expect.objectContaining({ pactId: taxes })]);
+      expect(cards(owner, "missed")).toEqual([expect.objectContaining({ pactId: taxes })]);
     },
   );
 
@@ -308,12 +273,9 @@ describe("judging", () => {
     await s.advanceTo("Fri 10:00");
 
     expect(owner.today().yesterday).toEqual([expect.objectContaining({ pactId: dentist, occurrenceDate: THURSDAY })]);
-    const filed = await owner.fileExcuse(
-      dentist,
-      { from: THURSDAY, to: THURSDAY, reason: "The dentist cancelled" },
-      [],
+    const filed = ok(
+      await owner.fileExcuse(dentist, { from: THURSDAY, to: THURSDAY, reason: "The dentist cancelled" }, []),
     );
-    if (!filed.ok) throw new Error(filed.reason);
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
     expect(occurrenceOf(owner, dentist).occurrence?.status).toEqual({
@@ -329,9 +291,8 @@ describe("judging", () => {
     const taxes = await createPact("Taxes", oneTime(THURSDAY, true));
     await s.advanceTo("Tue 10:00");
 
-    const filed = await owner.fileExcuse(taxes, { from: TUESDAY, to: TUESDAY, reason: "The forms never came" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
-    expect(sectionCards(owner, "to-do")).toEqual([]);
+    const filed = ok(await owner.fileExcuse(taxes, { from: TUESDAY, to: TUESDAY, reason: "The forms never came" }, []));
+    expect(cards(owner, "to-do")).toEqual([]);
     await reviewer.decide(filed.excuseId, { kind: "approve" });
     await s.advanceTo("Fri 00:00");
 
@@ -393,8 +354,8 @@ describe("Today", () => {
     // Named to come after Taxes, so only the sort by due time puts it first.
     const walk = await createPact("Walk", MON_WED_FRI);
 
-    expect(sectionCards(owner, "to-do").map((card) => ("pactId" in card ? card.pactId : null))).toEqual([walk, taxes]);
-    expect(sectionCards(owner, "to-do")[1]).toMatchObject({ occurrenceDate: THURSDAY, dueAt: s.at("Fri 00:00") });
+    expect(cards(owner, "to-do").map((card) => ("pactId" in card ? card.pactId : null))).toEqual([walk, taxes]);
+    expect(cards(owner, "to-do")[1]).toMatchObject({ occurrenceDate: THURSDAY, dueAt: s.at("Fri 00:00") });
   });
 });
 
@@ -499,8 +460,7 @@ describe("changing a One-time pact", () => {
     await pastEditWindow(s);
 
     const effect = (change: Partial<PactChange>) => {
-      const preview = owner.changePreview(taxes, changed(owner, taxes, change));
-      if (!preview.ok) throw new Error(preview.reason);
+      const preview = ok(owner.changePreview(taxes, changed(owner, taxes, change)));
       return preview.preview.changes.map((c) => `${c.term}: ${c.effect}`);
     };
     expect(effect({ schedule: oneTime(TUESDAY, true) })).toEqual(["schedule: stricter"]);

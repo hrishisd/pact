@@ -7,6 +7,7 @@ import { describe, expect, test } from "vitest";
 import { ownerWithOura } from "./testing/bedtime-pact.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 /**
  * Gym on Mon/Wed/Fri at $5, every day Missed in the first week: $15 to Sam,
@@ -43,8 +44,7 @@ describe("Wednesday bills", () => {
       overdueCents: 0,
       billDue: { amountCents: 1500, dueAt: s.at("Wed+2 18:00") },
     });
-    const ledger = owner.ledger(sam.id);
-    if (!ledger.ok) throw new Error(ledger.reason);
+    const ledger = ok(owner.ledger(sam.id));
     expect(ledger.ledger.history.map((entry) => entry.kind === "penalty" && entry.bill)).toEqual([
       // Monday+1's, judged Tuesday+1, can still be excused.
       { kind: "next-bill", billedOn: "2026-01-21" },
@@ -57,8 +57,7 @@ describe("Wednesday bills", () => {
   test("before its bill, a penalty says which Wednesday's bill it goes on", async () => {
     const s = scenario();
     const { owner, sam } = await missedWeek(s);
-    const ledger = owner.ledger(sam.id);
-    if (!ledger.ok) throw new Error(ledger.reason);
+    const ledger = ok(owner.ledger(sam.id));
     expect(ledger.ledger.history.map((entry) => entry.kind === "penalty" && entry.bill)).toEqual([
       { kind: "next-bill", billedOn: "2026-01-14" },
       { kind: "next-bill", billedOn: "2026-01-14" },
@@ -86,11 +85,9 @@ describe("Wednesday bills", () => {
     const { owner, gym, sam } = await missedWeek(s);
     // Friday's miss, judged Sat 00:00, can be excused until Mon 00:00.
     s.setClockTo("Sun 10:00");
-    const filed = await owner.fileExcuse(gym, { from: "2026-01-09", to: "2026-01-09", reason: "Sick" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    ok(await owner.fileExcuse(gym, { from: "2026-01-09", to: "2026-01-09", reason: "Sick" }, []));
     const fridayBill = () => {
-      const ledger = owner.ledger(sam.id);
-      if (!ledger.ok) throw new Error(ledger.reason);
+      const ledger = ok(owner.ledger(sam.id));
       const friday = ledger.ledger.history.find((e) => e.kind === "penalty" && e.occurrenceDate === "2026-01-09");
       return friday?.kind === "penalty" ? friday.bill : undefined;
     };
@@ -107,23 +104,20 @@ describe("Wednesday bills", () => {
     const { owner, reviewer, gym, sam } = await missedWeek(s);
     // Friday's miss (judged Sat 00:00) gets an excuse Sunday, so it's held at Wednesday+1's bill.
     s.setClockTo("Sun 10:00");
-    const filed = await owner.fileExcuse(gym, { from: "2026-01-09", to: "2026-01-09", reason: "Sick" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(gym, { from: "2026-01-09", to: "2026-01-09", reason: "Sick" }, []));
     await s.advanceTo("Wed+1 18:00");
     expect(owner.ledgers()[0]!.billDue).toEqual({ amountCents: 1000, dueAt: s.at("Wed+2 18:00") });
 
     s.setClockTo("Thu+1 09:00");
     await reviewer.decide(filed.excuseId, { kind: "reject", reason: "You were at the gym's party" });
-    const ledger = owner.ledger(sam.id);
-    if (!ledger.ok) throw new Error(ledger.reason);
+    const ledger = ok(owner.ledger(sam.id));
     const friday = ledger.ledger.history.find((e) => e.kind === "penalty" && e.occurrenceDate === "2026-01-09");
     expect(friday).toMatchObject({ bill: { kind: "next-bill", billedOn: "2026-01-21" } });
 
     // Friday's $5 joins the second week's $15.
     await s.advanceTo("Wed+2 18:00");
     expect(bills(s, owner.id).map((n) => n.payload.title)).toEqual(["New bill: $10 to Sam", "New bill: $20 to Sam"]);
-    const after = owner.ledger(sam.id);
-    if (!after.ok) throw new Error(after.reason);
+    const after = ok(owner.ledger(sam.id));
     const billedOn = (date: string) => {
       const entry = after.ledger.history.find((e) => e.kind === "penalty" && e.occurrenceDate === date);
       return entry?.kind === "penalty" && entry.bill?.kind === "on-bill" ? entry.bill.billedOn : null;
@@ -141,8 +135,7 @@ describe("Wednesday bills", () => {
     const gym = await createPact("Gym", MON_WED_FRI, { dates: { endDate: "2026-01-09" } });
     await s.advanceTo("Tue 10:00");
     // Monday's miss, the oldest penalty, is held by an excuse while Wednesday's and Friday's are billed.
-    const filed = await owner.fileExcuse(gym, { from: "2026-01-05", to: "2026-01-05", reason: "Sick" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(gym, { from: "2026-01-05", to: "2026-01-05", reason: "Sick" }, []));
     await s.advanceTo("Wed+1 18:00");
     expect(owner.ledgers()[0]!.billDue).toEqual({ amountCents: 1000, dueAt: s.at("Wed+2 18:00") });
     const paid = await recordPayment(owner, { recipientId: sam.id, amountCents: 1000 });
@@ -169,8 +162,7 @@ describe("Wednesday bills", () => {
     s.setClockTo("Sun 12:00");
     await createPact("00:00", ["sun", "tue"]);
     const penaltyBills = () => {
-      const ledger = owner.ledger(sam.id);
-      if (!ledger.ok) throw new Error(ledger.reason);
+      const ledger = ok(owner.ledger(sam.id));
       return ledger.ledger.history.map((entry) => entry.kind === "penalty" && [entry.occurrenceDate, entry.bill]);
     };
 
@@ -468,9 +460,8 @@ describe("Overdue", () => {
     const { owner, createPact } = await ownerWithReviewers(s);
     const bob = await s.befriend(owner, "Bob");
     const alice = await s.befriend(owner, "alice");
-    const toBob = await owner.addRecipient({ name: "Bob" });
-    const toAlice = await owner.addRecipient({ name: "alice" });
-    if (!toBob.ok || !toAlice.ok) throw new Error("recipient refused");
+    const toBob = ok(await owner.addRecipient({ name: "Bob" }));
+    const toAlice = ok(await owner.addRecipient({ name: "alice" }));
     await createPact("Gym", MON_WED_FRI, { reviewers: [bob, alice], recipientId: toBob.recipient.id });
     await createPact("Run", MON_WED_FRI, { reviewers: [bob, alice], recipientId: toAlice.recipient.id });
     await s.advanceTo("Wed+2 18:00");

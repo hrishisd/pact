@@ -4,6 +4,7 @@ import { ankiPact, ownerWithAnki } from "./testing/anki-pact.ts";
 import { bedtimePact } from "./testing/bedtime-pact.ts";
 import { MON_WED_FRI, photo } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 const DAILY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -12,8 +13,7 @@ async function ownerWithReviewer(s: Scenario, timezone = "America/New_York") {
   const owner = await s.signIn("owner");
   await owner.setTimezone(timezone);
   const reviewer = await s.befriend(owner, "reviewer");
-  const added = await owner.addRecipient({ name: "Sam" });
-  if (!added.ok) throw new Error(added.reason);
+  const added = ok(await owner.addRecipient({ name: "Sam" }));
   const createPact = async (name: string, days: Weekday[], penaltyCents = 500) => {
     const pact: NewPact = {
       evidenceKind: "camera",
@@ -24,8 +24,7 @@ async function ownerWithReviewer(s: Scenario, timezone = "America/New_York") {
       recipientId: added.recipient.id,
       reviewerIds: [reviewer.id],
     };
-    const created = await owner.createPact(pact);
-    if (!created.ok) throw new Error(created.reason);
+    const created = ok(await owner.createPact(pact));
     return created.pactId;
   };
   return { owner, createPact };
@@ -207,8 +206,7 @@ describe("Today across evidence kinds", () => {
     const { owner, reviewer, sam } = await ownerWithAnki(s);
     await owner.connectOura();
     const create = async (pact: NewPact) => {
-      const created = await owner.createPact(pact);
-      if (!created.ok) throw new Error(created.reason);
+      const created = ok(await owner.createPact(pact));
       return created.pactId;
     };
     const gym = await create({
@@ -262,8 +260,7 @@ describe("Today across evidence kinds", () => {
     const { owner, reviewer, sam } = await ownerWithAnki(s);
     await owner.connectOura();
     const create = async (pact: NewPact) => {
-      const created = await owner.createPact(pact);
-      if (!created.ok) throw new Error(created.reason);
+      const created = ok(await owner.createPact(pact));
       return created.pactId;
     };
     const gym = await create({
@@ -280,8 +277,7 @@ describe("Today across evidence kinds", () => {
     await owner.disconnectOura();
     await owner.disconnectAnki();
     await s.advanceTo("Wed+2 12:00");
-    const submitted = await owner.submitEvidence(gym, [photo()]);
-    if (!submitted.ok) throw new Error(submitted.reason);
+    const submitted = ok(await owner.submitEvidence(gym, [photo()]));
     await reviewer.decide(submitted.evidenceId, { kind: "reject", reason: "Blurry" });
     await s.advanceTo("Wed+2 18:00");
 

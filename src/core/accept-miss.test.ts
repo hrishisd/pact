@@ -5,6 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 const MONDAY = "2026-01-05";
 
@@ -50,8 +51,7 @@ describe("accepting a miss is refused", () => {
     // Monday, still open; then Monday with evidence waiting.
     s.setClockTo("Mon 12:00");
     expect(await owner.acceptMiss(gym, MONDAY)).toEqual(nothing);
-    const submitted = await owner.submitEvidence(gym, [photo()]);
-    if (!submitted.ok) throw new Error(submitted.reason);
+    const submitted = ok(await owner.submitEvidence(gym, [photo()]));
     expect(await owner.acceptMiss(gym, MONDAY)).toEqual(nothing);
     // Monday, Satisfied.
     await reviewer.decide(submitted.evidenceId, { kind: "approve" });

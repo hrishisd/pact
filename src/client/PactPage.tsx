@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
+import { termsOf } from "../shared/terms.ts";
 import type { ChangePactRefusal, Friend, PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
@@ -431,20 +432,7 @@ function changedAtOnce(
   pact: Pact,
   change: Partial<Pick<PactChange, "name" | "reviewerIds" | "reminders">>,
 ): PactChange {
-  return {
-    name: pact.name,
-    description: pact.description,
-    ...(pact.evidenceKind === "oura" && { inBedBy: pact.inBedBy }),
-    ...(pact.evidenceKind !== "oura" && pact.dueBy !== null && { dueBy: pact.dueBy }),
-    ...(pact.startDate !== null && { startDate: pact.startDate }),
-    ...(pact.endDate !== null && { endDate: pact.endDate }),
-    schedule: pact.schedule,
-    penaltyCents: pact.penaltyCents,
-    recipientId: pact.recipient.id,
-    reviewerIds: pact.reviewers.map((r) => r.id),
-    reminders: pact.reminders,
-    ...change,
-  };
+  return { ...termsOf(pact), ...change };
 }
 
 /** The create form's words for the refusals a change shares with it; a sheet has its own words for the rest. */

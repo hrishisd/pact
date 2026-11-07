@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 describe("submitting evidence", () => {
   test("on Monday, for a Mon/Wed/Fri pact, moves the pact from To do to Waiting for approval", async () => {
@@ -37,8 +38,7 @@ describe("submitting evidence", () => {
     const gym = await createPact("Gym", MON_WED_FRI);
 
     s.setClockTo("Mon 18:00");
-    const submitted = await owner.submitEvidence(gym, [photo()]);
-    if (!submitted.ok) throw new Error(submitted.reason);
+    const submitted = ok(await owner.submitEvidence(gym, [photo()]));
 
     const reviewItem = {
       kind: "review-item",

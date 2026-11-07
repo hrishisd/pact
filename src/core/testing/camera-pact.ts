@@ -4,6 +4,7 @@
 import type { NewPact, NewPayment, Schedule, Weekday } from "../../shared/types.ts";
 import type { Photo } from "../ports.ts";
 import type { AccountHandle, Scenario } from "./scenario.ts";
+import { ok } from "./queries.ts";
 
 export const MON_WED_FRI: Weekday[] = ["mon", "wed", "fri"];
 
@@ -25,8 +26,7 @@ export async function ownerWithReviewers(s: Scenario) {
   await owner.setTimezone("America/New_York");
   const reviewer = await s.befriend(owner, "reviewer");
   const second = await s.befriend(owner, "second");
-  const added = await owner.addRecipient({ name: "Sam" });
-  if (!added.ok) throw new Error(added.reason);
+  const added = ok(await owner.addRecipient({ name: "Sam" }));
   const createPact = async (
     name: string,
     days: Weekday[] | Schedule,
@@ -55,8 +55,7 @@ export async function ownerWithReviewers(s: Scenario) {
       ...dates,
       ...(reminders && { reminders }),
     };
-    const created = await by.createPact(pact);
-    if (!created.ok) throw new Error(created.reason);
+    const created = ok(await by.createPact(pact));
     return created.pactId;
   };
   return { owner, reviewer, second, sam: added.recipient, createPact };
@@ -72,7 +71,10 @@ export async function fifteenOwed(s: Scenario) {
 
 /** Records `payment` as `by`, with `screenshot`; returns its id, or throws if it's refused. */
 export async function recordPayment(by: AccountHandle, payment: NewPayment, screenshot = photo()): Promise<string> {
-  const recorded = await by.recordPayment(payment, screenshot);
-  if (!recorded.ok) throw new Error(recorded.reason);
-  return recorded.paymentId;
+  return ok(await by.recordPayment(payment, screenshot)).paymentId;
+}
+
+/** Submits a photo as `owner` for the occurrence of `pactId` open now; returns the evidence's id, or throws if it's refused. */
+export async function submit(owner: AccountHandle, pactId: string): Promise<string> {
+  return ok(await owner.submitEvidence(pactId, [photo()])).evidenceId;
 }

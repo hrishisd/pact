@@ -7,6 +7,7 @@ import { describe, expect, test } from "vitest";
 import type { Today } from "../shared/types.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 const MONDAY = "2026-01-05";
 
@@ -16,8 +17,7 @@ async function evidenceOnMonday() {
   const setup = await ownerWithReviewers(s);
   const gym = await setup.createPact("Gym", MON_WED_FRI);
   s.setClockTo("Mon 13:00");
-  const submitted = await setup.owner.submitEvidence(gym, [photo()]);
-  if (!submitted.ok) throw new Error(submitted.reason);
+  const submitted = ok(await setup.owner.submitEvidence(gym, [photo()]));
   return { s, ...setup, gym, evidenceId: submitted.evidenceId };
 }
 
@@ -163,8 +163,7 @@ describe("the rejected-evidence alert", () => {
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     s.setClockTo("Wed 09:00");
-    const wednesday = await owner.submitEvidence(gym, [photo(2)]);
-    if (!wednesday.ok) throw new Error(wednesday.reason);
+    const wednesday = ok(await owner.submitEvidence(gym, [photo(2)]));
     s.setClockTo("Wed 10:00");
     await second.decide(wednesday.evidenceId, { kind: "reject", reason: "That's last week's photo" });
 

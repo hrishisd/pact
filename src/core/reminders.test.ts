@@ -7,10 +7,11 @@
 // operator alert.
 
 import { describe, expect, test } from "vitest";
-import { WEEKDAYS, type NewPact, type PactChange } from "../shared/types.ts";
+import { WEEKDAYS, type NewPact } from "../shared/types.ts";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { changed, ok, pactOf } from "./testing/queries.ts";
 
 const MONDAY = "2026-01-05";
 const WEDNESDAY = "2026-01-07";
@@ -28,34 +29,10 @@ function operatorAlerts(s: Scenario, operator: AccountHandle) {
   return s.notifier.sentTo(operator).filter((n) => n.kind === "operator-alert");
 }
 
-function pactOf(owner: AccountHandle, pactId: string) {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  return result.pact;
-}
-
-/** The pact's terms as they stand, with `change` made, as the Request change form sends them. */
-function changed(owner: AccountHandle, pactId: string, change: Partial<PactChange>): PactChange {
-  const pact = pactOf(owner, pactId);
-  return {
-    name: pact.name,
-    description: pact.description,
-    ...(pact.evidenceKind === "oura" && { inBedBy: pact.inBedBy }),
-    ...(pact.evidenceKind !== "oura" && pact.dueBy !== null && { dueBy: pact.dueBy }),
-    schedule: pact.schedule,
-    penaltyCents: pact.penaltyCents,
-    recipientId: pact.recipient.id,
-    reviewerIds: pact.reviewers.map((r) => r.id),
-    reminders: pact.reminders,
-    ...change,
-  };
-}
-
 async function bedtimeWithReminders(s: Scenario, inBedBy: string, reminderTimes: string[], days = [...WEEKDAYS]) {
   const setup = await ownerWithOura(s);
   const pact: NewPact = { ...bedtimePact(setup.sam.id, setup.reviewer, inBedBy, days), reminders: reminderTimes };
-  const created = await setup.owner.createPact(pact);
-  if (!created.ok) throw new Error(created.reason);
+  const created = ok(await setup.owner.createPact(pact));
   return { ...setup, bed: created.pactId };
 }
 
@@ -222,8 +199,7 @@ describe("reminders on a Fixed days Camera pact", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI, { reminders: ["18:00"] });
     await s.advanceTo("Mon 09:30");
-    const filed = await owner.fileExcuse(gym, { from: WEDNESDAY, to: WEDNESDAY, reason: "Travelling" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(gym, { from: WEDNESDAY, to: WEDNESDAY, reason: "Travelling" }, []));
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
     await s.advanceTo("Mon 18:00");

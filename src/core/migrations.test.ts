@@ -16,6 +16,7 @@ import { createPactCore, type PactCore } from "./core.ts";
 import { openDatabase } from "./db.ts";
 import { migrations } from "./migrations.ts";
 import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./testing/fakes.ts";
+import { ok } from "./testing/queries.ts";
 
 let dir: string;
 let path: string;
@@ -92,8 +93,7 @@ test("migration 5: a pact made before judging existed gets no penalty for any oc
 
   // Judging carries on from there: Thursday and Friday, the days after the stamp now due, are judged.
   await advance(core, clock, new Date("2026-01-10T15:00:00Z"));
-  const ledger = owner.ledger("sam");
-  if (!ledger.ok) throw new Error(ledger.reason);
+  const ledger = ok(owner.ledger("sam"));
   expect(ledger.ledger.history.map((e) => (e.kind === "penalty" ? e.occurrenceDate : e.kind)).sort()).toEqual([
     "2026-01-08",
     "2026-01-09",
@@ -199,8 +199,7 @@ test.each([
     await advance(core, clock, clock.now());
 
     const billOf = () => {
-      const ledger = owner.ledger("sam");
-      if (!ledger.ok) throw new Error(ledger.reason);
+      const ledger = ok(owner.ledger("sam"));
       const [entry] = ledger.ledger.history;
       if (entry?.kind !== "penalty") throw new Error("no penalty");
       return entry.bill;

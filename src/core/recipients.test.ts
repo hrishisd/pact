@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 describe("recipients", () => {
   test("an owner can add a recipient by name", async () => {
@@ -53,17 +54,15 @@ describe("people are listed by name the same way on every page", () => {
     const { owner, createPact } = await ownerWithReviewers(s);
     const bob = await s.befriend(owner, "Bob");
     const alice = await s.befriend(owner, "alice");
-    const bobRecipient = await owner.addRecipient({ name: "Bob" });
-    const aliceRecipient = await owner.addRecipient({ name: "alice" });
-    if (!bobRecipient.ok || !aliceRecipient.ok) throw new Error("recipient refused");
+    const bobRecipient = ok(await owner.addRecipient({ name: "Bob" }));
+    const aliceRecipient = ok(await owner.addRecipient({ name: "alice" }));
     await createPact("Gym", MON_WED_FRI, { reviewers: [bob, alice], recipientId: bobRecipient.recipient.id });
     const run = await createPact("Run", MON_WED_FRI, {
       reviewers: [bob, alice],
       recipientId: aliceRecipient.recipient.id,
     });
     s.setClockTo("Mon 10:00"); // after the edit window
-    const filed = await owner.fileExcuse(run, { from: "2026-01-07", to: "2026-01-07", reason: "Trip" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(run, { from: "2026-01-07", to: "2026-01-07", reason: "Trip" }, []));
 
     expect(owner.friends().map((f) => f.name)).toEqual(["alice", "Bob", "reviewer", "second"]);
     expect(owner.recipients().map((r) => r.name)).toEqual(["alice", "Bob", "Sam"]);

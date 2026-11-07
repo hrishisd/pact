@@ -6,6 +6,7 @@ import type { PushDevice } from "./ports.ts";
 import { failOnCall } from "./testing/fakes.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
+import { ok, owed } from "./testing/queries.ts";
 
 // A real P-256 public key, from RFC 8291's example.
 const P256DH = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
@@ -19,8 +20,7 @@ async function submitted(s: Scenario) {
   const people = await ownerWithReviewers(s);
   const gym = await people.createPact("Gym", MON_WED_FRI);
   s.setClockTo("Mon 18:00");
-  const evidence = await people.owner.submitEvidence(gym, [photo()]);
-  if (!evidence.ok) throw new Error(evidence.reason);
+  const evidence = ok(await people.owner.submitEvidence(gym, [photo()]));
   return { ...people, gym, evidenceId: evidence.evidenceId };
 }
 
@@ -124,8 +124,7 @@ describe("notification settings", () => {
     await owner.setNotificationSetting("decision", false);
 
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Last week's" });
-    const payment = await owner.recordPayment({ recipientId: sam.id, amountCents: 500 }, photo(2));
-    if (!payment.ok) throw new Error(payment.reason);
+    const payment = ok(await owner.recordPayment({ recipientId: sam.id, amountCents: 500 }, photo(2)));
     await reviewer.decide(payment.paymentId, { kind: "approve" });
 
     expect(s.notifier.sentTo(owner)).toEqual([]);
@@ -140,7 +139,7 @@ describe("notification settings", () => {
     await s.advanceTo("Tue 00:00");
 
     expect(s.notifier.sentTo(owner)).toEqual([]);
-    expect(owner.ledgers()[0]?.owedCents).toBe(500);
+    expect(owed(owner)).toBe(500);
   });
 
   test("turned back on, it records again, and the setting is remembered until then", async () => {

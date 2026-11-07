@@ -7,30 +7,17 @@ import { describe, expect, test } from "vitest";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { failOnCall } from "./testing/fakes.ts";
 import { scenario, type AccountHandle } from "./testing/scenario.ts";
+import { cards, ok, sectionKinds, statusOn } from "./testing/queries.ts";
 
 const MON = "2026-01-05";
 const TUE = "2026-01-06";
 
 /** How the night of `date` stands, as an excuse for it would see it. */
 function night(owner: AccountHandle, pactId: string, date: string) {
-  const preview = owner.excusePreview(pactId, { from: date, to: date });
-  if (!preview.ok) throw new Error(preview.reason);
+  const preview = ok(owner.excusePreview(pactId, { from: date, to: date }));
   const skipped = preview.preview.skipped[0];
   if (skipped) return skipped.reason;
   return preview.preview.covered[0]!.status.kind;
-}
-
-/** The night of `date` as the pact's heat map shows it: judged or not, an approved excuse aside. */
-function judged(owner: AccountHandle, pactId: string, date: string) {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  const { history } = result.pact;
-  if (history.kind !== "fixed-days") throw new Error(`a ${history.kind} heat map`);
-  return history.days.find((day) => day.date === date)?.occurrence?.status.kind;
-}
-
-function missedCards(owner: AccountHandle) {
-  return owner.today().sections.find((section) => section.kind === "missed")?.cards ?? [];
 }
 
 describe("connecting Oura", () => {
@@ -62,8 +49,7 @@ describe("creating a bedtime pact", () => {
     const owner = await s.signIn("owner");
     await owner.setTimezone("America/New_York");
     const reviewer = await s.befriend(owner, "reviewer");
-    const added = await owner.addRecipient({ name: "Sam" });
-    if (!added.ok) throw new Error(added.reason);
+    const added = ok(await owner.addRecipient({ name: "Sam" }));
 
     expect(await owner.createPact(bedtimePact(added.recipient.id, reviewer))).toEqual({
       ok: false,
@@ -142,7 +128,7 @@ describe("judging a night", () => {
 
     expect(night(owner, pactId, MON)).toBe("satisfied");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
-    expect(missedCards(owner)).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       {
         pactId,
         name: "In bed by midnight",
@@ -181,7 +167,7 @@ describe("judging a night", () => {
     s.ouraSource.addSleep(owner.id, sleep("Wed 03:00"));
     await s.advanceTo("Wed 10:00");
 
-    expect(missedCards(owner)).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       expect.objectContaining({
         occurrenceDate: TUE,
         missedAt: s.at("Wed 02:00"),
@@ -209,7 +195,7 @@ describe("judging a night", () => {
     expect(night(owner, pactId, TUE)).toBe("not-judged");
 
     await s.advanceTo("Wed 18:00");
-    expect(missedCards(owner)).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       expect.objectContaining({
         occurrenceDate: TUE,
         missedAt: s.at("Wed 18:00"),
@@ -239,7 +225,7 @@ describe("judging a night", () => {
     await s.advanceTo("Wed 07:00");
 
     expect(night(owner, pactId, MON)).toBe("satisfied");
-    expect(missedCards(owner)).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       expect.objectContaining({ occurrenceDate: TUE, detail: { kind: "night", inBedAt: "00:10" } }),
     ]);
   });
@@ -250,15 +236,14 @@ describe("judging a night", () => {
     const pactId = await createPact("00:00");
     s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
     s.setClockTo("Mon 10:00");
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Red-eye flight" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Red-eye flight" }, []));
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
     await s.advanceTo("Wed 00:00");
     await s.advanceTo("Wed 17:59");
-    expect(judged(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
     await s.advanceTo("Wed 18:00");
-    expect(judged(owner, pactId, TUE)).toBe("excused");
+    expect(statusOn(owner, pactId, TUE)).toBe("excused");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([]);
   });
@@ -269,15 +254,14 @@ describe("judging a night", () => {
     const pactId = await createPact("00:00");
     s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
     s.setClockTo("Mon 10:00");
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Might be late" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Might be late" }, []));
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
     await s.advanceTo("Wed 00:00");
     s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
     await s.advanceTo("Wed 07:00");
 
-    expect(judged(owner, pactId, TUE)).toBe("satisfied");
+    expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
   });
 
   test("an excuse approved after the in-bed-by time leaves the night for Oura until 6pm", async () => {
@@ -286,16 +270,15 @@ describe("judging a night", () => {
     const pactId = await createPact("00:00");
     s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
     s.setClockTo("Tue 10:00");
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Might be late" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Might be late" }, []));
     await s.advanceTo("Wed 01:00");
     await reviewer.decide(filed.excuseId, { kind: "approve" });
-    expect(judged(owner, pactId, TUE)).toBe("not-judged");
+    expect(statusOn(owner, pactId, TUE)).toBe("not-judged");
 
     s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
     await s.advanceTo("Wed 07:00");
 
-    expect(judged(owner, pactId, TUE)).toBe("satisfied");
+    expect(statusOn(owner, pactId, TUE)).toBe("satisfied");
   });
 
   test("an approved excuse beats a late bedtime Oura reports afterwards; an on-time one is still Satisfied", async () => {
@@ -304,8 +287,7 @@ describe("judging a night", () => {
     const pactId = await createPact("00:00");
     s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
     s.setClockTo("Tue 10:00");
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: "2026-01-07", reason: "Night shifts" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    const filed = ok(await owner.fileExcuse(pactId, { from: TUE, to: "2026-01-07", reason: "Night shifts" }, []));
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
     s.ouraSource.addSleep(owner.id, sleep("Wed 02:00"), sleep("Wed 23:00"));
@@ -322,8 +304,7 @@ describe("judging a night", () => {
     const pactId = await createPact("00:00");
     s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
     s.setClockTo("Tue 10:00");
-    const filed = await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring is charging" }, []);
-    if (!filed.ok) throw new Error(filed.reason);
+    ok(await owner.fileExcuse(pactId, { from: TUE, to: TUE, reason: "Ring is charging" }, []));
 
     await s.advanceTo("Wed 18:00");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
@@ -355,7 +336,7 @@ describe("a traveller's night closes at 18:00 on Oura's clock", () => {
     // Asleep at 15:00 Wed in Honolulu (20:00 in New York), which Oura's clock puts in Tue night.
     s.ouraSource.addSleep(owner.id, sleep("2026-01-07T15:00:00-10:00"));
     await s.advanceTo("Wed 22:30");
-    expect(missedCards(owner)).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       expect.objectContaining({
         occurrenceDate: TUE,
         missedAt: s.at("Wed 22:30"),
@@ -375,7 +356,7 @@ describe("a traveller's night closes at 18:00 on Oura's clock", () => {
     await s.advanceTo("Wed 11:59");
     expect(night(owner, pactId, TUE)).toBe("not-judged");
     await s.advanceTo("Wed 12:00");
-    expect(missedCards(owner)).toEqual([
+    expect(cards(owner, "missed")).toEqual([
       expect.objectContaining({
         occurrenceDate: TUE,
         missedAt: s.at("Wed 12:00"),
@@ -548,7 +529,7 @@ describe("Today", () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithOura(s);
     await createPact("00:00");
-    expect(owner.today().sections.map((section) => section.kind)).toEqual(["automatic"]);
+    expect(sectionKinds(owner)).toEqual(["automatic"]);
     expect(owner.today().sections.find((section) => section.kind === "to-do")).toBeUndefined();
   });
 
@@ -559,7 +540,7 @@ describe("Today", () => {
     s.setClockTo("Mon 23:30");
     await createPact("00:00", ["wed"]);
     await s.advanceTo("Tue 18:00");
-    expect(owner.today().sections.map((section) => section.kind)).toEqual(["missed", "automatic", "coming-up"]);
+    expect(sectionKinds(owner)).toEqual(["missed", "automatic", "coming-up"]);
   });
 });
 

@@ -7,8 +7,9 @@
 import { describe, expect, test } from "vitest";
 import type { NewExcuse, TodayAlert } from "../shared/types.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
-import type { AccountHandle, Scenario } from "./testing/scenario.ts";
+import type { AccountHandle } from "./testing/scenario.ts";
 import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
+import { changed, ledgerHistory, ok, owed } from "./testing/queries.ts";
 
 const MONDAY = "2026-01-05";
 const TUESDAY = "2026-01-06";
@@ -26,9 +27,7 @@ function sick(from: string, to = from): NewExcuse {
 
 /** Files an excuse as `owner`; returns its id, or throws if it's refused. */
 async function fileExcuse(owner: AccountHandle, pactId: string, excuse: NewExcuse, photos = [photo()]) {
-  const filed = await owner.fileExcuse(pactId, excuse, photos);
-  if (!filed.ok) throw new Error(filed.reason);
-  return filed.excuseId;
+  return ok(await owner.fileExcuse(pactId, excuse, photos)).excuseId;
 }
 
 /** The spec's example: a Mon/Wed/Fri $5 Gym pact, and Monday Missed at Tue 00:00. */
@@ -40,17 +39,6 @@ async function gymMissedMonday() {
   return { s, ...setup, gym };
 }
 
-function owed(owner: AccountHandle): number {
-  return owner.ledgers()[0]!.owedCents;
-}
-
-function history(s: Scenario, owner: AccountHandle) {
-  const ledger = owner.ledger(owner.ledgers()[0]!.recipientId);
-  if (!ledger.ok) throw new Error(ledger.reason);
-  void s;
-  return ledger.ledger.history;
-}
-
 describe("the spec's example", () => {
   test("Monday Missed, $5 owed → excuse within 48h → held, owed $0 → approved → Excused, owed $0, no penalty in the history", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
@@ -60,7 +48,9 @@ describe("the spec's example", () => {
     const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
 
     expect(owed(owner)).toBe(0);
-    expect(history(s, owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: true, paidCents: 0 })]);
+    expect(ledgerHistory(owner)).toEqual([
+      expect.objectContaining({ occurrenceDate: MONDAY, held: true, paidCents: 0 }),
+    ]);
     expect(owner.today()).toMatchObject({
       alerts: [],
       sections: [],
@@ -81,7 +71,7 @@ describe("the spec's example", () => {
     expect(await reviewer.decide(excuseId, { kind: "approve" })).toEqual({ ok: true });
 
     expect(owed(owner)).toBe(0);
-    expect(history(s, owner)).toEqual([]);
+    expect(ledgerHistory(owner)).toEqual([]);
     expect(owner.today()).toMatchObject({ alerts: [], sections: [], waiting: [] });
     expect(owner.excuse(excuseId)).toMatchObject({
       ok: true,
@@ -101,7 +91,7 @@ describe("the spec's example", () => {
     expect(await reviewer.decide(excuseId, { kind: "reject", reason: "You were at the movies" })).toEqual({ ok: true });
 
     expect(owed(owner)).toBe(500);
-    expect(history(s, owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: false })]);
+    expect(ledgerHistory(owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: false })]);
     expect(owner.today()).toEqual({
       hasPacts: true,
       alerts: [
@@ -218,7 +208,7 @@ describe("days ahead", () => {
       excuse: { days: [FRIDAY, SATURDAY, SUNDAY].map((date) => ({ date, status: { kind: "excused" } })) },
     });
     // Mon–Thu were Missed; Fri–Sun added nothing, and their owner wasn't told they were Missed.
-    expect(history(s, owner).map((entry) => entry.kind === "penalty" && entry.occurrenceDate)).toEqual([
+    expect(ledgerHistory(owner).map((entry) => entry.kind === "penalty" && entry.occurrenceDate)).toEqual([
       THURSDAY,
       WEDNESDAY,
       TUESDAY,
@@ -244,7 +234,7 @@ describe("an excuse covering today", () => {
     });
     await s.advanceTo("Tue 08:00");
     expect(owed(owner)).toBe(0);
-    expect(history(s, owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: true })]);
+    expect(ledgerHistory(owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: true })]);
     expect(owner.excuse(excuseId)).toMatchObject({
       excuse: { days: [{ date: MONDAY, status: { kind: "missed", penaltyCents: 500, held: true } }] },
     });
@@ -255,7 +245,7 @@ describe("an excuse covering today", () => {
     await reviewer.decide(excuseId, { kind: "approve" });
 
     expect(owner.excuse(excuseId)).toMatchObject({ excuse: { days: [{ status: { kind: "excused" } }] } });
-    expect(history(s, owner)).toEqual([]);
+    expect(ledgerHistory(owner)).toEqual([]);
   });
 });
 
@@ -266,8 +256,7 @@ describe("which days an excuse covers", () => {
     const gym = await createPact("Gym", MON_WED_FRI);
     // Monday Missed (Tue 00:00); Wednesday Satisfied; Friday not judged yet.
     s.setClockTo("Wed 12:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     await reviewer.decide(evidence.evidenceId, { kind: "approve" });
     await s.advanceTo("Fri 08:00");
 
@@ -299,8 +288,7 @@ describe("which days an excuse covers", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Wed 12:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     await reviewer.decide(evidence.evidenceId, { kind: "approve" });
     await s.advanceTo("Thu 08:00");
 
@@ -387,8 +375,7 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Tue 09:00");
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
 
@@ -402,8 +389,7 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Tue 09:00");
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
 
@@ -426,8 +412,7 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Tue 09:00");
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
     await owner.acceptMiss(gym, MONDAY);
@@ -442,8 +427,7 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     await fileExcuse(owner, gym, sick(MONDAY));
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
 
@@ -540,18 +524,11 @@ describe("a rejected excuse with days not judged yet", () => {
     await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
     expect(owner.today().alerts).toEqual([expect.objectContaining({ kind: "excuse-rejected", excuseId })]);
 
-    const pact = owner.pact(gym);
-    if (!pact.ok) throw new Error(pact.reason);
-    const { name, description, penaltyCents, recipient, reviewers } = pact.pact;
-    const changed = await owner.changePact(gym, {
-      name,
-      description,
-      schedule: { kind: "fixed-days", days: ["mon", "wed"] },
-      penaltyCents,
-      recipientId: recipient.id,
-      reviewerIds: reviewers.map((r) => r.id),
-    });
-    await reviewer.decide(changeRequestIdOf(changed), { kind: "approve" });
+    const sent = await owner.changePact(
+      gym,
+      changed(owner, gym, { schedule: { kind: "fixed-days", days: ["mon", "wed"] } }),
+    );
+    await reviewer.decide(changeRequestIdOf(sent), { kind: "approve" });
 
     expect(owner.today().alerts).toEqual([]);
   });
@@ -591,7 +568,7 @@ describe("holds and payments", () => {
     // Wednesday's miss is paid already; Friday's is owed.
     await s.advanceTo("Thu 00:00");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0 })]);
-    expect(history(s, owner).filter((entry) => entry.kind === "penalty")).toEqual([
+    expect(ledgerHistory(owner).filter((entry) => entry.kind === "penalty")).toEqual([
       expect.objectContaining({ occurrenceDate: WEDNESDAY, paidCents: 500 }),
     ]);
     await s.advanceTo("Sat 00:00");
@@ -744,8 +721,7 @@ describe("the pact page", () => {
         ],
       },
     });
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Wed 11:00");
     const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
 
@@ -771,6 +747,6 @@ describe("restarts", () => {
     expect(owed(owner)).toBe(0);
     expect(owner.today().waiting).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId })]);
     await reviewer.decide(excuseId, { kind: "approve" });
-    expect(history(s, owner)).toEqual([]);
+    expect(ledgerHistory(owner)).toEqual([]);
   });
 });

@@ -5,6 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 describe("a ledger's history", () => {
   test("lists each penalty from every pact naming the recipient, newest first, under the ledger's summary", async () => {
@@ -77,8 +78,7 @@ describe("a ledger's history", () => {
     const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     const reject = async (when: string, by: typeof reviewer, reason: string) => {
-      const submitted = await owner.submitEvidence(gym, [photo()]);
-      if (!submitted.ok) throw new Error(submitted.reason);
+      const submitted = ok(await owner.submitEvidence(gym, [photo()]));
       s.setClockTo(when);
       await by.decide(submitted.evidenceId, { kind: "reject", reason });
     };
@@ -155,8 +155,7 @@ describe("whose ledger", () => {
 
 /** How much of each penalty on the owner's ledger for Sam is paid, oldest penalty first. */
 function paidOldestFirst(owner: AccountHandle, recipientId: string) {
-  const ledger = owner.ledger(recipientId);
-  if (!ledger.ok) throw new Error(ledger.reason);
+  const ledger = ok(owner.ledger(recipientId));
   return ledger.ledger.history
     .flatMap((entry) => (entry.kind === "penalty" ? [[entry.occurrenceDate, entry.paidCents]] : []))
     .reverse();
@@ -294,8 +293,7 @@ describe("payments in a ledger's history", () => {
     const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
     await createPact("Gym", ["mon"]);
     // The reviewer owes their own Sam, and pays it, with the owner approving.
-    const theirSam = await reviewer.addRecipient({ name: "Sam" });
-    if (!theirSam.ok) throw new Error(theirSam.reason);
+    const theirSam = ok(await reviewer.addRecipient({ name: "Sam" }));
     await reviewer.setTimezone("America/New_York");
     await createPact("Run", ["mon"], { by: reviewer, reviewers: [owner], recipientId: theirSam.recipient.id });
     await s.advanceTo("Tue 00:00");
