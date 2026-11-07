@@ -788,9 +788,9 @@ export type TodayAlert =
    * rejection first. It stays until the owner accepts the miss (Take the L,
    * `acceptMiss`), which changes nothing else, or files an excuse for the day.
    *
-   * On Weekly count (`week` set) the day just doesn't count: nothing is Missed
-   * or owed yet, and the owner can make it up another day before `week.dueAt`.
-   * The alert goes once the week is judged too.
+   * On Weekly count (`week`) the day just doesn't count: nothing is Missed
+   * or owed yet, and the owner can make it up another day before the week is
+   * due. The alert goes once the week is judged too.
    */
   | {
       kind: "evidence-rejected";
@@ -802,10 +802,14 @@ export type TodayAlert =
       occurrenceDate: LocalDate;
       penaltyCents: number;
       recipientName: string;
-      /** Until when an excuse for the day is accepted: 48 hours after the rejection (on Weekly count, after the week's due time). */
-      excusableUntil: Date;
-      /** Weekly count only: the week's due time, the end of its Sunday. */
-      week?: { dueAt: Date };
+      /**
+       * Until when an excuse for the day is accepted: 48 hours after the
+       * rejection. Null on Weekly count: the week isn't judged yet, so no 48
+       * hours are running.
+       */
+      excusableUntil: Date | null;
+      /** Whether it's a Weekly count day. */
+      week: boolean;
     }
   /**
    * A reviewer rejected an excuse: its held penalties are owed again, and its
@@ -1072,6 +1076,11 @@ export interface LedgerSummary {
   /** Approved payments, lifetime. */
   paidCents: number;
   /**
+   * What Record a payment starts at: the open bills (`overdueCents` and
+   * `billDue`), at most `payableCents`; with no open bill, `payableCents`.
+   */
+  suggestedPaymentCents: number;
+  /**
    * The unpaid part of bills past their due time that payments awaiting
    * approval don't cover. Above zero, the owner is Overdue to this recipient.
    */
@@ -1293,50 +1302,74 @@ export type PactChange = Omit<NewPact, "evidenceKind"> & {
 
 /**
  * What changing one term does: it relaxes the pact, so it waits for a
- * reviewer's approval; it only makes it stricter, so it applies without
- * approval to occurrences not open yet; or it doesn't change what counts (the
- * name, the reminders, an added reviewer), so it applies at once.
+ * reviewer's approval (and `reason` says why); it only makes it stricter, so
+ * it applies without approval to occurrences not open yet; or it doesn't
+ * change what counts (the name, the reminders, an added reviewer), so it
+ * applies at once.
  */
-export type ChangeEffect = "needs-approval" | "stricter" | "at-once";
+export type TermEffect = { effect: "needs-approval"; reason: ApprovalReason } | { effect: "stricter" | "at-once" };
 
-/** One term a change changes, before and after. */
-export type TermChange =
-  | { term: "name"; before: string; after: string; effect: ChangeEffect }
-  | { term: "description"; before: string; after: string; effect: ChangeEffect }
+/** Why a changed term relaxes the pact, so it needs approval. */
+export type ApprovalReason =
+  /** The description: it defines what a photo must show. */
+  | "defines-photo"
+  /** Any other deck: Pact can't tell whether it's easier. */
+  | "deck-changed"
+  /** A later in-bed-by or due-by time. */
+  | "later-time"
+  /** A due-by time removed, so due at midnight. */
+  | "due-at-midnight"
+  /** A Fixed days schedule losing a day. */
+  | "fewer-days"
+  /** A lower Weekly count target. */
+  | "lower-target"
+  /** One-time: Submit anytime turned on. */
+  | "submit-anytime-on"
+  /** One-time with Submit anytime on: a later deadline. */
+  | "later-deadline"
+  /** One-time without Submit anytime on both sides: any other date. */
+  | "date-moved"
+  /** A start date where there was none. */
+  | "start-added"
+  | "later-start"
+  /** An end date where there was none. */
+  | "end-added"
+  | "earlier-end"
+  | "lower-penalty"
+  /** Any other recipient: only a reviewer can judge which hurts more. */
+  | "recipient-changed"
+  /** Removing a reviewer. */
+  | "reviewers-removed";
+
+/** One term a change changes, before and after, and what changing it does. */
+export type TermChange = TermValues & TermEffect;
+
+type TermValues =
+  | { term: "name"; before: string; after: string }
+  | { term: "description"; before: string; after: string }
   /** An Anki pact's deck: its id, and its name as AnkiWeb last gave it (null if Pact never had it). */
-  | {
-      term: "deck";
-      before: { id: string; name: string | null };
-      after: { id: string; name: string | null };
-      effect: ChangeEffect;
-    }
-  | { term: "in-bed-by"; before: ClockTime; after: ClockTime; effect: ChangeEffect }
+  | { term: "deck"; before: { id: string; name: string | null }; after: { id: string; name: string | null } }
+  | { term: "in-bed-by"; before: ClockTime; after: ClockTime }
   /** Null for midnight. */
-  | { term: "due-by"; before: ClockTime | null; after: ClockTime | null; effect: ChangeEffect }
+  | { term: "due-by"; before: ClockTime | null; after: ClockTime | null }
   /** Null for none. */
-  | { term: "start-date"; before: LocalDate | null; after: LocalDate | null; effect: ChangeEffect }
+  | { term: "start-date"; before: LocalDate | null; after: LocalDate | null }
   /** Null for none. */
-  | { term: "end-date"; before: LocalDate | null; after: LocalDate | null; effect: ChangeEffect }
-  | { term: "schedule"; before: Schedule; after: Schedule; effect: ChangeEffect }
+  | { term: "end-date"; before: LocalDate | null; after: LocalDate | null }
+  | { term: "schedule"; before: Schedule; after: Schedule }
   /** In US cents. */
-  | { term: "penalty"; before: number; after: number; effect: ChangeEffect }
-  | { term: "recipient"; before: Recipient; after: Recipient; effect: ChangeEffect }
+  | { term: "penalty"; before: number; after: number }
+  | { term: "recipient"; before: Recipient; after: Recipient }
   /** In the order they go off. Changing them always applies at once. */
-  | {
-      term: "reminders";
-      before: (ClockTime | DatedReminder)[];
-      after: (ClockTime | DatedReminder)[];
-      effect: ChangeEffect;
-    }
+  | { term: "reminders"; before: (ClockTime | DatedReminder)[]; after: (ClockTime | DatedReminder)[] }
   /** Each list sorted by name. Removing anyone needs approval; adding applies at once. */
-  | {
-      term: "reviewers";
-      before: Friend[];
-      after: Friend[];
-      added: Friend[];
-      removed: Friend[];
-      effect: ChangeEffect;
-    };
+  | { term: "reviewers"; before: Friend[]; after: Friend[]; added: Friend[]; removed: Friend[] };
+
+/**
+ * What applies at once inside a change that is stricter or needs approval:
+ * the name, the reminders, and the reviewers added (one, or more than one).
+ */
+export type AppliesNow = "name" | "reminders" | "new-reviewer" | "new-reviewers";
 
 /** What sending a change does, taken as a whole. */
 export type ChangeOutcome =
@@ -1344,15 +1377,18 @@ export type ChangeOutcome =
   | { kind: "nothing" }
   /** Only the name, the reminders or added reviewers: done now. */
   | { kind: "at-once" }
-  /** Only stricter (and maybe at-once) changes: they apply without approval from the start given. */
-  | ({ kind: "stricter" } & ChangeStart)
+  /**
+   * Only stricter (and maybe at-once) changes: they apply without approval
+   * from the start given. `appliesNow`: the at-once ones, in that order.
+   */
+  | ({ kind: "stricter"; appliesNow: AppliesNow[] } & ChangeStart)
   /**
    * Something relaxes the pact, so it's a change request, reviewed as a whole
    * (`bundlesStricter`: with stricter changes in it, which wait too). The name,
-   * the reminders and added reviewers still apply at once. `reviewerNames`: who may decide
+   * the reminders and added reviewers still apply at once (`appliesNow`). `reviewerNames`: who may decide
    * it, the added reviewers included, sorted by name.
    */
-  | { kind: "needs-approval"; reviewerNames: string[]; bundlesStricter: boolean };
+  | { kind: "needs-approval"; reviewerNames: string[]; bundlesStricter: boolean; appliesNow: AppliesNow[] };
 
 /** The Request change form's verdict: each term that differs, in the form's order, and what sending would do. */
 export interface ChangePreview {

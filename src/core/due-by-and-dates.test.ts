@@ -282,12 +282,13 @@ describe("changing them after the edit window", () => {
       kind: "needs-approval",
       reviewerNames: ["reviewer", "second"],
       bundlesStricter: false,
+      appliesNow: [],
       changeRequestId: expect.any(String),
     });
     expect(reviewer.reviewQueue()).toEqual([
       expect.objectContaining({
         kind: "change-request",
-        changes: [{ term: "due-by", before: "09:00", after: "10:00", effect: "needs-approval" }],
+        changes: [{ term: "due-by", before: "09:00", after: "10:00", effect: "needs-approval", reason: "later-time" }],
         start: expect.objectContaining({ appliesFrom: s.date("Fri") }),
       }),
     ]);
@@ -313,7 +314,12 @@ describe("changing them after the edit window", () => {
 
     const result = ok(await owner.changePact(gym, changed(owner, gym, { dueBy: "09:00" })));
 
-    expect(result.outcome).toEqual({ kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null });
+    expect(result.outcome).toEqual({
+      kind: "stricter",
+      appliesFrom: s.date("Thu"),
+      todayKeepsCents: null,
+      appliesNow: [],
+    });
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(owner.today().sections[0]).toEqual({
       kind: "to-do",
@@ -336,12 +342,17 @@ describe("changing them after the edit window", () => {
       kind: "stricter",
       appliesFrom: s.date("Thu"),
       todayKeepsCents: null,
+      appliesNow: [],
     });
     const removed = ok(await owner.changePact(early, changed(owner, early, { dueBy: undefined })));
     expect(removed.outcome.kind).toBe("needs-approval");
     expect(owner.changeRequest(changeRequestIdOf(removed))).toMatchObject({
       ok: true,
-      changeRequest: { changes: [{ term: "due-by", before: "09:00", after: null, effect: "needs-approval" }] },
+      changeRequest: {
+        changes: [
+          { term: "due-by", before: "09:00", after: null, effect: "needs-approval", reason: "due-at-midnight" },
+        ],
+      },
     });
   });
 
@@ -355,12 +366,25 @@ describe("changing them after the edit window", () => {
     const pushed = ok(await owner.changePact(later, changed(owner, later, { startDate: s.date("Wed+1") })));
     expect(pushed.outcome.kind).toBe("needs-approval");
     expect(reviewer.reviewQueue()[0]).toMatchObject({
-      changes: [{ term: "start-date", before: s.date("Mon+1"), after: s.date("Wed+1"), effect: "needs-approval" }],
+      changes: [
+        {
+          term: "start-date",
+          before: s.date("Mon+1"),
+          after: s.date("Wed+1"),
+          effect: "needs-approval",
+          reason: "later-start",
+        },
+      ],
     });
     await owner.withdrawChangeRequest(changeRequestIdOf(pushed));
 
     const sooner = ok(await owner.changePact(later, changed(owner, later, { startDate: s.date("Fri") })));
-    expect(sooner.outcome).toEqual({ kind: "stricter", appliesFrom: s.date("Fri"), todayKeepsCents: null });
+    expect(sooner.outcome).toEqual({
+      kind: "stricter",
+      appliesFrom: s.date("Fri"),
+      todayKeepsCents: null,
+      appliesNow: [],
+    });
     expect(pactOf(owner, later)).toMatchObject({ startDate: s.date("Fri"), firstOccurrence: { date: s.date("Fri") } });
 
     expect(await owner.changePact(started, changed(owner, started, { startDate: s.date("Mon+1") }))).toEqual({
@@ -377,7 +401,12 @@ describe("changing them after the edit window", () => {
 
     const result = ok(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 1000 })));
 
-    expect(result.outcome).toEqual({ kind: "stricter", appliesFrom: "2026-01-26", todayKeepsCents: null });
+    expect(result.outcome).toEqual({
+      kind: "stricter",
+      appliesFrom: "2026-01-26",
+      todayKeepsCents: null,
+      appliesNow: [],
+    });
   });
 
   test("adding an end date or moving it earlier needs approval; moving it later or removing it is stricter", async () => {
@@ -392,7 +421,15 @@ describe("changing them after the edit window", () => {
     expect(owner.changePreview(ending, changed(owner, ending, { endDate: "2026-01-20" }))).toMatchObject({
       ok: true,
       preview: {
-        changes: [{ term: "end-date", before: "2026-01-31", after: "2026-01-20", effect: "needs-approval" }],
+        changes: [
+          {
+            term: "end-date",
+            before: "2026-01-31",
+            after: "2026-01-20",
+            effect: "needs-approval",
+            reason: "earlier-end",
+          },
+        ],
         outcome: { kind: "needs-approval" },
       },
     });
@@ -404,7 +441,12 @@ describe("changing them after the edit window", () => {
       },
     });
     const removed = ok(await owner.changePact(ending, changed(owner, ending, { endDate: undefined })));
-    expect(removed.outcome).toEqual({ kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null });
+    expect(removed.outcome).toEqual({
+      kind: "stricter",
+      appliesFrom: s.date("Thu"),
+      todayKeepsCents: null,
+      appliesNow: [],
+    });
     expect(pactOf(owner, ending).endDate).toBeNull();
   });
 

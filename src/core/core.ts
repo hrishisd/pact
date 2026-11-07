@@ -18,7 +18,7 @@ import {
   zoneOffsetAt,
 } from "./calendar.ts";
 import { openDatabase, type Db } from "./db.ts";
-import { termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
+import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
   ankiDueByFits,
   ankiDueByOrder,
@@ -2009,17 +2009,21 @@ class Core implements PactCore {
       // owed. The surplus pays the next penalties (#allocate), and owed is $0
       // meanwhile, never below.
       const owedCents = Math.max(0, row.penalty_cents - row.paid_cents);
+      const payableCents = Math.max(0, owedCents - row.awaiting_cents);
       const bills = this.#billsOf(ownerId, row.id);
       const billDue = billDueOf(bills, now);
+      const overdueCents = overdueOf(bills, now)?.cents ?? 0;
+      const billsCents = overdueCents + (billDue?.amountCents ?? 0);
       return {
         recipientId: row.id,
         name: row.name,
         owedCents,
-        payableCents: Math.max(0, owedCents - row.awaiting_cents),
+        payableCents,
         awaitingCents: row.awaiting_cents,
         awaitingCount: row.awaiting_count,
         paidCents: row.paid_cents,
-        overdueCents: overdueOf(bills, now)?.cents ?? 0,
+        suggestedPaymentCents: billsCents > 0 ? Math.min(billsCents, payableCents) : payableCents,
+        overdueCents,
         billDue: billDue && { amountCents: billDue.amountCents, dueAt: billDue.dueAt },
       };
     });
@@ -3136,10 +3140,15 @@ class Core implements PactCore {
         kind: "needs-approval",
         reviewerNames: this.#friendsSortedByName(deciders).map((friend) => friend.name),
         bundlesStricter: diffs.some((diff) => diff.effect === "stricter"),
+        appliesNow: appliesNow(before, after, diffs),
       };
     }
     if (diffs.some((diff) => diff.effect === "stricter")) {
-      return { kind: "stricter", ...this.#startOfNewTerms(pact, timezone, after, now) };
+      return {
+        kind: "stricter",
+        ...this.#startOfNewTerms(pact, timezone, after, now),
+        appliesNow: appliesNow(before, after, diffs),
+      };
     }
     return { kind: "at-once" };
   }
@@ -3309,32 +3318,32 @@ class Core implements PactCore {
   #termChanges(ownerId: AccountId, before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
     const deck = (id: string) => ({ id, name: this.#ankiDeckName(ownerId, id) });
     return diffs.map((diff): TermChange => {
-      const { effect } = diff;
+      const effect = effectOf(diff);
       switch (diff.term) {
         case "deck":
-          return { term: diff.term, before: deck(diff.before), after: deck(diff.after), effect };
+          return { term: diff.term, before: deck(diff.before), after: deck(diff.after), ...effect };
         case "name":
-          return { term: diff.term, before: before.name, after: after.name, effect };
+          return { term: diff.term, before: before.name, after: after.name, ...effect };
         case "description":
-          return { term: diff.term, before: before.description, after: after.description, effect };
+          return { term: diff.term, before: before.description, after: after.description, ...effect };
         case "in-bed-by":
-          return { term: diff.term, before: diff.before, after: diff.after, effect };
+          return { term: diff.term, before: diff.before, after: diff.after, ...effect };
         case "due-by":
-          return { term: diff.term, before: before.dueBy, after: after.dueBy, effect };
+          return { term: diff.term, before: before.dueBy, after: after.dueBy, ...effect };
         case "start-date":
-          return { term: diff.term, before: before.startDate, after: after.startDate, effect };
+          return { term: diff.term, before: before.startDate, after: after.startDate, ...effect };
         case "end-date":
-          return { term: diff.term, before: before.endDate, after: after.endDate, effect };
+          return { term: diff.term, before: before.endDate, after: after.endDate, ...effect };
         case "schedule":
-          return { term: diff.term, before: before.schedule, after: after.schedule, effect };
+          return { term: diff.term, before: before.schedule, after: after.schedule, ...effect };
         case "penalty":
-          return { term: diff.term, before: before.penaltyCents, after: after.penaltyCents, effect };
+          return { term: diff.term, before: before.penaltyCents, after: after.penaltyCents, ...effect };
         case "recipient":
           return {
             term: diff.term,
             before: { id: before.recipientId, name: this.#recipientName(before.recipientId) },
             after: { id: after.recipientId, name: this.#recipientName(after.recipientId) },
-            effect,
+            ...effect,
           };
         case "reviewers":
           return {
@@ -3343,10 +3352,10 @@ class Core implements PactCore {
             after: this.#friendsSortedByName(after.reviewerIds),
             added: this.#friendsSortedByName(after.reviewerIds.filter((id) => !before.reviewerIds.includes(id))),
             removed: this.#friendsSortedByName(before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))),
-            effect,
+            ...effect,
           };
         case "reminders":
-          return { term: diff.term, before: before.reminders, after: after.reminders, effect };
+          return { term: diff.term, before: before.reminders, after: after.reminders, ...effect };
       }
     });
   }
@@ -4150,7 +4159,7 @@ class Core implements PactCore {
   #todayAlerts(ownerId: AccountId, timezone: string, now: Date, billAlerts: TodayAlert[]): TodayAlert[] {
     const alerts = [
       ...this.#rejectedEvidenceAlerts(ownerId),
-      ...this.#rejectedDayAlerts(ownerId, timezone),
+      ...this.#rejectedDayAlerts(ownerId),
       ...this.#rejectedExcuseAlerts(ownerId, now),
       ...this.#questionAlerts(ownerId),
     ];
@@ -4442,6 +4451,7 @@ class Core implements PactCore {
           penaltyCents: row.amount_cents,
           recipientName: row.recipient_name,
           excusableUntil: new Date(judgedAt.getTime() + EXCUSE_WINDOW_MS),
+          week: false,
         },
       };
     });
@@ -4454,7 +4464,7 @@ class Core implements PactCore {
    * takes the L on it, an excuse covers the week (one rejected after the
    * rejection has its own alert), or the week is judged.
    */
-  #rejectedDayAlerts(ownerId: AccountId, timezone: string): { at: Date; alert: TodayAlert }[] {
+  #rejectedDayAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
     const rows = this.#db
       .prepare(
         `SELECT pact.id, pact.name, evidence.occurrence_date, evidence.day, evidence.decided_at,
@@ -4484,7 +4494,6 @@ class Core implements PactCore {
       reviewer_name: string;
     }[];
     return rows.map((row) => {
-      const week = this.#occurrencesOf(row.id, timezone).covering(row.occurrence_date)!;
       const terms = this.#termsOn(row.id, row.occurrence_date);
       return {
         at: new Date(row.decided_at),
@@ -4497,8 +4506,8 @@ class Core implements PactCore {
           occurrenceDate: row.day,
           penaltyCents: terms.penalty_cents,
           recipientName: this.#recipientName(terms.recipient_id),
-          excusableUntil: new Date(week.dueAt.getTime() + EXCUSE_WINDOW_MS),
-          week: { dueAt: week.dueAt },
+          excusableUntil: null,
+          week: true,
         },
       };
     });

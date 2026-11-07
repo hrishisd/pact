@@ -5,7 +5,14 @@
 
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
-import type { ChangeRequestView, CurrentTerms, EvidenceKind, Schedule, TermChange } from "../shared/types.ts";
+import type {
+  ApprovalReason,
+  ChangeRequestView,
+  CurrentTerms,
+  EvidenceKind,
+  Schedule,
+  TermChange,
+} from "../shared/types.ts";
 import { clockText, formatDate, money, remindersText, scheduleText } from "./format.ts";
 
 export type Term = TermChange["term"];
@@ -152,46 +159,45 @@ export function changeValue(change: Change, side: "before" | "after"): string {
 
 /** What a changed term needs, as its tag says: "Needs approval: a lower penalty", "Stricter", "Applies now". */
 export function effectText(change: Change): string {
-  if (change.effect === "stricter") return "Stricter";
-  if (change.term === "reviewers") {
-    const joins = change.added.length > 0 ? listNames(change.added.map((r) => r.name)) : null;
-    if (change.removed.length === 0)
-      return `Applies now. ${joins} ${change.added.length === 1 ? "hears" : "hear"} about it`;
-    const removing = `Needs approval: removing ${listNames(change.removed.map((r) => r.name))}`;
-    return joins ? `${removing}. ${joins} ${change.added.length === 1 ? "joins" : "join"} now` : removing;
-  }
-  if (change.effect === "at-once") return "Applies now";
-  switch (change.term) {
-    case "description":
-      return "Needs approval: it defines what a photo must show";
-    case "deck":
-      return "Needs approval: any change of deck";
-    case "in-bed-by":
-      return "Needs approval: a later time";
-    case "schedule":
-      return scheduleNeeds(change.before, change.after);
-    case "due-by":
-      return change.after === null ? "Needs approval: due at midnight instead" : "Needs approval: a later time";
-    case "start-date":
-      return change.before === null ? "Needs approval: adding a start date" : "Needs approval: a later start";
-    case "end-date":
-      return change.before === null ? "Needs approval: adding an end date" : "Needs approval: an earlier end";
-    case "penalty":
-      return "Needs approval: a lower penalty";
-    case "recipient":
-      return "Needs approval: any change of recipient";
-    case "name":
-    case "reminders":
-      return "Applies now";
+  switch (change.effect) {
+    case "stricter":
+      return "Stricter";
+    case "at-once":
+      if (change.term !== "reviewers") return "Applies now";
+      return `Applies now. ${addedNames(change)} ${change.added.length === 1 ? "hears" : "hear"} about it`;
+    case "needs-approval": {
+      const needs = `Needs approval: ${APPROVAL_REASONS[change.reason]}`;
+      if (change.term !== "reviewers") return needs;
+      const removing = `${needs} ${listNames(change.removed.map((r) => r.name))}`;
+      if (change.added.length === 0) return removing;
+      return `${removing}. ${addedNames(change)} ${change.added.length === 1 ? "joins" : "join"} now`;
+    }
   }
 }
 
-/** Why a changed schedule needs approval, as its tag says after "Needs approval: ". */
-function scheduleNeeds(before: Schedule, after: Schedule): string {
-  if (before.kind === "weekly-count") return "Needs approval: a lower target";
-  if (before.kind !== "one-time" || after.kind !== "one-time") return "Needs approval: fewer days";
-  if (after.submitAnytime && !before.submitAnytime) return "Needs approval: Submit anytime";
-  return after.submitAnytime ? "Needs approval: a later deadline" : "Needs approval: any change of date";
+/** Why a changed term needs approval, as its tag says after "Needs approval: ". */
+const APPROVAL_REASONS: Record<ApprovalReason, string> = {
+  "defines-photo": "it defines what a photo must show",
+  "deck-changed": "any change of deck",
+  "later-time": "a later time",
+  "due-at-midnight": "due at midnight instead",
+  "fewer-days": "fewer days",
+  "lower-target": "a lower target",
+  "submit-anytime-on": "Submit anytime",
+  "later-deadline": "a later deadline",
+  "date-moved": "any change of date",
+  "start-added": "adding a start date",
+  "later-start": "a later start",
+  "end-added": "adding an end date",
+  "earlier-end": "an earlier end",
+  "lower-penalty": "a lower penalty",
+  "recipient-changed": "any change of recipient",
+  // Followed by who: "removing Sam".
+  "reviewers-removed": "removing",
+};
+
+function addedNames(change: Extract<Change, { term: "reviewers" }>): string {
+  return listNames(change.added.map((r) => r.name));
 }
 
 /** A change request's changed terms: old struck out, new in bold. */

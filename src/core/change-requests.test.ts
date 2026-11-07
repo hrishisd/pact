@@ -30,7 +30,7 @@ describe("a stricter change applies at once, from the first occurrence not open 
 
     expect(result).toEqual({
       ok: true,
-      outcome: { kind: "stricter", appliesFrom: s.date("Fri"), todayKeepsCents: 500 },
+      outcome: { kind: "stricter", appliesFrom: s.date("Fri"), todayKeepsCents: 500, appliesNow: [] },
     });
     expect(pactOf(owner, gym)).toMatchObject({
       penaltyCents: 1000,
@@ -68,7 +68,12 @@ describe("a stricter change applies at once, from the first occurrence not open 
       ),
     );
 
-    expect(result.outcome).toEqual({ kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null });
+    expect(result.outcome).toEqual({
+      kind: "stricter",
+      appliesFrom: s.date("Thu"),
+      todayKeepsCents: null,
+      appliesNow: [],
+    });
     await s.advanceTo("Sat 00:00");
     expect(penalties(owner).map((p) => p.date)).toEqual([s.date("Mon"), s.date("Thu"), s.date("Fri")]);
   });
@@ -140,6 +145,7 @@ describe("a relaxing change waits for a reviewer", () => {
         kind: "needs-approval",
         reviewerNames: ["reviewer", "second"],
         bundlesStricter: false,
+        appliesNow: [],
         changeRequestId: expect.any(String),
       },
     });
@@ -168,7 +174,7 @@ describe("a relaxing change waits for a reviewer", () => {
         endsPact: false,
         note: "Money is tight this month",
         requestedAt: s.at("Thu 15:00"),
-        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
+        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval", reason: "lower-penalty" }],
         start: { appliesFrom: s.date("Fri"), todayKeepsCents: 500 },
       }),
     ]);
@@ -214,6 +220,7 @@ describe("a relaxing change waits for a reviewer", () => {
           before: { name: "Sam" },
           after: { id: added.recipient.id, name: "Red Cross" },
           effect: "needs-approval",
+          reason: "recipient-changed",
         },
       ],
     });
@@ -251,6 +258,7 @@ describe("a relaxing change waits for a reviewer", () => {
       kind: "needs-approval",
       reviewerNames: ["reviewer", "second"],
       bundlesStricter: false,
+      appliesNow: [],
       changeRequestId: expect.any(String),
     });
     expect(pactOf(owner, gym).reviewers.map((r) => r.name)).toEqual(["reviewer", "second"]);
@@ -266,6 +274,7 @@ describe("a relaxing change waits for a reviewer", () => {
           added: [],
           removed: [{ id: second.id, name: "second" }],
           effect: "needs-approval",
+          reason: "reviewers-removed",
         },
       ],
     });
@@ -292,10 +301,16 @@ describe("a relaxing change waits for a reviewer", () => {
             before: { kind: "fixed-days", days: MON_WED_FRI },
             after: { kind: "fixed-days", days: ["mon", "wed"] },
             effect: "needs-approval",
+            reason: "fewer-days",
           },
           { term: "penalty", before: 500, after: 1000, effect: "stricter" },
         ],
-        outcome: { kind: "needs-approval", reviewerNames: ["reviewer", "second"], bundlesStricter: true },
+        outcome: {
+          kind: "needs-approval",
+          reviewerNames: ["reviewer", "second"],
+          bundlesStricter: true,
+          appliesNow: [],
+        },
       },
     });
     const result = ok(await owner.changePact(gym, changed(owner, gym, fewer)));
@@ -334,7 +349,7 @@ describe("a relaxing change waits for a reviewer", () => {
       changeRequest: {
         state: { kind: "rejected", reviewerName: "reviewer", reason: "You can afford $5" },
         endsPact: false,
-        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
+        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval", reason: "lower-penalty" }],
         // Decided: nothing starts any more.
         start: null,
       },
@@ -365,7 +380,11 @@ describe("a relaxing change waits for a reviewer", () => {
 
     expect(owner.changePreview(created.pactId, { ...terms, inBedBy: "00:30" })).toMatchObject({
       ok: true,
-      preview: { changes: [{ term: "in-bed-by", before: "23:00", after: "00:30", effect: "needs-approval" }] },
+      preview: {
+        changes: [
+          { term: "in-bed-by", before: "23:00", after: "00:30", effect: "needs-approval", reason: "later-time" },
+        ],
+      },
     });
     expect(owner.changePreview(created.pactId, { ...terms, inBedBy: "22:30" })).toMatchObject({
       ok: true,
@@ -381,6 +400,108 @@ describe("a relaxing change waits for a reviewer", () => {
     expect(view).toMatchObject({ ok: true, changeRequest: { current: { evidenceKind: "oura", inBedBy: "23:00" } } });
     expect(view).not.toHaveProperty("changeRequest.current.dueBy");
     expect(view).not.toHaveProperty("changeRequest.current.anki");
+  });
+});
+
+describe("why a change needs approval, and what applies at once with it", () => {
+  /** Pacts made Mon 09:00 with each kind of term to change, looked at Tue 12:00. */
+  async function pactsToChange(s: Scenario) {
+    const setup = await ownerWithReviewers(s);
+    const { owner, createPact } = setup;
+    const other = ok(await owner.addRecipient({ name: "Other" })).recipient;
+    const third = await s.befriend(owner, "third");
+    const fourth = await s.befriend(owner, "fourth");
+    const pacts = {
+      gym: await createPact("Gym", EVERY_DAY, { dates: { dueBy: "21:00", endDate: s.date("Mon+8") } }),
+      run: await createPact("Run", MON_WED_FRI),
+      swim: await createPact("Swim", ["thu"], { dates: { startDate: s.date("Thu+1") } }),
+      yoga: await createPact("Yoga", ["thu"]),
+      piano: await createPact("Piano", { kind: "weekly-count", target: 3 }),
+      essay: await createPact("Essay", { kind: "one-time", deadline: s.date("Fri+1"), submitAnytime: false }),
+      thesis: await createPact("Thesis", { kind: "one-time", deadline: s.date("Fri+1"), submitAnytime: true }),
+    };
+    await s.advanceTo("Tue 12:00");
+    /** What the preview of `change` to `pact` says of each changed term: why it needs approval, or its effect. */
+    const why = (pact: keyof typeof pacts, change: Partial<PactChange>) => {
+      const { preview } = ok(owner.changePreview(pacts[pact], changed(owner, pacts[pact], change)));
+      return preview.changes.map((c) => [c.term, c.effect === "needs-approval" ? c.reason : c.effect]);
+    };
+    const outcomeOf = (pact: keyof typeof pacts, change: Partial<PactChange>) =>
+      ok(owner.changePreview(pacts[pact], changed(owner, pacts[pact], change))).preview.outcome;
+    return { ...setup, other, third, fourth, pacts, why, outcomeOf };
+  }
+
+  test("each relaxing change carries why it needs approval; a stricter one doesn't", async () => {
+    const s = scenario();
+    const { reviewer, other, why } = await pactsToChange(s);
+    const oneTime = (deadline: string, submitAnytime: boolean) =>
+      ({ kind: "one-time", deadline: s.date(deadline), submitAnytime }) as const;
+
+    expect(why("gym", { description: "Me at the gym" })).toEqual([["description", "defines-photo"]]);
+    expect(why("gym", { schedule: { kind: "fixed-days", days: ["mon", "tue"] } })).toEqual([
+      ["schedule", "fewer-days"],
+    ]);
+    expect(why("gym", { dueBy: "22:00" })).toEqual([["due-by", "later-time"]]);
+    expect(why("gym", { dueBy: undefined })).toEqual([["due-by", "due-at-midnight"]]);
+    expect(why("gym", { dueBy: "20:00" })).toEqual([["due-by", "stricter"]]);
+    expect(why("gym", { endDate: s.date("Mon+4") })).toEqual([["end-date", "earlier-end"]]);
+    expect(why("gym", { endDate: undefined })).toEqual([["end-date", "stricter"]]);
+    expect(why("run", { endDate: s.date("Mon+4") })).toEqual([["end-date", "end-added"]]);
+    expect(why("swim", { startDate: s.date("Thu+2") })).toEqual([["start-date", "later-start"]]);
+    expect(why("swim", { startDate: s.date("Thu") })).toEqual([["start-date", "stricter"]]);
+    expect(why("yoga", { startDate: s.date("Thu+1") })).toEqual([["start-date", "start-added"]]);
+    expect(why("gym", { penaltyCents: 300 })).toEqual([["penalty", "lower-penalty"]]);
+    expect(why("gym", { penaltyCents: 1000 })).toEqual([["penalty", "stricter"]]);
+    expect(why("gym", { recipientId: other.id })).toEqual([["recipient", "recipient-changed"]]);
+    expect(why("gym", { reviewerIds: [reviewer.id] })).toEqual([["reviewers", "reviewers-removed"]]);
+    expect(why("piano", { schedule: { kind: "weekly-count", target: 2 } })).toEqual([["schedule", "lower-target"]]);
+    expect(why("piano", { schedule: { kind: "weekly-count", target: 4 } })).toEqual([["schedule", "stricter"]]);
+    expect(why("essay", { schedule: oneTime("Fri+1", true) })).toEqual([["schedule", "submit-anytime-on"]]);
+    expect(why("essay", { schedule: oneTime("Thu+1", false) })).toEqual([["schedule", "date-moved"]]);
+    expect(why("thesis", { schedule: oneTime("Mon+2", true) })).toEqual([["schedule", "later-deadline"]]);
+    expect(why("thesis", { schedule: oneTime("Thu+1", true) })).toEqual([["schedule", "stricter"]]);
+    expect(why("thesis", { schedule: oneTime("Mon+2", false) })).toEqual([["schedule", "date-moved"]]);
+    expect(why("gym", { name: "Gym time", reminders: ["18:00"] })).toEqual([
+      ["name", "at-once"],
+      ["reminders", "at-once"],
+    ]);
+  });
+
+  test("a stricter change, or one that needs approval, says what in it applies at once: the name, the reminders, the new reviewers", async () => {
+    const s = scenario();
+    const { reviewer, second, third, fourth, outcomeOf } = await pactsToChange(s);
+
+    expect(outcomeOf("gym", { penaltyCents: 1000 })).toMatchObject({ kind: "stricter", appliesNow: [] });
+    expect(outcomeOf("gym", { penaltyCents: 1000, name: "Gym time" })).toMatchObject({
+      kind: "stricter",
+      appliesNow: ["name"],
+    });
+    expect(outcomeOf("gym", { penaltyCents: 300 })).toMatchObject({ kind: "needs-approval", appliesNow: [] });
+    expect(outcomeOf("gym", { penaltyCents: 300, reminders: ["18:00"] })).toMatchObject({
+      kind: "needs-approval",
+      appliesNow: ["reminders"],
+    });
+    expect(
+      outcomeOf("gym", {
+        penaltyCents: 300,
+        name: "Gym time",
+        reminders: ["18:00"],
+        reviewerIds: [reviewer.id, second.id, third.id, fourth.id],
+      }),
+    ).toMatchObject({ kind: "needs-approval", appliesNow: ["name", "reminders", "new-reviewers"] });
+    // Removing one reviewer needs approval; the one added joins at once.
+    expect(outcomeOf("gym", { reviewerIds: [reviewer.id, third.id] })).toMatchObject({
+      kind: "needs-approval",
+      appliesNow: ["new-reviewer"],
+    });
+    expect(outcomeOf("gym", { penaltyCents: 1000, reviewerIds: [reviewer.id, second.id, third.id] })).toMatchObject({
+      kind: "stricter",
+      appliesNow: ["new-reviewer"],
+    });
+    // A change that only applies at once needs no list: all of it does.
+    expect(outcomeOf("gym", { name: "Gym time", reviewerIds: [reviewer.id, second.id, third.id] })).toEqual({
+      kind: "at-once",
+    });
   });
 });
 
@@ -450,6 +571,7 @@ describe("one change request at a time", () => {
       kind: "needs-approval",
       reviewerNames: ["reviewer", "third"],
       bundlesStricter: false,
+      appliesNow: ["new-reviewer"],
       changeRequestId: expect.any(String),
     });
     expect(pactOf(owner, gym)).toMatchObject({
@@ -467,7 +589,7 @@ describe("one change request at a time", () => {
     expect(third.reviewQueue()).toEqual([
       expect.objectContaining({
         kind: "change-request",
-        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
+        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval", reason: "lower-penalty" }],
       }),
     ]);
     expect(await third.decide(changeRequestIdOf(result), { kind: "approve" })).toEqual({ ok: true });

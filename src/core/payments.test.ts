@@ -38,6 +38,7 @@ describe("recording a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 500,
+        suggestedPaymentCents: 500,
       },
     ]);
 
@@ -61,6 +62,7 @@ describe("recording a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 0,
+        suggestedPaymentCents: 0,
       },
     ]);
   });
@@ -255,6 +257,7 @@ describe("deciding a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 500,
+        suggestedPaymentCents: 500,
       },
     ]);
   });
@@ -278,6 +281,7 @@ describe("deciding a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 1500,
+        suggestedPaymentCents: 1500,
       },
     ]);
   });

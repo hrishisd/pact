@@ -150,6 +150,7 @@ describe("judging at the end of a scheduled day", () => {
         awaitingCents: 0,
         awaitingCount: 0,
         paidCents: 0,
+        suggestedPaymentCents: 1000,
         overdueCents: 0,
         billDue: null,
       },

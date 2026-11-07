@@ -468,3 +468,32 @@ describe("Overdue", () => {
     ]);
   });
 });
+
+describe("what Record a payment starts at", () => {
+  test("the open bills, overdue and due, less payments awaiting approval; with no open bill, all that may be paid", async () => {
+    const s = scenario();
+    const { owner, sam, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    const suggested = () => owner.ledgers().map((l) => [l.payableCents, l.suggestedPaymentCents]);
+
+    // No penalty yet.
+    expect(suggested()).toEqual([[0, 0]]);
+    // Monday's $5, not on a bill yet: all that may be paid.
+    await s.advanceTo("Tue 00:00");
+    expect(suggested()).toEqual([[500, 500]]);
+    // Wednesday+1's bill has last week's $15; Monday+1's $5 isn't on it.
+    await s.advanceTo("Wed+1 19:00");
+    expect(owner.ledgers()[0]).toMatchObject({ billDue: { amountCents: 1500 }, overdueCents: 0 });
+    expect(suggested()).toEqual([[2000, 1500]]);
+    // An excuse waiting holds Monday+1's penalty: it may not be paid, and isn't billed.
+    ok(await owner.fileExcuse(gym, { from: s.date("Mon+1"), to: s.date("Mon+1"), reason: "Sick" }, []));
+    expect(suggested()).toEqual([[1500, 1500]]);
+    // $4 awaiting approval covers part of the bill.
+    await recordPayment(owner, { recipientId: sam.id, amountCents: 400 });
+    expect(suggested()).toEqual([[1100, 1100]]);
+    // A week on: $11 left of the first bill is Overdue, and a new $10 bill is due.
+    await s.advanceTo("Wed+2 19:00");
+    expect(owner.ledgers()[0]).toMatchObject({ overdueCents: 1100, billDue: { amountCents: 1000 } });
+    expect(suggested()).toEqual([[2600, 2100]]);
+  });
+});

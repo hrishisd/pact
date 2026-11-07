@@ -116,7 +116,9 @@ describe("the spec's examples", () => {
     const [item] = reviewer.reviewQueue();
     expect(item).toMatchObject({
       kind: "change-request",
-      changes: [{ term: "schedule", before: weekly(3), after: weekly(2), effect: "needs-approval" }],
+      changes: [
+        { term: "schedule", before: weekly(3), after: weekly(2), effect: "needs-approval", reason: "lower-target" },
+      ],
       start: { appliesFrom: s.date("Mon+2") },
     });
     await reviewer.decide(item!.id, { kind: "approve" });
@@ -371,8 +373,8 @@ describe("a rejected photo", () => {
         occurrenceDate: s.date("Tue+1"),
         penaltyCents: 500,
         recipientName: "Sam",
-        excusableUntil: new Date(s.at("Mon+2 00:00").getTime() + 2 * DAY_MS),
-        week: { dueAt: s.at("Mon+2 00:00") },
+        excusableUntil: null,
+        week: true,
       },
     ]);
     expect(today.sections.find((section) => section.kind === "missed")).toBeUndefined();
@@ -600,7 +602,7 @@ describe("changing the target", () => {
       ok: true,
       preview: {
         changes: [{ term: "schedule", before: weekly(2), after: weekly(4), effect: "stricter" }],
-        outcome: { kind: "stricter", appliesFrom: s.date("Mon+2"), todayKeepsCents: null },
+        outcome: { kind: "stricter", appliesFrom: s.date("Mon+2"), todayKeepsCents: null, appliesNow: [] },
       },
     });
     await owner.changePact(piano, changed(owner, piano, { schedule: weekly(4) }));
@@ -621,7 +623,7 @@ describe("changing the target", () => {
 
     expect(preview).toMatchObject({
       ok: true,
-      preview: { outcome: { kind: "stricter", appliesFrom: s.date("Mon+2"), todayKeepsCents: 500 } },
+      preview: { outcome: { kind: "stricter", appliesFrom: s.date("Mon+2"), todayKeepsCents: 500, appliesNow: [] } },
     });
   });
 
@@ -653,7 +655,7 @@ describe("changing the due-by time", () => {
       ok: true,
       preview: {
         changes: [{ term: "due-by", before: "21:00", after: "20:00", effect: "stricter" }],
-        outcome: { kind: "stricter", appliesFrom: s.date("Mon+2"), todayKeepsCents: null },
+        outcome: { kind: "stricter", appliesFrom: s.date("Mon+2"), todayKeepsCents: null, appliesNow: [] },
       },
     });
     ok(await owner.changePact(piano, changed(owner, piano, { dueBy: "20:00" })));

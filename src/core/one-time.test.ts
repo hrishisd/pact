@@ -435,7 +435,7 @@ describe("changing a One-time pact", () => {
     const evidenceId = await submit(owner, taxes);
     expect(await owner.changePact(taxes, changed(owner, taxes, { schedule: oneTime(s.date("Thu")) }))).toMatchObject({
       ok: true,
-      outcome: { kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null },
+      outcome: { kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null, appliesNow: [] },
     });
     expect(pactOf(owner, taxes)).toMatchObject({ schedule: oneTime(s.date("Thu")), newTerms: null });
     await reviewer.decide(evidenceId, { kind: "approve" });
@@ -454,9 +454,20 @@ describe("changing a One-time pact", () => {
         ok: true,
         preview: {
           changes: [
-            { term: "schedule", before: oneTime(s.date("Thu")), after: oneTime(deadline), effect: "needs-approval" },
+            {
+              term: "schedule",
+              before: oneTime(s.date("Thu")),
+              after: oneTime(deadline),
+              effect: "needs-approval",
+              reason: "date-moved",
+            },
           ],
-          outcome: { kind: "needs-approval", reviewerNames: ["reviewer", "second"], bundlesStricter: false },
+          outcome: {
+            kind: "needs-approval",
+            reviewerNames: ["reviewer", "second"],
+            bundlesStricter: false,
+            appliesNow: [],
+          },
         },
       });
     }
@@ -631,7 +642,7 @@ describe("changing a One-time pact", () => {
 
     expect(await owner.changePact(taxes, changed(owner, taxes, { penaltyCents: 900 }))).toMatchObject({
       ok: true,
-      outcome: { kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null },
+      outcome: { kind: "stricter", appliesFrom: s.date("Thu"), todayKeepsCents: null, appliesNow: [] },
     });
     await s.advanceTo("Fri 00:00");
 

@@ -6,7 +6,14 @@
 
 import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type { ChangePactRefusal, ChangePreview, CreatePactRefusal, PactChange, PactTerms } from "../shared/types.ts";
+import type {
+  AppliesNow,
+  ChangePactRefusal,
+  ChangePreview,
+  CreatePactRefusal,
+  PactChange,
+  PactTerms,
+} from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import {
   changeValue,
@@ -296,21 +303,7 @@ function VerdictBox({
     case "loaded":
       break;
   }
-  const { outcome, changes } = verdict.preview;
-  // What applies now even inside a change that waits: the name, the reminders, and reviewers added.
-  const now = [
-    ...(changes.some((c) => c.term === "name") ? ["the name"] : []),
-    ...(changes.some((c) => c.term === "reminders") ? ["the reminders"] : []),
-    ...changes.flatMap((c) =>
-      c.term === "reviewers" && c.added.length > 0
-        ? [c.added.length === 1 ? "the new reviewer" : "the new reviewers"]
-        : [],
-    ),
-  ];
-  const nowLine =
-    now.length > 0
-      ? ` ${capitalize(listNames(now))} ${now.length === 1 && !now[0]!.endsWith("s") ? "changes" : "change"} now.`
-      : "";
+  const { outcome } = verdict.preview;
   switch (outcome.kind) {
     case "nothing":
       return <div className="verdict nothing">Nothing changed yet.</div>;
@@ -332,7 +325,7 @@ function VerdictBox({
                 : `Applies without approval from ${formatDate(outcome.appliesFrom)}.`}
             </b>
             {outcome.todayKeepsCents !== null && ` ${open} keeps ${money(outcome.todayKeepsCents)} per miss.`}
-            {nowLine}
+            {nowLine(outcome.appliesNow)}
           </p>
         </div>
       );
@@ -346,13 +339,28 @@ function VerdictBox({
             <b>{who}</b> Until then {pactName} keeps its current terms
             {outcome.bundlesStricter &&
               ", the stricter changes too, since a change that relaxes anything is reviewed as a whole"}
-            .{nowLine}
+            .{nowLine(outcome.appliesNow)}
           </p>
         </div>
       );
     }
   }
 }
+
+/** What applies at once inside a change that waits or is stricter: " The name and the new reviewers change now." */
+function nowLine(appliesNow: AppliesNow[]): string {
+  const [first, ...rest] = appliesNow;
+  if (first === undefined) return "";
+  const verb = rest.length === 0 && !APPLIES_NOW[first].plural ? "changes" : "change";
+  return ` ${capitalize(listNames(appliesNow.map((what) => APPLIES_NOW[what].text)))} ${verb} now.`;
+}
+
+const APPLIES_NOW: Record<AppliesNow, { text: string; plural: boolean }> = {
+  name: { text: "the name", plural: false },
+  reminders: { text: "the reminders", plural: true },
+  "new-reviewer": { text: "the new reviewer", plural: false },
+  "new-reviewers": { text: "the new reviewers", plural: true },
+};
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);

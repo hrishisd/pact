@@ -10,11 +10,7 @@ import { centsInputText, money, parseCents } from "./format.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useSend } from "./ui.tsx";
 
-/**
- * The Record a payment sheet for one ledger. The amount starts at the open
- * bills' amount (overdue and due), or with no open bill at the most it may
- * be, the ledger's `payableCents`.
- */
+/** The Record a payment sheet for one ledger. The amount starts at the core's `suggestedPaymentCents`. */
 export function RecordPaymentSheet({
   ledger,
   onClose,
@@ -26,7 +22,7 @@ export function RecordPaymentSheet({
   onSent: () => void;
 }) {
   const { payableCents } = ledger;
-  const [amount, setAmount] = useState(() => centsInputText(startingCents(ledger)));
+  const [amount, setAmount] = useState(() => centsInputText(ledger.suggestedPaymentCents));
   const [note, setNote] = useState("");
   const { busy, error, setError, run } = useSend(
     async (payment: RecordPaymentRequest, screenshotBlob: Blob) => {
@@ -115,12 +111,6 @@ const REFUSAL_TEXT: Record<Exclude<RecordPaymentRefusal, "payment-exceeds-owed">
   "invalid-amount": "Enter an amount above $0.",
   "no-screenshot": "Choose a screenshot of the payment.",
 };
-
-/** What the amount starts at: the open bills' amount, or everything that may be paid when no bill is open. */
-function startingCents(ledger: Json<LedgerSummary>): number {
-  const billsCents = ledger.overdueCents + (ledger.billDue?.amountCents ?? 0);
-  return billsCents > 0 ? Math.min(billsCents, ledger.payableCents) : ledger.payableCents;
-}
 
 /** An amount over the ledger's `payableCents`: more than owed, or, with payments awaiting approval, more than what's left. */
 function overLimitText(ledger: Json<LedgerSummary>): string {

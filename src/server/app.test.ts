@@ -946,10 +946,10 @@ describe("pacts", () => {
       ok: true,
       preview: {
         changes: [
-          { term: "due-by", before: "21:00", after: "22:00", effect: "needs-approval" },
+          { term: "due-by", before: "21:00", after: "22:00", effect: "needs-approval", reason: "later-time" },
           { term: "end-date", before: "2026-01-31", after: null, effect: "stricter" },
         ],
-        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: true },
+        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: true, appliesNow: [] },
       },
     });
   });
@@ -1005,7 +1005,7 @@ describe("pacts", () => {
     });
     expect(lowered.body).toMatchObject({
       ok: true,
-      preview: { changes: [{ term: "schedule", effect: "needs-approval" }] },
+      preview: { changes: [{ term: "schedule", effect: "needs-approval", reason: "lower-target" }] },
     });
   });
 
@@ -1065,7 +1065,7 @@ describe("pacts", () => {
     });
     expect(later.body).toMatchObject({
       ok: true,
-      preview: { changes: [{ term: "schedule", effect: "needs-approval" }] },
+      preview: { changes: [{ term: "schedule", effect: "needs-approval", reason: "later-deadline" }] },
     });
   });
 
@@ -1340,6 +1340,7 @@ describe("evidence", () => {
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: expect.any(String),
+          week: false,
         },
       ] satisfies TodayResponse["alerts"]);
       expect(today.body.sections).toEqual([]);
@@ -1521,8 +1522,8 @@ describe("change requests", () => {
     expect(preview.body).toEqual({
       ok: true,
       preview: {
-        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
-        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: false },
+        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval", reason: "lower-penalty" }],
+        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: false, appliesNow: [] },
       },
     } satisfies ChangePreviewResponse);
     const sent = await owner.post<ChangePactResponse>(API_PATHS.changePact(pactId), lower);
@@ -1685,6 +1686,7 @@ describe("ledgers", () => {
       awaitingCents: 0,
       awaitingCount: 0,
       paidCents: 0,
+      suggestedPaymentCents: 500,
       overdueCents: 0,
       billDue: null,
     };
@@ -1778,6 +1780,7 @@ describe("payments", () => {
         awaitingCents: 1000,
         awaitingCount: 1,
         paidCents: 0,
+        suggestedPaymentCents: 500,
         overdueCents: 0,
         billDue: null,
       },
@@ -1834,6 +1837,7 @@ describe("payments", () => {
         awaitingCents: 0,
         awaitingCount: 0,
         paidCents: 1000,
+        suggestedPaymentCents: 500,
         overdueCents: 0,
         billDue: null,
       },

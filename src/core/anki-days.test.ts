@@ -925,12 +925,13 @@ describe("changing an Anki pact's deck", () => {
       before: { id: SPANISH, name: "Spanish" },
       after: { id: ITALIAN, name: "Italian" },
       effect: "needs-approval",
+      reason: "deck-changed",
     };
     expect(owner.changePreview(pactId, change({ ankiDeckId: ITALIAN }))).toEqual({
       ok: true,
       preview: {
         changes: [deck],
-        outcome: { kind: "needs-approval", reviewerNames: [reviewer.name], bundlesStricter: false },
+        outcome: { kind: "needs-approval", reviewerNames: [reviewer.name], bundlesStricter: false, appliesNow: [] },
       },
     });
     expect(await owner.changePact(pactId, change({ ankiDeckId: "999" }))).toEqual({
@@ -983,7 +984,7 @@ describe("changing an Anki pact's deck", () => {
     await s.advanceTo("Tue 09:00");
     expect(owner.changePreview(pactId, change({ ankiDeckId: ITALIAN, dueBy: "22:00" }))).toMatchObject({
       ok: true,
-      preview: { outcome: { kind: "needs-approval", bundlesStricter: true } },
+      preview: { outcome: { kind: "needs-approval", bundlesStricter: true, appliesNow: [] } },
     });
   });
 

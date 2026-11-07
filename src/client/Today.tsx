@@ -897,8 +897,8 @@ function RejectedEvidenceAlert({
     ACCEPT_MISS_REFUSAL_TEXT,
     onTaken,
   );
-  // A Weekly count week isn't judged yet, so filing has no 48 hours running.
-  const fileLabel = alert.week ? "File excuse" : fileExcuseLabel("File excuse", alert.excusableUntil, now);
+  const fileLabel =
+    alert.excusableUntil === null ? "File excuse" : fileExcuseLabel("File excuse", alert.excusableUntil, now);
 
   return (
     <div className="alert bad" role="status">

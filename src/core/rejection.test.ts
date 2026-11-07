@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import type { Today } from "../shared/types.ts";
-import { gymEvidenceWaiting, photo } from "./testing/camera-pact.ts";
+import { gymEvidenceWaiting, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
@@ -30,6 +30,7 @@ describe("a rejection is final straight away", () => {
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Wed 15:00"),
+          week: false,
         },
       ],
       sections: [],
@@ -63,6 +64,7 @@ describe("a rejection is final straight away", () => {
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Thu 08:00"),
+          week: false,
         },
       ],
       sections: [],
@@ -119,6 +121,32 @@ describe("a rejection is final straight away", () => {
 });
 
 describe("the rejected-evidence alert", () => {
+  test("an excuse is accepted until 48 hours after the rejection, on Fixed days and One-time; on Weekly count the week isn't judged, so there's no limit", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", { kind: "weekly-count", target: 2 });
+    const essay = await createPact("Essay", { kind: "one-time", deadline: s.date("Fri+1"), submitAnytime: true });
+    const gym = await createPact("Gym", ["tue"]);
+    s.setClockTo("Tue+1 10:00");
+    const photos = [await submit(owner, piano), await submit(owner, essay), await submit(owner, gym)];
+    s.setClockTo("Tue+1 11:00");
+    for (const id of photos) await reviewer.decide(id, { kind: "reject", reason: "Blurry" });
+
+    const alerts = owner
+      .today()
+      .alerts.map((alert) =>
+        alert.kind === "evidence-rejected" ? [alert.name, alert.excusableUntil, alert.week] : alert.kind,
+      );
+    expect(alerts).toEqual(
+      expect.arrayContaining([
+        ["Gym", s.at("Thu+1 11:00"), false],
+        ["Essay", s.at("Thu+1 11:00"), false],
+        ["Piano", null, true],
+      ]),
+    );
+    expect(alerts).toHaveLength(3);
+  });
+
   test("Take the L clears it; owed and the ledger's history are unchanged", async () => {
     const s = scenario();
     const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
