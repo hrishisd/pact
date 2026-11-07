@@ -85,6 +85,7 @@ import {
   type ChangeRequestResult,
   type ChangeRequestState,
   type ChangeRequestView,
+  type ChangeStart,
   type CurrentTerms,
   type PactChange,
   type RequestEndResult,
@@ -126,7 +127,8 @@ import {
   type NewRecipient,
   type NotificationSetting,
   type NotificationSettingState,
-  type OccurrenceDecision,
+  type MissedDetail,
+  type OccurrenceDetail,
   type OccurrenceRecord,
   type OccurrenceStatus,
   type Connection,
@@ -144,6 +146,7 @@ import {
   type PactTerms,
   type TermsByKind,
   type Recipient,
+  type RecordedStatus,
   type NewPayment,
   type Profile,
   type PushDevice,
@@ -2532,61 +2535,62 @@ class Core implements PactCore {
           recipient_name: string | null;
         }
       | undefined;
-    const record: OccurrenceRecord = {
-      status,
-      decidedBy: this.#decidedBy(pact, occurrence.date, status),
-      recipientName: status.kind === "missed" ? (row?.recipient_name ?? null) : null,
-    };
-    if (pact.evidence_kind === "oura" && (status.kind === "satisfied" || status.kind === "missed")) {
+    const judged = status.kind === "satisfied" || status.kind === "missed";
+    let detail: OccurrenceDetail | null = null;
+    if (pact.evidence_kind === "oura" && judged) {
       const bedtimeStart = row?.bedtime_start ?? null;
-      record.night = { inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
+      detail = { kind: "night", inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
     }
-    if (pact.evidence_kind === "anki" && row && (status.kind === "satisfied" || status.kind === "missed")) {
-      record.anki = ankiCheckOf(row);
-    }
-    return record;
+    if (pact.evidence_kind === "anki" && row && judged) detail = { kind: "anki", lastCheck: ankiCheckOf(row) };
+    return { status: this.#recordedStatus(pact, occurrence.date, status, row?.recipient_name ?? null), detail };
   }
 
   /**
-   * The decision that settled an occurrence with `status`: its approved
-   * evidence (Satisfied), its rejected evidence (Missed), or the approved excuse
-   * that covers it (Excused, or a day not judged yet it already excuses).
+   * `status` with the decision that settled it: its approved evidence
+   * (Satisfied), its rejected evidence and where the penalty went (Missed), or
+   * the approved excuse that covers it (Excused, or a day not judged yet it
+   * already excuses).
    */
-  #decidedBy(
+  #recordedStatus(
     pact: Pick<PactRow, "id" | "schedule">,
     date: LocalDate,
     status: OccurrenceStatus,
-  ): OccurrenceDecision | null {
+    recipientName: string | null,
+  ): RecordedStatus {
     const pactId = pact.id;
     // A Weekly count week is Satisfied or Missed by its days, not by any one decision.
     const weekly = scheduleOf(pact.schedule).kind === "weekly-count";
-    if ((status.kind === "satisfied" || status.kind === "missed") && weekly) return null;
-    if (status.kind === "satisfied") {
-      const row = this.#db
-        .prepare(
-          `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
-           WHERE evidence.pact_id = ? AND evidence.occurrence_date = ? AND evidence.decision = 'approved'`,
-        )
-        .get(pactId, date) as { name: string } | undefined;
-      return row ? { kind: "evidence-approved", reviewerName: row.name } : null;
+    switch (status.kind) {
+      case "satisfied": {
+        const row = weekly
+          ? undefined
+          : (this.#db
+              .prepare(
+                `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
+                 WHERE evidence.pact_id = ? AND evidence.occurrence_date = ? AND evidence.decision = 'approved'`,
+              )
+              .get(pactId, date) as { name: string } | undefined);
+        return { ...status, approvedBy: row?.name ?? null };
+      }
+      case "missed":
+        return { ...status, recipientName, rejection: weekly ? null : this.#rejection(pactId, date) };
+      case "excused":
+      case "not-judged": {
+        const covered = status.kind === "excused" || status.excuse === "approved";
+        const row = covered
+          ? (this.#db
+              .prepare(
+                `SELECT account.name, excuse.reason FROM excuse_day
+                 JOIN excuse ON excuse.id = excuse_day.excuse_id
+                 JOIN account ON account.id = excuse.decided_by_account_id
+                 WHERE excuse_day.pact_id = ? AND excuse_day.date = ? AND excuse.decision = 'approved'
+                 ORDER BY excuse.decided_at DESC LIMIT 1`,
+              )
+              .get(pactId, date) as { name: string; reason: string } | undefined)
+          : undefined;
+        return { ...status, excuseApproval: row ? { reviewerName: row.name, reason: row.reason } : null };
+      }
     }
-    if (status.kind === "missed") {
-      const rejection = this.#rejection(pactId, date);
-      return rejection && { kind: "evidence-rejected", ...rejection };
-    }
-    if (status.kind === "excused" || (status.kind === "not-judged" && status.excuse === "approved")) {
-      const row = this.#db
-        .prepare(
-          `SELECT account.name, excuse.reason FROM excuse_day
-           JOIN excuse ON excuse.id = excuse_day.excuse_id
-           JOIN account ON account.id = excuse.decided_by_account_id
-           WHERE excuse_day.pact_id = ? AND excuse_day.date = ? AND excuse.decision = 'approved'
-           ORDER BY excuse.decided_at DESC LIMIT 1`,
-        )
-        .get(pactId, date) as { name: string; reason: string } | undefined;
-      return row ? { kind: "excuse-approved", reviewerName: row.name, reason: row.reason } : null;
-    }
-    return null;
   }
 
   /** Whether an excuse waiting for approval, or else an approved one, covers the occurrence. */
@@ -3167,7 +3171,7 @@ class Core implements PactCore {
     timezone: string,
     after: Pick<ChangeableTerms, "schedule" | "inBedBy" | "dueBy" | "startDate" | "endDate" | "penaltyCents">,
     at: Date,
-  ): { appliesFrom: LocalDate; todayKeepsCents: number | null } {
+  ): ChangeStart {
     // One-time: the change applies to its one occurrence, open or not.
     if (after.schedule.kind === "one-time") return { appliesFrom: after.schedule.deadline, todayKeepsCents: null };
     const today = localDateOf(at, timezone);
@@ -3425,30 +3429,28 @@ class Core implements PactCore {
     const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
     const { request } = row;
     const waiting = row.decision === null && row.withdrawn_at === null;
-    const start =
-      waiting && request.kind === "change"
-        ? this.#startOfNewTerms(pact, ownerZone(row.timezone, row.owner_account_id), request.after, this.#clock.now())
-        : null;
-    return {
+    const base = {
       id: row.id,
       pactId: row.pact_id,
       pactName: pact.name,
-      endsPact: request.kind === "end",
       note: row.note,
       requestedAt: new Date(row.requested_at),
-      changes:
-        request.kind === "end"
-          ? []
-          : this.#termChanges(
-              pact.owner_account_id,
-              request.before,
-              request.after,
-              termDiffs(request.before, request.after, pact.anki_rollover_hour),
-            ),
       // Reminders are the owner's own: reviewers don't see them.
       current: withoutReminders(this.#currentTerms(pact)),
-      appliesFrom: start?.appliesFrom ?? null,
-      todayKeepsCents: start?.todayKeepsCents ?? null,
+    };
+    if (request.kind === "end") return { ...base, endsPact: true };
+    return {
+      ...base,
+      endsPact: false,
+      changes: this.#termChanges(
+        pact.owner_account_id,
+        request.before,
+        request.after,
+        termDiffs(request.before, request.after, pact.anki_rollover_hour),
+      ),
+      start: waiting
+        ? this.#startOfNewTerms(pact, ownerZone(row.timezone, row.owner_account_id), request.after, this.#clock.now())
+        : null,
     };
   }
 
@@ -3581,7 +3583,7 @@ class Core implements PactCore {
     const today = localDateOf(now, timezone);
     if (!start || start.date <= today) return null;
     const todayKeepsCents = this.#todayKeeps(pact.id, occurrences, today, { penaltyCents: pact.penalty_cents });
-    return { startsOn: start.date, todayKeepsCents };
+    return { appliesFrom: start.date, todayKeepsCents };
   }
 
   /** `ownerId`'s pact `pactId`, if it is one. */
@@ -4577,14 +4579,35 @@ class Core implements PactCore {
         occurrenceDate: row.date,
         missedAt: new Date(row.judged_at),
         excusableUntil: new Date(new Date(row.judged_at).getTime() + EXCUSE_WINDOW_MS),
-        ...(row.evidence_kind === "oura" && {
-          night: { inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) },
-        }),
-        ...(row.evidence_kind === "anki" && { anki: ankiCheckOf(row) }),
-        ...(dueBy !== null && row.evidence_kind !== "anki" && { closed: { dueBy } }),
-        ...(weekly && { week: this.#weekProgress(row.id, row.date) }),
+        detail: this.#missedDetail(row, dueBy, weekly),
       };
     });
+  }
+
+  /**
+   * What a Missed card's line says beyond its day: Closed at today's due-by
+   * time, how far a Weekly count week got, the Anki check that decided it, or
+   * when Oura saw the owner get into bed.
+   */
+  #missedDetail(
+    row: {
+      id: string;
+      evidence_kind: EvidenceKind;
+      date: LocalDate;
+      bedtime_start: string | null;
+      anki_cards_left: number | null;
+      anki_checked_at: string | null;
+    },
+    dueBy: string | null,
+    weekly: boolean,
+  ): MissedDetail | null {
+    if (dueBy !== null && row.evidence_kind !== "anki") return { kind: "closed", dueBy };
+    if (weekly) return { kind: "week", progress: this.#weekProgress(row.id, row.date) };
+    if (row.evidence_kind === "anki") return { kind: "anki", lastCheck: ankiCheckOf(row) };
+    if (row.evidence_kind === "oura") {
+      return { kind: "night", inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) };
+    }
+    return null;
   }
 
   /** Who rejected the latest rejected evidence for an occurrence, and why; null if none was rejected. */

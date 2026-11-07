@@ -262,7 +262,7 @@ interface PactPageTerms {
    * above are the new ones. `todayKeepsCents` is today's penalty when today
    * is an occurrence on the old terms with another penalty.
    */
-  newTerms: { startsOn: string; todayKeepsCents: number | null } | null;
+  newTerms: ChangeStart | null;
   /** The pact's evidence, excuses and change request waiting for a reviewer's decision, newest first. */
   waiting: PactWaitingItem[];
   /** What its heat map shows. */
@@ -411,39 +411,51 @@ export interface HeatMapDay {
 
 /** How one occurrence went, as a heat map's tapped square and a Yesterday row tell it. */
 export interface OccurrenceRecord {
-  status: OccurrenceStatus;
+  status: RecordedStatus;
   /**
-   * The reviewer's decision that settled it: approved evidence (Satisfied), rejected
-   * evidence (Missed), or an approved excuse (Excused, or a day ahead it already
-   * covers). Null for anything else, such as a day Missed with no evidence.
+   * Once judged Satisfied or Missed, on Oura Ring and Anki pacts: the night's
+   * sleep, or the check that decided the Anki day. Null for anything else.
    */
-  decidedBy: OccurrenceDecision | null;
-  /** Missed only: the recipient its penalty went to. */
-  recipientName: string | null;
-  /**
-   * Bedtime pacts only, once judged Satisfied or Missed: when the owner got into
-   * bed, "HH:MM" on Oura's clock, or null when Oura reported no sleep by
-   * 18:00 the next day.
-   */
-  night?: { inBedAt: string | null };
-  /**
-   * Anki pacts only, once judged Satisfied or Missed: the check that decided
-   * it, or null when no check reached AnkiWeb that day.
-   */
-  anki?: AnkiCheck | null;
+  detail: OccurrenceDetail | null;
 }
+
+/**
+ * Where an occurrence stands, with the reviewer's decision that settled it:
+ * approved evidence (Satisfied), rejected evidence (Missed), or an approved
+ * excuse (Excused, or a day ahead it already covers). Each is null when no
+ * one decision settled it, such as a day Missed with no evidence or a Weekly
+ * count week.
+ */
+export type RecordedStatus =
+  | (Extract<OccurrenceStatus, { kind: "satisfied" }> & {
+      /** Who approved its evidence. */
+      approvedBy: string | null;
+    })
+  | (Extract<OccurrenceStatus, { kind: "missed" }> & {
+      /** The recipient its penalty went to. */
+      recipientName: string | null;
+      rejection: EvidenceRejection | null;
+    })
+  | (Extract<OccurrenceStatus, { kind: "excused" | "not-judged" }> & {
+      /** Who approved the excuse that covers it, and the excuse's reason. */
+      excuseApproval: { reviewerName: string; reason: string } | null;
+    });
+
+/** What an Oura Ring or Anki pact's judged occurrence adds to its record. */
+export type OccurrenceDetail =
+  /**
+   * When the owner got into bed, "HH:MM" on Oura's clock, or null when Oura
+   * reported no sleep by 18:00 the next day.
+   */
+  | { kind: "night"; inBedAt: string | null }
+  /** The check that decided the Anki day, or null when no check reached AnkiWeb that day. */
+  | { kind: "anki"; lastCheck: AnkiCheck | null };
 
 /** A check of an Anki pact's deck: cards left (new, learning and due together) and when Pact checked. */
 export interface AnkiCheck {
   cardsLeft: number;
   checkedAt: Date;
 }
-
-/** A reviewer's decision that settled an occurrence. `reason` is the rejection's, or the excuse's. */
-export type OccurrenceDecision =
-  | { kind: "evidence-approved"; reviewerName: string }
-  | { kind: "evidence-rejected"; reviewerName: string; reason: string }
-  | { kind: "excuse-approved"; reviewerName: string; reason: string };
 
 /** What the pact page's "Waiting on" list holds: never payments, which belong to a recipient. */
 export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" | "change-request" }>;
@@ -937,21 +949,19 @@ export interface TodayMissedCard extends TodayPactCard {
   missedAt: Date;
   /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
   excusableUntil: Date;
-  /**
-   * Bedtime pacts only: when Oura says the owner got into bed, "HH:MM" on
-   * Oura's clock, or null when Oura reported no sleep by 18:00 the next day.
-   */
-  night?: { inBedAt: string | null };
-  /** Anki pacts only: why the day is Missed: the last check that counted for it, or null when none reached AnkiWeb. */
-  anki?: AnkiCheck | null;
+  /** What else its line says, or null for a plain Missed day. */
+  detail: MissedDetail | null;
+}
+
+export type MissedDetail =
+  | OccurrenceDetail
   /**
    * Today's occurrence of a Camera pact, Missed at its due-by time ("HH:MM")
    * with no evidence: it shows as Closed.
    */
-  closed?: { dueBy: string };
+  | { kind: "closed"; dueBy: string }
   /** Weekly count only: how far the week got. `penaltyCents` is one penalty per day short. */
-  week?: WeekProgress;
-}
+  | { kind: "week"; progress: WeekProgress };
 
 /**
  * A bedtime night past its in-bed-by time that Oura hasn't reported yet and
@@ -1344,12 +1354,8 @@ export type ChangeOutcome =
   | { kind: "nothing" }
   /** Only the name, the reminders or added reviewers: done now. */
   | { kind: "at-once" }
-  /**
-   * Only stricter (and maybe at-once) changes: they apply without approval
-   * from `appliesFrom`, the first occurrence not open yet. `todayKeepsCents`
-   * is today's penalty when today is an occurrence and the penalty changes.
-   */
-  | { kind: "stricter"; appliesFrom: string; todayKeepsCents: number | null }
+  /** Only stricter (and maybe at-once) changes: they apply without approval from the start given. */
+  | ({ kind: "stricter" } & ChangeStart)
   /**
    * Something relaxes the pact, so it's a change request, reviewed as a whole
    * (`bundlesStricter`: with stricter changes in it, which wait too). The name,
@@ -1393,26 +1399,36 @@ export type RequestEndResult =
   | { ok: false; reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" };
 
 /** A change request, as its reviewers and its owner see it. */
-export interface ChangeRequestView {
+export type ChangeRequestView = ChangeRequestBase & ({ endsPact: true } | TermsChangeRequest);
+
+interface ChangeRequestBase {
   /** The change request's id. */
   id: string;
   pactId: string;
   pactName: string;
-  /** It asks to end the pact; `changes` is empty then. */
-  endsPact: boolean;
   /** The owner's "Why?", or null. */
   note: string | null;
   requestedAt: Date;
-  /** The terms it changes, old and new, each `needs-approval` or `stricter`. */
-  changes: TermChange[];
   /** The pact's terms as they stand: what it leaves alone stays as here. */
   current: CurrentTerms;
-  /**
-   * While it waits: the first occurrence the new terms would apply to if it
-   * were approved now, "YYYY-MM-DD". Null when it ends the pact, or once decided.
-   */
-  appliesFrom: string | null;
-  /** While it waits: today's penalty, when today is an occurrence and the penalty changes. */
+}
+
+/** A change request that changes terms, rather than ending the pact. */
+interface TermsChangeRequest {
+  endsPact: false;
+  /** The terms it changes, old and new, each `needs-approval` or `stricter`. */
+  changes: TermChange[];
+  /** While it waits: when the new terms would start if it were approved now. Null once decided. */
+  start: ChangeStart | null;
+}
+
+/**
+ * When new terms start: `appliesFrom`, "YYYY-MM-DD", is the first occurrence
+ * not open yet. `todayKeepsCents` is today's penalty, when today is an
+ * occurrence on the old terms and the penalty changes.
+ */
+export interface ChangeStart {
+  appliesFrom: string;
   todayKeepsCents: number | null;
 }
 
@@ -1420,12 +1436,12 @@ export interface ChangeRequestView {
 export type ChangeRequestState = ReviewState | { kind: "withdrawn"; withdrawnAt: Date };
 
 /** The change request's page, for its owner. */
-export interface ChangeRequestDetail extends ChangeRequestView {
+export type ChangeRequestDetail = ChangeRequestView & {
   state: ChangeRequestState;
   /** The pact's reviewers, sorted by name: who may decide it. */
   reviewerNames: string[];
   thread: QuestionThread;
-}
+};
 
 export type ChangeRequestResult =
   { ok: true; changeRequest: ChangeRequestDetail } | { ok: false; reason: "change-request-not-found" };

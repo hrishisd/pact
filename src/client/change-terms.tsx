@@ -11,6 +11,8 @@ import { clockText, formatDate, money, remindersText, scheduleText } from "./for
 export type Term = TermChange["term"];
 type Change = Json<TermChange>;
 type Current = Json<CurrentTerms>;
+/** A change request that changes terms rather than ending the pact. */
+type TermsChangeRequestView = Extract<ChangeRequestView, { endsPact: false }>;
 
 export const TERM_LABELS: Record<Term, string> = {
   name: "Name",
@@ -206,7 +208,7 @@ export function DiffList({ changes }: { changes: Change[] }) {
 }
 
 /** The terms a change request leaves alone, folded away. Reminders are the owner's own, so reviewers don't see them. */
-export function EverythingElse({ request }: { request: Json<ChangeRequestView> }) {
+export function EverythingElse({ request }: { request: Json<TermsChangeRequestView> }) {
   const changed = new Set(request.changes.map((change) => change.term));
   const rest = termsOfKind(request.current).filter(
     (term): term is Exclude<Term, "reminders"> => !changed.has(term) && term !== "reminders",
@@ -231,17 +233,18 @@ export function EverythingElse({ request }: { request: Json<ChangeRequestView> }
  * applies from Wed Nov 4, the first Gym day not open yet. Today keeps $5 per miss." A Weekly count
  * pact's applies from a week, and this week keeps its penalty.
  */
-export function startsText(request: Json<ChangeRequestView>, lead: string): string {
-  if (request.appliesFrom === null) return "";
+export function startsText(request: Json<TermsChangeRequestView>, lead: string): string {
+  const { start } = request;
+  if (start === null) return "";
   const { schedule } = request.current;
   // A One-time pact's one occurrence takes a change even once it's open.
   if (schedule.kind === "one-time") return `${lead} at once, to its one deadline, even if it's open.`;
   const unit = request.current.evidenceKind === "oura" ? "night" : schedule.kind === "weekly-count" ? "week" : "day";
   const today =
-    request.todayKeepsCents === null
+    start.todayKeepsCents === null
       ? ""
-      : ` ${openOccurrenceText(schedule)} keeps ${money(request.todayKeepsCents)} per miss.`;
-  return `${lead} from ${formatDate(request.appliesFrom)}, the first ${request.pactName} ${unit} not open yet.${today}`;
+      : ` ${openOccurrenceText(schedule)} keeps ${money(start.todayKeepsCents)} per miss.`;
+  return `${lead} from ${formatDate(start.appliesFrom)}, the first ${request.pactName} ${unit} not open yet.${today}`;
 }
 
 /** "Sam", "Sam and Alex", "Sam, Alex and Jo". */

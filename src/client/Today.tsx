@@ -366,7 +366,7 @@ function Section({
           key={`${card.pactId}:${card.occurrenceDate}`}
           name={card.name}
           penaltyCents={card.penaltyCents}
-          chip={<span className="chip c-missed">{card.closed ? "Closed" : "Missed"}</span>}
+          chip={<span className="chip c-missed">{card.detail?.kind === "closed" ? "Closed" : "Missed"}</span>}
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
           <div className="meta">{missedLine(card, timezone)}</div>
@@ -586,16 +586,21 @@ function CheckingAnkiWeb() {
  * into bed, or for an Anki day why. Today's day past its due-by time says when evidence was due. A
  * Weekly count week says how far it got.
  */
-function missedLine(card: Json<TodayMissedCard>, timezone: string): string {
-  if (card.closed) return `Evidence was due by ${clockText(card.closed.dueBy)}.`;
-  if (card.week) {
-    const { sessions, target } = card.week;
-    return `Week of ${formatDate(card.occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
+function missedLine({ detail, occurrenceDate }: Json<TodayMissedCard>, timezone: string): string {
+  switch (detail?.kind) {
+    case "closed":
+      return `Evidence was due by ${clockText(detail.dueBy)}.`;
+    case "week": {
+      const { sessions, target } = detail.progress;
+      return `Week of ${formatDate(occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
+    }
+    case "anki":
+      return `${formatDate(occurrenceDate)} · ${ankiMissText(detail.lastCheck, timezone)}`;
+    case "night":
+      return `${formatDate(occurrenceDate)} night · ${detail.inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(detail.inBedAt)}`}`;
+    case undefined:
+      return formatDate(occurrenceDate);
   }
-  if (card.anki !== undefined) return `${formatDate(card.occurrenceDate)} · ${ankiMissText(card.anki, timezone)}`;
-  if (!card.night) return formatDate(card.occurrenceDate);
-  const { inBedAt } = card.night;
-  return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;
 }
 
 /**

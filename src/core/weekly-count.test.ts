@@ -107,9 +107,10 @@ describe("the spec's examples", () => {
           penaltyCents: 500,
           held: false,
           excusableUntil: new Date(s.at("Mon+2 00:00").getTime() + 2 * DAY_MS),
+          recipientName: "Sam",
+          rejection: null,
         },
-        decidedBy: null,
-        recipientName: "Sam",
+        detail: null,
       },
     });
     expect(owed(owner)).toBe(500);
@@ -158,11 +159,11 @@ describe("the spec's examples", () => {
     expect(item).toMatchObject({
       kind: "change-request",
       changes: [{ term: "schedule", before: weekly(3), after: weekly(2), effect: "needs-approval" }],
-      appliesFrom: WEEK_2,
+      start: { appliesFrom: WEEK_2 },
     });
     await reviewer.decide(item!.id, { kind: "approve" });
 
-    expect(pactOf(owner, piano)).toMatchObject({ schedule: weekly(2), newTerms: { startsOn: WEEK_2 } });
+    expect(pactOf(owner, piano)).toMatchObject({ schedule: weekly(2), newTerms: { appliesFrom: WEEK_2 } });
     expect(s.notifier.sentTo(owner).find((n) => n.kind === "change-request-decided")?.payload.body).toBe(
       "Piano · New terms start Mon Jan 19",
     );
@@ -349,7 +350,7 @@ describe("evidence", () => {
     expect(weekOf(owner, piano, WEEK_1).occurrence?.status.kind).toBe("not-judged");
     await s.advanceTo("Mon+2 00:00");
 
-    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "satisfied" });
+    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: null });
   });
 
   test("evidence waiting for a decision at the end of Sunday holds the outcome until it's decided", async () => {
@@ -373,6 +374,8 @@ describe("evidence", () => {
       penaltyCents: 500,
       held: false,
       excusableUntil: new Date(s.at("Tue+2 10:00").getTime() + 2 * DAY_MS),
+      recipientName: "Sam",
+      rejection: null,
     });
     expect(owed(owner)).toBe(500);
     // Judged by now, the week has its own Missed card instead of the rejection's alert.
@@ -389,7 +392,7 @@ describe("evidence", () => {
 
     await reviewer.decide(late, { kind: "approve" });
 
-    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "satisfied" });
+    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: null });
     expect(owed(owner)).toBe(0);
   });
 });
@@ -459,7 +462,7 @@ describe("a rejected photo", () => {
           occurrenceDate: WEEK_1,
           missedAt: s.at("Mon+2 00:00"),
           excusableUntil: new Date(s.at("Mon+2 00:00").getTime() + 2 * DAY_MS),
-          week: { sessions: 0, waiting: 0, target: 1 },
+          detail: { kind: "week", progress: { sessions: 0, waiting: 0, target: 1 } },
         },
       ],
     });
@@ -514,9 +517,8 @@ describe("excuses", () => {
     await s.advanceTo("Mon+2 00:00");
 
     expect(weekOf(owner, piano, WEEK_1).occurrence).toEqual({
-      status: { kind: "excused" },
-      decidedBy: { kind: "excuse-approved", reviewerName: "reviewer", reason: "Recital" },
-      recipientName: null,
+      status: { kind: "excused", excuseApproval: { reviewerName: "reviewer", reason: "Recital" } },
+      detail: null,
     });
     expect(owed(owner)).toBe(0);
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([]);
@@ -535,7 +537,10 @@ describe("excuses", () => {
     expect(owed(owner)).toBe(0);
     await reviewer.decide(filed.excuseId, { kind: "approve" });
 
-    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({ kind: "excused" });
+    expect(weekOf(owner, piano, WEEK_1).occurrence?.status).toEqual({
+      kind: "excused",
+      excuseApproval: { reviewerName: "reviewer", reason: "Sick all week" },
+    });
     expect(owed(owner)).toBe(0);
   });
 });
@@ -749,7 +754,7 @@ describe("dates, bills and the heat map", () => {
       {
         date: WEEK_1,
         progress: { sessions: 2, waiting: 0, target: 2 },
-        occurrence: { status: { kind: "satisfied" }, decidedBy: null, recipientName: null },
+        occurrence: { status: { kind: "satisfied", approvedBy: null }, detail: null },
       },
       {
         date: WEEK_2,
@@ -761,9 +766,9 @@ describe("dates, bills and the heat map", () => {
             dueAt: s.at("Mon+3 00:00"),
             evidenceWaiting: false,
             excuse: null,
+            excuseApproval: null,
           },
-          decidedBy: null,
-          recipientName: null,
+          detail: null,
         },
       },
     ]);

@@ -781,9 +781,9 @@ describe("pacts", () => {
                     dueAt: `2026-01-${String(Number(day) + 1).padStart(2, "0")}T05:00:00.000Z`,
                     evidenceWaiting: false,
                     excuse: null,
+                    excuseApproval: null,
                   },
-                  decidedBy: null,
-                  recipientName: null,
+                  detail: null,
                 }
               : null,
           })),
@@ -810,9 +810,15 @@ describe("pacts", () => {
         evidenceKind: "camera",
         occurrenceDate: "2026-01-05",
         occurrence: {
-          status: { kind: "missed", penaltyCents: 500, held: false, excusableUntil: "2026-01-08T05:00:00.000Z" },
-          decidedBy: null,
-          recipientName: "Sam",
+          status: {
+            kind: "missed",
+            penaltyCents: 500,
+            held: false,
+            excusableUntil: "2026-01-08T05:00:00.000Z",
+            recipientName: "Sam",
+            rejection: null,
+          },
+          detail: null,
         },
       },
     ] satisfies TodayResponse["yesterday"]);

@@ -186,7 +186,7 @@ describe("judging an Anki day", () => {
     await s.advanceTo("Wed 00:00");
     expect(day(owner, pactId, TUE)).toMatchObject({
       status: { kind: "satisfied" },
-      anki: { cardsLeft: 0, checkedAt: s.at("Tue 21:10") },
+      detail: { kind: "anki", lastCheck: { cardsLeft: 0, checkedAt: s.at("Tue 21:10") } },
     });
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
   });
@@ -207,7 +207,7 @@ describe("judging an Anki day", () => {
         pactId,
         occurrenceDate: TUE,
         missedAt: s.at("Wed 00:00"),
-        anki: { cardsLeft: 12, checkedAt: s.at("Tue 23:50") },
+        detail: { kind: "anki", lastCheck: { cardsLeft: 12, checkedAt: s.at("Tue 23:50") } },
       }),
     ]);
     expect(s.notifier.sentTo(owner).map((n) => n.payload.title)).toContain("Spanish is Missed");
@@ -245,7 +245,7 @@ describe("judging an Anki day", () => {
     await s.advanceTo("Tue 21:59");
     await s.advanceTo("Tue 22:00");
     expect(status(owner, pactId, TUE)).toBe("missed");
-    expect(day(owner, pactId, TUE)?.anki).toBeNull();
+    expect(day(owner, pactId, TUE)?.detail).toEqual({ kind: "anki", lastCheck: null });
   });
 
   test("a day no check reached AnkiWeb for is Missed, as not reached", async () => {
@@ -259,7 +259,7 @@ describe("judging an Anki day", () => {
     await s.advanceTo("Wed 00:00");
 
     expect(status(owner, pactId, TUE)).toBe("missed");
-    expect(missedCards(owner)).toEqual([expect.objectContaining({ anki: null })]);
+    expect(missedCards(owner)).toEqual([expect.objectContaining({ detail: { kind: "anki", lastCheck: null } })]);
   });
 
   test("with nothing due and no answers yet, the first check satisfies the day", async () => {
@@ -312,7 +312,7 @@ describe("judging an Anki day", () => {
     await s.advanceTo("Wed 00:01");
     expect(day(owner, pactId, TUE)).toMatchObject({
       status: { kind: "satisfied" },
-      anki: { cardsLeft: 0, checkedAt: s.at("Tue 23:59") },
+      detail: { kind: "anki", lastCheck: { cardsLeft: 0, checkedAt: s.at("Tue 23:59") } },
     });
   });
 
@@ -334,7 +334,7 @@ describe("judging an Anki day", () => {
       expect.objectContaining({
         pactId,
         missedAt: s.at("Wed 00:00"),
-        anki: { cardsLeft: 2, checkedAt: s.at("Tue 23:59") },
+        detail: { kind: "anki", lastCheck: { cardsLeft: 2, checkedAt: s.at("Tue 23:59") } },
       }),
     ]);
   });
@@ -768,7 +768,7 @@ describe("AnkiWeb refusing Pact's login", () => {
     await s.advanceTo("Wed 00:00");
     expect(day(owner, pactId, TUE)).toMatchObject({
       status: { kind: "missed" },
-      anki: null,
+      detail: { kind: "anki", lastCheck: null },
     });
   });
 

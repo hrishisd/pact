@@ -123,7 +123,10 @@ describe("the spec's example", () => {
       sections: [],
       waiting: [],
       yesterday: [
-        expect.objectContaining({ occurrenceDate: MONDAY, occurrence: expect.objectContaining({ decidedBy: null }) }),
+        expect.objectContaining({
+          occurrenceDate: MONDAY,
+          occurrence: expect.objectContaining({ status: expect.objectContaining({ kind: "missed", rejection: null }) }),
+        }),
       ],
     });
     expect(owner.excuse(excuseId)).toMatchObject({

@@ -107,12 +107,17 @@ describe("a due-by time", () => {
     await s.advanceTo("Wed 09:01");
 
     const days = heatMapDays(owner, gym);
-    expect(days.find((d) => d.date === TUESDAY)?.occurrence?.status).toEqual({ kind: "satisfied" });
+    expect(days.find((d) => d.date === TUESDAY)?.occurrence?.status).toEqual({
+      kind: "satisfied",
+      approvedBy: "reviewer",
+    });
     expect(days.find((d) => d.date === WEDNESDAY)?.occurrence?.status).toEqual({
       kind: "missed",
       penaltyCents: 500,
       held: false,
       excusableUntil: new Date(s.at("Wed 09:00").getTime() + 48 * 3600_000),
+      recipientName: "Sam",
+      rejection: null,
     });
     expect(penaltyDays(owner)).toEqual([WEDNESDAY]);
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toEqual([
@@ -168,7 +173,7 @@ describe("a due-by time", () => {
             pactId: gym,
             occurrenceDate: MONDAY,
             missedAt: s.at("Mon 21:00"),
-            closed: { dueBy: "21:00" },
+            detail: { kind: "closed", dueBy: "21:00" },
           }),
         ],
       },
@@ -181,7 +186,7 @@ describe("a due-by time", () => {
       kind: "to-do",
       cards: [expect.objectContaining({ occurrenceDate: TUESDAY, dueBy: "21:00" })],
     });
-    expect(missed).toEqual({ kind: "missed", cards: [expect.not.objectContaining({ closed: expect.anything() })] });
+    expect(missed).toEqual({ kind: "missed", cards: [expect.objectContaining({ detail: null })] });
   });
 
   test("without one, the To do card is due at midnight", async () => {
@@ -368,12 +373,15 @@ describe("changing them after the edit window", () => {
       expect.objectContaining({
         kind: "change-request",
         changes: [{ term: "due-by", before: "09:00", after: "10:00", effect: "needs-approval" }],
-        appliesFrom: FRIDAY,
+        start: expect.objectContaining({ appliesFrom: FRIDAY }),
       }),
     ]);
     expect(pactOf(owner, gym)).toMatchObject({ dueBy: "09:00" });
     await reviewer.decide(changeRequestIdOf(result), { kind: "approve" });
-    expect(pactOf(owner, gym)).toMatchObject({ dueBy: "10:00", newTerms: { startsOn: FRIDAY, todayKeepsCents: null } });
+    expect(pactOf(owner, gym)).toMatchObject({
+      dueBy: "10:00",
+      newTerms: { appliesFrom: FRIDAY, todayKeepsCents: null },
+    });
 
     // Thursday keeps 09:00.
     s.setClockTo("Thu 09:30");

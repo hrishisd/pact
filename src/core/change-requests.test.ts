@@ -100,7 +100,7 @@ describe("a stricter change applies at once, from the first occurrence not open 
     });
     expect(pactOf(owner, gym)).toMatchObject({
       penaltyCents: 1000,
-      newTerms: { startsOn: FRIDAY, todayKeepsCents: 500 },
+      newTerms: { appliesFrom: FRIDAY, todayKeepsCents: 500 },
     });
     // Today's card keeps today's terms.
     expect(owner.today().sections).toEqual([
@@ -219,8 +219,7 @@ describe("a relaxing change waits for a reviewer", () => {
         note: "Money is tight this month",
         requestedAt: s.at("Thu 15:00"),
         changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
-        appliesFrom: FRIDAY,
-        todayKeepsCents: 500,
+        start: { appliesFrom: FRIDAY, todayKeepsCents: 500 },
       }),
     ]);
 
@@ -229,7 +228,7 @@ describe("a relaxing change waits for a reviewer", () => {
 
     expect(pactOf(owner, gym)).toMatchObject({
       penaltyCents: 200,
-      newTerms: { startsOn: SATURDAY, todayKeepsCents: 500 },
+      newTerms: { appliesFrom: SATURDAY, todayKeepsCents: 500 },
     });
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([
       expect.objectContaining({
@@ -594,14 +593,15 @@ describe("ending a pact", () => {
 
     expect(result).toEqual({ ok: true, changeRequestId: expect.any(String) });
     const id = result.ok ? result.changeRequestId : "";
-    expect(reviewer.reviewQueue()[0]).toMatchObject({
+    const queued = reviewer.reviewQueue()[0];
+    expect(queued).toMatchObject({
       kind: "change-request",
       id,
       endsPact: true,
       note: "I've moved and the gym is too far",
-      changes: [],
-      appliesFrom: null,
     });
+    expect(queued).not.toHaveProperty("changes");
+    expect(queued).not.toHaveProperty("start");
     expect(
       s.notifier
         .sentTo(reviewer)

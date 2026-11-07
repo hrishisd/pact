@@ -3,7 +3,14 @@
 // yesterday did.
 
 import { describe, expect, test } from "vitest";
-import type { HeatMapDay, OccurrenceRecord, PactChange, Weekday } from "../shared/types.ts";
+import type {
+  EvidenceRejection,
+  HeatMapDay,
+  OccurrenceDetail,
+  OccurrenceRecord,
+  PactChange,
+  Weekday,
+} from "../shared/types.ts";
 import { ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
@@ -33,21 +40,31 @@ async function excused(owner: AccountHandle, reviewer: AccountHandle, pactId: st
   await reviewer.decide(filed.excuseId, { kind: "approve" });
 }
 
-const satisfied = (reviewerName: string): OccurrenceRecord => ({
-  status: { kind: "satisfied" },
-  decidedBy: { kind: "evidence-approved", reviewerName },
-  recipientName: null,
+const satisfied = (approvedBy: string | null, detail: OccurrenceDetail | null = null): OccurrenceRecord => ({
+  status: { kind: "satisfied", approvedBy },
+  detail,
 });
 
-const missed = (s: Scenario, judgedAt: string, decidedBy: OccurrenceRecord["decidedBy"] = null): OccurrenceRecord => ({
+const missed = (
+  s: Scenario,
+  judgedAt: string,
+  rejection: EvidenceRejection | null = null,
+  detail: OccurrenceDetail | null = null,
+): OccurrenceRecord => ({
   status: {
     kind: "missed",
     penaltyCents: 500,
     held: false,
     excusableUntil: new Date(s.at(judgedAt).getTime() + 48 * 3600_000),
+    recipientName: "Sam",
+    rejection,
   },
-  decidedBy,
-  recipientName: "Sam",
+  detail,
+});
+
+const excusedBy = (reviewerName: string, reason: string): OccurrenceRecord => ({
+  status: { kind: "excused", excuseApproval: { reviewerName, reason } },
+  detail: null,
 });
 
 const notJudged = (s: Scenario, day: string, next: string, evidenceWaiting = false): OccurrenceRecord => ({
@@ -57,9 +74,9 @@ const notJudged = (s: Scenario, day: string, next: string, evidenceWaiting = fal
     dueAt: s.at(`${next} 00:00`),
     evidenceWaiting,
     excuse: null,
+    excuseApproval: null,
   },
-  decidedBy: null,
-  recipientName: null,
+  detail: null,
 });
 
 describe("the heat map", () => {
@@ -84,11 +101,7 @@ describe("the heat map", () => {
       { date: "2026-01-06", occurrence: null },
       {
         date: "2026-01-07",
-        occurrence: missed(s, "Wed 18:00", {
-          kind: "evidence-rejected",
-          reviewerName: "reviewer",
-          reason: "That's Monday's photo",
-        }),
+        occurrence: missed(s, "Wed 18:00", { reviewerName: "reviewer", reason: "That's Monday's photo" }),
       },
       { date: "2026-01-08", occurrence: null },
       { date: "2026-01-09", occurrence: missed(s, "Sat 00:00") },
@@ -96,11 +109,7 @@ describe("the heat map", () => {
       { date: "2026-01-11", occurrence: null },
       {
         date: "2026-01-12",
-        occurrence: {
-          status: { kind: "excused" },
-          decidedBy: { kind: "excuse-approved", reviewerName: "reviewer", reason: "Away at a wedding" },
-          recipientName: null,
-        },
+        occurrence: excusedBy("reviewer", "Away at a wedding"),
       },
       { date: "2026-01-13", occurrence: null },
       // Its photo is still waiting for a reviewer, past its due time.
@@ -198,17 +207,9 @@ describe("the heat map", () => {
     await s.advanceTo("Thu 18:00");
 
     expect(historyOf(owner, bed).slice(0, 3)).toEqual([
-      {
-        date: "2026-01-05",
-        occurrence: {
-          status: { kind: "satisfied" },
-          decidedBy: null,
-          recipientName: null,
-          night: { inBedAt: "23:40" },
-        },
-      },
-      { date: "2026-01-06", occurrence: { ...missed(s, "Thu 18:00"), night: { inBedAt: "01:10" } } },
-      { date: "2026-01-07", occurrence: { ...missed(s, "Thu 18:00"), night: { inBedAt: null } } },
+      { date: "2026-01-05", occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }) },
+      { date: "2026-01-06", occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: "01:10" }) },
+      { date: "2026-01-07", occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: null }) },
     ]);
   });
 });
@@ -239,11 +240,7 @@ describe("Yesterday on Today", () => {
         name: "Piano",
         evidenceKind: "camera",
         occurrenceDate: "2026-01-05",
-        occurrence: {
-          status: { kind: "excused" },
-          decidedBy: { kind: "excuse-approved", reviewerName: "reviewer", reason: "Sick with the flu" },
-          recipientName: null,
-        },
+        occurrence: excusedBy("reviewer", "Sick with the flu"),
       },
       {
         pactId: read,
@@ -287,12 +284,7 @@ describe("Yesterday on Today", () => {
         name: "In bed by midnight",
         evidenceKind: "oura",
         occurrenceDate: "2026-01-05",
-        occurrence: {
-          status: { kind: "satisfied" },
-          decidedBy: null,
-          recipientName: null,
-          night: { inBedAt: "23:40" },
-        },
+        occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }),
       },
     ]);
   });

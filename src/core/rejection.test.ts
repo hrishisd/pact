@@ -81,7 +81,10 @@ describe("a rejection is final straight away", () => {
         expect.objectContaining({
           occurrenceDate: MONDAY,
           occurrence: expect.objectContaining({
-            decidedBy: { kind: "evidence-rejected", reviewerName: "reviewer", reason: "That's last week's photo" },
+            status: expect.objectContaining({
+              kind: "missed",
+              rejection: { reviewerName: "reviewer", reason: "That's last week's photo" },
+            }),
           }),
         }),
       ],

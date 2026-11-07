@@ -187,11 +187,11 @@ function StageLine({ pact }: { pact: Pact }) {
 /** "New terms start Fri Jan 9. Today keeps $5 per miss.", while a change in force hasn't started. */
 function NewTerms({ pact }: { pact: Pact }) {
   if (pact.newTerms === null) return null;
-  const { startsOn, todayKeepsCents } = pact.newTerms;
+  const { appliesFrom, todayKeepsCents } = pact.newTerms;
   return (
     <div className="alert ok" role="status">
       <p>
-        <b>New terms start {formatDate(startsOn)}.</b>
+        <b>New terms start {formatDate(appliesFrom)}.</b>
         {todayKeepsCents !== null && ` ${openOccurrenceText(pact.schedule)} keeps ${money(todayKeepsCents)} per miss.`}
       </p>
     </div>

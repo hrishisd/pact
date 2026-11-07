@@ -453,7 +453,7 @@ describe("changing reminders on an Active pact", () => {
 
     expect(pactOf(owner, gym).reminders).toEqual(["19:00"]);
     const request = owner.changeRequest(result.outcome.changeRequestId);
-    if (!request.ok) throw new Error(request.reason);
+    if (!request.ok || request.changeRequest.endsPact) throw new Error("expected a change of terms");
     expect(request.changeRequest.changes.map((c) => c.term)).toEqual(["penalty"]);
   });
 });

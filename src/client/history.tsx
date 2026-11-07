@@ -56,30 +56,41 @@ function OccurrenceChip({
  * for; without it the chip says enough.
  */
 function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: string[] = []): string {
-  const { status, decidedBy, recipientName, night, anki } = record;
-  const bed = night && (night.inBedAt === null ? "No sleep data by 6pm." : `In bed at ${clockText(night.inBedAt)}.`);
+  const { status, detail } = record;
+  const bed =
+    detail?.kind === "night"
+      ? detail.inBedAt === null
+        ? "No sleep data by 6pm."
+        : `In bed at ${clockText(detail.inBedAt)}.`
+      : undefined;
   switch (status.kind) {
     case "satisfied":
       if (bed) return bed;
-      if (anki?.checkedAt) return `Finished by ${clockTime(anki.checkedAt, timezone)}.`;
-      return decidedBy?.kind === "evidence-approved" ? `Photo approved by ${decidedBy.reviewerName}.` : "";
+      if (detail?.kind === "anki" && detail.lastCheck)
+        return `Finished by ${clockTime(detail.lastCheck.checkedAt, timezone)}.`;
+      return status.approvedBy !== null ? `Photo approved by ${status.approvedBy}.` : "";
     case "missed": {
-      const cost = status.held
-        ? `${money(status.penaltyCents)} held.`
-        : `${money(status.penaltyCents)} to ${recipientName ?? "your recipient"}.`;
-      if (decidedBy?.kind === "evidence-rejected")
-        return `${decidedBy.reviewerName} rejected the photo: “${sentence(decidedBy.reason)}” ${cost}`;
-      if (anki !== undefined) return `${ankiMissText(anki, timezone)}. ${cost}`;
+      const cost = missedCost(status);
+      if (status.rejection)
+        return `${status.rejection.reviewerName} rejected the photo: “${sentence(status.rejection.reason)}” ${cost}`;
+      if (detail?.kind === "anki") return `${ankiMissText(detail.lastCheck, timezone)}. ${cost}`;
       return `${bed ?? "No photo."} ${cost}`;
     }
     case "excused":
     case "not-judged":
-      if (decidedBy?.kind === "excuse-approved")
-        return `Excuse approved by ${decidedBy.reviewerName}: “${sentence(decidedBy.reason)}”`;
+      if (status.excuseApproval)
+        return `Excuse approved by ${status.excuseApproval.reviewerName}: “${sentence(status.excuseApproval.reason)}”`;
       if (status.kind === "not-judged" && status.evidenceWaiting && reviewerNames.length > 0)
         return `Photo waiting for ${listNames(reviewerNames, "or")}.`;
       return "";
   }
+}
+
+/** What a Missed occurrence cost: held while an excuse waits, else paid to its recipient. */
+function missedCost(status: Extract<Occurrence["status"], { kind: "missed" }>): string {
+  return status.held
+    ? `${money(status.penaltyCents)} held.`
+    : `${money(status.penaltyCents)} to ${status.recipientName ?? "your recipient"}.`;
 }
 
 /** `text` ending in a full stop, unless it already ends a sentence. */
@@ -381,10 +392,7 @@ function weekLine(week: Week, timezone: string): string {
   const { status } = record;
   if (status.kind === "missed") {
     const short = week.progress.target - week.progress.sessions;
-    const cost = status.held
-      ? `${money(status.penaltyCents)} held.`
-      : `${money(status.penaltyCents)} to ${record.recipientName ?? "your recipient"}.`;
-    return `${weekText(week)}. ${short} short: ${cost}`;
+    return `${weekText(week)}. ${short} short: ${missedCost(status)}`;
   }
   const excused = occurrenceLine(record, timezone);
   if (status.kind === "excused" || excused !== "") return excused;

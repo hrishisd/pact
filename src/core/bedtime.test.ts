@@ -150,7 +150,7 @@ describe("judging a night", () => {
         occurrenceDate: TUE,
         missedAt: s.at("Wed 07:00"),
         excusableUntil: s.at("Fri 07:00"),
-        night: { inBedAt: "01:00" },
+        detail: { kind: "night", inBedAt: "01:00" },
       },
     ]);
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "missed-occurrence")).toHaveLength(1);
@@ -182,7 +182,11 @@ describe("judging a night", () => {
     await s.advanceTo("Wed 10:00");
 
     expect(missedCards(owner)).toEqual([
-      expect.objectContaining({ occurrenceDate: TUE, missedAt: s.at("Wed 02:00"), night: { inBedAt: "01:10" } }),
+      expect.objectContaining({
+        occurrenceDate: TUE,
+        missedAt: s.at("Wed 02:00"),
+        detail: { kind: "night", inBedAt: "01:10" },
+      }),
     ]);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500 })]);
   });
@@ -206,7 +210,11 @@ describe("judging a night", () => {
 
     await s.advanceTo("Wed 18:00");
     expect(missedCards(owner)).toEqual([
-      expect.objectContaining({ occurrenceDate: TUE, missedAt: s.at("Wed 18:00"), night: { inBedAt: null } }),
+      expect.objectContaining({
+        occurrenceDate: TUE,
+        missedAt: s.at("Wed 18:00"),
+        detail: { kind: "night", inBedAt: null },
+      }),
     ]);
   });
 
@@ -231,7 +239,9 @@ describe("judging a night", () => {
     await s.advanceTo("Wed 07:00");
 
     expect(night(owner, pactId, MON)).toBe("satisfied");
-    expect(missedCards(owner)).toEqual([expect.objectContaining({ occurrenceDate: TUE, night: { inBedAt: "00:10" } })]);
+    expect(missedCards(owner)).toEqual([
+      expect.objectContaining({ occurrenceDate: TUE, detail: { kind: "night", inBedAt: "00:10" } }),
+    ]);
   });
 
   test("a night with an approved excuse and no sleep is Excused at 6pm the next day", async () => {
@@ -346,7 +356,11 @@ describe("a traveller's night closes at 18:00 on Oura's clock", () => {
     s.ouraSource.addSleep(owner.id, sleep("2026-01-07T15:00:00-10:00"));
     await s.advanceTo("Wed 22:30");
     expect(missedCards(owner)).toEqual([
-      expect.objectContaining({ occurrenceDate: TUE, missedAt: s.at("Wed 22:30"), night: { inBedAt: "15:00" } }),
+      expect.objectContaining({
+        occurrenceDate: TUE,
+        missedAt: s.at("Wed 22:30"),
+        detail: { kind: "night", inBedAt: "15:00" },
+      }),
     ]);
   });
 
@@ -362,7 +376,11 @@ describe("a traveller's night closes at 18:00 on Oura's clock", () => {
     expect(night(owner, pactId, TUE)).toBe("not-judged");
     await s.advanceTo("Wed 12:00");
     expect(missedCards(owner)).toEqual([
-      expect.objectContaining({ occurrenceDate: TUE, missedAt: s.at("Wed 12:00"), night: { inBedAt: null } }),
+      expect.objectContaining({
+        occurrenceDate: TUE,
+        missedAt: s.at("Wed 12:00"),
+        detail: { kind: "night", inBedAt: null },
+      }),
     ]);
   });
 

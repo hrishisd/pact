@@ -26,6 +26,7 @@ describe("judging at the end of a scheduled day", () => {
         occurrenceDate: MONDAY,
         missedAt: s.at("Tue 00:00"),
         excusableUntil: s.at("Thu 00:00"),
+        detail: null,
       },
     ]);
   });
@@ -43,7 +44,10 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Tue 08:01");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 0 })]);
-    expect(owner.today()).toEqual({ ...nothingOnToday, yesterday: gymMonday({ kind: "satisfied" }) });
+    expect(owner.today()).toEqual({
+      ...nothingOnToday,
+      yesterday: gymMonday({ kind: "satisfied", approvedBy: "reviewer" }),
+    });
   });
 
   test("evidence submitted Monday, still waiting at midnight: not judged yet; rejected Tuesday: Missed as of the rejection, $5 owed", async () => {
@@ -175,7 +179,10 @@ describe("judging at the end of a scheduled day", () => {
     await s.advanceTo("Tue 23:00");
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
-    expect(owner.today()).toEqual({ ...nothingOnToday, yesterday: gymMonday({ kind: "satisfied" }) });
+    expect(owner.today()).toEqual({
+      ...nothingOnToday,
+      yesterday: gymMonday({ kind: "satisfied", approvedBy: "reviewer" }),
+    });
   });
 });
 
@@ -197,6 +204,7 @@ describe("judging over a week", () => {
         occurrenceDate: "2026-01-07",
         missedAt: s.at("Thu 00:00"),
         excusableUntil: s.at("Sat 00:00"),
+        detail: null,
       },
     ]);
   });
