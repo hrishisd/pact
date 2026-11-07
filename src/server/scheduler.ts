@@ -10,20 +10,19 @@ export interface Scheduler {
 }
 
 export function startScheduler(core: PactCore, clock: Clock): Scheduler {
-  let running: Promise<void> = Promise.resolve();
-  let ticking = false;
+  /** The tick in progress, if any. */
+  let running: Promise<void> | null = null;
 
   const tick = () => {
     // Never overlap ticks: a slow one simply delays the next.
-    if (ticking) return;
-    ticking = true;
+    if (running) return;
     running = core
       .advanceTo(clock.now())
       .catch((error: unknown) =>
         console.error(`scheduler tick failed: ${error instanceof Error ? error.stack : String(error)}`),
       )
       .finally(() => {
-        ticking = false;
+        running = null;
       });
   };
 
