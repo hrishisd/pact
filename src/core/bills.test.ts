@@ -402,6 +402,38 @@ describe("Overdue", () => {
     expect(told(reviewer)).toHaveLength(2);
   });
 
+  test("a second bill falling due in the same spell adds to it: the alert keeps the oldest bill, and the reminders their times", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await missedWeek(s);
+    const reminders = () => s.notifier.sentTo(owner).filter((n) => n.kind === "overdue-bill");
+    const told = () => s.notifier.sentTo(reviewer).filter((n) => n.kind === "overdue-bill");
+    // Wednesday+1's $15 is covered by a payment at its due time; rejected Thursday+2 20:00, it goes Overdue.
+    s.setClockTo("Wed+2 17:00");
+    const rejected = await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
+    await s.advanceTo("Wed+2 18:00");
+    s.setClockTo("Thu+2 20:00");
+    await reviewer.decide(rejected, { kind: "reject", reason: "That's a different account" });
+    for (const day of ["Thu+2", "Fri+2", "Sat+2", "Sun+2", "Mon+3", "Tue+3"]) await s.advanceTo(`${day} 20:00`);
+    expect([reminders().length, told().length]).toEqual([6, 1]);
+
+    // Wednesday+2's bill falls due: still the spell that began with Wednesday+1's.
+    await s.advanceTo("Wed+3 18:00");
+    expect(owner.today().alerts).toMatchObject([
+      { kind: "bill-overdue", overdueCents: 3000, billedOn: "2026-01-14", dueAt: s.at("Wed+2 18:00") },
+    ]);
+    expect([reminders().length, told().length]).toEqual([6, 1]);
+    await s.advanceTo("Wed+3 20:00");
+    expect(
+      reminders()
+        .map((n) => n.payload)
+        .at(-1),
+    ).toMatchObject({
+      title: "$30 overdue to Sam",
+      body: "Your Wed Jan 14 bill was due Wed Jan 21. Record your payment.",
+    });
+    expect([reminders().length, told().length]).toEqual([7, 1]);
+  });
+
   test("a payment covering an Overdue bill pauses the spell; rejected, it resumes and the reviewers aren't told again", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await missedWeek(s);

@@ -609,6 +609,18 @@ describe("holds and payments", () => {
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0, paidCents: 500 })]);
   });
+
+  test("an excuse holds a penalty a payment already part paid: the Review Queue says $0 owed, not below", async () => {
+    const { s, owner, reviewer, gym, sam } = await gymMissedMonday();
+    s.setClockTo("Tue 08:00");
+    await reviewer.decide(await recordPayment(owner, { recipientId: sam.id, amountCents: 300 }), { kind: "approve" });
+    const waiting = await recordPayment(owner, { recipientId: sam.id, amountCents: 200 });
+    await fileExcuse(owner, gym, sick(MONDAY));
+
+    expect(reviewer.reviewQueue()).toContainEqual(
+      expect.objectContaining({ kind: "payment", id: waiting, owedCents: 0, owedAfterApprovalCents: 0 }),
+    );
+  });
 });
 
 describe("who decides", () => {

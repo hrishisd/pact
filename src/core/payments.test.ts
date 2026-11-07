@@ -497,6 +497,25 @@ describe("a payment in the Review Queue", () => {
     ]);
   });
 
+  test("says what's owed to that payment's recipient, not to the owner's others", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
+    const foodBank = await owner.addRecipient({ name: "Food bank" });
+    if (!foodBank.ok) throw new Error(foodBank.reason);
+    await createPact("Gym", MON_WED_FRI);
+    await createPact("Read", ["mon"], { recipientId: foodBank.recipient.id });
+    await s.advanceTo("Sat 00:00");
+    s.setClockTo("Sat 09:00");
+    const toSam = await recordPayment(owner, { recipientId: sam.id, amountCents: 1000 });
+    s.setClockTo("Sat 10:00");
+    const toFoodBank = await recordPayment(owner, { recipientId: foodBank.recipient.id, amountCents: 200 }, photo(2));
+
+    expect(reviewer.reviewQueue()).toEqual([
+      expect.objectContaining({ id: toSam, owedCents: 1500, owedAfterApprovalCents: 500 }),
+      expect.objectContaining({ id: toFoodBank, owedCents: 500, owedAfterApprovalCents: 300 }),
+    ]);
+  });
+
   test("has no note when none was given", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await fifteenOwed(s);

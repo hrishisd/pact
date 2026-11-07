@@ -443,6 +443,17 @@ describe("changing them after the edit window", () => {
     expect(await changePact(owner, started, { startDate: NEXT_MONDAY })).toEqual({ ok: false, reason: "pact-started" });
   });
 
+  test("a stricter change to a pact starting more than a week off applies from its first occurrence", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { startDate: "2026-01-26" } });
+    await s.advanceTo("Tue 12:00");
+
+    const result = await change(owner, gym, { penaltyCents: 1000 });
+
+    expect(result.outcome).toEqual({ kind: "stricter", appliesFrom: "2026-01-26", todayKeepsCents: null });
+  });
+
   test("adding an end date or moving it earlier needs approval; moving it later or removing it is stricter", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
