@@ -272,7 +272,8 @@ export function CreatePact({
   } = useSend(
     async () => {
       const terms = termsOfForm(form);
-      if ("problem" in terms) return;
+      // The Penalty step stops these first. Returning nothing here would count as sent and keep the button disabled.
+      if ("problem" in terms) return problemText(terms.problem, form);
       if (editing) {
         const result = await api.editPact(editing.id, { evidenceKind: form.kind, ...terms });
         if (result.ok) return onCreated(editing.id, terms.name);
@@ -1238,7 +1239,7 @@ function CheckStep({
   // Asked for again only when the schedule really changes.
   const scheduleKey = JSON.stringify(schedule);
   const inBedBy = form.kind === "oura" ? form.inBedBy : undefined;
-  const { dueBy, startDate, endDate } = optionalTimes(form);
+  const { dueBy, startDate } = optionalTimes(form);
 
   useEffect(() => {
     let current = true;
