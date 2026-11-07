@@ -1180,11 +1180,18 @@ const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
 
 /**
  * A card's own buttons and forms. A click or Enter on them stays here
- * rather than opening what the card opens.
+ * rather than opening what the card opens. Other keys go on, so Escape still
+ * reaches an open sheet.
  */
 function CardActions({ className, children }: { className: string; children: ReactNode }) {
   return (
-    <div className={className} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <div
+      className={className}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.stopPropagation();
+      }}
+    >
       {children}
     </div>
   );
