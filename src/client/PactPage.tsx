@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
-import type { Friend, PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
+import type { ChangePactRefusal, Friend, PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
@@ -445,10 +445,11 @@ function changedAtOnce(
   };
 }
 
-/** The create form's words for a refusal it shares, or null for the sheet's own. */
-function problemText(reason: string): string | null {
-  return reason in PROBLEMS ? PROBLEMS[reason as keyof typeof PROBLEMS] : null;
-}
+/** The create form's words for the refusals a change shares with it; a sheet has its own words for the rest. */
+const SHARED_PROBLEMS: Partial<Record<ChangePactRefusal, string>> = PROBLEMS;
+
+/** The reminders step's words for its refusals; the reminders sheet has its own for the rest. */
+const REMINDERS_PROBLEMS: Partial<Record<ChangePactRefusal, string>> = REMINDER_PROBLEMS;
 
 function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(pact.name);
@@ -461,7 +462,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
     try {
       const result = await api.changePact(pact.id, changedAtOnce(pact, { name: name.trim() }));
       if (result.ok || result.reason === "nothing-changed") return onSaved();
-      setError(problemText(result.reason) ?? "Couldn't save it. Reopen the pact and try again.");
+      setError(SHARED_PROBLEMS[result.reason] ?? "Couldn't save it. Reopen the pact and try again.");
     } catch (cause) {
       setError(`Couldn't save it. ${failureText(cause, "Check your connection and try again.")}`);
     }
@@ -522,7 +523,7 @@ function AddReviewerSheet({
     try {
       const result = await api.changePact(pact.id, changedAtOnce(pact, { reviewerIds: [...current, ...picked] }));
       if (result.ok) return onSaved();
-      setError(problemText(result.reason) ?? "Couldn't add them. Reopen the pact and try again.");
+      setError(SHARED_PROBLEMS[result.reason] ?? "Couldn't add them. Reopen the pact and try again.");
     } catch (cause) {
       setError(`Couldn't add them. ${failureText(cause, "Check your connection and try again.")}`);
     }
@@ -601,11 +602,7 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
     try {
       const result = await api.changePact(pact.id, changedAtOnce(pact, { reminders }));
       if (result.ok || result.reason === "nothing-changed") return onSaved();
-      setError(
-        result.reason in REMINDER_PROBLEMS
-          ? REMINDER_PROBLEMS[result.reason as keyof typeof REMINDER_PROBLEMS]
-          : "Couldn't save them. Reopen the pact and try again.",
-      );
+      setError(REMINDERS_PROBLEMS[result.reason] ?? "Couldn't save them. Reopen the pact and try again.");
     } catch (cause) {
       setError(`Couldn't save them. ${failureText(cause, "Check your connection and try again.")}`);
     }

@@ -18,6 +18,7 @@ import {
   type AcceptExcuseRejectionResult,
   type AcceptMissRefusal,
   type LedgerSummary,
+  type Refusal,
   type SubmitEvidenceRefusal,
   type TodayAlert,
   type TodayAnkiCard,
@@ -996,10 +997,7 @@ function RejectedExcuseAlert({
   );
 }
 
-const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<
-  Extract<AcceptExcuseRejectionResult, { ok: false }>["reason"],
-  string
-> = {
+const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<Refusal<AcceptExcuseRejectionResult>, string> = {
   "excuse-not-found": "This excuse wasn't found.",
   "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
 };

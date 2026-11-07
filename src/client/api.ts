@@ -47,8 +47,10 @@ import {
   type EditPactRequest,
   type EditPactResponse,
   type ExcuseOptionsResponse,
+  type ExcusePreviewQuery,
   type ExcusePreviewResponse,
   type ExcuseResponse,
+  type FileExcuseRequest,
   type FileExcuseResponse,
   type DecideRequest,
   type DecideResponse,
@@ -63,8 +65,10 @@ import {
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type RecordPaymentRequest,
   type RecordPaymentResponse,
   type RemovePushSubscriptionRequest,
+  type RemovePushSubscriptionResponse,
   type ReviewQueueResponse,
   type SavePushSubscriptionRequest,
   type SavePushSubscriptionResponse,
@@ -192,13 +196,13 @@ export const api = {
     photos.forEach((photo, i) => form.append(EVIDENCE_PHOTO_FIELD, photo, `photo-${i + 1}.jpg`));
     return postForm<SubmitEvidenceResponse>(API_PATHS.evidence(encodeURIComponent(pactId)), form);
   },
-  excusePreview: (pactId: string, dates: { from: string; to: string }) =>
+  excusePreview: (pactId: string, { from, to }: ExcusePreviewQuery) =>
     call<ExcusePreviewResponse>(
-      `${API_PATHS.excusePreview(encodeURIComponent(pactId))}?${new URLSearchParams(dates).toString()}`,
+      `${API_PATHS.excusePreview(encodeURIComponent(pactId))}?${new URLSearchParams({ from, to }).toString()}`,
     ),
   excuseOptions: (pactId: string) => call<ExcuseOptionsResponse>(API_PATHS.excuseOptions(encodeURIComponent(pactId))),
   /** `photos` are already shrunk (photos.ts), in the order added. */
-  fileExcuse: (pactId: string, excuse: { from: string; to: string; reason: string }, photos: Blob[]) => {
+  fileExcuse: (pactId: string, excuse: FileExcuseRequest, photos: Blob[]) => {
     const form = new FormData();
     form.append(EXCUSE_FROM_FIELD, excuse.from);
     form.append(EXCUSE_TO_FIELD, excuse.to);
@@ -224,10 +228,10 @@ export const api = {
   ledgers: () => call<LedgersResponse>(API_PATHS.ledgers),
   ledger: (recipientId: string) => call<LedgerResponse>(API_PATHS.ledger(encodeURIComponent(recipientId))),
   /** `screenshot` is already shrunk (photos.ts). */
-  recordPayment: (recipientId: string, payment: { amountCents: number; note: string }, screenshot: Blob) => {
+  recordPayment: (recipientId: string, payment: RecordPaymentRequest, screenshot: Blob) => {
     const form = new FormData();
     form.append(PAYMENT_AMOUNT_FIELD, String(payment.amountCents));
-    form.append(PAYMENT_NOTE_FIELD, payment.note);
+    if (payment.note !== undefined) form.append(PAYMENT_NOTE_FIELD, payment.note);
     form.append(EVIDENCE_PHOTO_FIELD, screenshot, "screenshot.jpg");
     return postForm<RecordPaymentResponse>(API_PATHS.payments(encodeURIComponent(recipientId)), form);
   },
@@ -237,7 +241,7 @@ export const api = {
   savePushSubscription: (device: SavePushSubscriptionRequest) =>
     post<SavePushSubscriptionResponse>(API_PATHS.pushSubscriptions, device),
   removePushSubscription: (endpoint: string) =>
-    call<unknown>(API_PATHS.pushSubscriptions, {
+    call<RemovePushSubscriptionResponse>(API_PATHS.pushSubscriptions, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ endpoint } satisfies RemovePushSubscriptionRequest),

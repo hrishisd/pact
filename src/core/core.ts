@@ -126,6 +126,8 @@ import {
   type OccurrenceStatus,
   type Connection,
   type ConnectionProblem,
+  type ConnectionService,
+  type EvidenceKind,
   type PactTiming,
   type PaymentResult,
   type QuestionThread,
@@ -495,9 +497,8 @@ const ANKI_POLL_INTERVAL_MS = 10 * 60 * 1000;
  * (anki.ts), plus a margin.
  */
 const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
-/** What a broken Oura connection means for the owner, in its push and on Today. */
 /** The push when a connection needs reconnecting, by service. */
-const RECONNECT_PUSH: Record<Connection["service"], { title: string; body: string }> = {
+const RECONNECT_PUSH: Record<ConnectionService, { title: string; body: string }> = {
   oura: { title: "Oura needs reconnecting", body: RECONNECT_TEXT.oura },
   anki: { title: "AnkiWeb needs reconnecting", body: RECONNECT_TEXT.anki },
 };
@@ -1145,7 +1146,7 @@ class Core implements PactCore {
         const connections = (
           this.#db
             .prepare(`SELECT service, status, connected_at FROM connection WHERE account_id = ? ORDER BY service`)
-            .all(accountId) as { service: Connection["service"]; status: Connection["status"]; connected_at: string }[]
+            .all(accountId) as { service: ConnectionService; status: Connection["status"]; connected_at: string }[]
         ).map((row): Connection => ({
           service: row.service,
           status: row.status,
@@ -1309,9 +1310,9 @@ class Core implements PactCore {
               .prepare(`INSERT INTO evidence_photo (evidence_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
               .run(evidenceId, position, photoId, receivedAt.toISOString());
           });
-          // Evidence in the edit window waits for it to close: see #closeEditWindows.
+          // Evidence from inside the edit window waits for #closeEditWindows to
+          // tell its reviewers; if they were told already, it missed that and goes now.
           const pact = this.#ownPact(accountId, pactId);
-          // Its reviewers already told, it may be from inside the window but it missed that.
           if (pact && (pact.reviewers_notified_at !== null || editWindowClosesAt(pact, submittedAt) === null)) {
             this.#enqueueEvidenceReviewItems(pactId, evidenceId, day, ownerName);
           }
@@ -3794,7 +3795,7 @@ class Core implements PactCore {
     };
   }
 
-  #hasConnection(accountId: AccountId, service: Connection["service"]): boolean {
+  #hasConnection(accountId: AccountId, service: ConnectionService): boolean {
     return (
       this.#db.prepare(`SELECT 1 FROM connection WHERE account_id = ? AND service = ?`).get(accountId, service) !==
       undefined
@@ -3859,7 +3860,7 @@ class Core implements PactCore {
   }
 
   /** Why the service can't be read for the account, or null when its connection works. */
-  #connectionProblem(accountId: AccountId, service: Connection["service"]): ConnectionProblem | null {
+  #connectionProblem(accountId: AccountId, service: ConnectionService): ConnectionProblem | null {
     const row = this.#db
       .prepare(`SELECT status FROM connection WHERE account_id = ? AND service = ?`)
       .get(accountId, service) as { status: Connection["status"] } | undefined;
@@ -4606,7 +4607,7 @@ class Core implements PactCore {
       .all(ownerId, since.toISOString()) as {
       id: string;
       name: string;
-      evidence_kind: PactTerms["evidenceKind"];
+      evidence_kind: EvidenceKind;
       schedule: string;
       amount_cents: number;
       date: LocalDate;
@@ -5031,7 +5032,7 @@ class Core implements PactCore {
    * Until then no call is made. A connection made again since the service
    * was asked (`askedAt`) is left alone: its new tokens weren't the ones refused.
    */
-  #markDisconnected(service: Connection["service"], account: AccountId, askedAt: Date): void {
+  #markDisconnected(service: ConnectionService, account: AccountId, askedAt: Date): void {
     const marked = this.#db
       .prepare(
         `UPDATE connection SET status = 'needs-reconnecting'
@@ -5610,7 +5611,7 @@ function friendshipPair(a: AccountId, b: AccountId): [AccountId, AccountId] {
 interface ActivePact {
   id: string;
   name: string;
-  evidenceKind: PactTerms["evidenceKind"];
+  evidenceKind: EvidenceKind;
   penaltyCents: number;
   recipientName: string;
   terms: OccurrenceTerms;
@@ -5628,7 +5629,7 @@ function editWindowClosesAt(pact: Pick<PactRow, "created_at">, now: Date): Date 
   return now.getTime() < closesAt.getTime() ? closesAt : null;
 }
 
-/** A pact row's occurrence terms: the one place a stored schedule is read. */
+/** A pact row's occurrence terms, its stored schedule parsed. */
 function occurrenceTermsOf(
   row: Pick<PactRow, "schedule" | "first_occurrence"> & {
     in_bed_by?: string | null;
@@ -5703,7 +5704,6 @@ function deadlineWallClock(date: LocalDate, inBedBy: string): string {
   return `${Number(inBedBy.slice(0, 2)) >= 18 ? date : addDays(date, 1)}T${inBedBy}`;
 }
 
-/** A clock time "HH:MM" as it sorts in a night, which runs from 18:00 to 17:59 the next day. */
 /**
  * Whether every reminder goes off before the due time `due` sets: a One-time
  * pact's deadline (`dueAt`), a bedtime's in-bed-by time (a night running from
@@ -5742,6 +5742,7 @@ function withoutReminders({
   return terms;
 }
 
+/** A clock time "HH:MM" as it sorts in a night, which runs from 18:00 to 17:59 the next day. */
 function nightOrder(time: string): string {
   return `${Number(time.slice(0, 2)) < 18 ? 1 : 0}${time}`;
 }
@@ -5766,7 +5767,7 @@ interface PactRow {
   id: string;
   name: string;
   description: string;
-  evidence_kind: PactTerms["evidenceKind"];
+  evidence_kind: EvidenceKind;
   schedule: string;
   in_bed_by: string | null;
   due_by: string | null;

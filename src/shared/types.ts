@@ -3,6 +3,9 @@
 
 export type AccountId = string;
 
+/** Why a command or query answered `{ ok: false }`: the `reason` of result type `R`. */
+export type Refusal<R extends { ok: boolean }> = Extract<R, { ok: false; reason: unknown }>["reason"];
+
 export type SignInResult = { ok: true; accountId: AccountId } | { ok: false; reason: "invite-required" };
 
 export interface Invite {
@@ -68,7 +71,11 @@ export type Schedule =
 export const MAX_WEEKLY_TARGET = 7;
 
 /** How a pact's evidence is gathered. Picked at creation and never changes. */
-export type EvidenceKind = "camera" | "oura" | "anki";
+export const EVIDENCE_KINDS = ["camera", "oura", "anki"] as const;
+export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
+
+/** A service that supplies evidence: every evidence kind but Camera. */
+export type ConnectionService = Exclude<EvidenceKind, "camera">;
 
 export interface NewPact {
   evidenceKind: EvidenceKind;
@@ -677,7 +684,7 @@ export interface Profile {
 
 /** A link to an outside service that supplies evidence: Oura or AnkiWeb. */
 export interface Connection {
-  service: "oura" | "anki";
+  service: ConnectionService;
   /** Needs reconnecting once the service refuses its tokens; until then, connected. */
   status: "connected" | "needs-reconnecting";
   connectedAt: Date;
@@ -693,7 +700,7 @@ export interface Connection {
 export type ConnectionProblem = "needs-reconnecting" | "not-connected";
 
 /** What a broken connection costs and what to do, as its push and its alerts say after "… needs reconnecting." */
-export const RECONNECT_TEXT: Record<Connection["service"], string> = {
+export const RECONNECT_TEXT: Record<ConnectionService, string> = {
   oura: "A night with no data by 6pm counts as Missed. Reconnect before then.",
   anki: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
 };

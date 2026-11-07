@@ -10,17 +10,9 @@ import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type {
-  AccountId,
-  AnkiConnector,
-  NewPayment,
-  OuraConnector,
-  PactCore,
-  Photo,
-  Schedule,
-  Weekday,
-} from "../core/index.ts";
+import type { AccountId, AnkiConnector, OuraConnector, PactCore, Photo, Schedule } from "../core/index.ts";
 import {
+  EVIDENCE_KINDS,
   MAX_EVIDENCE_PHOTOS,
   MAX_EXCUSE_PHOTOS,
   NOTIFICATION_SETTINGS,
@@ -71,8 +63,10 @@ import {
   type DeletePactResponse,
   type EditPactResponse,
   type ExcuseOptionsResponse,
+  type ExcusePreviewQuery,
   type ExcusePreviewResponse,
   type ExcuseResponse,
+  type FileExcuseRequest,
   type FileExcuseResponse,
   type DecideRequest,
   type DecideResponse,
@@ -95,8 +89,10 @@ import {
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type RecordPaymentRequest,
   type RecordPaymentResponse,
   type RemovePushSubscriptionRequest,
+  type RemovePushSubscriptionResponse,
   type ReviewQueueResponse,
   type SavePushSubscriptionRequest,
   type SavePushSubscriptionResponse,
@@ -196,9 +192,9 @@ export function createApp({
   });
 
   /**
-   * One line per photo upload (evidence, or a payment's screenshot), to see
-   * sizes and speeds in the server log. Nothing from the request's URL goes
-   * in, so a request can't forge a line.
+   * One line per photo upload (evidence, an excuse's photos, or a payment's
+   * screenshot), to see sizes and speeds in the server log. Nothing from the
+   * request's URL goes in, so a request can't forge a line.
    */
   const logUpload = (upload: Upload, fields: Record<string, string | number>) =>
     log(
@@ -208,12 +204,12 @@ export function createApp({
     );
 
   /**
-   * A multipart upload of photos in EVIDENCE_PHOTO_FIELD: evidence, or a
-   * payment's screenshot. Transport checks only: a form that won't parse, a
-   * field there that isn't a photo, or a form `valid` refuses is a 400
-   * invalid-request; a photo over the size cap is a 400 photo-too-large.
-   * Otherwise `send` calls the core with the photos and its result is the
-   * response. Each upload that parsed logs one line (`logUpload`) with its
+   * A multipart upload of photos in EVIDENCE_PHOTO_FIELD: evidence, an
+   * excuse's photos, or a payment's screenshot. Transport checks only: a form
+   * that won't parse, a field there that isn't a photo, or a form `parse`
+   * refuses is a 400 invalid-request; a photo over the size cap is a 400
+   * photo-too-large. Otherwise `send` calls the core with the photos and its
+   * result is the response. Each upload that parsed logs one line (`logUpload`) with its
    * sizes and timings and what `outcome` says became of it, except a form
    * refused for its shape.
    */
@@ -521,7 +517,8 @@ export function createApp({
     const timing = parseOptionalStrings(request ?? {}, ["inBedBy", "dueBy", "startDate"]);
     if (!timing) return apiError(c, 400, "invalid-request");
     const evidenceKind = request?.evidenceKind;
-    if (evidenceKind !== undefined && !isEvidenceKind(evidenceKind)) return apiError(c, 400, "invalid-request");
+    if (evidenceKind !== undefined && !isOneOf(EVIDENCE_KINDS, evidenceKind))
+      return apiError(c, 400, "invalid-request");
     const body: FirstOccurrenceResponse = json(
       core
         .as(c.get("accountId"))
@@ -613,7 +610,7 @@ export function createApp({
     }),
     (c) =>
       receivePhotos(c, "payment", {
-        parse: (form, photoCount): Omit<NewPayment, "recipientId"> | null => {
+        parse: (form, photoCount): RecordPaymentRequest | null => {
           const amount = form[PAYMENT_AMOUNT_FIELD];
           const note = form[PAYMENT_NOTE_FIELD];
           if (typeof amount !== "string" || !/^-?\d+(\.\d+)?$/.test(amount)) return null;
@@ -639,7 +636,7 @@ export function createApp({
     }),
     (c) =>
       receivePhotos(c, "excuse", {
-        parse: (form) => {
+        parse: (form): FileExcuseRequest | null => {
           const [from, to, reason] = [form[EXCUSE_FROM_FIELD], form[EXCUSE_TO_FIELD], form[EXCUSE_REASON_FIELD]];
           if (typeof from !== "string" || typeof to !== "string" || typeof reason !== "string") return null;
           return { from, to, reason };
@@ -654,9 +651,8 @@ export function createApp({
   app.get(API_PATHS.excusePreview(":id"), (c) => {
     const [from, to] = [c.req.query("from"), c.req.query("to")];
     if (from === undefined || to === undefined) return apiError(c, 400, "invalid-request");
-    const body: ExcusePreviewResponse = json(
-      core.as(c.get("accountId")).excusePreview(c.req.param("id"), { from, to }),
-    );
+    const query: ExcusePreviewQuery = { from, to };
+    const body: ExcusePreviewResponse = json(core.as(c.get("accountId")).excusePreview(c.req.param("id"), query));
     return c.json(body);
   });
 
@@ -775,7 +771,8 @@ export function createApp({
     const request = (await c.req.json().catch(() => null)) as Partial<RemovePushSubscriptionRequest> | null;
     if (typeof request?.endpoint !== "string") return apiError(c, 400, "invalid-request");
     await core.as(c.get("accountId")).removePushSubscription(request.endpoint);
-    return c.json({ ok: true });
+    const body: RemovePushSubscriptionResponse = { ok: true };
+    return c.json(body);
   });
 
   app.all("/api/*", (c) => apiError(c, 404, "not-found"));
@@ -844,8 +841,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isWeekday(value: string): value is Weekday {
-  return (WEEKDAYS as readonly string[]).includes(value);
+/** Whether `value` is one of `list`'s members. */
+function isOneOf<T>(list: readonly T[], value: unknown): value is T {
+  return (list as readonly unknown[]).includes(value);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -866,7 +864,7 @@ function parseSchedule(value: unknown): Schedule | null {
   }
   if (value.kind !== "fixed-days") return null;
   const { days } = value;
-  if (!isStringArray(days) || !days.every(isWeekday)) return null;
+  if (!isStringArray(days) || !days.every((day) => isOneOf(WEEKDAYS, day))) return null;
   return { kind: "fixed-days", days };
 }
 
@@ -892,10 +890,6 @@ function parseOptionalStrings<Key extends string>(
 
 /** A pact's optional times: the in-bed-by and due-by times, and the start and end dates. */
 const PACT_TIMES = ["inBedBy", "dueBy", "startDate", "endDate"] as const;
-
-function isEvidenceKind(value: unknown): value is CreatePactRequest["evidenceKind"] {
-  return value === "camera" || value === "oura" || value === "anki";
-}
 
 /** A pact's reminders, if sent: a list of strings, or undefined for none. False when malformed. */
 function parseReminders(value: Record<string, unknown>): { reminders?: string[] } | false {
@@ -927,7 +921,7 @@ function parsePactTerms(value: Record<string, unknown>): Omit<NewPact, "evidence
 function parseNewPact(value: unknown): CreatePactRequest | null {
   if (!isRecord(value)) return null;
   const { evidenceKind } = value;
-  if (!isEvidenceKind(evidenceKind)) return null;
+  if (!isOneOf(EVIDENCE_KINDS, evidenceKind)) return null;
   const terms = parsePactTerms(value);
   return terms && { evidenceKind, ...terms };
 }
@@ -949,8 +943,8 @@ function parseDecision(value: unknown): DecideRequest | null {
 
 function parseSetNotificationSetting(value: unknown): SetNotificationSettingRequest | null {
   if (!isRecord(value) || typeof value.enabled !== "boolean") return null;
-  const setting = NOTIFICATION_SETTINGS.find((known) => known === value.setting);
-  return setting ? { setting, enabled: value.enabled } : null;
+  const { setting } = value;
+  return isOneOf(NOTIFICATION_SETTINGS, setting) ? { setting, enabled: value.enabled } : null;
 }
 
 function parsePushDevice(value: unknown): SavePushSubscriptionRequest | null {

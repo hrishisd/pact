@@ -79,11 +79,11 @@ const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = 
   "nothing-changed": "Nothing changed yet.",
 };
 
-function refusalText(reason: ChangePactRefusal | "no-amount" | "no-recipient"): string {
-  return reason in REFUSALS
-    ? REFUSALS[reason as keyof typeof REFUSALS]
-    : PROBLEMS[reason as Exclude<typeof reason, keyof typeof REFUSALS>];
-}
+/** The words for each refusal: the create form's, then this page's own, which win where both have one. */
+const REFUSAL_TEXT = { ...PROBLEMS, ...REFUSALS } satisfies Record<
+  ChangePactRefusal | "no-amount" | "no-recipient",
+  string
+>;
 
 export function ChangePact({
   pactId,
@@ -160,7 +160,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
   const change = changeOf(form, "");
   const key = JSON.stringify(change);
   useEffect(() => {
-    if ("problem" in change) return setVerdict({ kind: "refused", text: refusalText(change.problem) });
+    if ("problem" in change) return setVerdict({ kind: "refused", text: REFUSAL_TEXT[change.problem] });
     let current = true;
     const timer = window.setTimeout(() => {
       api.changePreview(pact.id, change).then(
@@ -169,7 +169,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           setVerdict(
             result.ok
               ? { kind: "loaded", preview: result.preview }
-              : { kind: "refused", text: refusalText(result.reason) },
+              : { kind: "refused", text: REFUSAL_TEXT[result.reason] },
           );
         },
         (error: unknown) => current && setVerdict({ kind: "failed", error }),
@@ -189,7 +189,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
     try {
       const result = await api.changePact(pact.id, sent);
       if (result.ok) return onDone();
-      setSendError(refusalText(result.reason));
+      setSendError(REFUSAL_TEXT[result.reason]);
     } catch (error) {
       setSendError(`Couldn't send it. ${failureText(error, "Check your connection and try again.")}`);
     }

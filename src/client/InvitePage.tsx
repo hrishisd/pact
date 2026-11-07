@@ -3,19 +3,17 @@
 
 import { useEffect, useState } from "react";
 import type { AcceptInviteResponse, InviteLookupResponse, MeResponse } from "../shared/api.ts";
-import type { InviteUnusableReason } from "../shared/types.ts";
+import type { InviteUnusableReason, Refusal } from "../shared/types.ts";
 import { api, failureText, signInWithInvite } from "./api.ts";
 import { GoogleIcon } from "./icons.tsx";
 import { initial } from "./format.ts";
 import { Centered } from "./ui.tsx";
 
-type Refusal = Extract<AcceptInviteResponse, { ok: false }>["reason"];
-
 type State =
   | { kind: "loading" }
   | { kind: "failed"; error: unknown }
   | { kind: "open"; inviterName: string }
-  | { kind: "refused"; reason: Refusal; inviterName?: string }
+  | { kind: "refused"; reason: Refusal<AcceptInviteResponse>; inviterName?: string }
   | { kind: "accepted"; friendName: string };
 
 export function InvitePage({
@@ -156,7 +154,10 @@ export function InvitePage({
   }
 }
 
-function refusalText(reason: Refusal, inviterName: string | undefined): { title: string; body: string } {
+function refusalText(
+  reason: Refusal<AcceptInviteResponse>,
+  inviterName: string | undefined,
+): { title: string; body: string } {
   const unusable: Record<InviteUnusableReason, { title: string; body: string }> = {
     "invite-not-found": {
       title: "This invite link doesn't work",

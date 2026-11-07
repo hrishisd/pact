@@ -1,5 +1,6 @@
 // The five ports outside the Pact core. Each has a production adapter
-// (adapters.ts, photo-stores.ts, web-push.ts) and a fake for tests (testing/fakes.ts).
+// (adapters.ts, oura.ts, anki.ts, photo-stores.ts, web-push.ts) and a fake for
+// tests (testing/fakes.ts).
 
 import type { AccountId, AnkiCounts, AnkiDeck, PushDevice } from "../shared/types.ts";
 

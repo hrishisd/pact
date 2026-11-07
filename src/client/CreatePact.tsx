@@ -20,6 +20,7 @@ import {
   type Friend,
   type PactTerms,
   type Recipient,
+  type Refusal,
   type Schedule,
   type Weekday,
 } from "../shared/types.ts";
@@ -1272,7 +1273,7 @@ export function ReviewersStep({
 type FirstState =
   | { kind: "loading" }
   | { kind: "loaded"; first: Json<FirstOccurrence> }
-  | { kind: "refused"; reason: Extract<FirstOccurrenceResponse, { ok: false }>["reason"] }
+  | { kind: "refused"; reason: Refusal<FirstOccurrenceResponse> }
   | { kind: "failed"; error: unknown };
 
 /** How often the Check step asks again, so the day it names stays the one Create would store. */
