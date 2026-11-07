@@ -4144,7 +4144,7 @@ class Core implements PactCore {
     const now = this.#clock.now();
     const bills = this.#billsForToday(ownerId, now);
     return {
-      alerts: this.#todayAlerts(ownerId, timezone, now, bills.alerts),
+      alerts: this.#todayAlerts(ownerId, now, bills.alerts),
       sections: this.#todaySections(ownerId, timezone, now, bills.cards),
     };
   }
@@ -4156,7 +4156,7 @@ class Core implements PactCore {
    * reviewer questions until the owner replies or the item is decided;
    * newest first.
    */
-  #todayAlerts(ownerId: AccountId, timezone: string, now: Date, billAlerts: TodayAlert[]): TodayAlert[] {
+  #todayAlerts(ownerId: AccountId, now: Date, billAlerts: TodayAlert[]): TodayAlert[] {
     const alerts = [
       ...this.#rejectedEvidenceAlerts(ownerId),
       ...this.#rejectedDayAlerts(ownerId),

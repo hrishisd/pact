@@ -348,7 +348,7 @@ function VerdictBox({
 }
 
 /** What applies at once inside a change that waits or is stricter: " The name and the new reviewers change now." */
-function nowLine(appliesNow: AppliesNow[]): string {
+export function nowLine(appliesNow: AppliesNow[]): string {
   const [first, ...rest] = appliesNow;
   if (first === undefined) return "";
   const verb = rest.length === 0 && !APPLIES_NOW[first].plural ? "changes" : "change";
