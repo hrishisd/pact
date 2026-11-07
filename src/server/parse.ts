@@ -36,13 +36,17 @@ export function arrayOf<T>(parse: Parser<T>): Parser<T[]> {
   };
 }
 
-/** A JSON object with each of `fields`; other keys are ignored and left out. */
+/**
+ * A JSON object with each of `fields`; other keys are ignored and left out.
+ * Only the object's own keys count, so a field named like an Object.prototype
+ * member (`constructor`, `toString`) reads as left out when the body omits it.
+ */
 export function object<T>(fields: Fields<T>): Parser<T> {
   return (value) => {
     if (!isRecord(value)) return null;
     const parsed: Record<string, unknown> = {};
     for (const [key, parse] of Object.entries<Parser<unknown>>(fields)) {
-      const field = parse(value[key]);
+      const field = parse(Object.hasOwn(value, key) ? value[key] : undefined);
       if (field === null) return null;
       if (field !== undefined) parsed[key] = field;
     }
