@@ -111,7 +111,7 @@ interface HeatMapColumn {
 }
 
 /** Mon–Sun weeks of `days` (which start on any weekday), with blanks before the first. */
-function weeksOf(days: Day[]): HeatMapColumn[] {
+export function weeksOf(days: Day[]): HeatMapColumn[] {
   const first = days[0];
   if (!first) return [];
   const { year, month, day } = parseLocalDate(first.date);
@@ -129,7 +129,7 @@ function weeksOf(days: Day[]): HeatMapColumn[] {
  * Each week's month label: a week whose Monday is in the first 7 days of a
  * month, and the first week unless the next one is labelled already.
  */
-function monthLabels(weeks: HeatMapColumn[]): string[] {
+export function monthLabels(weeks: HeatMapColumn[]): string[] {
   const monthOf = (week: HeatMapColumn) => MONTHS[parseLocalDate(week.monday).month - 1]!;
   const labels = weeks.map((week) => (parseLocalDate(week.monday).day <= 7 ? monthOf(week) : ""));
   const first = weeks[0];

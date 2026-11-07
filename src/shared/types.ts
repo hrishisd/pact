@@ -97,11 +97,12 @@ export interface NewPact {
    */
   inBedBy?: ClockTime;
   /**
-   * Camera and Anki, optional: the due-by time, after 00:00. Evidence is due by it each day instead of midnight, and the
-   * day is judged then. On an Anki pact it runs from noon through the
-   * collection's rollover hour: a time up to the rollover hour is the morning
-   * after, still the evening's Anki day, and a later one, from noon, is that
-   * day once its Anki day has opened.
+   * Camera and Anki, optional: the due-by time, after 00:00. Evidence is due
+   * by it each day instead of midnight, and the day is judged then. On an
+   * Anki pact it runs from noon through the collection's rollover hour: a
+   * time up to the rollover hour is the morning after, still the evening's
+   * Anki day, and a later one, from noon, is that day once its Anki day has
+   * opened.
    */
   dueBy?: ClockTime;
   /**
