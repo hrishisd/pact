@@ -107,6 +107,7 @@ import {
 import { INVITE_REQUIRED_CODE, isInviteRequired, type Auth } from "./auth.ts";
 import { connections } from "./connections.ts";
 import { inviteRequiredPage, signInFailedPage } from "./pages.ts";
+import { arrayOf, boolean, number, object, oneOf, optional, string, union, type Fields, type Parser } from "./parse.ts";
 
 export interface AppOptions {
   core: PactCore;
@@ -708,7 +709,7 @@ function photoBodyLimit(photos: number) {
 }
 
 /** The request's JSON body as `parse` reads it: null when it isn't JSON or `parse` refuses it. */
-async function readJson<T>(c: Context, parse: (value: unknown) => T | null): Promise<T | null> {
+async function readJson<T>(c: Context, parse: Parser<T>): Promise<T | null> {
   return parse(await c.req.json().catch(() => null));
 }
 
@@ -722,178 +723,58 @@ function json<T>(value: T): Json<T> {
 
 // Request bodies are checked for shape only; the core judges their content.
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const schedule = union<Schedule>({
+  "fixed-days": object({ days: arrayOf(oneOf(WEEKDAYS)) }),
+  "weekly-count": object({ target: number }),
+  "one-time": object({ deadline: string, submitAnytime: boolean }),
+});
 
-/** Whether `value` is one of `list`'s members. */
-function isOneOf<T>(list: readonly T[], value: unknown): value is T {
-  const members: readonly unknown[] = list;
-  return members.includes(value);
-}
+const parseSetTimezone = object<SetTimezoneRequest>({ timezone: string });
+const parseConnectAnki = object<ConnectAnkiRequest>({ email: string, password: string });
+const parseNewRecipient = object<AddRecipientRequest>({ name: string });
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
+const parseFirstOccurrence = object<FirstOccurrenceRequest>({
+  schedule,
+  evidenceKind: optional(oneOf(EVIDENCE_KINDS)),
+  inBedBy: optional(string),
+  dueBy: optional(string),
+  startDate: optional(string),
+  editing: optional(string),
+});
 
-function parseSchedule(value: unknown): Schedule | null {
-  if (!isRecord(value)) return null;
-  if (value.kind === "weekly-count") {
-    const { target } = value;
-    return typeof target === "number" ? { kind: "weekly-count", target } : null;
-  }
-  if (value.kind === "one-time") {
-    const { deadline, submitAnytime } = value;
-    return typeof deadline === "string" && typeof submitAnytime === "boolean"
-      ? { kind: "one-time", deadline, submitAnytime }
-      : null;
-  }
-  if (value.kind !== "fixed-days") return null;
-  const { days } = value;
-  if (!isStringArray(days) || !days.every((day) => isOneOf(WEEKDAYS, day))) return null;
-  return { kind: "fixed-days", days };
-}
+/** The terms a new pact and a change share. */
+const PACT_TERMS: Fields<Omit<NewPact, "evidenceKind">> = {
+  name: string,
+  description: string,
+  schedule,
+  penaltyCents: number,
+  recipientId: string,
+  reviewerIds: arrayOf(string),
+  inBedBy: optional(string),
+  dueBy: optional(string),
+  startDate: optional(string),
+  endDate: optional(string),
+  ankiDeckId: optional(string),
+  reminders: optional(arrayOf(string)),
+};
 
-function parseSetTimezone(value: unknown): SetTimezoneRequest | null {
-  if (!isRecord(value) || typeof value.timezone !== "string") return null;
-  return { timezone: value.timezone };
-}
+const parseNewPact = object<CreatePactRequest>({ evidenceKind: oneOf(EVIDENCE_KINDS), ...PACT_TERMS });
+const parsePactChange = object<ChangePactRequest>({ ...PACT_TERMS, note: optional(string) });
+const parseEndPact = object<EndPactRequest>({ note: optional(string) });
 
-function parseConnectAnki(value: unknown): ConnectAnkiRequest | null {
-  if (!isRecord(value)) return null;
-  const { email, password } = value;
-  if (typeof email !== "string" || typeof password !== "string") return null;
-  return { email, password };
-}
+const parseDecision = union<DecideRequest>({
+  approve: object({}),
+  reject: object({ reason: string }),
+});
 
-function parseNewRecipient(value: unknown): AddRecipientRequest | null {
-  if (!isRecord(value) || typeof value.name !== "string") return null;
-  return { name: value.name };
-}
-
-/** The optional string fields `keys` of `value`, those it has; null if any isn't a string. */
-function parseOptionalStrings<Key extends string>(
-  value: Record<string, unknown>,
-  keys: readonly Key[],
-): Partial<Record<Key, string>> | null {
-  const found: Partial<Record<Key, string>> = {};
-  for (const key of keys) {
-    const field = value[key];
-    if (field === undefined) continue;
-    if (typeof field !== "string") return null;
-    found[key] = field;
-  }
-  return found;
-}
-
-function parseFirstOccurrence(value: unknown): FirstOccurrenceRequest | null {
-  if (!isRecord(value)) return null;
-  const schedule = parseSchedule(value.schedule);
-  const timing = parseOptionalStrings(value, ["inBedBy", "dueBy", "startDate"]);
-  const { editing, evidenceKind } = value;
-  if (
-    !schedule ||
-    !timing ||
-    (editing !== undefined && typeof editing !== "string") ||
-    (evidenceKind !== undefined && !isOneOf(EVIDENCE_KINDS, evidenceKind))
-  ) {
-    return null;
-  }
-  return {
-    schedule,
-    ...timing,
-    ...(evidenceKind !== undefined && { evidenceKind }),
-    ...(editing !== undefined && { editing }),
-  };
-}
-
-/** A pact's optional times: the in-bed-by and due-by times, and the start and end dates. */
-const PACT_TIMES = ["inBedBy", "dueBy", "startDate", "endDate"] as const;
-
-/** A pact's reminders, if sent: a list of strings, or undefined for none. False when malformed. */
-function parseReminders(value: Record<string, unknown>): { reminders?: string[] } | false {
-  if (value.reminders === undefined) return {};
-  return isStringArray(value.reminders) ? { reminders: value.reminders } : false;
-}
-
-/** The terms a new pact and a change share; null if any is malformed. */
-function parsePactTerms(value: Record<string, unknown>): Omit<NewPact, "evidenceKind"> | null {
-  const { name, description, penaltyCents, recipientId, reviewerIds } = value;
-  const schedule = parseSchedule(value.schedule);
-  const times = parseOptionalStrings(value, [...PACT_TIMES, "ankiDeckId"]);
-  const reminders = parseReminders(value);
-  if (
-    !times ||
-    !reminders ||
-    typeof name !== "string" ||
-    typeof description !== "string" ||
-    !schedule ||
-    typeof penaltyCents !== "number" ||
-    typeof recipientId !== "string" ||
-    !isStringArray(reviewerIds)
-  ) {
-    return null;
-  }
-  return { name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times, ...reminders };
-}
-
-function parseNewPact(value: unknown): CreatePactRequest | null {
-  if (!isRecord(value)) return null;
-  const { evidenceKind } = value;
-  if (!isOneOf(EVIDENCE_KINDS, evidenceKind)) return null;
-  const terms = parsePactTerms(value);
-  return terms && { evidenceKind, ...terms };
-}
-
-function parsePactChange(value: unknown): ChangePactRequest | null {
-  if (!isRecord(value)) return null;
-  const { note } = value;
-  if (note !== undefined && typeof note !== "string") return null;
-  const terms = parsePactTerms(value);
-  return terms && { ...terms, ...(note !== undefined && { note }) };
-}
-
-function parseEndPact(value: unknown): EndPactRequest | null {
-  if (!isRecord(value)) return null;
-  const { note } = value;
-  if (note !== undefined && typeof note !== "string") return null;
-  return note === undefined ? {} : { note };
-}
-
-function parseDecision(value: unknown): DecideRequest | null {
-  if (!isRecord(value)) return null;
-  if (value.kind === "approve") return { kind: "approve" };
-  if (value.kind === "reject" && typeof value.reason === "string") return { kind: "reject", reason: value.reason };
-  return null;
-}
-
-function parseAskOwner(value: unknown): AskOwnerRequest | null {
-  if (!isRecord(value) || typeof value.question !== "string") return null;
-  return { question: value.question };
-}
-
-function parseReply(value: unknown): ReplyRequest | null {
-  if (!isRecord(value) || typeof value.reply !== "string") return null;
-  return { reply: value.reply };
-}
-
-function parseSetNotificationSetting(value: unknown): SetNotificationSettingRequest | null {
-  if (!isRecord(value) || typeof value.enabled !== "boolean") return null;
-  const { setting } = value;
-  return isOneOf(NOTIFICATION_SETTINGS, setting) ? { setting, enabled: value.enabled } : null;
-}
-
-function parsePushDevice(value: unknown): SavePushSubscriptionRequest | null {
-  if (!isRecord(value)) return null;
-  const { endpoint, p256dh, auth } = value;
-  if (typeof endpoint !== "string" || typeof p256dh !== "string" || typeof auth !== "string") return null;
-  return { endpoint, p256dh, auth };
-}
-
-function parseRemovePushSubscription(value: unknown): RemovePushSubscriptionRequest | null {
-  if (!isRecord(value) || typeof value.endpoint !== "string") return null;
-  return { endpoint: value.endpoint };
-}
+const parseAskOwner = object<AskOwnerRequest>({ question: string });
+const parseReply = object<ReplyRequest>({ reply: string });
+const parseSetNotificationSetting = object<SetNotificationSettingRequest>({
+  setting: oneOf(NOTIFICATION_SETTINGS),
+  enabled: boolean,
+});
+const parsePushDevice = object<SavePushSubscriptionRequest>({ endpoint: string, p256dh: string, auth: string });
+const parseRemovePushSubscription = object<RemovePushSubscriptionRequest>({ endpoint: string });
 
 function readIndexHtml(staticDir: string): string | null {
   try {

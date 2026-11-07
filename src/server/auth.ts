@@ -28,6 +28,7 @@ import { getMigrations } from "better-auth/db/migration";
 import type { PactCore } from "../core/index.ts";
 import { openWithPragmas } from "../core/db.ts";
 import { AUTH_BASE_PATH, AUTH_ERROR_PATH, INVITE_TOKEN_SIGN_IN_KEY } from "../shared/api.ts";
+import { object, optional, string } from "./parse.ts";
 
 /** The `error` code Better Auth puts on the error redirect when the core refuses a sign-in. */
 export const INVITE_REQUIRED_CODE = "invite_required";
@@ -158,20 +159,16 @@ interface DevSignInBody {
   inviteToken?: string;
 }
 
+const parseDevSignInBody = object<DevSignInBody>({ email: string, name: string, inviteToken: optional(string) });
+
 /** A Standard Schema (what Better Auth takes for a body) for DevSignInBody, without a schema library. */
 const devSignInBody = {
   "~standard": {
     version: 1 as const,
     vendor: "pact",
     validate: (value: unknown) => {
-      const body = value as Partial<Record<keyof DevSignInBody, unknown>> | null;
-      const valid =
-        typeof body?.email === "string" &&
-        typeof body.name === "string" &&
-        (body.inviteToken === undefined || typeof body.inviteToken === "string");
-      return valid
-        ? { value: value as DevSignInBody }
-        : { issues: [{ message: "expected { email, name, inviteToken? }" }] };
+      const body = parseDevSignInBody(value);
+      return body ? { value: body } : { issues: [{ message: "expected { email, name, inviteToken? }" }] };
     },
     // Type-only, for inference.
     types: undefined as unknown as { input: DevSignInBody; output: DevSignInBody },
