@@ -1036,17 +1036,7 @@ class Core implements PactCore {
         const row = this.#ownPact(accountId, pactId);
         if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
         const now = this.#clock.now();
-        const occurrences = this.#occurrencesOf(pactId, timezone);
-        const { first } = occurrences;
-        const schedule = scheduleOf(row.schedule);
-        let history: PactHistory;
-        if (schedule.kind === "one-time") {
-          history = { kind: "one-time", day: { date: first.date, occurrence: this.#occurrenceRecord(row, first) } };
-        } else if (schedule.kind === "weekly-count") {
-          history = { kind: "weekly-count", weeks: this.#heatMapWeeks(row, timezone, first.date, now) };
-        } else {
-          history = { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) };
-        }
+        const { first } = this.#occurrencesOf(pactId, timezone);
         const service = SERVICE_OF_KIND[row.evidence_kind];
         const pact: PactTerms = {
           id: row.id,
@@ -1062,7 +1052,7 @@ class Core implements PactCore {
             this.#waitingEvidence(accountId, pactId),
             this.#waitingExcuses(accountId, pactId),
           ) as PactWaitingItem[],
-          history,
+          history: this.#pactHistory(row, timezone, first, now),
           connectionProblem:
             row.stage === "active" && service !== null ? this.#connectionProblem(accountId, service) : null,
         };
@@ -1685,58 +1675,10 @@ class Core implements PactCore {
         return this.#ledgerSummaries(accountId);
       },
       ledger: (recipientId) => {
-        account();
+        const { timezone } = account();
         const [summary] = this.#ledgerSummaries(accountId, recipientId);
         if (!summary) return { ok: false, reason: "recipient-not-found" };
-        const penaltyRows = this.#db
-          .prepare(
-            `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
-                    penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held,
-                    ${WEEKLY_COUNT_PACT} AS weekly
-             FROM penalty JOIN pact ON pact.id = penalty.pact_id
-             WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
-             ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
-          )
-          .all(accountId, recipientId) as {
-          id: string;
-          pact_id: string;
-          pact_name: string;
-          occurrence_date: string;
-          amount_cents: number;
-          added_at: string;
-          bill_id: string | null;
-          held: 0 | 1;
-          weekly: 0 | 1;
-        }[];
-        const allocation = this.#allocate(accountId, recipientId);
-        const bills = this.#billsOf(accountId, recipientId);
-        const timezone = account().timezone;
-        const penalties = penaltyRows.map((row): LedgerPenalty => {
-          const held = row.held === 1;
-          // Missed with evidence means all of it was rejected, on Fixed days; a short week is its own miss.
-          const rejection = row.weekly === 1 ? null : this.#rejection(row.pact_id, row.occurrence_date);
-          const bill = bills.find((b) => b.id === row.bill_id);
-          return {
-            kind: "penalty",
-            penaltyId: row.id,
-            pactId: row.pact_id,
-            pactName: row.pact_name,
-            occurrenceDate: row.occurrence_date,
-            amountCents: row.amount_cents,
-            ...(row.weekly === 1 && { week: this.#weekProgress(row.pact_id, row.occurrence_date) }),
-            addedAt: new Date(row.added_at),
-            paidCents: allocation.get(row.id)?.paidCents ?? 0,
-            ...(rejection && { rejection }),
-            held,
-            bill: bill
-              ? { kind: "on-bill", billedOn: bill.billedOn, dueAt: bill.dueAt }
-              : {
-                  // A rejected excuse releases it to the next bill it can make, as if it had never been held.
-                  kind: held ? "if-excuse-rejected" : "next-bill",
-                  billedOn: nextBillDay(new Date(row.added_at), this.#clock.now(), ownerZone(timezone, accountId)),
-                },
-          };
-        });
+        const penalties = this.#ledgerPenalties(accountId, recipientId, timezone);
         // A payment recorded the instant a penalty was added came after it, so it's listed first.
         const history = mergeByTime<LedgerEntry>(
           (entry) => (entry.kind === "penalty" ? entry.addedAt : entry.recordedAt),
@@ -1971,6 +1913,58 @@ class Core implements PactCore {
         recipientName: this.#recipientName(terms.recipient_id),
         ...(row.weekly === 1 && { week: this.#weekProgress(row.pact_id, row.occurrence_date) }),
         thread: this.#thread(row.id, true),
+      };
+    });
+  }
+
+  /** The owner's penalties for `recipientId`, newest first, each with what's paid and the bill it's on or will make. */
+  #ledgerPenalties(ownerId: AccountId, recipientId: string, timezone: string | null): LedgerPenalty[] {
+    const penaltyRows = this.#db
+      .prepare(
+        `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
+                penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held,
+                ${WEEKLY_COUNT_PACT} AS weekly
+         FROM penalty JOIN pact ON pact.id = penalty.pact_id
+         WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
+         ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
+      )
+      .all(ownerId, recipientId) as {
+      id: string;
+      pact_id: string;
+      pact_name: string;
+      occurrence_date: string;
+      amount_cents: number;
+      added_at: string;
+      bill_id: string | null;
+      held: 0 | 1;
+      weekly: 0 | 1;
+    }[];
+    const allocation = this.#allocate(ownerId, recipientId);
+    const bills = this.#billsOf(ownerId, recipientId);
+    return penaltyRows.map((row): LedgerPenalty => {
+      const held = row.held === 1;
+      // Missed with evidence means all of it was rejected, on Fixed days; a short week is its own miss.
+      const rejection = row.weekly === 1 ? null : this.#rejection(row.pact_id, row.occurrence_date);
+      const bill = bills.find((b) => b.id === row.bill_id);
+      return {
+        kind: "penalty",
+        penaltyId: row.id,
+        pactId: row.pact_id,
+        pactName: row.pact_name,
+        occurrenceDate: row.occurrence_date,
+        amountCents: row.amount_cents,
+        ...(row.weekly === 1 && { week: this.#weekProgress(row.pact_id, row.occurrence_date) }),
+        addedAt: new Date(row.added_at),
+        paidCents: allocation.get(row.id)?.paidCents ?? 0,
+        ...(rejection && { rejection }),
+        held,
+        bill: bill
+          ? { kind: "on-bill", billedOn: bill.billedOn, dueAt: bill.dueAt }
+          : {
+              // A rejected excuse releases it to the next bill it can make, as if it had never been held.
+              kind: held ? "if-excuse-rejected" : "next-bill",
+              billedOn: nextBillDay(new Date(row.added_at), this.#clock.now(), ownerZone(timezone, ownerId)),
+            },
       };
     });
   }
@@ -2425,6 +2419,18 @@ class Core implements PactCore {
       evidenceWaiting: this.#evidenceDecision(pactId, date) === "waiting",
       excuse,
     };
+  }
+
+  /** The pact page's history: its one occurrence, its weeks, or its days, from the first occurrence `first`. */
+  #pactHistory(row: PactRow, timezone: string, first: Occurrence, now: Date): PactHistory {
+    switch (scheduleOf(row.schedule).kind) {
+      case "one-time":
+        return { kind: "one-time", day: { date: first.date, occurrence: this.#occurrenceRecord(row, first) } };
+      case "weekly-count":
+        return { kind: "weekly-count", weeks: this.#heatMapWeeks(row, timezone, first.date, now) };
+      case "fixed-days":
+        return { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) };
+    }
   }
 
   /**
@@ -3092,20 +3098,7 @@ class Core implements PactCore {
     const before = this.#changeableTerms(pact);
     // Only a new pact can swap a week's count for its days, or back.
     if (checked.terms.schedule.kind !== before.schedule.kind) return { ok: false, reason: "schedule-kind-fixed" };
-    const after: ChangeableTerms = {
-      name: checked.name,
-      description: checked.description,
-      inBedBy: checked.terms.inBedBy ?? null,
-      dueBy: checked.terms.dueBy ?? null,
-      startDate: checked.startDate,
-      endDate: checked.terms.endDate ?? null,
-      schedule: checked.terms.schedule,
-      penaltyCents: change.penaltyCents,
-      recipientId: change.recipientId,
-      reviewerIds: [...checked.reviewerIds].sort(),
-      reminders: checked.reminders,
-      ankiDeckId: checked.ankiDeckId,
-    };
+    const after = changeableTermsOf(checked, change);
     // Reminders apply at once, so they go off before the due time in force now as well as the new one.
     const current = {
       oneTime: before.schedule.kind === "one-time",
@@ -3123,18 +3116,8 @@ class Core implements PactCore {
     if (checked.terms.schedule.kind === "one-time" && !this.#deadlineFarEnough(pact, zone, after, now)) {
       return { ok: false, reason: "deadline-too-soon" };
     }
-    // Occurrences already open keep their terms: a start date means nothing once the first has opened,
-    // and an end date can't take away a day (or a week) that has.
-    const from = firstDayNotOpen(before.schedule, localDateOf(now, zone));
-    if (after.startDate !== before.startDate && pact.first_occurrence < from) {
-      return { ok: false, reason: "pact-started" };
-    }
-    const firstFrom = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
-    if (after.endDate !== null && after.endDate !== before.endDate) {
-      if (after.endDate < addDays(from, -1) || after.endDate < lastDayOf(after.schedule, firstFrom)) {
-        return { ok: false, reason: "end-date-too-early" };
-      }
-    }
+    const reason = openOccurrencesRefusal(pact.first_occurrence, before, after, localDateOf(now, zone));
+    if (reason !== null) return { ok: false, reason };
     return {
       ok: true,
       pact,
@@ -3616,7 +3599,8 @@ class Core implements PactCore {
    * What creating and editing share: `pact` checked as a pact made at
    * `createdAt`, or why it's refused. `existing` is the pact being edited or
    * changed: an Anki pact keeps its rollover hour, and its own deck counts as
-   * known even once it's gone from the deck list.
+   * known even once it's gone from the deck list. The evidence source is
+   * checked first, then the terms, then the recipient and reviewers.
    */
   #checkedPact(
     ownerId: AccountId,
@@ -3624,103 +3608,49 @@ class Core implements PactCore {
     pact: NewPact,
     createdAt: Date,
     existing?: Pick<PactRow, "anki_deck_id" | "anki_rollover_hour">,
-  ):
-    | {
-        ok: true;
-        /** The owner's: a pact needs one. */
-        timezone: string;
-        name: string;
-        description: string;
-        terms: OccurrenceTerms;
-        startDate: LocalDate | null;
-        reviewerIds: AccountId[];
-        reminders: string[];
-        ankiDeckId: string | null;
-      }
-    | { ok: false; reason: CreatePactRefusal } {
-    const oura = pact.evidenceKind === "oura";
-    const anki = pact.evidenceKind === "anki";
-    if (oura && !this.#hasConnection(ownerId, "oura")) return { ok: false, reason: "oura-not-connected" };
-    let ankiDeckId: string | null = null;
-    let ankiRollover: number | null = null;
-    if (anki) {
-      if (!this.#hasConnection(ownerId, "anki")) return { ok: false, reason: "anki-not-connected" };
-      const list = this.#ankiDeckList(ownerId);
-      const deckId = pact.ankiDeckId ?? "";
-      const ownDeck = existing?.anki_deck_id === deckId && existing.anki_rollover_hour !== null;
-      if (!ownDeck && !list?.decks.some((deck) => deck.id === deckId)) return { ok: false, reason: "unknown-deck" };
-      ankiDeckId = deckId;
-      ankiRollover = existing?.anki_rollover_hour ?? list!.rolloverHour;
-    }
-    if (oura && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
-      return { ok: false, reason: "invalid-in-bed-by" };
-    }
-    // A ring's nights are Fixed days only, and at most one day of evidence counts a day.
-    if (pact.schedule.kind === "weekly-count") {
-      const { target } = pact.schedule;
-      if (oura || anki || !Number.isSafeInteger(target) || target < 1 || target > MAX_WEEKLY_TARGET) {
-        return { ok: false, reason: "invalid-schedule" };
+  ): CheckedPact | { ok: false; reason: CreatePactRefusal } {
+    const source = this.#evidenceSource(ownerId, pact, existing);
+    if (!source.ok) return source;
+    const terms = checkedTerms(pact, source.ankiRollover, timezone, createdAt);
+    if (!terms.ok) return terms;
+    const people = this.#checkedPeople(ownerId, pact);
+    if (!people.ok) return people;
+    return { ...terms, reviewerIds: people.reviewerIds, ankiDeckId: source.ankiDeckId };
+  }
+
+  /**
+   * Where `pact`'s evidence comes from, or why it can't: Oura Ring and Anki
+   * need their connection, and an Anki pact a deck from the owner's deck list
+   * (or `existing`'s own deck). An Anki pact's day turns at the collection's
+   * rollover hour; `existing` keeps the one it has.
+   */
+  #evidenceSource(
+    ownerId: AccountId,
+    pact: NewPact,
+    existing: Pick<PactRow, "anki_deck_id" | "anki_rollover_hour"> | undefined,
+  ): { ok: true; ankiDeckId: string | null; ankiRollover: number | null } | { ok: false; reason: CreatePactRefusal } {
+    switch (pact.evidenceKind) {
+      case "camera":
+        return { ok: true, ankiDeckId: null, ankiRollover: null };
+      case "oura":
+        if (!this.#hasConnection(ownerId, "oura")) return { ok: false, reason: "oura-not-connected" };
+        return { ok: true, ankiDeckId: null, ankiRollover: null };
+      case "anki": {
+        if (!this.#hasConnection(ownerId, "anki")) return { ok: false, reason: "anki-not-connected" };
+        const list = this.#ankiDeckList(ownerId);
+        const deckId = pact.ankiDeckId ?? "";
+        const ownDeck = existing?.anki_deck_id === deckId && existing.anki_rollover_hour !== null;
+        if (!ownDeck && !list?.decks.some((deck) => deck.id === deckId)) return { ok: false, reason: "unknown-deck" };
+        return { ok: true, ankiDeckId: deckId, ankiRollover: existing?.anki_rollover_hour ?? list!.rolloverHour };
       }
     }
-    const oneTime = pact.schedule.kind === "one-time";
-    if (pact.schedule.kind === "one-time" && (oura || anki || !isLocalDate(pact.schedule.deadline))) {
-      return { ok: false, reason: "invalid-schedule" };
-    }
-    // A due-by time is for evidence the owner submits; a ring's night has its in-bed-by time.
-    if (
-      pact.dueBy !== undefined &&
-      (oura || !isDueBy(pact.dueBy) || (ankiRollover !== null && !ankiDueByFits(pact.dueBy, ankiRollover)))
-    ) {
-      return { ok: false, reason: "invalid-due-by" };
-    }
-    // A One-time pact has just its deadline: Submit anytime sets when it opens.
-    if (pact.startDate !== undefined && (oneTime || !isLocalDate(pact.startDate))) {
-      return { ok: false, reason: "invalid-start-date" };
-    }
-    if (pact.endDate !== undefined && (oneTime || !isLocalDate(pact.endDate))) {
-      return { ok: false, reason: "invalid-end-date" };
-    }
-    const reminders = [...new Set(pact.reminders ?? [])];
-    if (reminders.length > MAX_REMINDERS || !reminders.every(oneTime ? isDatedReminder : isClockTime)) {
-      return { ok: false, reason: "invalid-reminders" };
-    }
-    // In the order they go off: a night's run from 18:00 to the morning after, an Anki day's from its rollover hour.
-    if (ankiRollover !== null) {
-      const rollover = ankiRollover;
-      reminders.sort((a, b) => ankiReminderOrder(a, rollover) - ankiReminderOrder(b, rollover));
-    } else {
-      const order = oura ? nightOrder : (time: string) => time;
-      reminders.sort((a, b) => order(a).localeCompare(order(b), "en-US"));
-    }
-    const name = pact.name.trim();
-    // Oura Ring and Anki pacts have no photo to describe.
-    const description = oura || anki ? "" : pact.description.trim();
-    if (name === "") return { ok: false, reason: "blank-name" };
-    if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
-    if (timezone === null) return { ok: false, reason: "no-timezone" };
-    const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone, {
-      inBedBy: oura ? pact.inBedBy! : null,
-      dueBy: pact.dueBy ?? null,
-      ankiRollover,
-      startDate: pact.startDate ?? null,
-    });
-    if (!timing.ok) return timing;
-    const due = {
-      oneTime,
-      ankiRollover,
-      inBedBy: oura ? pact.inBedBy! : null,
-      dueBy: timing.terms.dueBy ?? null,
-      dueAt: timing.first.dueAt,
-    };
-    if (!remindersGoOffInTime(reminders, due, timezone)) return { ok: false, reason: "reminder-after-due-time" };
-    const endDate = pact.endDate ?? null;
-    // The first occurrence has to end by the end date: a whole week, for Weekly count.
-    if (endDate !== null && endDate < lastDayOf(timing.terms.schedule, timing.terms.firstOccurrence)) {
-      return { ok: false, reason: "end-date-too-early" };
-    }
-    if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
-      return { ok: false, reason: "invalid-penalty" };
-    }
+  }
+
+  /** `pact`'s recipient and reviewers, or why they're refused: the owner's own recipient, and friends. */
+  #checkedPeople(
+    ownerId: AccountId,
+    pact: NewPact,
+  ): { ok: true; reviewerIds: AccountId[] } | { ok: false; reason: CreatePactRefusal } {
     const isOwnRecipient = this.#db
       .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
       .get(pact.recipientId, ownerId);
@@ -3728,17 +3658,7 @@ class Core implements PactCore {
     const reviewerIds = [...new Set(pact.reviewerIds)];
     if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
     if (!reviewerIds.every((id) => this.#areFriends(ownerId, id))) return { ok: false, reason: "not-a-friend" };
-    return {
-      ok: true,
-      timezone,
-      name,
-      description,
-      terms: endDate === null ? timing.terms : { ...timing.terms, endDate },
-      startDate: pact.startDate ?? null,
-      reviewerIds,
-      reminders,
-      ankiDeckId,
-    };
+    return { ok: true, reviewerIds };
   }
 
   #hasConnection(accountId: AccountId, service: ConnectionService): boolean {
@@ -4240,127 +4160,76 @@ class Core implements PactCore {
     }));
   }
 
-  /**
-   * Alerts: occurrences Missed through a rejection, and rejected excuses,
-   * until accepted or excused again, and reviewer questions until the owner
-   * replies or the item is decided; newest first. To do:
-   * pacts with an occurrence open now that still needs evidence. Missed:
-   * other occurrences judged Missed in the last 48 hours and not accepted.
-   * Coming up: pacts whose first
-   * occurrence hasn't opened yet. A pact on a day it isn't due appears in
-   * neither To do nor Coming up. Empty sections are left out.
-   */
+  /** Today's alerts and sections for the owner, as `#todayAlerts` and `#todaySections` put them. */
   #todayCards(ownerId: AccountId, timezone: string): { alerts: TodayAlert[]; sections: TodaySection[] } {
     const now = this.#clock.now();
+    const bills = this.#billsForToday(ownerId, now);
+    return {
+      alerts: this.#todayAlerts(ownerId, timezone, now, bills.alerts),
+      sections: this.#todaySections(ownerId, timezone, now, bills.cards),
+    };
+  }
+
+  /**
+   * Today's alerts: connection problems while an Active pact is judged from
+   * the connection, then `billAlerts`, then occurrences Missed through a
+   * rejection, and rejected excuses, until accepted or excused again, and
+   * reviewer questions until the owner replies or the item is decided;
+   * newest first.
+   */
+  #todayAlerts(ownerId: AccountId, timezone: string, now: Date, billAlerts: TodayAlert[]): TodayAlert[] {
+    const alerts = [
+      ...this.#rejectedEvidenceAlerts(ownerId),
+      ...this.#rejectedDayAlerts(ownerId, timezone),
+      ...this.#rejectedExcuseAlerts(ownerId, now),
+      ...this.#questionAlerts(ownerId),
+    ];
+    // A connection matters only while an Active pact is judged from it.
+    const problemWith = (service: ConnectionService) =>
+      this.#activePactsUsing(ownerId, service) > 0 ? this.#connectionProblem(ownerId, service) : null;
+    const ouraProblem = problemWith("oura");
+    const ankiProblem = problemWith("anki");
+    return [
+      ...(ouraProblem ? [{ kind: "oura-connection" as const, status: ouraProblem }] : []),
+      ...(ankiProblem ? [{ kind: "anki-connection" as const, status: ankiProblem }] : []),
+      ...billAlerts,
+      ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert),
+    ];
+  }
+
+  /**
+   * Today's sections. No Oura data: bedtime nights past their deadline that
+   * Oura hasn't reported. To do: pacts with an occurrence open now that still
+   * needs evidence, and `billCards`. Missed: other occurrences judged Missed
+   * in the last 48 hours and not accepted. Automatic: bedtime nights open
+   * now. Coming up: pacts whose first occurrence hasn't opened yet. A pact on
+   * a day it isn't due appears in neither To do nor Coming up. Empty sections
+   * are left out.
+   */
+  #todaySections(ownerId: AccountId, timezone: string, now: Date, billCards: TodayBillCard[]): TodaySection[] {
     const toDo: (TodayToDoCard | TodayAnkiCard | TodayBillCard)[] = [];
     const automatic: TodayAutomaticCard[] = [];
     const noOuraData: TodayNoOuraDataCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
     for (const pact of this.#activePacts(ownerId)) {
-      // Each card shows the terms of the occurrence it's about.
-      const cardOn = (date: LocalDate) => ({
-        pactId: pact.id,
-        name: pact.name,
-        penaltyCents: this.#termsOn(pact.id, date).penalty_cents,
-      });
-      const { editWindowClosesAt } = pact;
-      const { first, openAt, between, dayDueAt } = this.#occurrencesOf(pact.id, timezone);
-      switch (pact.evidenceKind) {
-        case "oura": {
-          if (now.getTime() < first.opensAt.getTime()) {
-            comingUp.push({
-              ...cardOn(first.date),
-              editWindowClosesAt,
-              opensOn: first.date,
-              startDate: pact.startDate,
-            });
-            continue;
-          }
-          // Nights the owner needn't hear about: judged, or with an excuse filed (it's under Waiting for approval).
-          const today = localDateOf(now, timezone);
-          const open = (night: Occurrence) =>
-            !this.#isJudged(pact.id, night.date) && this.#excuseOn(pact.id, night.date) === null;
-          const nights = between(addDays(today, -2), today);
-          // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
-          const tonight = nights.find(
-            (night) => night.opensAt.getTime() <= now.getTime() && now.getTime() < night.dueAt.getTime() && open(night),
-          );
-          // Last night: past its deadline, and Oura hasn't reported it before it closes.
-          const lastNight = nights.find(
-            (night) =>
-              night.dueAt.getTime() <= now.getTime() && now.getTime() < night.closesAt.getTime() && open(night),
-          );
-          const tonightCard = tonight && {
-            occurrenceDate: tonight.date,
-            dueAt: tonight.dueAt,
-            inBedBy: this.#termsOn(pact.id, tonight.date).in_bed_by!,
-          };
-          if (lastNight) {
-            // Tonight's deadline rides on this card.
-            noOuraData.push({
-              ...cardOn(lastNight.date),
-              occurrenceDate: lastNight.date,
-              closesAt: lastNight.closesAt,
-              tonight: tonightCard ?? null,
-            });
-          } else if (tonightCard) {
-            automatic.push({ ...cardOn(tonightCard.occurrenceDate), editWindowClosesAt, ...tonightCard });
-          }
+      const placed = this.#pactToday(ownerId, pact, timezone, now);
+      if (placed === null) continue;
+      switch (placed.section) {
+        case "to-do":
+          toDo.push(placed.card);
           break;
-        }
-        case "anki": {
-          const open = openAt(now);
-          // Leaves Today once judged: Satisfied the moment Pact sees the deck finished.
-          if (open && !this.#isJudged(pact.id, open.date) && now.getTime() < open.dueAt.getTime()) {
-            if (this.#excuseOn(pact.id, open.date) === null) toDo.push(this.#ankiCard(pact, ownerId, open, cardOn));
-          } else if (!open && now.getTime() < first.opensAt.getTime()) {
-            comingUp.push({
-              ...cardOn(first.date),
-              editWindowClosesAt,
-              opensOn: first.date,
-              startDate: pact.startDate,
-            });
-          }
+        case "automatic":
+          automatic.push(placed.card);
           break;
-        }
-        case "camera": {
-          const open = openAt(now);
-          // Judged while still open: its evidence was rejected, so it's an alert, or
-          // it's past its due-by time, so it's Missed. Past it and not judged yet,
-          // the next tick judges it.
-          if (open && (this.#isJudged(pact.id, open.date) || now.getTime() >= open.dueAt.getTime())) continue;
-          if (open && pact.terms.schedule.kind === "weekly-count") {
-            const today = localDateOf(now, timezone);
-            const week = this.#weekToDo(pact.id, open, today, dayDueAt(today)!, now);
-            if (week) toDo.push({ kind: "evidence", ...cardOn(open.date), editWindowClosesAt, ...week });
-          } else if (open) {
-            // Evidence waiting or approved: Waiting for approval, or done.
-            const decision = this.#evidenceDecision(pact.id, open.date);
-            if (decision === "waiting" || decision === "approved") continue;
-            // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
-            if (this.#excuseOn(pact.id, open.date) !== null) continue;
-            toDo.push({
-              kind: "evidence",
-              ...cardOn(open.date),
-              editWindowClosesAt,
-              occurrenceDate: open.date,
-              dueAt: open.dueAt,
-              dueBy: this.#termsOn(pact.id, open.date).due_by,
-            });
-          } else if (now.getTime() < first.opensAt.getTime()) {
-            comingUp.push({
-              ...cardOn(first.date),
-              editWindowClosesAt,
-              opensOn: first.date,
-              startDate: pact.startDate,
-            });
-          }
+        case "no-oura-data":
+          noOuraData.push(placed.card);
           break;
-        }
+        case "coming-up":
+          comingUp.push(placed.card);
+          break;
       }
     }
-    const bills = this.#billsForToday(ownerId, now);
-    toDo.push(...bills.cards);
+    toDo.push(...billCards);
     // Rows come sorted by name, and the sorts are stable.
     toDo.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
     automatic.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
@@ -4373,38 +4242,156 @@ class Core implements PactCore {
     if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
     if (automatic.length > 0) sections.push({ kind: "automatic", cards: automatic });
     if (comingUp.length > 0) sections.push({ kind: "coming-up", cards: comingUp });
-    const alerts = [
-      ...this.#rejectedEvidenceAlerts(ownerId),
-      ...this.#rejectedDayAlerts(ownerId, timezone),
-      ...this.#rejectedExcuseAlerts(ownerId, now),
-      ...this.#questionAlerts(ownerId),
-    ];
-    // A connection matters only while an Active pact is judged from it.
-    const problemWith = (service: ConnectionService) =>
-      this.#activePactsUsing(ownerId, service) > 0 ? this.#connectionProblem(ownerId, service) : null;
-    const ouraProblem = problemWith("oura");
-    const ankiProblem = problemWith("anki");
+    return sections;
+  }
+
+  /** The Active pact's card on Today and the section it goes in, or null when it has none now. */
+  #pactToday(ownerId: AccountId, pact: ActivePact, timezone: string, now: Date): TodayPlacement | null {
+    switch (pact.evidenceKind) {
+      case "oura":
+        return this.#bedtimeToday(pact, timezone, now);
+      case "anki":
+        return this.#ankiToday(ownerId, pact, timezone, now);
+      case "camera":
+        return this.#cameraToday(pact, timezone, now);
+    }
+  }
+
+  /**
+   * A bedtime pact on Today: Coming up before its first night opens; then
+   * last night under No Oura data, else tonight under Automatic. A night with
+   * an excuse filed is under Waiting for approval instead.
+   */
+  #bedtimeToday(pact: ActivePact, timezone: string, now: Date): TodayPlacement | null {
+    const { first, between } = this.#occurrencesOf(pact.id, timezone);
+    if (now.getTime() < first.opensAt.getTime()) {
+      return { section: "coming-up", card: this.#comingUpCard(pact, first) };
+    }
+    const today = localDateOf(now, timezone);
+    // Nights the owner needn't hear about: judged, or with an excuse filed.
+    const open = (night: Occurrence) =>
+      !this.#isJudged(pact.id, night.date) && this.#excuseOn(pact.id, night.date) === null;
+    const nights = between(addDays(today, -2), today);
+    // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
+    const tonight = nights.find(
+      (night) => night.opensAt.getTime() <= now.getTime() && now.getTime() < night.dueAt.getTime() && open(night),
+    );
+    // Last night: past its deadline, and Oura hasn't reported it before it closes.
+    const lastNight = nights.find(
+      (night) => night.dueAt.getTime() <= now.getTime() && now.getTime() < night.closesAt.getTime() && open(night),
+    );
+    const tonightCard = tonight && {
+      occurrenceDate: tonight.date,
+      dueAt: tonight.dueAt,
+      inBedBy: this.#termsOn(pact.id, tonight.date).in_bed_by!,
+    };
+    if (lastNight) {
+      // Tonight's deadline rides on this card.
+      return {
+        section: "no-oura-data",
+        card: {
+          ...this.#cardOn(pact, lastNight.date),
+          occurrenceDate: lastNight.date,
+          closesAt: lastNight.closesAt,
+          tonight: tonightCard ?? null,
+        },
+      };
+    }
+    if (tonightCard) {
+      return {
+        section: "automatic",
+        card: {
+          ...this.#cardOn(pact, tonightCard.occurrenceDate),
+          editWindowClosesAt: pact.editWindowClosesAt,
+          ...tonightCard,
+        },
+      };
+    }
+    return null;
+  }
+
+  /**
+   * An Anki pact on Today: its day open now under To do until it's judged
+   * (Satisfied the moment Pact sees the deck finished) or past its due time,
+   * unless an excuse covers it; Coming up before its first day opens.
+   */
+  #ankiToday(ownerId: AccountId, pact: ActivePact, timezone: string, now: Date): TodayPlacement | null {
+    const { first, openAt } = this.#occurrencesOf(pact.id, timezone);
+    const open = openAt(now);
+    if (open && !this.#isJudged(pact.id, open.date) && now.getTime() < open.dueAt.getTime()) {
+      if (this.#excuseOn(pact.id, open.date) !== null) return null;
+      return { section: "to-do", card: this.#ankiCard(pact, ownerId, open) };
+    }
+    if (!open && now.getTime() < first.opensAt.getTime()) {
+      return { section: "coming-up", card: this.#comingUpCard(pact, first) };
+    }
+    return null;
+  }
+
+  /**
+   * A Camera pact on Today: its occurrence open now under To do while it
+   * still needs evidence; Coming up before its first occurrence opens.
+   */
+  #cameraToday(pact: ActivePact, timezone: string, now: Date): TodayPlacement | null {
+    const { first, openAt, dayDueAt } = this.#occurrencesOf(pact.id, timezone);
+    const open = openAt(now);
+    if (!open) {
+      return now.getTime() < first.opensAt.getTime()
+        ? { section: "coming-up", card: this.#comingUpCard(pact, first) }
+        : null;
+    }
+    // Judged while still open: its evidence was rejected, so it's an alert, or
+    // it's past its due-by time, so it's Missed. Past it and not judged yet,
+    // the next tick judges it.
+    if (this.#isJudged(pact.id, open.date) || now.getTime() >= open.dueAt.getTime()) return null;
+    const { editWindowClosesAt } = pact;
+    if (pact.terms.schedule.kind === "weekly-count") {
+      const today = localDateOf(now, timezone);
+      const week = this.#weekToDo(pact.id, open, today, dayDueAt(today)!, now);
+      if (!week) return null;
+      return {
+        section: "to-do",
+        card: { kind: "evidence", ...this.#cardOn(pact, open.date), editWindowClosesAt, ...week },
+      };
+    }
+    // Evidence waiting or approved: Waiting for approval, or done.
+    const decision = this.#evidenceDecision(pact.id, open.date);
+    if (decision === "waiting" || decision === "approved") return null;
+    // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
+    if (this.#excuseOn(pact.id, open.date) !== null) return null;
     return {
-      alerts: [
-        ...(ouraProblem ? [{ kind: "oura-connection" as const, status: ouraProblem }] : []),
-        ...(ankiProblem ? [{ kind: "anki-connection" as const, status: ankiProblem }] : []),
-        ...bills.alerts,
-        ...mergeByTime(({ at }) => at, "newest-first", alerts).map(({ alert }) => alert),
-      ],
-      sections,
+      section: "to-do",
+      card: {
+        kind: "evidence",
+        ...this.#cardOn(pact, open.date),
+        editWindowClosesAt,
+        occurrenceDate: open.date,
+        dueAt: open.dueAt,
+        dueBy: this.#termsOn(pact.id, open.date).due_by,
+      },
+    };
+  }
+
+  /** What every pact card on Today shows: the terms of the occurrence on `date`, the one it's about. */
+  #cardOn(pact: ActivePact, date: LocalDate): Pick<TodayComingUpCard, "pactId" | "name" | "penaltyCents"> {
+    return { pactId: pact.id, name: pact.name, penaltyCents: this.#termsOn(pact.id, date).penalty_cents };
+  }
+
+  /** The pact's Coming up card, until its first occurrence `first` opens. */
+  #comingUpCard(pact: ActivePact, first: Occurrence): TodayComingUpCard {
+    return {
+      ...this.#cardOn(pact, first.date),
+      editWindowClosesAt: pact.editWindowClosesAt,
+      opensOn: first.date,
+      startDate: pact.startDate,
     };
   }
 
   /** An Anki pact's open day on Today: its due time, and how the deck stood at the last check. */
-  #ankiCard(
-    pact: ActivePact,
-    ownerId: AccountId,
-    open: Occurrence,
-    cardOn: (date: LocalDate) => { pactId: string; name: string; penaltyCents: number },
-  ): TodayAnkiCard {
+  #ankiCard(pact: ActivePact, ownerId: AccountId, open: Occurrence): TodayAnkiCard {
     return {
       kind: "anki",
-      ...cardOn(open.date),
+      ...this.#cardOn(pact, open.date),
       editWindowClosesAt: pact.editWindowClosesAt,
       occurrenceDate: open.date,
       dueAt: open.dueAt,
@@ -4737,33 +4724,16 @@ class Core implements PactCore {
       const times = remindersOf(pact.reminders);
       if (times.length === 0) continue;
       const timezone = ownerZone(pact.timezone, pact.owner_account_id);
-      const kind = reminderKindOf(pact);
-      const occurrences = this.#occurrencesOf(pact.id, timezone);
       // A night's or an Anki day's reminder can go off the morning after, so start a day early.
       const fromDate = addDays(localDateOf(from, timezone), -1);
-      const toDate = localDateOf(t, timezone);
-      // Each reminder that could go off, with the day it's about and when that
-      // day's evidence is due: on Weekly count, every day of an open week. On
-      // One-time each reminder has its own date, and they're all about the one occurrence.
-      const due: { date: LocalDate; dueAt: Date; time: string; at: Date }[] = [];
-      const schedule = scheduleOf(pact.schedule);
-      if (schedule.kind === "one-time") {
-        const { date, dueAt } = occurrences.first;
-        due.push(...times.map((time) => ({ date, dueAt, time, at: oneTimeReminderAt(time, timezone) })));
-      } else {
-        const days: { date: LocalDate; dueAt: Date }[] = [];
-        if (schedule.kind === "weekly-count") {
-          for (let date = fromDate; date <= toDate; date = addDays(date, 1)) {
-            const dueAt = occurrences.dayDueAt(date);
-            if (dueAt) days.push({ date, dueAt });
-          }
-        } else {
-          days.push(...occurrences.between(fromDate, toDate));
-        }
-        for (const { date, dueAt } of days) {
-          due.push(...times.map((time) => ({ date, dueAt, time, at: reminderAt(date, time, timezone, kind) })));
-        }
-      }
+      const due = remindersDue(
+        pact,
+        times,
+        this.#occurrencesOf(pact.id, timezone),
+        fromDate,
+        localDateOf(t, timezone),
+        timezone,
+      );
       // A reminder sent before the owner moved west comes round again: it went off already.
       this.#db.prepare(`DELETE FROM reminder_sent WHERE pact_id = ? AND date < ?`).run(pact.id, addDays(fromDate, -1));
       for (const { date, dueAt, time, at } of due) {
@@ -5578,6 +5548,13 @@ interface ActivePact {
   editWindowClosesAt: Date | null;
 }
 
+/** A pact's card on Today and the section it goes in. */
+type TodayPlacement =
+  | { section: "to-do"; card: TodayToDoCard | TodayAnkiCard }
+  | { section: "automatic"; card: TodayAutomaticCard }
+  | { section: "no-oura-data"; card: TodayNoOuraDataCard }
+  | { section: "coming-up"; card: TodayComingUpCard };
+
 function editWindowEnd({ created_at }: Pick<PactRow, "created_at">): Date {
   return new Date(new Date(created_at).getTime() + EDIT_WINDOW_MS);
 }
@@ -5680,6 +5657,123 @@ function nightOf(timestamp: string): LocalDate {
 /** The night of `date`'s in-bed-by deadline as a wall-clock "YYYY-MM-DDTHH:MM". */
 function deadlineWallClock(date: LocalDate, inBedBy: string): string {
   return `${Number(inBedBy.slice(0, 2)) >= 18 ? date : addDays(date, 1)}T${inBedBy}`;
+}
+
+/** A pact's terms as `#checkedPact` checks them. */
+interface CheckedTerms {
+  ok: true;
+  /** The owner's: a pact needs one. */
+  timezone: string;
+  name: string;
+  description: string;
+  terms: OccurrenceTerms;
+  startDate: LocalDate | null;
+  reminders: string[];
+}
+
+/** A pact checked for creating or editing. */
+interface CheckedPact extends CheckedTerms {
+  reviewerIds: AccountId[];
+  ankiDeckId: string | null;
+}
+
+/**
+ * `pact`'s terms checked as a pact made at `createdAt` by an owner in
+ * `timezone`, or why they're refused. An Anki pact's day turns at
+ * `ankiRollover` (null for other pacts).
+ */
+function checkedTerms(
+  pact: NewPact,
+  ankiRollover: number | null,
+  timezone: string | null,
+  createdAt: Date,
+): CheckedTerms | { ok: false; reason: CreatePactRefusal } {
+  const oura = pact.evidenceKind === "oura";
+  const anki = pact.evidenceKind === "anki";
+  if (oura && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
+    return { ok: false, reason: "invalid-in-bed-by" };
+  }
+  // A ring's nights are Fixed days only, and at most one day of evidence counts a day.
+  if (pact.schedule.kind === "weekly-count") {
+    const { target } = pact.schedule;
+    if (oura || anki || !Number.isSafeInteger(target) || target < 1 || target > MAX_WEEKLY_TARGET) {
+      return { ok: false, reason: "invalid-schedule" };
+    }
+  }
+  const oneTime = pact.schedule.kind === "one-time";
+  if (pact.schedule.kind === "one-time" && (oura || anki || !isLocalDate(pact.schedule.deadline))) {
+    return { ok: false, reason: "invalid-schedule" };
+  }
+  // A due-by time is for evidence the owner submits; a ring's night has its in-bed-by time.
+  if (
+    pact.dueBy !== undefined &&
+    (oura || !isDueBy(pact.dueBy) || (ankiRollover !== null && !ankiDueByFits(pact.dueBy, ankiRollover)))
+  ) {
+    return { ok: false, reason: "invalid-due-by" };
+  }
+  // A One-time pact has just its deadline: Submit anytime sets when it opens.
+  if (pact.startDate !== undefined && (oneTime || !isLocalDate(pact.startDate))) {
+    return { ok: false, reason: "invalid-start-date" };
+  }
+  if (pact.endDate !== undefined && (oneTime || !isLocalDate(pact.endDate))) {
+    return { ok: false, reason: "invalid-end-date" };
+  }
+  const unique = [...new Set(pact.reminders ?? [])];
+  if (unique.length > MAX_REMINDERS || !unique.every(oneTime ? isDatedReminder : isClockTime)) {
+    return { ok: false, reason: "invalid-reminders" };
+  }
+  const reminders = sortedReminders(unique, oura, ankiRollover);
+  const name = pact.name.trim();
+  // Oura Ring and Anki pacts have no photo to describe.
+  const description = oura || anki ? "" : pact.description.trim();
+  if (name === "") return { ok: false, reason: "blank-name" };
+  if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
+  if (timezone === null) return { ok: false, reason: "no-timezone" };
+  const timing = newOccurrenceTerms(pact.schedule, createdAt, timezone, {
+    inBedBy: oura ? pact.inBedBy! : null,
+    dueBy: pact.dueBy ?? null,
+    ankiRollover,
+    startDate: pact.startDate ?? null,
+  });
+  if (!timing.ok) return timing;
+  const due = {
+    oneTime,
+    ankiRollover,
+    inBedBy: oura ? pact.inBedBy! : null,
+    dueBy: timing.terms.dueBy ?? null,
+    dueAt: timing.first.dueAt,
+  };
+  if (!remindersGoOffInTime(reminders, due, timezone)) return { ok: false, reason: "reminder-after-due-time" };
+  const endDate = pact.endDate ?? null;
+  // The first occurrence has to end by the end date: a whole week, for Weekly count.
+  if (endDate !== null && endDate < lastDayOf(timing.terms.schedule, timing.terms.firstOccurrence)) {
+    return { ok: false, reason: "end-date-too-early" };
+  }
+  if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
+    return { ok: false, reason: "invalid-penalty" };
+  }
+  return {
+    ok: true,
+    timezone,
+    name,
+    description,
+    terms: endDate === null ? timing.terms : { ...timing.terms, endDate },
+    startDate: pact.startDate ?? null,
+    reminders,
+  };
+}
+
+/**
+ * `reminders` in the order they go off: a night's run from 18:00 to the
+ * morning after (`oura`), an Anki day's from its rollover hour, any other
+ * day's from midnight.
+ */
+function sortedReminders(reminders: string[], oura: boolean, ankiRollover: number | null): string[] {
+  if (ankiRollover !== null) {
+    return [...reminders].sort((a, b) => ankiReminderOrder(a, ankiRollover) - ankiReminderOrder(b, ankiRollover));
+  }
+  const order = oura ? nightOrder : (time: string) => time;
+  return [...reminders].sort((a, b) => order(a).localeCompare(order(b), "en-US"));
 }
 
 /**
@@ -5870,6 +5964,47 @@ const TERM_LABELS: Record<TermDiff["term"], string> = {
   reminders: "Reminders",
 };
 
+/** The terms a change would give a pact: `checked`, from `change`, with the penalty and recipient it names. */
+function changeableTermsOf(checked: CheckedPact, change: PactChange): ChangeableTerms {
+  return {
+    name: checked.name,
+    description: checked.description,
+    inBedBy: checked.terms.inBedBy ?? null,
+    dueBy: checked.terms.dueBy ?? null,
+    startDate: checked.startDate,
+    endDate: checked.terms.endDate ?? null,
+    schedule: checked.terms.schedule,
+    penaltyCents: change.penaltyCents,
+    recipientId: change.recipientId,
+    reviewerIds: [...checked.reviewerIds].sort(),
+    reminders: checked.reminders,
+    ankiDeckId: checked.ankiDeckId,
+  };
+}
+
+/**
+ * Why changing a pact whose first occurrence is `firstOccurrence` from
+ * `before` to `after` on `today` is refused, or null. Occurrences already
+ * open keep their terms: a start date means nothing once the first has
+ * opened, and an end date can't take away a day (or a week) that has.
+ */
+function openOccurrencesRefusal(
+  firstOccurrence: LocalDate,
+  before: ChangeableTerms,
+  after: ChangeableTerms,
+  today: LocalDate,
+): "pact-started" | "end-date-too-early" | null {
+  const from = firstDayNotOpen(before.schedule, today);
+  if (after.startDate !== before.startDate && firstOccurrence < from) return "pact-started";
+  const firstFrom = firstOccurrenceAfterChange(firstOccurrence, after.schedule, from, after.startDate);
+  if (after.endDate !== null && after.endDate !== before.endDate) {
+    if (after.endDate < addDays(from, -1) || after.endDate < lastDayOf(after.schedule, firstFrom)) {
+      return "end-date-too-early";
+    }
+  }
+  return null;
+}
+
 /**
  * A pact's first occurrence once a change to `schedule` and `startDate` takes
  * effect `from` a date: as it was if that's before `from`; otherwise, as the
@@ -5979,6 +6114,40 @@ interface ExcuseToDecide {
   pact_id: string;
   decision: ReviewOutcome | null;
   owner_account_id: AccountId;
+}
+
+/**
+ * Each of `times` that could go off for `pact` from `fromDate` through
+ * `toDate`, with the day it's about and when that day's evidence is due: on
+ * Weekly count, every day of an open week. On One-time each reminder has its
+ * own date, and they're all about the one occurrence.
+ */
+function remindersDue(
+  pact: Pick<PactRow, "schedule" | "evidence_kind" | "anki_rollover_hour">,
+  times: string[],
+  occurrences: Occurrences,
+  fromDate: LocalDate,
+  toDate: LocalDate,
+  timezone: string,
+): { date: LocalDate; dueAt: Date; time: string; at: Date }[] {
+  const schedule = scheduleOf(pact.schedule);
+  if (schedule.kind === "one-time") {
+    const { date, dueAt } = occurrences.first;
+    return times.map((time) => ({ date, dueAt, time, at: oneTimeReminderAt(time, timezone) }));
+  }
+  const days: { date: LocalDate; dueAt: Date }[] = [];
+  if (schedule.kind === "weekly-count") {
+    for (let date = fromDate; date <= toDate; date = addDays(date, 1)) {
+      const dueAt = occurrences.dayDueAt(date);
+      if (dueAt) days.push({ date, dueAt });
+    }
+  } else {
+    days.push(...occurrences.between(fromDate, toDate));
+  }
+  const kind = reminderKindOf(pact);
+  return days.flatMap(({ date, dueAt }) =>
+    times.map((time) => ({ date, dueAt, time, at: reminderAt(date, time, timezone, kind) })),
+  );
 }
 
 /** What a pact's reminder times are about: a calendar day, a night, or an Anki day. */
