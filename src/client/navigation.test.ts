@@ -41,6 +41,54 @@ describe("a link to a page opens that page on a fresh load", () => {
   });
 });
 
+describe("links already sent keep opening the same page", () => {
+  // Pushes and invite links carry these paths, so they must keep working whatever builds them.
+  test.each([
+    ["/pacts/new", { tab: "pacts", stack: [{ kind: "create" }] }],
+    ["/notifications", { tab: "today", stack: [{ kind: "notifications" }] }],
+    ["/pacts/p%201", { tab: "pacts", stack: [{ kind: "pact", id: "p 1" }] }],
+    [
+      "/pacts/p1/edit",
+      {
+        tab: "pacts",
+        stack: [
+          { kind: "pact", id: "p1" },
+          { kind: "edit-pact", id: "p1" },
+        ],
+      },
+    ],
+    [
+      "/pacts/p1/change",
+      {
+        tab: "pacts",
+        stack: [
+          { kind: "pact", id: "p1" },
+          { kind: "change-pact", id: "p1" },
+        ],
+      },
+    ],
+    ["/changes/c1", { tab: "today", stack: [{ kind: "change-request", id: "c1" }] }],
+    ["/ledgers/r1", { tab: "ledgers", stack: [{ kind: "ledger", recipientId: "r1" }] }],
+    ["/excuses/x1", { tab: "today", stack: [{ kind: "excuse", id: "x1" }] }],
+    ["/evidence/e1", { tab: "today", stack: [{ kind: "evidence", id: "e1" }] }],
+    ["/payments/m1", { tab: "today", stack: [{ kind: "payment", id: "m1" }] }],
+  ] as const)("%s", (path, route) => {
+    expect(routeFromPath(path)).toEqual(route);
+  });
+
+  test("an invite link is /invite/ and the token as it was made", () => {
+    expect(inviteTokenFromPath("/invite/Ab-9_xYz")).toBe("Ab-9_xYz");
+    expect(APP_PATHS.invite("Ab-9_xYz")).toBe("/invite/Ab-9_xYz");
+  });
+
+  test("a trailing slash or a doubled one is another path", () => {
+    expect(routeFromPath("/pacts/p1/")).toEqual({ tab: "today", stack: [] });
+    expect(routeFromPath("//pacts/p1")).toEqual({ tab: "today", stack: [] });
+    expect(routeFromPath("/pacts/")).toEqual({ tab: "today", stack: [] });
+    expect(inviteTokenFromPath("/invite/Ab-9_xYz/")).toBeNull();
+  });
+});
+
 describe("a link to a tab opens the tab's own screen", () => {
   test.each([
     [APP_PATHS.today, "today"],
