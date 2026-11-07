@@ -384,7 +384,13 @@ describe("a relaxing change waits for a reviewer", () => {
     expect(pactOf(owner, gym)).toMatchObject({ penaltyCents: 500, newTerms: null, waiting: [] });
     expect(owner.changeRequest(changeRequestIdOf(result))).toMatchObject({
       ok: true,
-      changeRequest: { state: { kind: "rejected", reviewerName: "reviewer", reason: "You can afford $5" } },
+      changeRequest: {
+        state: { kind: "rejected", reviewerName: "reviewer", reason: "You can afford $5" },
+        endsPact: false,
+        changes: [{ term: "penalty", before: 500, after: 200, effect: "needs-approval" }],
+        // Decided: nothing starts any more.
+        start: null,
+      },
     });
     expect(s.notifier.sentTo(owner).filter((n) => n.kind === "change-request-decided")).toEqual([
       expect.objectContaining({

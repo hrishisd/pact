@@ -248,6 +248,24 @@ describe("judging an Anki day", () => {
     expect(day(owner, pactId, TUE)?.detail).toEqual({ kind: "anki", lastCheck: null });
   });
 
+  test("a day Missed at today's due-by time shows the check that decided it, not Closed", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"], dueBy: "22:00" });
+
+    deckShows({ review: 3 }, TUE, "Tue 21:50");
+    await s.advanceTo("Tue 21:55");
+    await s.advanceTo("Tue 22:00");
+
+    expect(missedCards(owner)).toEqual([
+      expect.objectContaining({
+        pactId,
+        occurrenceDate: TUE,
+        detail: { kind: "anki", lastCheck: { cardsLeft: 3, checkedAt: s.at("Tue 21:55") } },
+      }),
+    ]);
+  });
+
   test("a day no check reached AnkiWeb for is Missed, as not reached", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithAnki(s);
