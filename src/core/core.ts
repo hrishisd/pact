@@ -5703,7 +5703,7 @@ function checkedTerms(
   if (unique.length > MAX_REMINDERS || !unique.every(oneTime ? isDatedReminder : isClockTime)) {
     return { ok: false, reason: "invalid-reminders" };
   }
-  const reminders = sortedReminders(unique, oura, ankiRollover);
+  const reminders = sortedReminders(unique, oneTime, oura, ankiRollover);
   const name = pact.name.trim();
   // Oura Ring and Anki pacts have no photo to describe.
   const description = oura || anki ? "" : pact.description.trim();
@@ -5745,11 +5745,13 @@ function checkedTerms(
 }
 
 /**
- * `reminders` in the order they go off: a night's run from 18:00 to the
- * morning after (`oura`), an Anki day's from its rollover hour, any other
- * day's from midnight.
+ * `reminders` in the order they go off: a One-time pact's by date and time
+ * (`oneTime`), a night's from 18:00 to the morning after (`oura`), an Anki
+ * day's from its rollover hour, any other day's from midnight.
  */
-function sortedReminders(reminders: string[], oura: boolean, ankiRollover: number | null): string[] {
+function sortedReminders(reminders: string[], oneTime: boolean, oura: boolean, ankiRollover: number | null): string[] {
+  // "YYYY-MM-DDTHH:MM" sorts as text.
+  if (oneTime) return [...reminders].sort((a, b) => a.localeCompare(b, "en-US"));
   const dayStarts = ankiRollover ?? (oura ? NIGHT_STARTS_HOUR : 0);
   return [...reminders].sort((a, b) => minutesFrom(a, dayStarts) - minutesFrom(b, dayStarts));
 }

@@ -414,6 +414,17 @@ describe("reminders", () => {
     expect(pactOf(owner, taxes).reminders).toEqual(reminders);
   });
 
+  test("a pact keeps its reminders in date and time order", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+
+    const taxes = await createPact("Taxes", oneTime(THURSDAY_1), {
+      reminders: [`${THURSDAY}T09:00`, `${TUESDAY}T18:00`, `${THURSDAY}T08:00`],
+    });
+
+    expect(pactOf(owner, taxes).reminders).toEqual([`${TUESDAY}T18:00`, `${THURSDAY}T08:00`, `${THURSDAY}T09:00`]);
+  });
+
   test("a reminder at or after the deadline, or with no date, is refused", async () => {
     const s = scenario();
     const { createPact } = await ownerWithReviewers(s);

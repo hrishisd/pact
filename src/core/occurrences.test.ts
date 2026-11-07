@@ -6,10 +6,13 @@ import { describe, expect, test } from "vitest";
 import type { Weekday } from "../shared/types.ts";
 import {
   ankiDueByOrder,
+  minutesFrom,
   newOccurrenceTerms,
+  NIGHT_STARTS_HOUR,
   nightStartsAt,
   noOuraDataPushAt,
   occurrences,
+  occurrencesOverTime,
   type NewOccurrenceOptions,
   type OccurrenceTerms,
 } from "./occurrences.ts";
@@ -374,5 +377,96 @@ describe("an Anki due-by time that can't fit its Anki day", () => {
 
     expect(() => occurrences(terms, NEW_YORK).covering("2026-01-05")).toThrow("can't be due by 09:00");
     expect(() => ankiDueByOrder("09:00", 4)).toThrow("can't be due by 09:00");
+  });
+});
+
+describe("times of day in a day that starts at an hour", () => {
+  test.each([
+    { time: "18:00", startHour: NIGHT_STARTS_HOUR, minutes: 0, why: "a night starts at 18:00" },
+    { time: "17:59", startHour: NIGHT_STARTS_HOUR, minutes: 1439, why: "17:59 is the night's last minute" },
+    { time: "23:59", startHour: NIGHT_STARTS_HOUR, minutes: 359, why: "23:59 is before midnight" },
+    { time: "00:00", startHour: NIGHT_STARTS_HOUR, minutes: 360, why: "midnight is the night's seventh hour" },
+    { time: "04:00", startHour: 4, minutes: 0, why: "an Anki day starts at its rollover hour" },
+    { time: "03:59", startHour: 4, minutes: 1439, why: "the minute before is the Anki day's last" },
+    { time: "00:00", startHour: 0, minutes: 0, why: "a day from midnight starts at it" },
+    { time: "23:59", startHour: 0, minutes: 1439, why: "and ends a minute before the next" },
+  ])("$time is $minutes minutes into a day from $startHour:00: $why", ({ time, startHour, minutes }) => {
+    expect(minutesFrom(time, startHour)).toBe(minutes);
+  });
+});
+
+describe("how Anki due-by times sort", () => {
+  test.each([
+    // The usual 4am rollover: noon that day is the earliest, the rollover hour the morning after the latest.
+    { dueBy: "12:00", rollover: 4, order: 8 * 60 },
+    { dueBy: "23:59", rollover: 4, order: 20 * 60 - 1 },
+    { dueBy: null, rollover: 4, order: 20 * 60 },
+    { dueBy: "00:01", rollover: 4, order: 20 * 60 + 1 },
+    { dueBy: "04:00", rollover: 4, order: 24 * 60 },
+    // A midnight rollover: the midnight ending the day is the latest.
+    { dueBy: "23:59", rollover: 0, order: 24 * 60 - 1 },
+    { dueBy: null, rollover: 0, order: 24 * 60 },
+    // A noon rollover: noon itself is the morning after's, a minute later that day's.
+    { dueBy: "12:01", rollover: 12, order: 1 },
+    { dueBy: "12:00", rollover: 12, order: 24 * 60 },
+  ])("$dueBy with a $rollover:00 rollover sorts $order minutes after the day opens", ({ dueBy, rollover, order }) => {
+    expect(ankiDueByOrder(dueBy, rollover)).toBe(order);
+  });
+
+  test("no due-by time sorts as midnight", () => {
+    for (const rollover of [0, 4, 12, 23])
+      expect(ankiDueByOrder(null, rollover)).toBe(ankiDueByOrder("00:00", rollover));
+  });
+});
+
+describe("Anki days", () => {
+  const mondays = termsOf({ schedule: fixedDays("mon"), firstOccurrence: "2026-01-05", ankiRollover: 4 });
+
+  test.each([
+    { dueBy: null, dueAt: "2026-01-06T00:00:00-05:00", why: "with no due-by time, at the midnight ending its date" },
+    { dueBy: "20:00", dueAt: "2026-01-05T20:00:00-05:00", why: "an evening time on its own date" },
+    { dueBy: "04:00", dueAt: "2026-01-06T04:00:00-05:00", why: "the rollover hour the morning after" },
+  ])("open from the rollover hour, an Anki day is due $why", ({ dueBy, dueAt }) => {
+    expect(occurrences({ ...mondays, dueBy }, NEW_YORK).first).toEqual({
+      date: "2026-01-05",
+      opensAt: new Date("2026-01-05T04:00:00-05:00"),
+      dueAt: new Date(dueAt),
+      closesAt: new Date(dueAt),
+    });
+  });
+});
+
+describe("terms that changed over time", () => {
+  // Fixed days from Mon 5 Jan: Mondays due 09:00 until the 12th, then Mon/Wed due at midnight until the
+  // 19th, then every day due 20:00, ending on Thu 22 Jan.
+  const current = termsOf({
+    schedule: fixedDays("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
+    firstOccurrence: "2026-01-05",
+    dueBy: "20:00",
+    endDate: "2026-01-22",
+  });
+  const earlier = [
+    { until: "2026-01-12", schedule: fixedDays("mon"), inBedBy: null, dueBy: "09:00" },
+    { until: "2026-01-19", schedule: fixedDays("mon", "wed"), inBedBy: null, dueBy: null },
+  ];
+
+  test("each date follows the terms it's dated under; the first occurrence and end date are the current terms'", () => {
+    const pact = occurrencesOverTime(current, earlier, NEW_YORK);
+
+    expect(pact.between("2026-01-01", "2026-01-31").map((o) => [o.date, o.dueAt])).toEqual([
+      ["2026-01-05", new Date("2026-01-05T09:00:00-05:00")],
+      ["2026-01-12", new Date("2026-01-13T00:00:00-05:00")],
+      ["2026-01-14", new Date("2026-01-15T00:00:00-05:00")],
+      ["2026-01-19", new Date("2026-01-19T20:00:00-05:00")],
+      ["2026-01-20", new Date("2026-01-20T20:00:00-05:00")],
+      ["2026-01-21", new Date("2026-01-21T20:00:00-05:00")],
+      ["2026-01-22", new Date("2026-01-22T20:00:00-05:00")],
+    ]);
+  });
+
+  test("an end date ends the pact even on a date earlier terms schedule", () => {
+    const ended = occurrencesOverTime({ ...current, endDate: "2026-01-13" }, earlier, NEW_YORK);
+
+    expect(ended.between("2026-01-01", "2026-01-31").map((o) => o.date)).toEqual(["2026-01-05", "2026-01-12"]);
   });
 });
