@@ -158,7 +158,7 @@ describe("judging a night", () => {
   test("first long_sleep at 01:10 (Missed), a second at 03:00 arrives later: stays Missed", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithOura(s);
-    const pactId = await createPact("00:00");
+    await createPact("00:00");
     s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
     await s.advanceTo("Tue 18:00");
 

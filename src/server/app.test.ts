@@ -11,6 +11,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { scenario } from "../core/testing/scenario.ts";
 import { EVIDENCE_KINDS, MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
+import { termsOf } from "../shared/terms.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
@@ -2572,6 +2573,38 @@ describe("connecting AnkiWeb", () => {
         changes: [{ term: "deck", before: { id: "1", name: "Spanish" }, after: { id: "2", name: "Italian" } }],
         outcome: { kind: "needs-approval" },
       },
+    });
+  });
+
+  test("a rename sent as the pact page sends it, its deck unchanged among the terms, applies at once", async () => {
+    const { s, owner, pact } = await ownerWithFriend();
+    const accountId = s.core.accountIdForEmail(OPERATOR)!;
+    await login(s, owner.cookie, "right");
+    s.ankiSource.setDeck(accountId, { id: "1", name: "Spanish" });
+    await s.api(API_PATHS.ankiDecks, { cookie: owner.cookie });
+    const created = await s.api<CreatePactResponse>(API_PATHS.pacts, {
+      cookie: owner.cookie,
+      method: "POST",
+      body: { ...pact, evidenceKind: "anki", name: "Spanish", description: "", ankiDeckId: "1" },
+    });
+    if (!created.body.ok) throw new Error(created.body.reason);
+    const path = API_PATHS.pact(created.body.pactId);
+    s.clock.set(s.at("Wed 20:00"));
+    const before = (await s.api<PactResponse>(path, { cookie: owner.cookie })).body;
+    if (!before.ok) throw new Error(before.reason);
+
+    const change = { ...termsOf(before.pact), name: "Spanish daily" };
+    expect(change).toMatchObject({ ankiDeckId: "1" });
+    const sent = await s.api<ChangePactResponse>(API_PATHS.changePact(created.body.pactId), {
+      cookie: owner.cookie,
+      method: "POST",
+      body: change,
+    });
+
+    expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" } });
+    expect((await s.api<PactResponse>(path, { cookie: owner.cookie })).body).toMatchObject({
+      ok: true,
+      pact: { name: "Spanish daily", anki: { deckId: "1" }, waiting: [] },
     });
   });
 

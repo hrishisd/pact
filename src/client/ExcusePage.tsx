@@ -9,7 +9,7 @@ import type { ExcuseDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
-import { formatDate, formatDayTime } from "./format.ts";
+import { formatDayTime } from "./format.ts";
 import { ExcuseIcon } from "./icons.tsx";
 import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
 import { Empty, useLoad, useNow } from "./ui.tsx";

@@ -444,7 +444,7 @@ async function evidencePaymentEvidence(s: Scenario) {
 describe("a payment in the Review Queue", () => {
   test("is in the queue of each account that may decide it, with what the Review screen needs", async () => {
     const s = scenario();
-    const { owner, reviewer, second, sam, createPact, paymentId } = await tenRecorded(s);
+    const { owner, reviewer, second, createPact, paymentId } = await tenRecorded(s);
     const friend = await reviewerForAnotherRecipient(s, { owner, createPact });
 
     const item = {
