@@ -278,10 +278,12 @@ function Shell({
           title: "New pact",
           body: (
             <CreatePact
-              ouraConnected={profile.connections.some((connection) => connection.service === "oura")}
-              ouraAvailable={profile.ouraAvailable}
-              ankiConnected={profile.connections.some((connection) => connection.service === "anki")}
-              ankiAvailable={profile.ankiAvailable}
+              connections={{
+                ouraConnected: profile.connections.some((connection) => connection.service === "oura"),
+                ouraAvailable: profile.ouraAvailable,
+                ankiConnected: profile.connections.some((connection) => connection.service === "anki"),
+                ankiAvailable: profile.ankiAvailable,
+              }}
               onCancel={nav.back}
               onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
               onInvite={openProfile}

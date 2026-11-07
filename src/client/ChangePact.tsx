@@ -26,18 +26,9 @@ import {
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
-import {
-  formOf,
-  GoalStep,
-  optionalTimes,
-  PenaltyStep,
-  PROBLEMS,
-  ReviewersStep,
-  scheduleOf,
-  ScheduleStep,
-  type Form,
-} from "./CreatePact.tsx";
-import { formatDate, money, parseCents, remindersText } from "./format.ts";
+import { formOf, GoalStep, PenaltyStep, PROBLEMS, ReviewersStep, ScheduleStep, termsOfForm } from "./CreatePact.tsx";
+import { formatDate, money, remindersText } from "./format.ts";
+import type { Form } from "./pact-form.ts";
 import { RemindersStep } from "./reminders-step.tsx";
 import { LoadedFound, Sheet, useLoad, useSend } from "./ui.tsx";
 
@@ -107,24 +98,11 @@ export function ChangePact({
   );
 }
 
-/** The form's terms as the core takes them, or what stops them being sent. */
+/** The form's terms and note as the core takes them, or what stops them being sent. */
 function changeOf(form: Form, note: string): PactChange | { problem: "no-amount" | "no-recipient" } {
-  const penaltyCents = parseCents(form.penalty);
-  if (penaltyCents === null) return { problem: "no-amount" };
-  if (form.recipientId === null) return { problem: "no-recipient" };
-  return {
-    name: form.name.trim(),
-    description: form.kind === "camera" ? form.description.trim() : "",
-    ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
-    ...(form.kind === "anki" && form.ankiDeckId !== null && { ankiDeckId: form.ankiDeckId }),
-    ...optionalTimes(form),
-    schedule: scheduleOf(form),
-    penaltyCents,
-    recipientId: form.recipientId,
-    reviewerIds: form.reviewerIds,
-    reminders: form.reminders,
-    ...(note.trim() !== "" && { note }),
-  };
+  const terms = termsOfForm(form);
+  if ("problem" in terms) return terms;
+  return { ...terms, ...(note.trim() !== "" && { note }) };
 }
 
 type Verdict =

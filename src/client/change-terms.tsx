@@ -5,7 +5,7 @@
 
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
-import type { ChangeRequestView, CurrentTerms, Schedule, TermChange } from "../shared/types.ts";
+import type { ChangeRequestView, CurrentTerms, EvidenceKind, Schedule, TermChange } from "../shared/types.ts";
 import { clockText, formatDate, money, remindersText, scheduleText } from "./format.ts";
 
 export type Term = TermChange["term"];
@@ -40,8 +40,12 @@ export function openOccurrenceText(schedule: Pick<Schedule, "kind">): string {
   return schedule.kind === "weekly-count" ? "This week" : "Today";
 }
 
-/** The terms a pact of this kind lists, in the Request change order. A One-time pact has no start or end date. */
-export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">): Term[] {
+/**
+ * The terms a pact of this evidence kind and kind of schedule has, in the
+ * Request change order. A One-time pact has no start or end date; an Oura
+ * Ring pact has no due-by time.
+ */
+export function termsOfKind(current: { evidenceKind: EvidenceKind; schedule: Pick<Schedule, "kind"> }): Term[] {
   if (current.schedule.kind === "one-time") {
     return ["name", "description", "schedule", "due-by", "penalty", "recipient", "reviewers", "reminders"];
   }

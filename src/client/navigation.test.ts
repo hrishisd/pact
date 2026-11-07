@@ -103,6 +103,11 @@ describe("a link to a tab opens the tab's own screen", () => {
     expect(routeFromPath("/somewhere/else")).toEqual({ tab: "today", stack: [] });
     expect(routeFromPath("/pacts/p1/history")).toEqual({ tab: "today", stack: [] });
   });
+
+  test("a page link whose id isn't valid percent-encoding opens Today", () => {
+    expect(routeFromPath("/pacts/%")).toEqual({ tab: "today", stack: [] });
+    expect(routeFromPath("/pacts/%E0%A4%A")).toEqual({ tab: "today", stack: [] });
+  });
 });
 
 describe("an invite link", () => {
@@ -115,5 +120,6 @@ describe("an invite link", () => {
     expect(inviteTokenFromPath("/invite/")).toBeNull();
     expect(inviteTokenFromPath("/invite/a/b")).toBeNull();
     expect(inviteTokenFromPath(APP_PATHS.pact("p1"))).toBeNull();
+    expect(inviteTokenFromPath("/invite/%")).toBeNull();
   });
 });

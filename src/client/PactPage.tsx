@@ -16,7 +16,7 @@ import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
 import { listNames, openOccurrenceText } from "./change-terms.tsx";
-import { dueTimesForm, PROBLEMS, ReviewersStep } from "./CreatePact.tsx";
+import { formOf, PROBLEMS, ReviewersStep } from "./CreatePact.tsx";
 import { clockText, formatDate, formatDay, minutesLeft, money, remindersText, scheduleText } from "./format.ts";
 import { WaitingRow } from "./item-page.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
@@ -54,6 +54,8 @@ export function PactPage({
   // Reloaded after a change made here, keeping the pact shown meanwhile and if the reload fails.
   const { state, reload } = useLoad(() => api.pact(pactId));
   const result = loadedData(state);
+  // One clock for the page: the edit window's countdown, what it allows, and the heat map's today.
+  const now = useNow();
 
   useEffect(() => {
     if (result?.ok) onLoaded(pactId, result.pact.name);
@@ -65,42 +67,68 @@ export function PactPage({
       what="This pact"
       notFound={{ title: "Pact not found", body: "It isn't one of your pacts." }}
     >
-      {({ pact }) => (
-        <>
-          {pact.connectionProblem &&
-            (pact.evidenceKind === "anki" ? (
-              <AnkiConnectionAlert status={pact.connectionProblem} onReconnected={reload} />
-            ) : (
-              <OuraConnectionAlert status={pact.connectionProblem} />
-            ))}
-          {pact.stage === "active" && pact.evidenceKind === "anki" && pact.anki.deckMissing && (
-            <AnkiDeckMissing deckName={pact.anki.deckName} />
-          )}
-          <EditWindowBar pact={pact} onEdit={onEdit} onDeleted={onDeleted} />
-          <StageLine pact={pact} />
-          <NewTerms pact={pact} />
-          <Actions pact={pact} timezone={timezone} onFiled={reload} onRequestChange={onRequestChange} />
-          {pact.waiting.length > 0 && (
-            <WaitingOn items={pact.waiting} onOpenExcuse={onOpenExcuse} onOpenChangeRequest={onOpenChangeRequest} />
-          )}
-          <History pact={pact} timezone={timezone} />
-          <Terms pact={pact} onSaved={reload} onInvite={onInvite} />
-          <EndPact pact={pact} onSent={reload} />
-          {pact.stage === "ended" && (
-            <p className="small muted">
-              Ended {formatDay(pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on the
-              ledger.
-            </p>
-          )}
-        </>
-      )}
+      {({ pact }) => {
+        const minutes = minutesLeft(pact.editWindowClosesAt, now);
+        // After the edit window, until the pact Ends: File excuse, Request change, End pact and the terms' own Change.
+        const changeable = minutes === null && pact.stage === "active";
+        const waiting = changeWaiting(pact);
+        return (
+          <>
+            {pact.connectionProblem &&
+              (pact.evidenceKind === "anki" ? (
+                <AnkiConnectionAlert status={pact.connectionProblem} onReconnected={reload} />
+              ) : (
+                <OuraConnectionAlert status={pact.connectionProblem} />
+              ))}
+            {pact.stage === "active" && pact.evidenceKind === "anki" && pact.anki.deckMissing && (
+              <AnkiDeckMissing deckName={pact.anki.deckName} />
+            )}
+            <EditWindowBar pact={pact} minutes={minutes} onEdit={onEdit} onDeleted={onDeleted} />
+            <StageLine pact={pact} />
+            <NewTerms pact={pact} />
+            {changeable && (
+              <Actions
+                pact={pact}
+                changeWaiting={waiting}
+                timezone={timezone}
+                onFiled={reload}
+                onRequestChange={onRequestChange}
+              />
+            )}
+            {pact.waiting.length > 0 && (
+              <WaitingOn items={pact.waiting} onOpenExcuse={onOpenExcuse} onOpenChangeRequest={onOpenChangeRequest} />
+            )}
+            <HeatMap pact={pact} timezone={timezone} now={now} />
+            <Terms pact={pact} changeable={changeable} changeWaiting={waiting} onSaved={reload} onInvite={onInvite} />
+            {changeable && !waiting && <EndPact pact={pact} onSent={reload} />}
+            {pact.stage === "ended" && (
+              <p className="small muted">
+                Ended {formatDay(pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on the
+                ledger.
+              </p>
+            )}
+          </>
+        );
+      }}
     </LoadedFound>
   );
 }
 
-/** The blue bar on a pact in its edit window. It and any open sheet go away when the window closes. */
-function EditWindowBar({ pact, onEdit, onDeleted }: { pact: Pact; onEdit: () => void; onDeleted: () => void }) {
-  const now = useNow();
+/**
+ * The blue bar on a pact in its edit window, with `minutes` left in it. It
+ * and any open sheet go away when the window closes.
+ */
+function EditWindowBar({
+  pact,
+  minutes,
+  onEdit,
+  onDeleted,
+}: {
+  pact: Pact;
+  minutes: number | null;
+  onEdit: () => void;
+  onDeleted: () => void;
+}) {
   const [asking, setAsking] = useState(false);
   const {
     busy,
@@ -117,7 +145,6 @@ function EditWindowBar({ pact, onEdit, onDeleted }: { pact: Pact; onEdit: () => 
     // Deleted goes Back, which lands a moment later: the button stays disabled till then.
     { leavesScreen: true },
   );
-  const minutes = minutesLeft(pact.editWindowClosesAt, now);
 
   if (minutes === null) return error ? <p className="error">{error}</p> : null;
   return (
@@ -191,20 +218,19 @@ function changeWaiting(pact: Pact): boolean {
  */
 function Actions({
   pact,
+  changeWaiting: waiting,
   timezone,
   onFiled,
   onRequestChange,
 }: {
   pact: Pact;
+  changeWaiting: boolean;
   timezone: string;
   onFiled: () => void;
   onRequestChange: () => void;
 }) {
-  const now = useNow();
   const [filing, setFiling] = useState(false);
   const close = useCallback(() => setFiling(false), []);
-  if (minutesLeft(pact.editWindowClosesAt, now) !== null || pact.stage === "ended") return null;
-  const waiting = changeWaiting(pact);
   return (
     <div className="stack-sm">
       {waiting && (
@@ -249,7 +275,6 @@ function Actions({
  * Ending is a change request, so it's gone while one waits.
  */
 function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
-  const now = useNow();
   const [asking, setAsking] = useState(false);
   const [note, setNote] = useState("");
   const {
@@ -269,9 +294,6 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
     },
     (failure) => `Couldn't send it. ${failureText(failure, "Check your connection and try again.")}`,
   );
-  if (minutesLeft(pact.editWindowClosesAt, now) !== null || pact.stage === "ended" || changeWaiting(pact)) {
-    return null;
-  }
   const names = pact.reviewers.map((r) => r.name);
   const approval = names.length === 1 ? `${names[0]}'s approval` : `approval from ${listNames(names, "or")}`;
 
@@ -360,25 +382,30 @@ function WaitingOn({
   );
 }
 
-function History({ pact, timezone }: { pact: Pact; timezone: string }) {
-  const now = useNow();
-  return <HeatMap pact={pact} timezone={timezone} now={now} />;
-}
-
 /**
- * The pact's terms. Once the edit window has closed, Change on the name and
- * the reminders and Add on the reviewers: changes that apply at once.
+ * The pact's terms. Once the edit window has closed (`changeable`), Change
+ * on the name and the reminders and Add on the reviewers: changes that apply
+ * at once. In the edit window, Edit covers them.
  */
-function Terms({ pact, onSaved, onInvite }: { pact: Pact; onSaved: () => void; onInvite: () => void }) {
-  const now = useNow();
+function Terms({
+  pact,
+  changeable,
+  changeWaiting,
+  onSaved,
+  onInvite,
+}: {
+  pact: Pact;
+  changeable: boolean;
+  changeWaiting: boolean;
+  onSaved: () => void;
+  onInvite: () => void;
+}) {
   const [changing, setChanging] = useState<"name" | "reviewers" | "reminders" | null>(null);
   const close = useCallback(() => setChanging(null), []);
   const saved = () => {
     setChanging(null);
     onSaved();
   };
-  // In the edit window, Edit covers them.
-  const changeable = pact.stage === "active" && minutesLeft(pact.editWindowClosesAt, now) === null;
   return (
     <section className="card">
       <h3>Terms</h3>
@@ -391,28 +418,56 @@ function Terms({ pact, onSaved, onInvite }: { pact: Pact; onSaved: () => void; o
         onChangeReminders={changeable ? () => setChanging("reminders") : undefined}
       />
       {changing === "name" && <NameSheet pact={pact} onClose={close} onSaved={saved} />}
-      {changing === "reviewers" && <AddReviewerSheet pact={pact} onClose={close} onSaved={saved} onInvite={onInvite} />}
+      {changing === "reviewers" && (
+        <AddReviewerSheet
+          pact={pact}
+          changeWaiting={changeWaiting}
+          onClose={close}
+          onSaved={saved}
+          onInvite={onInvite}
+        />
+      )}
       {changing === "reminders" && <RemindersSheet pact={pact} onClose={close} onSaved={saved} />}
     </section>
   );
 }
 
-/** The pact's terms as they stand, with `change` in place of its own: a change that applies at once. */
-function changedAtOnce(
-  pact: Pact,
-  change: Partial<Pick<PactChange, "name" | "reviewerIds" | "reminders">>,
-): PactChange {
-  return { ...termsOf(pact), ...change };
-}
+/** A change that applies at once: the terms a sheet changes. */
+type AtOnceChange = Partial<Pick<PactChange, "name" | "reviewerIds" | "reminders">>;
 
 /**
- * The create form's words for a refusal a change shares with it; a sheet has
- * its own words for the rest. Read when called, not when this file loads:
- * CreatePact imports this file, so PROBLEMS may not exist yet then.
+ * Sends a change that applies at once from a sheet: the pact's terms as they
+ * stand, with `run(change)`'s in place of their own, then `onSaved`.
+ * `refusals` words the refusals the sheet expects; any other, and a failure,
+ * start with `couldnt` ("Couldn't save it."). With `unchangedSaves`, a change
+ * that changes nothing counts as saved. The name and reviewer sheets use the
+ * create form's PROBLEMS, read when they render: CreatePact imports this
+ * file, so PROBLEMS may not exist yet when it loads.
  */
-function sharedProblem(reason: ChangePactRefusal): string | undefined {
-  const problems: Partial<Record<ChangePactRefusal, string>> = PROBLEMS;
-  return problems[reason];
+function useChangeAtOnce(
+  pact: Pact,
+  {
+    refusals,
+    couldnt,
+    unchangedSaves,
+    onSaved,
+  }: {
+    refusals: Partial<Record<ChangePactRefusal, string>>;
+    couldnt: string;
+    unchangedSaves: boolean;
+    onSaved: () => void;
+  },
+) {
+  return useSend(
+    async (change: AtOnceChange) => {
+      const result = await api.changePact(pact.id, { ...termsOf(pact), ...change });
+      if (!result.ok && !(unchangedSaves && result.reason === "nothing-changed")) {
+        return refusals[result.reason] ?? `${couldnt} Reopen the pact and try again.`;
+      }
+      onSaved();
+    },
+    (cause) => `${couldnt} ${failureText(cause, "Check your connection and try again.")}`,
+  );
 }
 
 /** The reminders step's words for its refusals; the reminders sheet has its own for the rest. */
@@ -424,16 +479,12 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
     busy: saving,
     error,
     run: save,
-  } = useSend(
-    async () => {
-      const result = await api.changePact(pact.id, changedAtOnce(pact, { name: name.trim() }));
-      if (!result.ok && result.reason !== "nothing-changed") {
-        return sharedProblem(result.reason) ?? "Couldn't save it. Reopen the pact and try again.";
-      }
-      onSaved();
-    },
-    (cause) => `Couldn't save it. ${failureText(cause, "Check your connection and try again.")}`,
-  );
+  } = useChangeAtOnce(pact, {
+    refusals: PROBLEMS,
+    couldnt: "Couldn't save it.",
+    unchangedSaves: true,
+    onSaved,
+  });
 
   return (
     <Sheet title="Name" closeLabel="Cancel" onClose={onClose}>
@@ -448,7 +499,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
         <small>Shown on Today. A new name applies at once, with no approval.</small>
       </label>
       {error && <p className="error">{error}</p>}
-      <button className="btn primary block" disabled={saving} onClick={() => save()}>
+      <button className="btn primary block" disabled={saving} onClick={() => save({ name: name.trim() })}>
         Save name
       </button>
     </Sheet>
@@ -462,11 +513,13 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
  */
 function AddReviewerSheet({
   pact,
+  changeWaiting,
   onClose,
   onSaved,
   onInvite,
 }: {
   pact: Pact;
+  changeWaiting: boolean;
   onClose: () => void;
   onSaved: () => void;
   onInvite: () => void;
@@ -481,18 +534,17 @@ function AddReviewerSheet({
   const reviewerNames = pact.reviewers.map((r) => r.name);
   const pickedNames = (others ?? []).filter((f) => picked.includes(f.id)).map((f) => f.name);
 
+  // Add stays off until someone is picked, so the change always changes something.
   const {
     busy: saving,
     error,
     run: save,
-  } = useSend(
-    async () => {
-      const result = await api.changePact(pact.id, changedAtOnce(pact, { reviewerIds: [...current, ...picked] }));
-      if (!result.ok) return sharedProblem(result.reason) ?? "Couldn't add them. Reopen the pact and try again.";
-      onSaved();
-    },
-    (cause) => `Couldn't add them. ${failureText(cause, "Check your connection and try again.")}`,
-  );
+  } = useChangeAtOnce(pact, {
+    refusals: PROBLEMS,
+    couldnt: "Couldn't add them.",
+    unchangedSaves: false,
+    onSaved,
+  });
 
   let body: ReactNode = null;
   if (others !== null && others.length === 0) {
@@ -513,7 +565,7 @@ function AddReviewerSheet({
       </>
     );
   } else if (others !== null) {
-    const hint = changeWaiting(pact)
+    const hint = changeWaiting
       ? "Applies at once, with no approval, and they're told. They can decide the change waiting too."
       : "Applies at once, with no approval, and they're told.";
     body = (
@@ -530,7 +582,11 @@ function AddReviewerSheet({
           />
         </div>
         {error && <p className="error">{error}</p>}
-        <button className="btn primary block" disabled={saving || picked.length === 0} onClick={() => save()}>
+        <button
+          className="btn primary block"
+          disabled={saving || picked.length === 0}
+          onClick={() => save({ reviewerIds: [...current, ...picked] })}
+        >
           {picked.length === 0 ? "Add reviewer" : `Add ${listNames(pickedNames)}`}
         </button>
       </>
@@ -551,34 +607,26 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
     error,
     setError,
     run: send,
-  } = useSend(
-    async () => {
-      const result = await api.changePact(pact.id, changedAtOnce(pact, { reminders }));
-      if (!result.ok && result.reason !== "nothing-changed") {
-        return REMINDERS_PROBLEMS[result.reason] ?? "Couldn't save them. Reopen the pact and try again.";
-      }
-      onSaved();
-    },
-    (cause) => `Couldn't save them. ${failureText(cause, "Check your connection and try again.")}`,
-  );
-  const form = {
-    kind: pact.evidenceKind,
-    weekly: pact.schedule.kind === "weekly-count",
-    oneTime: pact.schedule.kind === "one-time",
-    deadline: pact.schedule.kind === "one-time" ? pact.schedule.deadline : "",
-    ...dueTimesForm(pact),
-    reminders,
-  };
+  } = useChangeAtOnce(pact, {
+    refusals: REMINDERS_PROBLEMS,
+    couldnt: "Couldn't save them.",
+    unchangedSaves: true,
+    onSaved,
+  });
 
   const save = () => {
     if (reminders.includes("")) return setError(REMINDER_PROBLEMS["invalid-reminders"]);
-    send();
+    send({ reminders });
   };
 
   return (
     <Sheet title="Reminders" closeLabel="Cancel" onClose={onClose}>
       <div className="stack step-in-sheet">
-        <RemindersStep form={form} onReminders={setReminders} hint="Changes apply at once, with no approval." />
+        <RemindersStep
+          form={{ ...formOf(pact), reminders }}
+          onReminders={setReminders}
+          hint="Changes apply at once, with no approval."
+        />
       </div>
       {error && <p className="error">{error}</p>}
       <button className="btn primary block" disabled={saving} onClick={save}>

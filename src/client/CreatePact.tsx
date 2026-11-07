@@ -6,31 +6,31 @@
 // browser back here (`?oura=connected`) at Goal. Picking Anki with no
 // connection adds a Connect AnkiWeb step, which signs in on the spot and goes
 // on to Goal, where the owner picks the deck. Editing a pact in its edit
-// window reuses the form without the evidence kind step. The core decides every rule; the steps only
-// stop the owner moving on with a field left empty.
+// window reuses the form without the evidence kind step. The core decides
+// every rule; the steps only stop the owner moving on with a field left empty.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MAX_WEEKLY_TARGET,
   WEEKDAYS,
   type AnkiDeck,
-  type CurrentTerms,
   type EditPactRefusal,
   type EvidenceKind,
   type FirstOccurrence,
   type Friend,
+  type PactChange,
   type PactTerms,
   type Recipient,
   type Refusal,
   type Schedule,
-  type TermsByKind,
   type Weekday,
 } from "../shared/types.ts";
 import { parseDatedReminder } from "../shared/calendar.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
-import { takeOuraResult } from "./oura.tsx";
+import { ouraResultText, takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
 import { api, failureText } from "./api.ts";
+import { termsOfKind, type Term } from "./change-terms.tsx";
 import {
   centsInputText,
   clockText,
@@ -42,22 +42,13 @@ import {
   parseCents,
 } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
+import { scheduleKindOf, type Form } from "./pact-form.ts";
 import { TermsList } from "./PactPage.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { LoadedFound, loadFailure, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 type Step = "kind" | "connect" | "goal" | "schedule" | "penalty" | "reviewers" | "reminders" | "check";
 const AFTER_KIND: Step[] = ["goal", "schedule", "penalty", "reviewers", "reminders", "check"];
-
-/** The form's steps. A pact's evidence kind never changes, so editing skips that step. */
-function stepsFor(
-  kind: EvidenceKind,
-  { editing, ouraConnected, ankiConnected }: { editing: boolean; ouraConnected: boolean; ankiConnected: boolean },
-): Step[] {
-  if (editing) return AFTER_KIND;
-  const connect = (kind === "oura" && !ouraConnected) || (kind === "anki" && !ankiConnected);
-  return ["kind", ...(connect ? (["connect"] as const) : []), ...AFTER_KIND];
-}
 
 type Pact = Json<PactTerms>;
 
@@ -72,42 +63,6 @@ const DAY_BUTTONS: Record<Weekday, { short: string; full: string }> = {
   sun: { short: "Su", full: "Sunday" },
 };
 
-export interface Form {
-  kind: EvidenceKind;
-  /** Oura Ring: "HH:MM" as the time field gives it, or "" until picked. */
-  inBedBy: string;
-  /** Anki only: the deck's id, or null until picked, and its full name as the deck list gave it. */
-  ankiDeckId: string | null;
-  ankiDeckName: string;
-  /** Whether the owner typed the name; until then a bedtime pact's name follows its in-bed-by time, an Anki pact's its deck. */
-  named: boolean;
-  name: string;
-  description: string;
-  /** Camera only: a Weekly count of `target` days a week, rather than Fixed days on `days`. */
-  weekly: boolean;
-  days: Weekday[];
-  target: number;
-  /** Camera only: One-time, due on `deadline`, rather than Fixed days or a Weekly count. */
-  oneTime: boolean;
-  /** "YYYY-MM-DD" as the date field gives it, or "" until picked. */
-  deadline: string;
-  /** One-time only: evidence counts from creation until the deadline, rather than on its date only. */
-  submitAnytime: boolean;
-  /** Camera and Anki: whether evidence is due by a set time instead of midnight. */
-  dueByOn: boolean;
-  /** "HH:MM" as the time field gives it, or "" until picked. */
-  dueBy: string;
-  /** "YYYY-MM-DD" as the date field gives it, or "" for none. */
-  startDate: string;
-  endDate: string;
-  /** As typed, in dollars: "5" or "2.50". */
-  penalty: string;
-  recipientId: string | null;
-  reviewerIds: string[];
-  /** "HH:MM" each as the time field gives it (on One-time, "YYYY-MM-DDTHH:MM"), or "" until picked. */
-  reminders: string[];
-}
-
 const EMPTY_FORM: Form = {
   kind: "camera",
   inBedBy: "",
@@ -116,10 +71,9 @@ const EMPTY_FORM: Form = {
   named: false,
   name: "",
   description: "",
-  weekly: false,
+  scheduleKind: "fixed-days",
   days: [],
   target: 3,
-  oneTime: false,
   deadline: "",
   submitAnytime: false,
   dueByOn: false,
@@ -132,7 +86,7 @@ const EMPTY_FORM: Form = {
   reminders: [],
 };
 
-export function formOf(pact: Json<CurrentTerms> & Pick<Pact, "reminders">): Form {
+export function formOf(pact: Pact): Form {
   const anki = pact.evidenceKind === "anki" ? pact.anki : null;
   return {
     kind: pact.evidenceKind,
@@ -142,10 +96,9 @@ export function formOf(pact: Json<CurrentTerms> & Pick<Pact, "reminders">): Form
     named: true,
     name: pact.name,
     description: pact.description,
-    weekly: pact.schedule.kind === "weekly-count",
+    scheduleKind: pact.schedule.kind,
     days: pact.schedule.kind === "fixed-days" ? pact.schedule.days : [],
     target: pact.schedule.kind === "weekly-count" ? pact.schedule.target : EMPTY_FORM.target,
-    oneTime: pact.schedule.kind === "one-time",
     deadline: pact.schedule.kind === "one-time" ? pact.schedule.deadline : "",
     submitAnytime: pact.schedule.kind === "one-time" && pact.schedule.submitAnytime,
     startDate: pact.startDate ?? "",
@@ -158,7 +111,7 @@ export function formOf(pact: Json<CurrentTerms> & Pick<Pact, "reminders">): Form
 }
 
 /** The form's in-bed-by and due-by fields, as a pact's terms have them. */
-export function dueTimesForm(terms: Json<TermsByKind>): Pick<Form, "inBedBy" | "dueByOn" | "dueBy"> {
+function dueTimesForm(terms: Pact): Pick<Form, "inBedBy" | "dueByOn" | "dueBy"> {
   if (terms.evidenceKind === "oura") return { inBedBy: terms.inBedBy, dueByOn: false, dueBy: "" };
   return { inBedBy: "", dueByOn: terms.dueBy !== null, dueBy: terms.dueBy ?? "" };
 }
@@ -167,8 +120,7 @@ export function dueTimesForm(terms: Json<TermsByKind>): Pick<Form, "inBedBy" | "
  * What's wrong, in the owner's words: the core's refusals at Create or Save,
  * and the steps' own checks that a field is filled in.
  */
-type Problem =
-  EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "oura-failed" | "oura-unavailable" | "anki-due-by";
+type Problem = EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "anki-due-by";
 
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
@@ -190,8 +142,6 @@ export const PROBLEMS: Record<Problem, string> = {
   "no-amount": "Enter an amount, like 5 or 2.50.",
   "invalid-penalty": "Set a penalty above $0.",
   "no-recipient": "Pick a recipient.",
-  "oura-failed": "Oura didn't connect. Try again.",
-  "oura-unavailable": "Oura isn't set up yet.",
   "unknown-recipient": "That recipient isn't on your list. Pick another.",
   "no-reviewers": "Pick at least one reviewer.",
   "not-a-friend": "Only friends can be reviewers.",
@@ -211,10 +161,12 @@ function stepProblem(step: Step, form: Form): Problem | null {
       if (form.kind !== "camera") return null;
       if (form.description.trim() === "") return "blank-description";
       return null;
-    case "schedule":
-      if (isOneTime(form) && form.deadline === "") return "no-deadline";
-      if (!isWeekly(form) && !isOneTime(form) && form.days.length === 0) return "no-days";
+    case "schedule": {
+      const scheduleKind = scheduleKindOf(form);
+      if (scheduleKind === "one-time" && form.deadline === "") return "no-deadline";
+      if (scheduleKind === "fixed-days" && form.days.length === 0) return "no-days";
       return form.kind !== "oura" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
+    }
     case "penalty": {
       const penaltyCents = parseCents(form.penalty);
       if (penaltyCents === null) return "no-amount";
@@ -244,41 +196,19 @@ export function EditPact({
   onInvite: () => void;
 }) {
   const { state } = useLoad(() => api.pact(pactId));
-  // Editing never shows the kind step, so neither the Oura nor the Anki flags change anything here.
   return (
     <LoadedFound
       state={state}
       what="This pact"
       notFound={{ title: "Pact not found", body: "It isn't one of your pacts." }}
     >
-      {({ pact }) => (
-        <CreatePact
-          editing={pact}
-          ouraConnected
-          ouraAvailable
-          ankiConnected
-          ankiAvailable
-          onCancel={onDone}
-          onCreated={onDone}
-          onInvite={onInvite}
-        />
-      )}
+      {({ pact }) => <CreatePact editing={pact} onCancel={onDone} onCreated={onDone} onInvite={onInvite} />}
     </LoadedFound>
   );
 }
 
-/** The form, for a new pact or for `editing`. */
-export function CreatePact({
-  editing,
-  ouraConnected,
-  ouraAvailable,
-  ankiConnected: ankiConnectedBefore,
-  ankiAvailable,
-  onCancel,
-  onCreated,
-  onInvite,
-}: {
-  editing?: Pact;
+/** What the evidence kind step needs to know about the account's connections and this server. */
+interface Connections {
   /** Whether the account has an Oura connection: without one, Oura Ring adds the Connect step. */
   ouraConnected: boolean;
   /** Whether this server has Oura set up: without it, the Oura Ring tile can't be picked. */
@@ -287,40 +217,77 @@ export function CreatePact({
   ankiConnected: boolean;
   /** Whether this server has Anki set up: without it, the Anki tile can't be picked. */
   ankiAvailable: boolean;
+}
+
+/**
+ * The form, for a new pact or for `editing`. A pact's evidence kind never
+ * changes, so editing skips that step, and with it the connections.
+ */
+export function CreatePact({
+  onCancel,
+  onCreated,
+  onInvite,
+  ...opened
+}: ({ editing: Pact } | { connections: Connections }) & {
   onCancel: () => void;
   /** After creating the pact, or saving the edit. */
   onCreated: (pactId: string, name: string) => void;
   onInvite: () => void;
 }) {
+  const editing = "editing" in opened ? opened.editing : undefined;
+  const connections = "connections" in opened ? opened.connections : null;
   const now = useNow();
   const [windowClosed, setWindowClosed] = useState(false);
-  // Back from Oura's page: connected goes on to Goal; anything else stays at the kind step.
+  // Back from Oura's page: connected goes on to Goal; anything else stays at the kind step, saying why.
   const [ouraResult] = useState(takeOuraResult);
+  const [ouraError, setOuraError] = useState(() => ouraResultText(ouraResult));
   const [form, setForm] = useState<Form>(
     editing ? formOf(editing) : { ...EMPTY_FORM, kind: ouraResult === "connected" ? "oura" : "camera" },
   );
   // Connecting AnkiWeb happens on this page, so the Connect step goes once it has.
-  const [ankiConnected, setAnkiConnected] = useState(ankiConnectedBefore);
+  const [ankiConnected, setAnkiConnected] = useState(connections?.ankiConnected ?? false);
   const [ankiLogin, setAnkiLogin] = useState<AnkiLogin>(NO_ANKI_LOGIN);
-  const steps = stepsFor(form.kind, { editing: editing !== undefined, ouraConnected, ankiConnected });
-  const [stepIndex, setStepIndex] = useState(ouraResult === "connected" ? steps.indexOf("goal") : 0);
+  const [step, setStep] = useState<Step>(editing || ouraResult === "connected" ? "goal" : "kind");
   const [tried, setTried] = useState(false);
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [recipients, setRecipients] = useState<Recipient[] | null>(null);
   const [loadFailed, setLoadFailed] = useState<{ error: unknown } | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(
-    ouraResult === "failed"
-      ? PROBLEMS["oura-failed"]
-      : ouraResult === "unavailable"
-        ? PROBLEMS["oura-unavailable"]
-        : null,
-  );
   const top = useRef<HTMLDivElement>(null);
 
-  const step = steps[stepIndex]!;
+  /** Whether picking `kind` adds a Connect step: Oura Ring or Anki, with no connection yet. */
+  const connects = (kind: EvidenceKind) =>
+    (kind === "oura" && connections?.ouraConnected === false) || (kind === "anki" && !ankiConnected);
+  const steps: Step[] = editing
+    ? AFTER_KIND
+    : ["kind", ...(connects(form.kind) ? (["connect"] as const) : []), ...AFTER_KIND];
+  const stepIndex = steps.indexOf(step);
   const problem = stepProblem(step, form);
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
+
+  const {
+    busy: creating,
+    error: createError,
+    setError: setCreateError,
+    run: create,
+  } = useSend(
+    async () => {
+      const terms = termsOfForm(form);
+      if ("problem" in terms) return;
+      if (editing) {
+        const result = await api.editPact(editing.id, { evidenceKind: form.kind, ...terms });
+        if (result.ok) return onCreated(editing.id, terms.name);
+        if (result.reason === "edit-window-closed") setWindowClosed(true);
+        return problemText(result.reason, form);
+      }
+      const result = await api.createPact({ evidenceKind: form.kind, ...terms });
+      if (!result.ok) return problemText(result.reason, form);
+      onCreated(result.pactId, terms.name);
+    },
+    (error) =>
+      `Couldn't ${editing ? "save" : "create"} it. ${failureText(error, "Check your connection and try again.")}`,
+    // Created or saved leaves for the pact's page: the button stays disabled till then.
+    { leavesScreen: true },
+  );
 
   const loadFriends = () => api.friends().then(setFriends, (error: unknown) => setLoadFailed({ error }));
   useEffect(() => {
@@ -337,16 +304,17 @@ export function CreatePact({
 
   useEffect(() => {
     top.current?.scrollIntoView({ block: "start" });
-  }, [stepIndex]);
+  }, [step]);
 
-  const goTo = (index: number) => {
+  const goTo = (to: Step) => {
     setTried(false);
+    setOuraError(null);
     setCreateError(null);
-    setStepIndex(index);
+    setStep(to);
   };
   const next = () => {
     if (problem) return setTried(true);
-    goTo(stepIndex + 1);
+    goTo(steps[stepIndex + 1]!);
   };
 
   const connectAnki = async () => {
@@ -356,44 +324,7 @@ export function CreatePact({
     // The password goes no further than that request.
     setAnkiLogin({ email: ankiLogin.email, password: "", busy: false, failed: null });
     setAnkiConnected(true);
-    goTo(stepsFor("anki", { editing: false, ouraConnected, ankiConnected: true }).indexOf("goal"));
-  };
-
-  const create = async () => {
-    const recipientId = form.recipientId;
-    const penaltyCents = parseCents(form.penalty);
-    if (recipientId === null || penaltyCents === null) return;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      const pact = {
-        evidenceKind: form.kind,
-        name: form.name.trim(),
-        description: form.kind === "camera" ? form.description.trim() : "",
-        ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
-        ...(form.kind === "anki" && form.ankiDeckId !== null && { ankiDeckId: form.ankiDeckId }),
-        ...optionalTimes(form),
-        schedule: scheduleOf(form),
-        penaltyCents,
-        recipientId,
-        reviewerIds: form.reviewerIds,
-        reminders: form.reminders,
-      } as const;
-      if (editing) {
-        const result = await api.editPact(editing.id, pact);
-        if (result.ok) return onCreated(editing.id, pact.name);
-        if (result.reason === "edit-window-closed") setWindowClosed(true);
-        setCreateError(problemText(result.reason, form));
-      } else {
-        const result = await api.createPact(pact);
-        if (result.ok) return onCreated(result.pactId, pact.name);
-        setCreateError(problemText(result.reason, form));
-      }
-    } catch (error) {
-      const action = editing ? "save" : "create";
-      setCreateError(`Couldn't ${action} it. ${failureText(error, "Check your connection and try again.")}`);
-    }
-    setCreating(false);
+    goTo("goal");
   };
 
   let body: ReactNode;
@@ -401,11 +332,11 @@ export function CreatePact({
     case "kind":
       body = (
         <KindStep
-          ouraAvailable={ouraAvailable}
-          ankiAvailable={ankiAvailable}
+          ouraAvailable={connections?.ouraAvailable ?? false}
+          ankiAvailable={connections?.ankiAvailable ?? false}
           onPick={(kind) => {
             update({ kind });
-            goTo(1);
+            goTo(connects(kind) ? "connect" : "goal");
           }}
         />
       );
@@ -492,6 +423,7 @@ export function CreatePact({
       )}
       {body}
       {tried && problem && <p className="error">{problemText(problem, form)}</p>}
+      {ouraError && <p className="error">{ouraError}</p>}
       {createError && <p className="error">{createError}</p>}
       <div className="footbar">
         {stepIndex === 0 ? (
@@ -499,12 +431,12 @@ export function CreatePact({
             Cancel
           </button>
         ) : (
-          <button className="btn" disabled={creating} onClick={() => goTo(stepIndex - 1)}>
+          <button className="btn" disabled={creating} onClick={() => goTo(steps[stepIndex - 1]!)}>
             Back
           </button>
         )}
         {step === "check" ? (
-          <button className="btn primary grow" disabled={creating} onClick={() => void create()}>
+          <button className="btn primary grow" disabled={creating} onClick={() => create()}>
             {editing ? "Save changes" : "Create pact"}
           </button>
         ) : step === "connect" && form.kind === "anki" ? (
@@ -778,39 +710,64 @@ export function GoalStep({ form, update }: { form: Form; update: (change: Partia
   );
 }
 
-/** Whether the form makes a Weekly count pact: Camera only. */
-function isWeekly(form: Pick<Form, "kind" | "weekly" | "oneTime">): boolean {
-  return form.kind === "camera" && form.weekly && !form.oneTime;
-}
-
-/** Whether the form makes a One-time pact: Camera only. */
-export function isOneTime(form: Pick<Form, "kind" | "oneTime">): boolean {
-  return form.kind === "camera" && form.oneTime;
-}
-
 /** The form's schedule as the core takes it. */
-export function scheduleOf(form: Form): Schedule {
-  if (isOneTime(form)) return { kind: "one-time", deadline: form.deadline, submitAnytime: form.submitAnytime };
-  return isWeekly(form) ? { kind: "weekly-count", target: form.target } : { kind: "fixed-days", days: form.days };
+function scheduleOf(form: Form): Schedule {
+  switch (scheduleKindOf(form)) {
+    case "fixed-days":
+      return { kind: "fixed-days", days: form.days };
+    case "weekly-count":
+      return { kind: "weekly-count", target: form.target };
+    case "one-time":
+      return { kind: "one-time", deadline: form.deadline, submitAnytime: form.submitAnytime };
+  }
 }
 
-/** The form's optional times as the core takes them: each left out when it isn't set. One-time has no dates. */
-export function optionalTimes(form: Form): { dueBy?: string; startDate?: string; endDate?: string } {
-  const dated = !isOneTime(form);
+/** The terms the form's evidence kind and kind of schedule have. */
+function termsOfFormKind(form: Form): Term[] {
+  return termsOfKind({ evidenceKind: form.kind, schedule: { kind: scheduleKindOf(form) } });
+}
+
+/** The form's optional times as the core takes them: each left out when it isn't set, or its pact doesn't have it. */
+function optionalTimes(form: Form): { dueBy?: string; startDate?: string; endDate?: string } {
+  const terms = termsOfFormKind(form);
   return {
-    ...(form.kind !== "oura" && form.dueByOn && { dueBy: form.dueBy }),
-    ...(dated && form.startDate !== "" && { startDate: form.startDate }),
-    ...(dated && form.endDate !== "" && { endDate: form.endDate }),
+    ...(terms.includes("due-by") && form.dueByOn && { dueBy: form.dueBy }),
+    ...(terms.includes("start-date") && form.startDate !== "" && { startDate: form.startDate }),
+    ...(terms.includes("end-date") && form.endDate !== "" && { endDate: form.endDate }),
   };
 }
 
 /**
- * The form's reminders as a schedule of the kind `oneTime` says takes them:
- * a One-time pact's each have a date, the deadline's to start with.
+ * The form's terms as the core takes them, at Create, Save or Request
+ * change, or what stops them being sent: an amount that isn't one, or no
+ * recipient picked.
  */
-function remindersAs(form: Form, oneTime: boolean): string[] {
-  if (oneTime === isOneTime(form)) return form.reminders;
-  if (!oneTime) return form.reminders.map((reminder) => parseDatedReminder(reminder).time);
+export function termsOfForm(form: Form): Omit<PactChange, "note"> | { problem: "no-amount" | "no-recipient" } {
+  const penaltyCents = parseCents(form.penalty);
+  if (penaltyCents === null) return { problem: "no-amount" };
+  if (form.recipientId === null) return { problem: "no-recipient" };
+  return {
+    name: form.name.trim(),
+    description: form.kind === "camera" ? form.description.trim() : "",
+    ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
+    ...(form.kind === "anki" && form.ankiDeckId !== null && { ankiDeckId: form.ankiDeckId }),
+    ...optionalTimes(form),
+    schedule: scheduleOf(form),
+    penaltyCents,
+    recipientId: form.recipientId,
+    reviewerIds: form.reviewerIds,
+    reminders: form.reminders,
+  };
+}
+
+/**
+ * The form's reminders as a schedule of kind `to` takes them: a One-time
+ * pact's each have a date, the deadline's to start with.
+ */
+function remindersAs(form: Form, to: Schedule["kind"]): string[] {
+  const dated = to === "one-time";
+  if (dated === (scheduleKindOf(form) === "one-time")) return form.reminders;
+  if (!dated) return form.reminders.map((reminder) => parseDatedReminder(reminder).time);
   return form.deadline === "" ? [] : form.reminders.map((time) => (time === "" ? "" : `${form.deadline}T${time}`));
 }
 
@@ -827,14 +784,10 @@ export function ScheduleStep({
   const { days } = form;
   const oura = form.kind === "oura";
   const anki = form.kind === "anki";
-  const weekly = isWeekly(form);
-  const oneTime = isOneTime(form);
-  const pick = (kind: "fixed" | "weekly" | "one-time") =>
-    update({
-      weekly: kind === "weekly",
-      oneTime: kind === "one-time",
-      reminders: remindersAs(form, kind === "one-time"),
-    });
+  const scheduleKind = scheduleKindOf(form);
+  const weekly = scheduleKind === "weekly-count";
+  const oneTime = scheduleKind === "one-time";
+  const pick = (kind: Schedule["kind"]) => update({ scheduleKind: kind, reminders: remindersAs(form, kind) });
   const everyDay = days.length === WEEKDAYS.length;
   const onDays = (days: Weekday[]) => update({ days });
   // Kept in week order, Monday first.
@@ -846,10 +799,10 @@ export function ScheduleStep({
       <h2>Schedule</h2>
       {form.kind === "camera" && !kindFixed && (
         <div className="seg" role="group" aria-label="Schedule type">
-          <button aria-pressed={!weekly && !oneTime} onClick={() => pick("fixed")}>
+          <button aria-pressed={scheduleKind === "fixed-days"} onClick={() => pick("fixed-days")}>
             Fixed days
           </button>
-          <button aria-pressed={weekly} onClick={() => pick("weekly")}>
+          <button aria-pressed={weekly} onClick={() => pick("weekly-count")}>
             Weekly count
           </button>
           <button aria-pressed={oneTime} onClick={() => pick("one-time")}>
@@ -935,7 +888,7 @@ export function ScheduleStep({
                 ? `You can submit on any day of the week, until ${until}.`
                 : `You can submit on scheduled days only, until ${until}.`}
       </small>
-      {!oura && (
+      {termsOfFormKind(form).includes("due-by") && (
         <>
           <div className="list">
             <label className="switch-row">
@@ -1308,6 +1261,7 @@ function CheckStep({
     };
   }, [scheduleKey, form.kind, inBedBy, dueBy, startDate, editing?.id]);
 
+  const terms = termsOfForm(form);
   const recipient = recipients.find((r) => r.id === form.recipientId);
   return (
     <>
@@ -1315,17 +1269,15 @@ function CheckStep({
       <div className="card">
         <h3>{form.name.trim()}</h3>
         {form.kind === "camera" && <p className="muted">{form.description.trim()}</p>}
-        {recipient && (
+        {recipient && !("problem" in terms) && (
           <TermsList
             deckName={form.kind === "anki" ? form.ankiDeckName : undefined}
             terms={{
+              ...terms,
               evidenceKind: form.kind,
-              inBedBy,
-              dueBy: dueBy ?? null,
-              startDate: startDate ?? null,
-              endDate: endDate ?? null,
-              schedule,
-              penaltyCents: parseCents(form.penalty) ?? 0,
+              dueBy: terms.dueBy ?? null,
+              startDate: terms.startDate ?? null,
+              endDate: terms.endDate ?? null,
               recipient,
               reviewers: friends.filter((f) => form.reviewerIds.includes(f.id)),
               reminders: form.reminders,

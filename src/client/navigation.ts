@@ -133,11 +133,22 @@ const PAGE_ROUTES: { pattern: RegExp; route: (id: string) => Route }[] = [
   { pattern: pathPattern(APP_PATHS.payment), route: (id) => ({ tab: "today", stack: [{ kind: "payment", id }] }) },
 ];
 
+/** A path's id part as it was before encoding, or null when it isn't valid percent-encoding, like "%". */
+function decodedId(part: string): string | null {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return null;
+  }
+}
+
 /** The route a path opens on a fresh load: a page, a tab's own screen, or Today for any other path. */
 export function routeFromPath(pathname: string): Route {
   for (const { pattern, route } of PAGE_ROUTES) {
     const match = pattern.exec(pathname);
-    if (match) return route(decodeURIComponent(match[1] ?? ""));
+    if (!match) continue;
+    const id = decodedId(match[1] ?? "");
+    if (id !== null) return route(id);
   }
   const tab = (Object.keys(TAB_PATHS) as TabId[]).find((t) => TAB_PATHS[t] === pathname) ?? "today";
   return { tab, stack: [] };
@@ -148,7 +159,7 @@ const INVITE_PATTERN = pathPattern(APP_PATHS.invite);
 /** The token of the invite link `pathname` is, or null. */
 export function inviteTokenFromPath(pathname: string): string | null {
   const token = INVITE_PATTERN.exec(pathname)?.[1];
-  return token === undefined ? null : decodeURIComponent(token);
+  return token === undefined ? null : decodedId(token);
 }
 
 function currentEntry(): Entry {

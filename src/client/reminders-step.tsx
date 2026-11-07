@@ -4,14 +4,11 @@
 
 import { addDays, parseClockTime } from "../shared/calendar.ts";
 import { MAX_REMINDERS, type CreatePactRefusal } from "../shared/types.ts";
-import type { Form } from "./CreatePact.tsx";
 import { clockText } from "./format.ts";
+import { scheduleKindOf, type Form } from "./pact-form.ts";
 
 /** What the step needs from the pact form: the kind and due time decide the copy and a new reminder's time. */
-type RemindersForm = Pick<
-  Form,
-  "kind" | "weekly" | "oneTime" | "deadline" | "inBedBy" | "dueByOn" | "dueBy" | "reminders"
->;
+type RemindersForm = Pick<Form, "kind" | "scheduleKind" | "deadline" | "inBedBy" | "dueByOn" | "dueBy" | "reminders">;
 
 /** The core's refusals about reminders, in the owner's words. */
 export const REMINDER_PROBLEMS = {
@@ -30,13 +27,9 @@ function suggestedReminder(form: RemindersForm): string {
   const before = hour * 60 + minute - 30;
   const minutes = (before + 24 * 60) % (24 * 60);
   const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-  if (!oneTime(form)) return time;
+  if (scheduleKindOf(form) !== "one-time") return time;
   if (form.deadline === "") return "";
   return `${before < 0 ? addDays(form.deadline, -1) : form.deadline}T${time}`;
-}
-
-function oneTime(form: RemindersForm): boolean {
-  return form.kind === "camera" && form.oneTime;
 }
 
 export function RemindersStep({
@@ -57,7 +50,8 @@ export function RemindersStep({
       ? `the due-by time, ${clockText(form.dueBy)}`
       : "midnight";
   const set = (index: number, time: string) => onReminders(reminders.map((r, i) => (i === index ? time : r)));
-  const dated = oneTime(form);
+  const scheduleKind = scheduleKindOf(form);
+  const dated = scheduleKind === "one-time";
   return (
     <>
       <h2>Reminders</h2>
@@ -92,7 +86,7 @@ export function RemindersStep({
             ? `They go off on scheduled days before ${due}, only while the deck isn't finished as of Pact's last check, and say how many cards are left.`
             : dated
               ? `Each goes off once, on its date, before ${due} on the deadline, only if you haven't submitted a photo yet.`
-              : form.weekly
+              : scheduleKind === "weekly-count"
                 ? `They go off each day before ${due} that you haven't submitted a photo, until the week's target is met.`
                 : `They go off on scheduled days before ${due}, only if you haven't submitted a photo yet.`}
         {hint && ` ${hint}`}
