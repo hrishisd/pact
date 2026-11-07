@@ -29,7 +29,6 @@ import {
   EXCUSE_REASON_FIELD,
   EXCUSE_TO_FIELD,
   INVITE_REQUIRED_PATH,
-  invitePath,
   APP_PATHS,
   MAX_PHOTO_BYTES,
   OURA_RESULT_PARAM,
@@ -337,7 +336,7 @@ export function createApp({
         throw error;
       }
       // As Google's sign-in does: back to the invite, to accept it, or home.
-      return c.redirect(inviteToken === undefined ? "/" : invitePath(inviteToken));
+      return c.redirect(inviteToken === undefined ? "/" : APP_PATHS.invite(inviteToken));
     });
   }
 

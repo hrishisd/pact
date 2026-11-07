@@ -1,7 +1,7 @@
 // The Profile sheet's Friends section: who you're friends with, and an invite link to share.
 
 import { useState } from "react";
-import { invitePath } from "../shared/api.ts";
+import { APP_PATHS } from "../shared/api.ts";
 import { api, failureText } from "./api.ts";
 import { initial } from "./format.ts";
 import { loadFailure, loadedData, useLoad } from "./ui.tsx";
@@ -69,7 +69,7 @@ function InviteFriend() {
     setState({ kind: "creating" });
     try {
       const invite = await api.createInvite();
-      const url = new URL(invitePath(invite.token), window.location.origin).href;
+      const url = new URL(APP_PATHS.invite(invite.token), window.location.origin).href;
       setState({ kind: "ready", url, copied: false });
       if (canShare) await share(url);
       else await copy(url);

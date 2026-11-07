@@ -98,17 +98,6 @@ export const INVITE_TOKEN_SIGN_IN_KEY = "inviteToken";
 export const OURA_RESULT_PARAM = "oura";
 export type OuraResult = "connected" | "cancelled" | "failed" | "unavailable";
 
-/** The client route of an invite link; the SPA renders it. */
-export function invitePath(token: string): string {
-  return `/invite/${token}`;
-}
-
-/** The token of the invite link `pathname` is (the inverse of `invitePath`), or null. */
-export function inviteTokenFromPath(pathname: string): string | null {
-  const match = /^\/invite\/([^/]+)$/.exec(pathname);
-  return match?.[1] === undefined ? null : decodeURIComponent(match[1]);
-}
-
 /** The app's own pages, for its navigation and for where a notification opens. */
 export const APP_PATHS = {
   today: "/",
@@ -127,6 +116,10 @@ export const APP_PATHS = {
   evidence: (evidenceId: string) => `/evidence/${encodeURIComponent(evidenceId)}`,
   /** A payment's page, for its owner: where a reviewer's question about it opens. */
   payment: (paymentId: string) => `/payments/${encodeURIComponent(paymentId)}`,
+  /** The device's push and the account's notification settings, opened from Profile. */
+  notifications: "/notifications",
+  /** An invite link. It shows before sign-in, so the app reads it apart from the other pages. */
+  invite: (token: string) => `/invite/${encodeURIComponent(token)}`,
 } as const;
 
 /**

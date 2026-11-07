@@ -10,7 +10,7 @@ import {
   EXCUSE_REASON_FIELD,
   EXCUSE_TO_FIELD,
   INVITE_TOKEN_SIGN_IN_KEY,
-  invitePath,
+  APP_PATHS,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   type AcceptExcuseRejectionResponse,
@@ -95,8 +95,8 @@ export function signInWithGoogle(): Promise<unknown> {
 export function signInWithInvite(token: string): Promise<unknown> {
   return authClient.signIn.social({
     provider: "google",
-    callbackURL: invitePath(token),
-    errorCallbackURL: invitePath(token),
+    callbackURL: APP_PATHS.invite(token),
+    errorCallbackURL: APP_PATHS.invite(token),
     additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: token },
   });
 }

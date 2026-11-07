@@ -14,6 +14,7 @@ import { EVIDENCE_KINDS, MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
 import { termsOf } from "../shared/terms.ts";
 import {
   API_PATHS,
+  APP_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
   DEV_SIGN_IN_PATH,
@@ -21,7 +22,6 @@ import {
   INVITE_REQUIRED_PATH,
   INVITE_TOKEN_SIGN_IN_KEY,
   OURA_RECONNECT_PATH,
-  invitePath,
   MAX_PHOTO_BYTES,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
@@ -241,7 +241,7 @@ async function server({
       const fromInvite =
         inviteToken === undefined
           ? { callbackURL: "/" }
-          : { callbackURL: invitePath(inviteToken), additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: inviteToken } };
+          : { callbackURL: APP_PATHS.invite(inviteToken), additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: inviteToken } };
       const start = await request(`${AUTH_BASE_PATH}/sign-in/social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -487,7 +487,7 @@ describe("invites", () => {
     const friend = await s.signIn("friend@example.test", { inviteToken: owner.token });
 
     expect(friend.response.status).toBe(302);
-    expect(friend.response.headers.get("Location")).toBe(invitePath(owner.token));
+    expect(friend.response.headers.get("Location")).toBe(APP_PATHS.invite(owner.token));
     expect(s.authRows()).toEqual({ user: 2, account: 2, session: 2 });
     const accept = await friend.post<AcceptInviteResponse>(API_PATHS.acceptInvite(owner.token));
     expect(accept).toMatchObject({ status: 200, body: { ok: true, friend: { name: "owner" } } });
@@ -642,7 +642,7 @@ describe("dev sign-in", () => {
     const response = await s.request(`${DEV_SIGN_IN_PATH}?email=friend@example.test&name=Friend&invite=${owner.token}`);
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe(invitePath(owner.token));
+    expect(response.headers.get("Location")).toBe(APP_PATHS.invite(owner.token));
     const cookie = cookieFrom(response);
     expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body).toMatchObject({
       email: "friend@example.test",
@@ -2045,7 +2045,7 @@ describe("spa", () => {
   test("client routes fall back to index.html; unknown API routes don't", async () => {
     const s = await server();
 
-    for (const path of ["/some/client/route", invitePath("some-token")]) {
+    for (const path of ["/some/client/route", APP_PATHS.invite("some-token")]) {
       const page = await s.request(path);
       expect(page.status).toBe(200);
       expect(page.headers.get("Cache-Control")).toBe("no-cache");

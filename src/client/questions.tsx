@@ -144,12 +144,3 @@ export function AskSheet({
     </Sheet>
   );
 }
-
-/** The chip of an item of the owner's still waiting: on their reply, or for approval. */
-export function WaitingChip({ thread }: { thread: Json<QuestionThread> }) {
-  return thread.waitingOnReply ? (
-    <span className="chip c-reply">Waiting on your reply</span>
-  ) : (
-    <span className="chip c-wait">Waiting for approval</span>
-  );
-}

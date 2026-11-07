@@ -225,7 +225,9 @@ function stepProblem(step: Step, form: Form): Problem | null {
       return form.reviewerIds.length === 0 ? "no-reviewers" : null;
     case "reminders":
       return form.reminders.includes("") ? "invalid-reminders" : null;
-    default:
+    case "kind":
+    case "connect":
+    case "check":
       return null;
   }
 }

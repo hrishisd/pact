@@ -50,7 +50,8 @@ import {
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
-import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
+import { CameraIcon } from "./icons.tsx";
+import { WaitingRow } from "./item-page.tsx";
 import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
@@ -65,6 +66,11 @@ interface ExcuseTarget {
 
 /** Opens the File excuse sheet. */
 type OnFileExcuse = (target: ExcuseTarget) => void;
+
+/** File excuse from a card or alert about one of a pact's days: the sheet opens on that day. */
+function excuseTargetFor(about: { pactId: string; name: string; occurrenceDate: string }): ExcuseTarget {
+  return { pactId: about.pactId, pactName: about.name, day: about.occurrenceDate };
+}
 
 export function Today({
   timezone,
@@ -312,57 +318,64 @@ function Section({
           checking={checkingOura}
           ouraConnectionProblem={ouraConnectionProblem}
           onOpen={() => onOpenPact(card.pactId, card.name)}
-          onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+          onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
         />
       ));
     case "to-do":
-      return section.cards.map((card) =>
-        card.kind === "bill" ? (
-          <BillCard
-            key={`bill:${card.recipientId}`}
-            card={card}
-            timezone={timezone}
-            now={now}
-            onOpenLedger={onOpenLedger}
-            onPaid={onChanged}
-          />
-        ) : card.kind === "anki" ? (
-          <AnkiCard
-            key={`anki:${card.pactId}`}
-            card={card}
-            timezone={timezone}
-            now={now}
-            checking={checkingAnki}
-            onOpen={() => onOpenPact(card.pactId, card.name)}
-            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
-          />
-        ) : (
-          <PactCard
-            key={`evidence:${card.pactId}`}
-            name={card.name}
-            penaltyCents={card.penaltyCents}
-            editWindowClosesAt={card.editWindowClosesAt}
-            now={now}
-            chip={<span className="chip c-todo">To do</span>}
-            onOpen={() => onOpenPact(card.pactId, card.name)}
-          >
-            {card.week ? (
-              <WeekToDo card={card} week={card.week} timezone={timezone} />
-            ) : (
-              <div className="meta due">
-                Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
-                {timeLeft(Date.parse(card.dueAt) - now)}
-              </div>
-            )}
-            <EvidenceForm
-              pactId={card.pactId}
-              weekly={card.week !== undefined}
-              onSubmitted={onChanged}
-              onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
-            />
-          </PactCard>
-        ),
-      );
+      return section.cards.map((card) => {
+        switch (card.kind) {
+          case "bill":
+            return (
+              <BillCard
+                key={`bill:${card.recipientId}`}
+                card={card}
+                timezone={timezone}
+                now={now}
+                onOpenLedger={onOpenLedger}
+                onPaid={onChanged}
+              />
+            );
+          case "anki":
+            return (
+              <AnkiCard
+                key={`anki:${card.pactId}`}
+                card={card}
+                timezone={timezone}
+                now={now}
+                checking={checkingAnki}
+                onOpen={() => onOpenPact(card.pactId, card.name)}
+                onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
+              />
+            );
+          case "evidence":
+            return (
+              <PactCard
+                key={`evidence:${card.pactId}`}
+                name={card.name}
+                penaltyCents={card.penaltyCents}
+                editWindowClosesAt={card.editWindowClosesAt}
+                now={now}
+                chip={<span className="chip c-todo">To do</span>}
+                onOpen={() => onOpenPact(card.pactId, card.name)}
+              >
+                {card.week ? (
+                  <WeekToDo card={card} week={card.week} timezone={timezone} />
+                ) : (
+                  <div className="meta due">
+                    Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
+                    {timeLeft(Date.parse(card.dueAt) - now)}
+                  </div>
+                )}
+                <EvidenceForm
+                  pactId={card.pactId}
+                  weekly={card.week !== undefined}
+                  onSubmitted={onChanged}
+                  onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
+                />
+              </PactCard>
+            );
+        }
+      });
     case "missed":
       return section.cards.map((card) => (
         <PactCard
@@ -378,7 +391,7 @@ function Section({
             occurrenceDate={card.occurrenceDate}
             excusableUntil={card.excusableUntil}
             now={now}
-            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+            onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
             onTaken={onChanged}
           />
         </PactCard>
@@ -905,10 +918,7 @@ function RejectedEvidenceAlert({
       )}
       <div className="row2">
         {fileLabel && (
-          <button
-            className="btn sm"
-            onClick={() => onFileExcuse({ pactId: alert.pactId, pactName: alert.name, day: alert.occurrenceDate })}
-          >
+          <button className="btn sm" onClick={() => onFileExcuse(excuseTargetFor(alert))}>
             {fileLabel}
           </button>
         )}
@@ -1023,51 +1033,48 @@ function Waiting({
     <section className="stack">
       <div className="label">Waiting for approval</div>
       <div className="cards">
-        {items.map((item) =>
-          item.kind === "change-request" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenChangeRequest(item.id)}>
-              <span className="kico k-change">
-                <PencilIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>{item.endsPact ? "Change · End this pact" : "Change"}</small>
-              </span>
-            </button>
-          ) : item.kind === "excuse" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenExcuse(item.id)}>
-              <span className="kico k-excuse">
-                <ExcuseIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>Excuse · {datesText(item.firstDate, item.lastDate)}</small>
-              </span>
-            </button>
-          ) : item.kind === "evidence" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenPact(item.pactId, item.name)}>
-              <span className="kico k-evidence">
-                <CameraIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>Evidence</small>
-              </span>
-            </button>
-          ) : (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenLedger(item.recipientId, item.recipientName)}>
-              <span className="kico k-payment">
-                <DollarIcon />
-              </span>
-              <span className="rt">
-                <b>
-                  {money(item.amountCents)} to {item.recipientName}
-                </b>
-                <small>Payment</small>
-              </span>
-            </button>
-          ),
-        )}
+        {items.map((item) => {
+          switch (item.kind) {
+            case "change-request":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="change-request"
+                  title={item.name}
+                  detail={item.endsPact ? "End this pact" : undefined}
+                  onOpen={() => onOpenChangeRequest(item.id)}
+                />
+              );
+            case "excuse":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="excuse"
+                  title={item.name}
+                  detail={datesText(item.firstDate, item.lastDate)}
+                  onOpen={() => onOpenExcuse(item.id)}
+                />
+              );
+            case "evidence":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="evidence"
+                  title={item.name}
+                  onOpen={() => onOpenPact(item.pactId, item.name)}
+                />
+              );
+            case "payment":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="payment"
+                  title={`${money(item.amountCents)} to ${item.recipientName}`}
+                  onOpen={() => onOpenLedger(item.recipientId, item.recipientName)}
+                />
+              );
+          }
+        })}
       </div>
     </section>
   );

@@ -229,11 +229,7 @@ function DailyHeatMap({
   now: number;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = scroller.current;
-    if (el) el.scrollLeft = el.scrollWidth;
-  }, [days.length]);
+  const scroller = useScrolledToEnd(days.length);
   const weeks = weeksOf(days);
   const months = monthLabels(weeks);
   const picked = days.find((day) => day.date === selected && day.occurrence !== null);
@@ -297,6 +293,16 @@ function DailyHeatMap({
   );
 }
 
+/** A ref for a scroller kept scrolled to its end, now, whenever `length` changes. */
+function useScrolledToEnd(length: number) {
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scroller.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [length]);
+  return scroller;
+}
+
 function Legend() {
   return (
     <div className="legend">
@@ -327,11 +333,7 @@ function Legend() {
  */
 function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: string; now: number }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = scroller.current;
-    if (el) el.scrollLeft = el.scrollWidth;
-  }, [weeks.length]);
+  const scroller = useScrolledToEnd(weeks.length);
   const picked = weeks.find((week) => week.date === selected && week.occurrence !== null);
 
   return (

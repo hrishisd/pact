@@ -18,7 +18,7 @@ import { HeatMap } from "./history.tsx";
 import { listNames, openOccurrenceText } from "./change-terms.tsx";
 import { dueTimesForm, PROBLEMS, ReviewersStep } from "./CreatePact.tsx";
 import { clockText, formatDate, formatDay, minutesLeft, money, remindersText, scheduleText } from "./format.ts";
-import { CameraIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
+import { WaitingRow } from "./item-page.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { LoadedFound, Sheet, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
@@ -114,6 +114,8 @@ function EditWindowBar({ pact, onEdit, onDeleted }: { pact: Pact; onEdit: () => 
       onDeleted();
     },
     (failure) => `Couldn't delete it. ${failureText(failure, "Check your connection and try again.")}`,
+    // Deleted goes Back, which lands a moment later: the button stays disabled till then.
+    { leavesScreen: true },
   );
   const minutes = minutesLeft(pact.editWindowClosesAt, now);
 
@@ -325,39 +327,34 @@ function WaitingOn({
     <section className="stack">
       <div className="label">Waiting on</div>
       <div className="cards">
-        {items.map((item) =>
-          item.kind === "change-request" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenChangeRequest(item.id)}>
-              <span className="kico k-change">
-                <PencilIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>{item.endsPact ? "Change · End this pact" : "Change"}</small>
-              </span>
-            </button>
-          ) : item.kind === "excuse" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenExcuse(item.id)}>
-              <span className="kico k-excuse">
-                <ExcuseIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>Excuse · {datesText(item.firstDate, item.lastDate)}</small>
-              </span>
-            </button>
-          ) : (
-            <div key={item.id} className="rowbtn still">
-              <span className="kico k-evidence">
-                <CameraIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>Evidence · {formatDate(item.occurrenceDate)}</small>
-              </span>
-            </div>
-          ),
-        )}
+        {items.map((item) => {
+          switch (item.kind) {
+            case "change-request":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="change-request"
+                  title={item.name}
+                  detail={item.endsPact ? "End this pact" : undefined}
+                  onOpen={() => onOpenChangeRequest(item.id)}
+                />
+              );
+            case "excuse":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="excuse"
+                  title={item.name}
+                  detail={datesText(item.firstDate, item.lastDate)}
+                  onOpen={() => onOpenExcuse(item.id)}
+                />
+              );
+            case "evidence":
+              return (
+                <WaitingRow key={item.id} kind="evidence" title={item.name} detail={formatDate(item.occurrenceDate)} />
+              );
+          }
+        })}
       </div>
     </section>
   );

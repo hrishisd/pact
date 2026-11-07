@@ -149,25 +149,32 @@ export function InvitePage({
   }
 }
 
+/** What an invite link that can't be used says, by why. */
+const UNUSABLE_TEXT: Record<InviteUnusableReason, { title: string; body: string }> = {
+  "invite-not-found": {
+    title: "This invite link doesn't work",
+    body: "Check you have the whole link, or ask your friend for a new one.",
+  },
+  "invite-used": {
+    title: "This invite has been used",
+    body: "Each invite link works once. Ask your friend for a new one.",
+  },
+  "invite-expired": {
+    title: "This invite has expired",
+    body: "Invite links last 7 days. Ask your friend for a new one.",
+  },
+};
+
+/** What a refused accept says. */
 function refusalText(
   reason: Refusal<AcceptInviteResponse>,
   inviterName: string | undefined,
 ): { title: string; body: string } {
-  const unusable: Record<InviteUnusableReason, { title: string; body: string }> = {
-    "invite-not-found": {
-      title: "This invite link doesn't work",
-      body: "Check you have the whole link, or ask your friend for a new one.",
-    },
-    "invite-used": {
-      title: "This invite has been used",
-      body: "Each invite link works once. Ask your friend for a new one.",
-    },
-    "invite-expired": {
-      title: "This invite has expired",
-      body: "Invite links last 7 days. Ask your friend for a new one.",
-    },
-  };
   switch (reason) {
+    case "invite-not-found":
+    case "invite-used":
+    case "invite-expired":
+      return UNUSABLE_TEXT[reason];
     case "own-invite":
       return { title: "This is your own invite", body: "Send the link to a friend so they can accept it." };
     case "already-friends":
@@ -175,7 +182,5 @@ function refusalText(
         title: inviterName ? `You and ${inviterName} are already friends` : "You're already friends",
         body: "You can already pick each other to review pacts.",
       };
-    default:
-      return unusable[reason];
   }
 }

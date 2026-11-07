@@ -4,14 +4,11 @@
 // one waits on the owner's reply. It opens from Today, a pact's page, an
 // approved excuse's push and a reviewer's question.
 
-import { API_PATHS, type Json } from "../shared/api.ts";
+import type { Json } from "../shared/api.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
-import { listNames } from "./change-terms.tsx";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
-import { formatDayTime } from "./format.ts";
-import { ExcuseIcon } from "./icons.tsx";
-import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
+import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, RejectionLine, SentTo } from "./item-page.tsx";
 import { LoadedFound, useLoad, useNow } from "./ui.tsx";
 
 export function ExcusePage({
@@ -49,16 +46,11 @@ function ExcuseView({
   onReplied: () => void;
 }) {
   const now = useNow();
-  const { state } = excuse;
   return (
     <>
-      <div className="row2">
-        <span className="kind k-excuse">
-          <ExcuseIcon />
-          Excuse
-        </span>
-        <StateChip excuse={excuse} />
-      </div>
+      <ItemKindHeader kind="excuse">
+        <ItemStateChip state={excuse.state} thread={excuse.thread} approvedClass="c-excused" />
+      </ItemKindHeader>
       <article className="card">
         <div className="stack-sm">
           <h3>
@@ -69,20 +61,8 @@ function ExcuseView({
           <span className="meta">{excuseDatesText(excuse.days)}</span>
         </div>
         <span className="excuse-reason">“{excuse.reason}”</span>
-        {state.kind === "rejected" && (
-          <p className="small">
-            {state.reviewerName} said “{state.reason}”
-          </p>
-        )}
-        {excuse.photoIds.map((photoId, i) => {
-          const src = API_PATHS.photo(encodeURIComponent(photoId));
-          return (
-            // Opens the photo full size in a new tab.
-            <a key={photoId} href={src} target="_blank" rel="noreferrer">
-              <img className="big-photo" src={src} alt={`Photo ${i + 1} of ${excuse.photoIds.length}`} />
-            </a>
-          );
-        })}
+        <RejectionLine state={excuse.state} />
+        <PhotoLinks photoIds={excuse.photoIds} />
       </article>
       <section className="stack">
         <div className="label">Days</div>
@@ -97,23 +77,8 @@ function ExcuseView({
           ))}
         </div>
       </section>
-      <Thread thread={excuse.thread} viewer="owner" timezone={timezone} />
-      {excuse.thread.waitingOnReply && <ReplyBox itemId={excuse.id} onReplied={onReplied} />}
-      <p className="meta">
-        Sent to {listNames(excuse.reviewerNames)} · {formatDayTime(excuse.filedAt, timezone)}
-      </p>
+      <OwnerThread itemId={excuse.id} thread={excuse.thread} timezone={timezone} onReplied={onReplied} />
+      <SentTo reviewerNames={excuse.reviewerNames} sentAt={excuse.filedAt} timezone={timezone} />
     </>
   );
-}
-
-function StateChip({ excuse }: { excuse: Json<ExcuseDetail> }) {
-  const { state } = excuse;
-  switch (state.kind) {
-    case "waiting":
-      return <WaitingChip thread={excuse.thread} />;
-    case "approved":
-      return <span className="chip c-excused">Approved by {state.reviewerName}</span>;
-    case "rejected":
-      return <span className="chip c-missed">Rejected by {state.reviewerName}</span>;
-  }
 }

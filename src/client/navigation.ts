@@ -43,9 +43,8 @@ interface Entry {
   inApp: boolean;
 }
 
-const NOTIFICATIONS_PATH = "/notifications";
-
-function pagePath(page: Page): string {
+/** The address of `page`, for its history entry. */
+export function pagePath(page: Page): string {
   switch (page.kind) {
     case "create":
       return APP_PATHS.newPact;
@@ -66,7 +65,7 @@ function pagePath(page: Page): string {
     case "payment":
       return APP_PATHS.payment(page.id);
     case "notifications":
-      return NOTIFICATIONS_PATH;
+      return APP_PATHS.notifications;
   }
 }
 
@@ -75,38 +74,81 @@ function routePath(route: Route): string {
   return top ? pagePath(top) : TAB_PATHS[route.tab];
 }
 
-function routeFromPath(pathname: string): Route {
-  if (pathname === APP_PATHS.newPact) return { tab: "pacts", stack: [{ kind: "create" }] };
-  if (pathname === NOTIFICATIONS_PATH) return { tab: "today", stack: [{ kind: "notifications" }] };
-  const edit = /^\/pacts\/([^/]+)\/(edit|change)$/.exec(pathname);
-  if (edit) {
-    const id = decodeURIComponent(edit[1]!);
-    return {
+/**
+ * One of APP_PATHS as a pattern that matches it, capturing its id (the part
+ * a path function encodes) when it has one.
+ */
+function pathPattern(path: string | ((id: string) => string)): RegExp {
+  const ID = "\0";
+  const text = typeof path === "string" ? path : path(ID);
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(encodeURIComponent(ID), "([^/]+)")}$`);
+}
+
+/**
+ * The pages a fresh load can open, by path, each with its tab and the pages
+ * under it. The first pattern that matches wins, so the new pact form comes
+ * before a pact.
+ */
+const PAGE_ROUTES: { pattern: RegExp; route: (id: string) => Route }[] = [
+  { pattern: pathPattern(APP_PATHS.newPact), route: () => ({ tab: "pacts", stack: [{ kind: "create" }] }) },
+  {
+    pattern: pathPattern(APP_PATHS.notifications),
+    route: () => ({ tab: "today", stack: [{ kind: "notifications" }] }),
+  },
+  {
+    pattern: pathPattern(APP_PATHS.editPact),
+    route: (id) => ({
       tab: "pacts",
       stack: [
         { kind: "pact", id },
-        { kind: edit[2] === "edit" ? "edit-pact" : "change-pact", id },
+        { kind: "edit-pact", id },
       ],
-    };
-  }
+    }),
+  },
+  {
+    pattern: pathPattern(APP_PATHS.changePact),
+    route: (id) => ({
+      tab: "pacts",
+      stack: [
+        { kind: "pact", id },
+        { kind: "change-pact", id },
+      ],
+    }),
+  },
   // A change request opens from Today or its pact; a link to one lands on Today.
-  const change = /^\/changes\/([^/]+)$/.exec(pathname);
-  if (change) return { tab: "today", stack: [{ kind: "change-request", id: decodeURIComponent(change[1]!) }] };
-  const pact = /^\/pacts\/([^/]+)$/.exec(pathname);
-  if (pact) return { tab: "pacts", stack: [{ kind: "pact", id: decodeURIComponent(pact[1]!) }] };
-  const ledger = /^\/ledgers\/([^/]+)$/.exec(pathname);
-  if (ledger) return { tab: "ledgers", stack: [{ kind: "ledger", recipientId: decodeURIComponent(ledger[1]!) }] };
+  {
+    pattern: pathPattern(APP_PATHS.changeRequest),
+    route: (id) => ({ tab: "today", stack: [{ kind: "change-request", id }] }),
+  },
+  { pattern: pathPattern(APP_PATHS.pact), route: (id) => ({ tab: "pacts", stack: [{ kind: "pact", id }] }) },
+  {
+    pattern: pathPattern(APP_PATHS.ledger),
+    route: (recipientId) => ({ tab: "ledgers", stack: [{ kind: "ledger", recipientId }] }),
+  },
   // An excuse opens from Today or a pact; a link to one (an approved excuse's push) lands on Today.
-  const excuse = /^\/excuses\/([^/]+)$/.exec(pathname);
-  if (excuse) return { tab: "today", stack: [{ kind: "excuse", id: decodeURIComponent(excuse[1]!) }] };
+  { pattern: pathPattern(APP_PATHS.excuse), route: (id) => ({ tab: "today", stack: [{ kind: "excuse", id }] }) },
   // Evidence and payment pages open from a reviewer's question, on Today or in its push.
-  const item = /^\/(evidence|payments)\/([^/]+)$/.exec(pathname);
-  if (item) {
-    const id = decodeURIComponent(item[2]!);
-    return { tab: "today", stack: [item[1] === "evidence" ? { kind: "evidence", id } : { kind: "payment", id }] };
+  { pattern: pathPattern(APP_PATHS.evidence), route: (id) => ({ tab: "today", stack: [{ kind: "evidence", id }] }) },
+  { pattern: pathPattern(APP_PATHS.payment), route: (id) => ({ tab: "today", stack: [{ kind: "payment", id }] }) },
+];
+
+/** The route a path opens on a fresh load: a page, a tab's own screen, or Today for any other path. */
+export function routeFromPath(pathname: string): Route {
+  for (const { pattern, route } of PAGE_ROUTES) {
+    const match = pattern.exec(pathname);
+    if (match) return route(decodeURIComponent(match[1] ?? ""));
   }
   const tab = (Object.keys(TAB_PATHS) as TabId[]).find((t) => TAB_PATHS[t] === pathname) ?? "today";
   return { tab, stack: [] };
+}
+
+const INVITE_PATTERN = pathPattern(APP_PATHS.invite);
+
+/** The token of the invite link `pathname` is, or null. */
+export function inviteTokenFromPath(pathname: string): string | null {
+  const token = INVITE_PATTERN.exec(pathname)?.[1];
+  return token === undefined ? null : decodeURIComponent(token);
 }
 
 function currentEntry(): Entry {

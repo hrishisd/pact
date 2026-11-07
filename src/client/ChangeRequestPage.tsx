@@ -9,8 +9,7 @@ import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { formatDayTime } from "./format.ts";
-import { PencilIcon } from "./icons.tsx";
-import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
+import { ItemKindHeader, ItemStateChip, OwnerThread, RejectionLine } from "./item-page.tsx";
 import { LoadedFound, useLoad, useSend } from "./ui.tsx";
 
 export function ChangeRequestPage({
@@ -72,13 +71,9 @@ function ChangeRequestView({
 
   return (
     <>
-      <div className="row2">
-        <span className="kind k-change">
-          <PencilIcon />
-          Change
-        </span>
-        <StateChip request={request} />
-      </div>
+      <ItemKindHeader kind="change-request">
+        <ItemStateChip state={request.state} thread={request.thread} />
+      </ItemKindHeader>
       <article className="card">
         <div className="stack-sm">
           <h3>
@@ -89,11 +84,7 @@ function ChangeRequestView({
           <span className="meta">Sent {formatDayTime(request.requestedAt, timezone)}</span>
         </div>
         {request.note !== null && <span className="quote">“{request.note}”</span>}
-        {request.state.kind === "rejected" && (
-          <p className="small">
-            {request.state.reviewerName} said “{request.state.reason}”
-          </p>
-        )}
+        <RejectionLine state={request.state} />
         {request.endsPact ? (
           <p className="small muted">
             {waiting
@@ -108,8 +99,7 @@ function ChangeRequestView({
           </>
         )}
       </article>
-      <Thread thread={request.thread} viewer="owner" timezone={timezone} />
-      {request.thread.waitingOnReply && <ReplyBox itemId={request.id} onReplied={onReplied} />}
+      <OwnerThread itemId={request.id} thread={request.thread} timezone={timezone} onReplied={onReplied} />
       {waiting && (
         <>
           <p className="meta">Sent to {listNames(request.reviewerNames)}</p>
@@ -124,18 +114,4 @@ function ChangeRequestView({
       )}
     </>
   );
-}
-
-function StateChip({ request }: { request: Json<ChangeRequestDetail> }) {
-  const { state } = request;
-  switch (state.kind) {
-    case "waiting":
-      return <WaitingChip thread={request.thread} />;
-    case "approved":
-      return <span className="chip c-ok">Approved by {state.reviewerName}</span>;
-    case "rejected":
-      return <span className="chip c-missed">Rejected by {state.reviewerName}</span>;
-    case "withdrawn":
-      return <span className="chip c-soon">Withdrawn</span>;
-  }
 }

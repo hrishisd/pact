@@ -67,7 +67,8 @@ export function dayNote(status: Status, now: number, timezone: string, week = fa
       if (Date.parse(status.dueAt) > now)
         return week ? "Due by Sunday" : `Due at ${dueClockText(status.dueAt, timezone)}`;
       return oura ? "No Oura data" : "Not judged yet";
-    default:
+    case "satisfied":
+    case "excused":
       return "";
   }
 }

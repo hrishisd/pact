@@ -328,7 +328,8 @@ function buttonText(verdict: Verdict): string {
       return "Nothing to send";
     case "needs-approval":
       return `Send to ${listNames(outcome.reviewerNames)}`;
-    default:
+    case "at-once":
+    case "stricter":
       return "Apply change";
   }
 }
