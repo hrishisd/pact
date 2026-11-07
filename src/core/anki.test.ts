@@ -150,6 +150,46 @@ test("an auth error is disconnected; a network error throws; a protocol error th
   adapter.close();
 });
 
+test("an answer that isn't one is a login AnkiWeb can't answer; a success without a host key throws", async () => {
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  let answer: unknown = "not json at all";
+  const { adapter } = adapterFor(s, fakeScript(() => answer).run);
+
+  expect(await adapter.login(owner.id, "owner@example.test", "right")).toEqual({ ok: false, reason: "unreachable" });
+  expect(s.logs).toEqual([`AnkiWeb login failed for account ${owner.id}: the Anki script's answer wasn't one`]);
+  answer = { ok: true, endpoint: null };
+  await expect(adapter.login(owner.id, "owner@example.test", "right")).rejects.toThrow(
+    "AnkiWeb login answered without a host key",
+  );
+  expect(s.logs).toHaveLength(1);
+  const db = openWithPragmas(s.dbPath);
+  expect(db.prepare("SELECT * FROM anki_connection").all()).toEqual([]);
+  db.close();
+  adapter.close();
+});
+
+test("decks or counts that say they succeeded without them throw, and keep the endpoint as it was", async () => {
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  const moved = "https://sync2.ankiweb.net/";
+  const script = fakeScript(
+    (request) =>
+      okLogin(request) ??
+      (request.op === "decks" ? { ok: true, decks: DECKS, endpoint: moved } : { ok: true, endpoint: moved }),
+  );
+  const { adapter } = adapterFor(s, script.run);
+  await adapter.login(owner.id, "owner@example.test", "right");
+
+  await expect(adapter.decks(owner.id)).rejects.toThrow("AnkiWeb deck list answered without decks");
+  await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow("AnkiWeb counts answered without counts");
+  expect(script.requests.slice(1).map((request) => "endpoint" in request && request.endpoint)).toEqual([
+    "https://sync.ankiweb.net/",
+    "https://sync.ankiweb.net/",
+  ]);
+  adapter.close();
+});
+
 test("one check runs at a time per account", async () => {
   const s = scenario();
   const owner = await s.signIn("owner");

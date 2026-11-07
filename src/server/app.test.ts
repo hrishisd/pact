@@ -140,6 +140,7 @@ async function server({
           authorizeUrl: (state) => `${OURA_AUTHORIZE}?state=${state}`,
           async connect(account, code) {
             ouraConnects.push({ account, code });
+            if (code === "throwing-code") throw new Error("token endpoint timed out");
             return code === "good-code" ? { ok: true } : { ok: false, reason: "exchange-failed" };
           },
           forget: (account) => void ouraForgets.push(account),
@@ -147,10 +148,12 @@ async function server({
       : null,
     anki: ankiSetUp
       ? {
-          // AnkiWeb, faked: "right" is the password, and "down" stands for AnkiWeb not answering.
+          // AnkiWeb, faked: "right" is the password, "down" stands for AnkiWeb not answering,
+          // and "throws" for the adapter failing outright.
           async login(account, username, password) {
             ankiLogins.push({ account, username, password });
             if (password === "down") return { ok: false, reason: "unreachable" };
+            if (password === "throws") throw new Error("socket hang up");
             return password === "right" ? { ok: true } : { ok: false, reason: "wrong-login" };
           },
           forget: async (account) => void ankiForgets.push(account),
@@ -874,6 +877,15 @@ describe("pacts", () => {
         body: { error: "invalid-request" },
       });
     }
+    // An editing id that isn't text, and JSON that isn't an object.
+    for (const sent of [{ schedule: pact.schedule, editing: 5 }, [pact.schedule], '"schedule"', null]) {
+      const check = await s.api(API_PATHS.firstOccurrence, { cookie, method: "POST", body: sent });
+      expect({ sent, ...check }).toEqual({
+        sent,
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
   });
 
   test("the Check step takes each evidence kind", async () => {
@@ -888,14 +900,22 @@ describe("pacts", () => {
 
   test("a fractional penalty is the core's refusal, as data, like a fractional payment", async () => {
     const { s, owner, pact } = await ownerWithFriend();
+    const { cookie } = owner;
+    const fractional = { ...pact, penaltyCents: 5.5 };
 
-    const created = await s.api(API_PATHS.pacts, {
-      cookie: owner.cookie,
-      method: "POST",
-      body: { ...pact, penaltyCents: 5.5 },
-    });
+    const created = await s.api(API_PATHS.pacts, { cookie, method: "POST", body: fractional });
 
     expect(created).toEqual({ status: 200, body: { ok: false, reason: "invalid-penalty" } });
+    // Editing in the edit window, and a change after it, read the same terms.
+    const made = await s.api<CreatePactResponse>(API_PATHS.pacts, { cookie, method: "POST", body: pact });
+    if (!made.body.ok) throw new Error(JSON.stringify(made.body));
+    const pactId = made.body.pactId;
+    expect(await s.api(API_PATHS.pact(pactId), { cookie, method: "PUT", body: fractional })).toEqual(created);
+    s.clock.set(new Date(s.clock.now().getTime() + 11 * 60 * 1000));
+    for (const path of [API_PATHS.changePact(pactId), API_PATHS.changePreview(pactId)]) {
+      const changed = await s.api(path, { cookie, method: "POST", body: fractional });
+      expect({ path, ...changed }).toEqual({ path, ...created });
+    }
   });
 
   test("a due-by time, start date and end date go through to the core, and its refusals come back as data", async () => {
@@ -1664,10 +1684,10 @@ describe("change requests", () => {
         body: { error: "invalid-request" },
       });
     }
-    expect(await s.api(API_PATHS.endPact(pactId), { cookie, method: "POST", body: { note: 5 } })).toEqual({
-      status: 400,
-      body: { error: "invalid-request" },
-    });
+    for (const sent of [{ note: 5 }, ["note"], '"note"', null]) {
+      const ended = await s.api(API_PATHS.endPact(pactId), { cookie, method: "POST", body: sent });
+      expect({ sent, ...ended }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
+    }
   });
 });
 
@@ -2088,6 +2108,10 @@ describe("api", () => {
 
     expect(set.status).toBe(400);
     expect(await set.json()).toEqual({ error: "invalid-request" });
+    for (const sent of [{ timezone: 5 }, ["Europe/London"], '"Europe/London"', "not json"]) {
+      const response = await s.api(API_PATHS.timezone, { cookie, method: "POST", body: sent });
+      expect({ sent, ...response }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
+    }
   });
 });
 
@@ -2362,6 +2386,16 @@ describe("notifications", () => {
     expect(saved).toMatchObject({ status: 200, body: { ok: false, reason: "invalid-subscription" } });
   });
 
+  test("a removal without an endpoint is a 400", async () => {
+    const s = await server();
+    const { cookie } = await s.signIn(OPERATOR);
+
+    for (const sent of [{}, { endpoint: 1 }, [DEVICE.endpoint], JSON.stringify(DEVICE.endpoint)]) {
+      const removed = await s.api(API_PATHS.pushSubscriptions, { cookie, method: "DELETE", body: sent });
+      expect({ sent, ...removed }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
+    }
+  });
+
   test.each([
     ["no keys", { endpoint: DEVICE.endpoint }],
     ["an endpoint that isn't a string", { ...DEVICE, endpoint: 1 }],
@@ -2400,6 +2434,53 @@ describe("connecting AnkiWeb", () => {
     expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([
       { service: "anki", status: "connected", connectedAt: expect.any(String), activePacts: 0 },
     ]);
+  });
+
+  test("the email is trimmed; a login that throws is unreachable and logged, and connects nothing", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const connect = (password: string) =>
+      s.api<ConnectAnkiResponse>(API_PATHS.ankiConnect, {
+        cookie,
+        method: "POST",
+        body: { email: "  me@example.test \n", password } satisfies ConnectAnkiRequest,
+      });
+
+    expect(await connect("throws")).toEqual({ status: 200, body: { ok: false, reason: "unreachable" } });
+    expect(s.logs).toContain("anki connect failed: socket hang up");
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+
+    expect((await connect("right")).body).toEqual({ ok: true });
+    expect(s.ankiLogins.map((login) => login.username)).toEqual(["me@example.test", "me@example.test"]);
+  });
+
+  test("a connect without an email and password is a 400, even with Anki not set up", async () => {
+    const s = await server({ production: true, ankiSetUp: false });
+    const { cookie } = await operatorWithInvite(s);
+    for (const body of [{}, { email: "me@example.test" }, ["me@example.test", "right"]]) {
+      expect(await s.api(API_PATHS.ankiConnect, { cookie, method: "POST", body })).toEqual({
+        status: 400,
+        body: { error: "invalid-request" },
+      });
+    }
+  });
+
+  test("a disconnect the core fails keeps the host key", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    await login(s, cookie, "right");
+    const as = s.core.as.bind(s.core);
+    vi.spyOn(s.core, "as").mockImplementation((id) => ({
+      ...as(id),
+      disconnectAnki: () => Promise.reject(new Error("database is locked")),
+    }));
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    onTestFinished(() => quiet.mockRestore());
+
+    const response = await s.request(API_PATHS.ankiDisconnect, { cookie, method: "POST" });
+
+    expect(response.status).toBe(500);
+    expect(s.ankiForgets).toEqual([]);
   });
 
   test("a connect without an email and password is a 400", async () => {
@@ -2625,6 +2706,36 @@ describe("connecting Oura", () => {
     if (!created.body.ok) throw new Error(created.body.reason);
     return { s, cookie: owner.cookie, accountId: s.core.accountIdForEmail(OPERATOR)! };
   }
+
+  test("a code whose exchange throws returns to the form as failed, is logged, and connects nothing", async () => {
+    const s = await server();
+    const { cookie } = await operatorWithInvite(s);
+    const started = await startConnecting(s, cookie);
+
+    const back = await s.request(`${API_PATHS.ouraCallback}?code=throwing-code&state=${started.state}`, {
+      cookie: started.cookie,
+    });
+
+    expect(back.headers.get("Location")).toBe("/pacts/new?oura=failed");
+    expect(s.logs).toContain("oura connect failed: token endpoint timed out");
+    expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body.connections).toEqual([]);
+  });
+
+  test("a disconnect the core fails keeps Oura's tokens", async () => {
+    const { s, cookie } = await ownerWithBedtimePact();
+    const as = s.core.as.bind(s.core);
+    vi.spyOn(s.core, "as").mockImplementation((id) => ({
+      ...as(id),
+      disconnectOura: () => Promise.reject(new Error("database is locked")),
+    }));
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    onTestFinished(() => quiet.mockRestore());
+
+    const response = await s.request(API_PATHS.ouraDisconnect, { cookie, method: "POST" });
+
+    expect(response.status).toBe(500);
+    expect(s.ouraForgets).toEqual([]);
+  });
 
   test("checking Oura now asks Oura for a night not judged yet, at most once in 15 seconds", async () => {
     const { s, cookie, accountId } = await ownerWithBedtimePact();
