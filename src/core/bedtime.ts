@@ -9,7 +9,14 @@ import { earlierDate, laterDate, localDateOf } from "./calendar.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { enqueueMissed, judge } from "./judging.ts";
-import { endedBedtimePacts, excuseOn, isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
+import {
+  endedBedtimePacts,
+  excuseOn,
+  isJudged,
+  pactsToJudge,
+  stillToDo,
+  type PactToJudge,
+} from "./occurrence-state.ts";
 import { nightStartsAt, noOuraDataPushAt, type Occurrence } from "./occurrences.ts";
 import { deadlineWallClock, nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
 import type { OuraSleepPeriod, OuraSource } from "./ports.ts";
@@ -132,7 +139,8 @@ export async function fetchSleep(
 
 /**
  * At 15:00 the day after, a bedtime night still not judged sends its owner
- * one push, unless an excuse was filed for it. One per owner and night, so
+ * one push, unless an excuse was filed for it or an approved vacation covers
+ * it (a vacation waiting for approval keeps it, as it keeps reminders). One per owner and night, so
  * two pacts waiting on the same night send one. A night already closed by
  * the time the scheduler gets here was just judged, so it sends none.
  */
@@ -141,7 +149,7 @@ export function pushNoOuraData(ctx: CoreContext, t: Date): void {
     const offset = ouraOffset(ctx, pact.owner_account_id, pact.timezone);
     if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone, offset).getTime()) continue;
     if (t.getTime() >= night.closesAt.getTime() || isJudged(ctx, pact.id, night.date)) continue;
-    if (excuseOn(ctx, pact.id, night.date) !== null) continue;
+    if (!stillToDo(ctx, pact.id, night.date)) continue;
     const sent = ctx.db
       .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
       .run(pact.owner_account_id, night.date);

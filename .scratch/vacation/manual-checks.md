@@ -20,3 +20,4 @@ Things that need a real phone and real push notifications. Steps marked **(human
 ## After ticket 03
 
 - [ ] **(human)** A rejection sends "Sam rejected your vacation" with the reason, and tapping it opens Today with the rejected-vacation alert.
+- [x] With a vacation still waiting after its first day, the day's reminder push still arrives, and no Missed push arrives when that day is judged Missed. Covered by an automated scenario instead of a phone check, with the push API assumed to work: "through its whole week, each day's reminder push goes out and no Missed push does" in `src/core/vacations.test.ts`. Its fake notifier replaces only `Notifier.deliver`.

@@ -40,7 +40,11 @@ export function DayChip({
     case "excused":
       return <span className="chip c-excused">Excused</span>;
     case "missed":
-      return <span className="chip c-missed">{status.held ? "Missed · excuse waiting for approval" : "Missed"}</span>;
+      return (
+        <span className="chip c-missed">
+          {status.held ? `Missed · ${heldBy(status)} waiting for approval` : "Missed"}
+        </span>
+      );
     case "not-judged":
       if (status.excuse === "approved") return <span className="chip c-excused">Excused</span>;
       if (status.excuse === "waiting") return <span className="chip c-wait">Excuse waiting for approval</span>;
@@ -50,6 +54,11 @@ export function DayChip({
         return <span className="chip c-todo">{week ? "This week" : "Due today"}</span>;
       return <span className="chip c-soon">{oura ? "No Oura data" : "Not judged yet"}</span>;
   }
+}
+
+/** What holds a Missed day's penalty: an excuse or a vacation waiting for approval. */
+function heldBy(status: Extract<Status, { kind: "missed" }>): string {
+  return status.heldByVacation ? "vacation" : "excuse";
 }
 
 /**

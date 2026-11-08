@@ -4,6 +4,7 @@
 import type {
   AnkiDecksResult,
   AcceptExcuseRejectionResult,
+  AcceptVacationRejectionResult,
   AcceptInviteResult,
   AcceptMissResult,
   AddRecipientResult,
@@ -206,6 +207,8 @@ export const API_PATHS = {
   vacationPreview: "/api/vacations/preview",
   /** POST (no body): withdraw a vacation still waiting. */
   withdrawVacation: <T extends string>(vacationId: T) => `/api/vacations/${vacationId}/withdraw` as const,
+  acceptVacationRejection: <T extends string>(vacationId: T) =>
+    `/api/vacations/${vacationId}/accept-rejection` as const,
   reviewQueue: "/api/review",
   /** GET: items the account may decide that are waiting on their owner's reply. */
   waitingOnReply: "/api/review/waiting-on-reply",
@@ -379,6 +382,9 @@ export type VacationsResponse = Json<VacationCard>[];
 
 /** POST /api/vacations/:id/withdraw (no body). */
 export type WithdrawVacationResponse = Json<WithdrawVacationResult>;
+
+/** POST /api/vacations/:id/accept-rejection (no body). */
+export type AcceptVacationRejectionResponse = Json<AcceptVacationRejectionResult>;
 
 /** GET /api/review: the signed-in account's Review Queue, change requests first, then the rest oldest first. */
 export type ReviewQueueResponse = Json<ReviewItem[]>;

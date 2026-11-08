@@ -90,7 +90,7 @@ The owner's request to have one or more occurrences of one pact treated as excus
 _Avoid_: Appeal, dispute, exemption, pass
 
 **Vacation**:
-The owner's request for a date range off from the pacts they pick, made ahead of time. It's one review item, sent to the reviewers they pick, and any one of them approves or rejects it whole. Once approved, the occurrences it covers are judged Excused, with no reminders and no penalties. It covers only occurrences that haven't opened yet; one already open needs an excuse. It doesn't pause the ledger.
+The owner's request for a date range off from the pacts they pick, made ahead of time. It's one review item, sent to the reviewers they pick, and any one of them approves or rejects it whole. Once approved, the occurrences it covers are judged Excused, with no reminders and no penalties. It covers only occurrences that haven't opened yet; one already open needs an excuse. While it waits, its days keep their reminders and To do cards, and a covered occurrence judged Missed has its penalty held: approving removes it, and rejecting or withdrawing the vacation makes it owed. It doesn't pause the ledger.
 _Avoid_: Vacation mode, pause, break, holiday, time off, suspension
 
 **Reviewer**:
@@ -135,7 +135,7 @@ An account's on/off for one kind of notification, on all its devices. Every kind
 ### Money
 
 **Penalty**:
-The fixed amount the owner owes for each missed occurrence of a pact.
+The fixed amount the owner owes for each missed occurrence of a pact. A penalty is **held** while an excuse or vacation covering its occurrence waits for approval: it isn't owed yet and goes on no bill.
 _Avoid_: Fine, stake, forfeit, charge
 
 **Recipient**:

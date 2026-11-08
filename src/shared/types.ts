@@ -563,6 +563,8 @@ export type ReviewItem =
       reviewerNames: string[];
       /** Each ticked pact with something covered, in the order the owner's pacts were made. */
       covers: VacationCover[];
+      /** The penalties it holds, left out when none: approving removes them, rejecting makes them owed. */
+      heldCents?: number;
       filedAt: Date;
       thread: QuestionThread;
     };
@@ -857,6 +859,24 @@ export type TodayAlert =
        * whose window hasn't started.
        */
       refile: { closesAt: Date | null } | null;
+    }
+  /**
+   * A picked reviewer rejected a vacation: its held penalties are owed
+   * again, and its days not judged yet are judged as usual. Newest
+   * rejection first. It stays until the owner takes the L
+   * (`acceptVacationRejection`), or files a new vacation or an excuse
+   * covering any of its days.
+   */
+  | {
+      kind: "vacation-rejected";
+      vacationId: string;
+      reviewerName: string;
+      reason: string;
+      /** Its first and last day. */
+      firstDate: LocalDate;
+      lastDate: LocalDate;
+      /** The penalties it held, owed again now. */
+      owedAgainCents: number;
     }
   /**
    * Bills to one recipient are past their due time and not all paid, and
@@ -1158,17 +1178,21 @@ export interface LedgerPenalty {
   paidCents: number;
   /** When the occurrence was Missed because its latest evidence was rejected: who rejected it and why. */
   rejection?: EvidenceRejection;
-  /** Held while an excuse for the occurrence waits for approval: it doesn't count toward owed, and payments don't pay it. */
+  /**
+   * Held while an excuse or vacation covering the occurrence waits for
+   * approval: it doesn't count toward owed, and payments don't pay it.
+   */
   held: boolean;
   /**
    * The bill it's on, or the Wednesday bill it goes on once it can't be
-   * excused. While it's held, the bill it would go on
-   * if the excuse were rejected now: a later one the longer the excuse waits.
+   * excused. While it's held, the bill it would go on if the excuse (or
+   * vacation) holding it were rejected now: a later one the longer it waits.
    */
   bill:
     | { kind: "on-bill"; billedOn: LocalDate; dueAt: Date }
     | { kind: "next-bill"; billedOn: LocalDate }
-    | { kind: "if-excuse-rejected"; billedOn: LocalDate };
+    | { kind: "if-excuse-rejected"; billedOn: LocalDate }
+    | { kind: "if-vacation-rejected"; billedOn: LocalDate };
 }
 
 /** A payment to the recipient the owner recorded, and where its review stands. */
@@ -1223,8 +1247,10 @@ export type OccurrenceStatus =
       kind: "missed";
       /** Its penalty. */
       penaltyCents: number;
-      /** Held while an excuse for it waits for approval. */
+      /** Held while an excuse or vacation for it waits for approval. */
       held: boolean;
+      /** Set when what holds it is a vacation waiting for approval, not an excuse. */
+      heldByVacation?: true;
       /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
       excusableUntil: Date;
     }
@@ -1411,6 +1437,11 @@ export type FileVacationRefusal =
 
 export type FileVacationResult = { ok: true; vacationId: string } | { ok: false; reason: FileVacationRefusal };
 
+export type AcceptVacationRejectionResult =
+  | { ok: true }
+  /** nothing-to-accept: it isn't rejected, or the owner already took the L on it. */
+  | { ok: false; reason: "vacation-not-found" | "nothing-to-accept" };
+
 export type WithdrawVacationResult = { ok: true } | { ok: false; reason: "vacation-not-found" | "not-waiting" };
 
 /** One of the owner's vacations as its Profile card shows it. */
@@ -1424,6 +1455,8 @@ export interface VacationCard {
   /** Who it was sent to, by name. */
   reviewerNames: string[];
   state: VacationState;
+  /** The penalties it holds while it waits, left out when none: withdrawing makes them owed. */
+  heldCents?: number;
 }
 
 /**
@@ -1443,6 +1476,8 @@ export interface VacationCover {
   schedule: Schedule;
   /** Oldest first. */
   covered: VacationOccurrence[];
+  /** The covered occurrences already Missed, oldest first, each with its penalty held while it waits; left out when none. */
+  held?: (VacationOccurrence & { penaltyCents: number })[];
 }
 
 export interface Health {

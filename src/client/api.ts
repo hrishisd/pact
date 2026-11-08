@@ -14,6 +14,7 @@ import {
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   type AcceptExcuseRejectionResponse,
+  type AcceptVacationRejectionResponse,
   type AnkiDecksResponse,
   type CheckAnkiResponse,
   type CheckOuraResponse,
@@ -227,6 +228,8 @@ export const api = {
   vacations: () => call<VacationsResponse>(API_PATHS.vacations),
   withdrawVacation: (vacationId: string) =>
     post<WithdrawVacationResponse>(API_PATHS.withdrawVacation(encodeURIComponent(vacationId))),
+  acceptVacationRejection: (vacationId: string) =>
+    post<AcceptVacationRejectionResponse>(API_PATHS.acceptVacationRejection(encodeURIComponent(vacationId))),
   acceptMiss: (pactId: string, occurrenceDate: string) =>
     post<AcceptMissResponse>(API_PATHS.acceptMiss(encodeURIComponent(pactId), encodeURIComponent(occurrenceDate))),
   reviewQueue: () => call<ReviewQueueResponse>(API_PATHS.reviewQueue),

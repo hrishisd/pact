@@ -37,6 +37,7 @@ import {
   PAYMENT_NOTE_FIELD,
   PHOTO_CONTENT_TYPES,
   type AcceptExcuseRejectionResponse,
+  type AcceptVacationRejectionResponse,
   type AnkiDecksResponse,
   type CheckAnkiResponse,
   type CheckOuraResponse,
@@ -594,6 +595,9 @@ export function createApp({
 
   app.post(API_PATHS.withdrawVacation(":id"), async (c) =>
     c.json<WithdrawVacationResponse>(await account(c).withdrawVacation(c.req.param("id"))),
+  );
+  app.post(API_PATHS.acceptVacationRejection(":id"), async (c) =>
+    c.json<AcceptVacationRejectionResponse>(await account(c).acceptVacationRejection(c.req.param("id"))),
   );
 
   app.post(API_PATHS.acceptMiss(":id", ":date"), async (c) => {

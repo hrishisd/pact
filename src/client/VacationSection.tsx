@@ -7,7 +7,7 @@ import type { Json } from "../shared/api.ts";
 import type { VacationCard } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
-import { dateSpan } from "./format.ts";
+import { dateSpan, money } from "./format.ts";
 import { ReplyBox } from "./questions.tsx";
 import { loadedData, loadFailure, useLoad, useSend } from "./ui.tsx";
 import { firstName, pactsText, plural } from "./vacation-text.ts";
@@ -129,7 +129,12 @@ function WaitingActions({
       )}
       {open === "withdraw" ? (
         <div className="alert amber" role="status">
-          <span>Withdraw this vacation? Your pacts keep all their days.</span>
+          <span>
+            Withdraw this vacation?{" "}
+            {vacation.heldCents === undefined
+              ? "Your pacts keep all their days."
+              : `${money(vacation.heldCents)} held becomes owed.`}
+          </span>
           <div className="row2">
             <button className="btn sm danger" disabled={withdraw.busy} onClick={() => withdraw.run()}>
               {withdraw.busy ? "Withdrawing…" : "Withdraw"}

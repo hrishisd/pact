@@ -88,7 +88,7 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
   }
 }
 
-/** What a Missed occurrence cost: held while an excuse waits, else paid to its recipient. */
+/** What a Missed occurrence cost: held while an excuse or vacation waits, else paid to its recipient. */
 function missedCost(status: Extract<Occurrence["status"], { kind: "missed" }>): string {
   return status.held
     ? `${money(status.penaltyCents)} held.`

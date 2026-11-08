@@ -6,8 +6,10 @@ import { addDays, dayCount } from "../shared/calendar.ts";
 import { dateSpan } from "../shared/format.ts";
 import {
   MAX_EXCUSE_SPAN_DAYS,
+  type AcceptVacationRejectionResult,
   type AccountId,
   type ReviewItem,
+  type TodayAlert,
   type VacationCover,
   type VacationState,
   type FileVacationResult,
@@ -286,7 +288,11 @@ export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCar
     ownerId,
     today,
   );
-  return rows.map((row) => ({ ...vacationSummary(ctx, row), state: vacationState(ctx, row) }));
+  return rows.map((row) => ({
+    ...vacationSummary(ctx, row),
+    state: vacationState(ctx, row),
+    ...heldTotal(coveredPenalties(ctx, row.id)),
+  }));
 }
 
 /** What a vacation's Profile card and review item both show: its dates, note, pacts and who it went to. */
@@ -338,7 +344,12 @@ export function pickedReviewers(ctx: CoreContext, vacationId: string): AccountId
  * covered occurrences as they stand now: a day an approved change took off
  * the schedule isn't one any more.
  */
-function vacationCovers(ctx: CoreContext, vacationId: string, timezone: string): VacationCover[] {
+function vacationCovers(
+  ctx: CoreContext,
+  vacationId: string,
+  timezone: string,
+  held: CoveredPenalty[],
+): VacationCover[] {
   const pacts = ctx.all<PactRow>(
     `SELECT pact.* FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
      WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
@@ -357,6 +368,12 @@ function vacationCovers(ctx: CoreContext, vacationId: string, timezone: string):
         return occurrence ? [occurrenceSpan(ctx, pact.id, occurrence)] : [];
       });
     if (covered.length === 0) return [];
+    // A held penalty's date is a covered occurrence's, so it shows as that occurrence: a Weekly count one as its week.
+    const mine = held
+      .filter((penalty) => penalty.pact_id === pact.id)
+      .flatMap(({ date, amount_cents: penaltyCents }) =>
+        covered.filter((span) => span.date === date).map((span) => ({ ...span, penaltyCents })),
+      );
     return [
       {
         pactId: pact.id,
@@ -364,9 +381,37 @@ function vacationCovers(ctx: CoreContext, vacationId: string, timezone: string):
         evidenceKind: pact.evidence_kind,
         schedule: scheduleOf(pact.schedule),
         covered,
+        ...(mine.length > 0 && { held: mine }),
       },
     ];
   });
+}
+
+/**
+ * The penalties of the vacation's covered occurrences Missed so far, oldest
+ * first: held while it waits for approval. Approving removes them, and
+ * rejecting or withdrawing it makes them owed.
+ */
+function coveredPenalties(ctx: CoreContext, vacationId: string): CoveredPenalty[] {
+  return ctx.all(
+    `SELECT vacation_day.pact_id, vacation_day.date, penalty.amount_cents, penalty.added_at FROM vacation_day
+     JOIN penalty ON penalty.pact_id = vacation_day.pact_id AND penalty.occurrence_date = vacation_day.date
+     WHERE vacation_day.vacation_id = ? ORDER BY vacation_day.date, vacation_day.pact_id`,
+    vacationId,
+  );
+}
+
+interface CoveredPenalty {
+  pact_id: string;
+  date: LocalDate;
+  amount_cents: number;
+  added_at: string;
+}
+
+/** The total of the vacation's held penalties, as `heldCents`, left out when none are held. */
+function heldTotal(held: CoveredPenalty[]): { heldCents?: number } {
+  const cents = held.reduce((sum, penalty) => sum + penalty.amount_cents, 0);
+  return cents > 0 ? { heldCents: cents } : {};
 }
 
 /** Vacations waiting for approval that `reviewerId` was picked for, oldest first. */
@@ -381,14 +426,18 @@ export function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): Revi
      ORDER BY vacation.filed_at, vacation.id`,
     reviewerId,
   );
-  return rows.map((row): ReviewItem => ({
-    kind: "vacation",
-    ...vacationSummary(ctx, row),
-    ownerName: row.owner_name,
-    covers: vacationCovers(ctx, row.id, row.timezone),
-    filedAt: new Date(row.filed_at),
-    thread: thread(ctx, row.id, true),
-  }));
+  return rows.map((row): ReviewItem => {
+    const held = coveredPenalties(ctx, row.id);
+    return {
+      kind: "vacation",
+      ...vacationSummary(ctx, row),
+      ownerName: row.owner_name,
+      covers: vacationCovers(ctx, row.id, row.timezone, held),
+      ...heldTotal(held),
+      filedAt: new Date(row.filed_at),
+      thread: thread(ctx, row.id, true),
+    };
+  });
 }
 
 /** A vacation a reviewer is deciding on, as `decide` reads it. */
@@ -443,7 +492,8 @@ export function vacationToDecide(
  * Records a picked reviewer's decision on a vacation waiting for approval
  * and tells the owner. Approved: every covered day of every pact is
  * excused at once, as an approved excuse's are (`excuseApprovedDays`).
- * Rejected: its days are judged as usual.
+ * Rejected: its held penalties are owed by no longer waiting, its days are
+ * judged as usual, and Today raises an alert (`rejectedVacationAlerts`).
  */
 export function decideVacation(
   ctx: CoreContext,
@@ -489,5 +539,90 @@ export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationI
   if (!row) return { ok: false, reason: "vacation-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
   ctx.db.prepare(`UPDATE vacation SET withdrawn_at = ? WHERE id = ?`).run(ctx.clock.now().toISOString(), vacationId);
+  return { ok: true };
+}
+
+/**
+ * SQL: no vacation or excuse filed after the vacation `alias` covers any of
+ * its days. A rejected vacation's alert stands only while this holds.
+ */
+export function noLaterFilingSql(alias: string): string {
+  return `NOT EXISTS (SELECT 1 FROM vacation_day AS mine
+    WHERE mine.vacation_id = ${alias}.id
+      AND (EXISTS (SELECT 1 FROM vacation_day AS other JOIN vacation AS later ON later.id = other.vacation_id
+                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)
+        OR EXISTS (SELECT 1 FROM excuse_day AS other JOIN excuse AS later ON later.id = other.excuse_id
+                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)))`;
+}
+
+/**
+ * One alert per rejected vacation of the owner's, newest rejection first,
+ * until the owner takes the L on it or files a new vacation or an excuse
+ * covering any of its days. With when it was rejected, for ordering among
+ * the alerts.
+ */
+export function rejectedVacationAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
+  const rows = ctx.all<{
+    id: string;
+    first_day: LocalDate;
+    last_day: LocalDate;
+    reject_reason: string;
+    decided_at: string;
+    reviewer_name: string;
+  }>(
+    `SELECT vacation.id, vacation.first_day, vacation.last_day, vacation.reject_reason, vacation.decided_at,
+            reviewer.name AS reviewer_name
+     FROM vacation
+     JOIN account AS reviewer ON reviewer.id = vacation.decided_by_account_id
+     WHERE vacation.owner_account_id = ? AND vacation.decision = 'rejected' AND vacation.rejection_accepted_at IS NULL
+       AND ${noLaterFilingSql("vacation")}
+     ORDER BY vacation.decided_at DESC, vacation.id`,
+    ownerId,
+  );
+  return rows.map((row) => ({
+    at: new Date(row.decided_at),
+    alert: {
+      kind: "vacation-rejected",
+      vacationId: row.id,
+      reviewerName: row.reviewer_name,
+      reason: row.reject_reason,
+      firstDate: row.first_day,
+      lastDate: row.last_day,
+      // The penalties it held when it was rejected: owed again since.
+      owedAgainCents: coveredPenalties(ctx, row.id)
+        .filter((penalty) => penalty.added_at <= row.decided_at)
+        .reduce((sum, penalty) => sum + penalty.amount_cents, 0),
+    },
+  }));
+}
+
+/**
+ * The owner takes the L on their rejected vacation `vacationId`: its alert
+ * goes, and so do the covered occurrences already Missed when it was
+ * rejected, from Today's Missed. Days judged later keep their own card.
+ */
+export function acceptVacationRejection(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  vacationId: string,
+): AcceptVacationRejectionResult {
+  const row = ctx.one(`SELECT 1 FROM vacation WHERE id = ? AND owner_account_id = ?`, vacationId, ownerId);
+  if (!row) return { ok: false, reason: "vacation-not-found" };
+  const now = ctx.clock.now().toISOString();
+  const accepted = ctx.db
+    .prepare(
+      `UPDATE vacation SET rejection_accepted_at = ?
+       WHERE id = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL`,
+    )
+    .run(now, vacationId);
+  if (accepted.changes !== 1) return { ok: false, reason: "nothing-to-accept" };
+  ctx.db
+    .prepare(
+      `UPDATE occurrence SET miss_accepted_at = ?
+       WHERE outcome = 'missed' AND miss_accepted_at IS NULL
+         AND judged_at <= (SELECT decided_at FROM vacation WHERE id = ?)
+         AND (pact_id, date) IN (SELECT pact_id, date FROM vacation_day WHERE vacation_id = ?)`,
+    )
+    .run(now, vacationId, vacationId);
   return { ok: true };
 }

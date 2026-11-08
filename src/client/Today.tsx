@@ -17,6 +17,7 @@ import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptExcuseRejectionResult,
   type AcceptMissRefusal,
+  type AcceptVacationRejectionResult,
   type ConnectionService,
   type LedgerSummary,
   type Refusal,
@@ -38,6 +39,7 @@ import {
   ankiMissText,
   clockText,
   clockTime,
+  dateSpan,
   dateUnlessToday,
   formatDate,
   formatDay,
@@ -48,6 +50,7 @@ import {
   hoursLeft,
 } from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
+import { firstName } from "./vacation-text.ts";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
 import { CameraIcon } from "./icons.tsx";
@@ -216,13 +219,15 @@ export function Today({
   );
 }
 
-/** Each alert's React key: one per rejected occurrence, rejected excuse, or recipient overdue. */
+/** Each alert's React key: one per rejected occurrence, rejected excuse or vacation, or recipient overdue. */
 function alertKey(alert: Json<TodayAlert>): string {
   switch (alert.kind) {
     case "evidence-rejected":
       return `evidence:${alert.pactId}:${alert.occurrenceDate}`;
     case "excuse-rejected":
       return `excuse:${alert.excuseId}`;
+    case "vacation-rejected":
+      return `vacation:${alert.vacationId}`;
     case "bill-overdue":
       return `overdue:${alert.recipientId}`;
     case "reviewer-question":
@@ -757,6 +762,8 @@ function Alert({
       return <RejectedEvidenceAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "excuse-rejected":
       return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
+    case "vacation-rejected":
+      return <RejectedVacationAlert alert={alert} onTaken={onChanged} />;
     case "bill-overdue":
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
     case "connection":
@@ -1005,6 +1012,51 @@ function RejectedExcuseAlert({
     </div>
   );
 }
+
+/**
+ * A rejected vacation: its held penalties are owed again, and its days are
+ * judged as usual. Take the L clears it, with no confirmation.
+ */
+function RejectedVacationAlert({
+  alert,
+  onTaken,
+}: {
+  alert: Extract<Json<TodayAlert>, { kind: "vacation-rejected" }>;
+  /** After Take the L: Today reloads. */
+  onTaken: () => void;
+}) {
+  const { busy, error, take } = useTakeTheL(
+    () => api.acceptVacationRejection(alert.vacationId),
+    ACCEPT_VACATION_REJECTION_REFUSAL_TEXT,
+    onTaken,
+  );
+  return (
+    <div className="alert bad" role="status">
+      <b>{firstName(alert.reviewerName)} rejected your vacation</b>
+      <span>“{alert.reason}”</span>
+      <span className="small">
+        {dateSpan(alert.firstDate, alert.lastDate)}
+        {" · "}
+        {alert.owedAgainCents > 0 ? (
+          <b className="pen">{money(alert.owedAgainCents)} is owed again</b>
+        ) : (
+          "your pacts keep all their days"
+        )}
+      </span>
+      <div className="row2">
+        <button className="btn sm danger" disabled={busy} onClick={take}>
+          {busy ? "Sending…" : "Take the L"}
+        </button>
+      </div>
+      {error && <p className="error small">{error}</p>}
+    </div>
+  );
+}
+
+const ACCEPT_VACATION_REJECTION_REFUSAL_TEXT: Record<Refusal<AcceptVacationRejectionResult>, string> = {
+  "vacation-not-found": "This vacation wasn't found.",
+  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
+};
 
 const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<Refusal<AcceptExcuseRejectionResult>, string> = {
   "excuse-not-found": "This excuse wasn't found.",
