@@ -11,7 +11,8 @@
 // evidence, excuses, money, review, connections, bedtime, anki-days,
 // reminders, today), whose functions take the CoreContext (context.ts). They
 // share writes (judging.ts, outbox.ts), reads (rows.ts, occurrence-state.ts)
-// and pure rules (pact-rules.ts, bill-math.ts, oura-clock.ts, occurrences.ts).
+// and pure rules (pact-rules.ts, occurrences.ts, changes.ts, calendar.ts,
+// bill-math.ts, oura-clock.ts).
 
 import { randomUUID } from "node:crypto";
 import { APP_PATHS } from "../shared/api.ts";

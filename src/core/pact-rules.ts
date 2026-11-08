@@ -72,7 +72,7 @@ export function editWindowClosesAt(pact: { created_at: string }, now: Date): Dat
   return now.getTime() < closesAt.getTime() ? closesAt : null;
 }
 
-/** A pact's terms as `#checkedPact` checks them. */
+/** A pact's terms as `checkedPact` (pacts.ts) checks them. */
 export interface CheckedTerms {
   ok: true;
   /** The owner's: a pact needs one. */

@@ -268,7 +268,7 @@ function ledgerSummaries(ctx: CoreContext, ownerId: AccountId, recipientId?: str
   const now = ctx.clock.now();
   return rows.sort(byName).map((row) => {
     // An excuse approved after its penalty was paid leaves more paid than
-    // owed. The surplus pays the next penalties (#allocate), and owed is $0
+    // owed. The surplus pays the next penalties (`allocate`), and owed is $0
     // meanwhile, never below.
     const owedCents = Math.max(0, row.penalty_cents - row.paid_cents);
     const payableCents = Math.max(0, owedCents - row.awaiting_cents);
@@ -520,10 +520,7 @@ function overdueNotice(
 }
 
 function timezoneOf(ctx: CoreContext, accountId: AccountId): string {
-  const row = ctx.db.prepare(`SELECT timezone FROM account WHERE id = ?`).get(accountId) as {
-    timezone: string | null;
-  };
-  return ownerZone(row.timezone, accountId);
+  return ownerZone(accountRow(ctx, accountId).timezone, accountId);
 }
 
 /** Today's bill cards and overdue alerts: one of each at most per recipient. */
