@@ -29,25 +29,39 @@ An owner plans a vacation from Profile, sees exactly what it covers before askin
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] A Mon/Wed/Fri Camera pact, an every-night bedtime pact and a 3× per week Weekly count pact; a vacation filed on Wed for Mon+1 to Sun+1 covers Mon+1, Wed+1 and Fri+1, the seven nights Mon+1 to Sun+1, and the week of Mon+1.
-- [ ] Thursday rule, filed on Mon: Sun+1 to Sat+2 covers the week of Mon+2 whole (Sun+2 included) and not the week of Mon+1, whose Thursday is outside; Fri+1 to Wed+2 covers no week, and the preview lists both weeks as not covered; Thu+1 alone covers the week of Mon+1.
-- [ ] Filed on Tue for Wed to Sun: the week of Mon has its Thursday inside but opened on Monday, so it's skipped as already open.
-- [ ] One-time: a ticked pact with its deadline inside is covered; one with its deadline outside covers nothing; one with Submit anytime is skipped as already open, and the options query marks it as one that can't be ticked.
-- [ ] Dates: a first day of today, a last day before the first, and 63 days are refused; 62 days are accepted.
+- [x] A Mon/Wed/Fri Camera pact, an every-night bedtime pact and a 3× per week Weekly count pact; a vacation filed on Wed for Mon+1 to Sun+1 covers Mon+1, Wed+1 and Fri+1, the seven nights Mon+1 to Sun+1, and the week of Mon+1.
+- [x] Thursday rule, filed on Mon: Sun+1 to Sat+2 covers the week of Mon+2 whole (Sun+2 included) and not the week of Mon+1, whose Thursday is outside; Fri+1 to Wed+2 covers no week, and the preview lists both weeks as not covered; Thu+1 alone covers the week of Mon+1.
+- [x] Filed on Tue for Wed to Sun: the week of Mon has its Thursday inside but opened on Monday, so it's skipped as already open.
+- [x] One-time: a ticked pact with its deadline inside is covered; one with its deadline outside covers nothing; one with Submit anytime is skipped as already open, and the options query marks it as one that can't be ticked.
+- [x] Dates: a first day of today, a last day before the first, and 63 days are refused; 62 days are accepted.
 - [ ] Overlaps: days already Excused, on a waiting excuse, on a waiting vacation and on an approved vacation are skipped with their reasons; a vacation with nothing left is refused ("nothing-to-cover").
-- [ ] An excuse filed for a day on a waiting vacation skips it as "on-waiting-vacation"; after the vacation is withdrawn, the excuse covers it.
-- [ ] Refused: no pact ticked, no reviewer picked, a picked reviewer who reviews none of the ticked pacts, a pact still in its edit window, another owner's pact.
-- [ ] A pact created after filing isn't covered, and the preview and the stored days agree for the same input.
-- [ ] Withdraw works while waiting and is refused for another owner's vacation.
-- [ ] Routes for options, preview, file, withdraw and the owner's vacations (`src/server/app.test.ts`).
+- [x] An excuse filed for a day on a waiting vacation skips it as "on-waiting-vacation"; after the vacation is withdrawn, the excuse covers it.
+- [x] Refused: no pact ticked, no reviewer picked, a picked reviewer who reviews none of the ticked pacts, a pact still in its edit window, another owner's pact.
+- [x] A pact created after filing isn't covered, and the preview and the stored days agree for the same input.
+- [x] Withdraw works while waiting and is refused for another owner's vacation.
+- [x] Routes for options, preview, file, withdraw and the owner's vacations (`src/server/app.test.ts`).
 
 ## Acceptance criteria (screens)
 
-- [ ] Component tests: the Reviewers step shows with one possible reviewer and Next stays disabled until one is ticked; unticking a pact drops a reviewer who reviews no ticked pact; "All pacts" shows when every offered pact is ticked by hand.
-- [ ] Checked in the browser at 390×844 on a seeded dev database, with screenshots next to the prototype's: Profile with none planned, each of the four steps (with a date error, a partial Weekly count week and a One-time pact), the confirm step, the waiting card, the withdraw confirm and the message after it.
+- [x] Component tests: the Reviewers step shows with one possible reviewer and Next stays disabled until one is ticked; unticking a pact drops a reviewer who reviews no ticked pact; "All pacts" shows when every offered pact is ticked by hand.
+- [x] Checked in the browser at 390×844 on a seeded dev database, with screenshots next to the prototype's: Profile with none planned, each of the four steps (with a date error, a partial Weekly count week and a One-time pact), the confirm step, the waiting card, the withdraw confirm and the message after it.
 
 ## Manual checks
 
 In `../manual-checks.md` (After ticket 01): the native date pickers and the footer bar on the iPhone.
 
 ## Comments
+
+### Built on `claude/modest-allen-7rmsz7`
+
+- **Core** (`src/core/vacations.ts`): migration 28; the options query, the preview (which filing reuses, so the confirm step and the stored days agree), file, withdraw and the owner's waiting vacations for Profile. `vacationOn` in `occurrence-state.ts` says whether a waiting or approved vacation covers an occurrence; excuses skip a day on a waiting vacation as "on-waiting-vacation". 23 scenarios in `vacations.test.ts`.
+- **Routes** in `src/server/app.ts` with tests in `app.test.ts`.
+- **Client**: the Vacation section on the Profile sheet (`VacationSection.tsx`), and the four steps at `/vacation/new` (`PlanVacation.tsx`). Ask for approval goes back to Today with the Profile sheet open and "Sent to Sam and Alex for approval." Component tests cover the three screen criteria plus the Profile card and Withdraw.
+- **Beyond the spec's Data section**: `vacation.pacts_summary` stores "all", "all-recurring" or "some" at filing, so a card filed as "All pacts" stays that way after a newer pact becomes one Plan a vacation offers.
+- **Lint**: `scripts/check-conventions.ts` now treats "break" and "pause" as everyday words. The glossary's Vacation entry avoids them as names for a vacation, which made `npm run lint` fail on main over every `break` statement.
+
+### Left open
+
+- The Overlaps criterion stays unticked for one part, "on an approved vacation". Every other part has a scenario. Nothing can approve a vacation until ticket 02, and core tests can't write storage directly. `vacationOn` already counts approved vacations, and the preview skips their days as "on-vacation". Ticket 02 should add that scenario.
+- A waiting vacation whose last day has passed stays on Profile with Withdraw, since it can still be decided and, after ticket 03, may hold penalties. Ticket 04, which adds "Last one", should decide when a waiting card leaves.
+- The iPhone date pickers and footer bar are in `../manual-checks.md` (After ticket 01).
