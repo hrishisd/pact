@@ -109,3 +109,32 @@ test("a vacation waiting on Jordan's reply is listed by its dates, under Jordan'
   expect(screen.getByText("Spanish?")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
 });
+
+test("a vacation holding penalties lists each held day, and approving and rejecting say what happens to them", async () => {
+  const [bed, gym, essay] = VACATION.covers;
+  const holding: VacationItem = {
+    ...VACATION,
+    heldCents: 1500,
+    covers: [
+      { ...bed!, held: [{ date: "2026-12-22", penaltyCents: 500 }] },
+      { ...gym!, held: [{ date: "2026-12-21", through: "2026-12-27", penaltyCents: 1000 }] },
+      essay!,
+    ],
+  };
+  stubApi({ reviewQueue: answers<ReviewQueueResponse>([holding]), waitingOnReply: answers<ReviewQueueResponse>([]) });
+  const { user } = renderWithUser(<Review timezone="America/New_York" onQueue={vi.fn()} />);
+
+  const card = (await screen.findByRole("heading", { name: "Vacation" })).closest("article")!;
+  expect(within(card).getByText("Tue Dec 22 · Missed · $5 held")).toBeTruthy();
+  expect(within(card).getByText("Week of Dec 21 · Missed · $10 held")).toBeTruthy();
+  expect(
+    within(card).getByText(
+      "Approving removes $15 in held penalties. It excuses all of these and stops their reminders on these days. Once approved, it can't be changed.",
+    ),
+  ).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Reject" }));
+  expect(
+    screen.getByText("Rejecting makes $15 owed again and leaves the days not judged yet to be judged as usual."),
+  ).toBeTruthy();
+});

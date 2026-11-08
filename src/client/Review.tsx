@@ -13,7 +13,7 @@ import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.
 import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-page.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
-import { coveredText, firstName, pactsText, plural } from "./vacation-text.ts";
+import { coveredText, firstName, pactsText, plural, weekOf } from "./vacation-text.ts";
 import { Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
@@ -449,6 +449,7 @@ function PaymentItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: P
  */
 function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: VacationReviewItem }) {
   const reviewers = item.reviewerNames;
+  const held = item.heldCents === undefined ? null : money(item.heldCents);
   const decides = reviewers.length === 1 ? "" : reviewers.length === 2 ? " Either can decide." : " Any one can decide.";
   return (
     <>
@@ -479,13 +480,20 @@ function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
                   {lines.map((line) => (
                     <small key={line}>{line}</small>
                   ))}
+                  {cover.held?.map((day) => (
+                    <small key={day.date}>
+                      {day.through === undefined ? formatDate(day.date) : weekOf(day.date)} · Missed ·{" "}
+                      {money(day.penaltyCents)} held
+                    </small>
+                  ))}
                 </span>
               </div>
             );
           })}
         </div>
         <p className="muted small">
-          Approving excuses all of these and stops their reminders on these days. Once approved, it can't be changed.
+          {held ? `Approving removes ${held} in held penalties. It excuses` : "Approving excuses"} all of these and
+          stops their reminders on these days. Once approved, it can't be changed.
         </p>
       </article>
       <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
@@ -493,7 +501,13 @@ function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
         itemId={item.id}
         onAsk={onAsk}
         placeholder="e.g. Not two weeks before the gym challenge ends"
-        cost={<p className="small">Rejecting keeps every day of {firstName(item.ownerName)}'s pacts as it is.</p>}
+        cost={
+          <p className="small">
+            {held
+              ? `Rejecting makes ${held} owed again and leaves the days not judged yet to be judged as usual.`
+              : `Rejecting keeps every day of ${firstName(item.ownerName)}'s pacts as it is.`}
+          </p>
+        }
         onDecided={onDecided}
       />
     </>

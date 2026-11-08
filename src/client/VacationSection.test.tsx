@@ -119,3 +119,11 @@ test("an approved vacation says who approved it and that it can't be changed, wi
   expect(screen.queryByText(/Nothing changes until/)).toBeNull();
   expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
 });
+
+test("Withdraw on a vacation holding penalties says what becomes owed", async () => {
+  stubApi({ vacations: answers<VacationsResponse>([{ ...WAITING[0]!, heldCents: 1500 }]) });
+  const { user } = renderWithUser(<VacationSection message={null} onPlan={vi.fn()} />);
+  await user.click(await screen.findByRole("button", { name: "Withdraw" }));
+
+  expect(screen.getByText("Withdraw this vacation? $15 held becomes owed.")).toBeTruthy();
+});
