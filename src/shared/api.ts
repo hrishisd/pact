@@ -51,6 +51,13 @@ import type {
   SetTimezoneResult,
   SubmitEvidenceResult,
   Today,
+  FileVacationResult,
+  NewVacation,
+  VacationCard,
+  VacationOptions,
+  VacationPreviewResult,
+  VacationRequest,
+  WithdrawVacationResult,
 } from "./types.ts";
 
 /**
@@ -187,6 +194,14 @@ export const API_PATHS = {
   excuse: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}` as const,
   /** POST (no body): Take the L on a rejected excuse. */
   acceptExcuseRejection: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}/accept-rejection` as const,
+  /** GET: the owner's vacations waiting for approval. POST: file a vacation. */
+  vacations: "/api/vacations",
+  /** GET: what Plan a vacation offers. */
+  vacationOptions: "/api/vacations/options",
+  /** POST: what a vacation with some dates and pacts would cover. */
+  vacationPreview: "/api/vacations/preview",
+  /** POST (no body): withdraw a vacation still waiting. */
+  withdrawVacation: <T extends string>(vacationId: T) => `/api/vacations/${vacationId}/withdraw` as const,
   reviewQueue: "/api/review",
   /** GET: items the account may decide that are waiting on their owner's reply. */
   waitingOnReply: "/api/review/waiting-on-reply",
@@ -343,6 +358,23 @@ export type ExcuseResponse = Json<ExcuseResult>;
 
 /** POST /api/excuses/:id/accept-rejection (no body). */
 export type AcceptExcuseRejectionResponse = Json<AcceptExcuseRejectionResult>;
+
+/** GET /api/vacations/options */
+export type VacationOptionsResponse = Json<VacationOptions>;
+
+/** POST /api/vacations/preview. A body of another shape is a 400; the core's refusals are 200s. */
+export type VacationPreviewRequest = VacationRequest;
+export type VacationPreviewResponse = Json<VacationPreviewResult>;
+
+/** POST /api/vacations. A body of another shape is a 400; the core's refusals are 200s. */
+export type FileVacationRequest = NewVacation;
+export type FileVacationResponse = Json<FileVacationResult>;
+
+/** GET /api/vacations: the owner's vacations for Profile. */
+export type VacationsResponse = Json<VacationCard>[];
+
+/** POST /api/vacations/:id/withdraw (no body). */
+export type WithdrawVacationResponse = Json<WithdrawVacationResult>;
 
 /** GET /api/review: the signed-in account's Review Queue, change requests first, then the rest oldest first. */
 export type ReviewQueueResponse = Json<ReviewItem[]>;

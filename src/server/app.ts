@@ -63,6 +63,13 @@ import {
   type DeletePactResponse,
   type EditPactResponse,
   type ExcuseOptionsResponse,
+  type FileVacationRequest,
+  type FileVacationResponse,
+  type VacationOptionsResponse,
+  type VacationPreviewRequest,
+  type VacationPreviewResponse,
+  type VacationsResponse,
+  type WithdrawVacationResponse,
   type ExcusePreviewQuery,
   type ExcusePreviewResponse,
   type ExcuseResponse,
@@ -569,6 +576,26 @@ export function createApp({
     c.json<AcceptExcuseRejectionResponse>(await account(c).acceptExcuseRejection(c.req.param("id"))),
   );
 
+  app.get(API_PATHS.vacationOptions, (c) => c.json<VacationOptionsResponse>(account(c).vacationOptions()));
+
+  app.post(API_PATHS.vacationPreview, async (c) => {
+    const request = await readJson(c, parseVacationRequest);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<VacationPreviewResponse>(account(c).vacationPreview(request));
+  });
+
+  app.get(API_PATHS.vacations, (c) => c.json<VacationsResponse>(account(c).vacations()));
+
+  app.post(API_PATHS.vacations, async (c) => {
+    const vacation = await readJson(c, parseNewVacation);
+    if (!vacation) return apiError(c, 400, "invalid-request");
+    return c.json<FileVacationResponse>(await account(c).fileVacation(vacation));
+  });
+
+  app.post(API_PATHS.withdrawVacation(":id"), async (c) =>
+    c.json<WithdrawVacationResponse>(await account(c).withdrawVacation(c.req.param("id"))),
+  );
+
   app.post(API_PATHS.acceptMiss(":id", ":date"), async (c) => {
     const date = c.req.param("date");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return apiError(c, 400, "invalid-request");
@@ -761,6 +788,13 @@ const PACT_TERMS: Fields<Omit<NewPact, "evidenceKind">> = {
 const parseNewPact = object<CreatePactRequest>({ evidenceKind: oneOf(EVIDENCE_KINDS), ...PACT_TERMS });
 const parsePactChange = object<ChangePactRequest>({ ...PACT_TERMS, note: optional(string) });
 const parseEndPact = object<EndPactRequest>({ note: optional(string) });
+const VACATION_REQUEST = { from: string, to: string, pactIds: arrayOf(string) };
+const parseVacationRequest = object<VacationPreviewRequest>(VACATION_REQUEST);
+const parseNewVacation = object<FileVacationRequest>({
+  ...VACATION_REQUEST,
+  note: optional(string),
+  reviewerIds: arrayOf(string),
+});
 
 const parseDecision = union<DecideRequest>({
   approve: object({}),

@@ -52,6 +52,13 @@ import {
   type ExcuseResponse,
   type FileExcuseRequest,
   type FileExcuseResponse,
+  type FileVacationRequest,
+  type FileVacationResponse,
+  type VacationOptionsResponse,
+  type VacationPreviewRequest,
+  type VacationPreviewResponse,
+  type VacationsResponse,
+  type WithdrawVacationResponse,
   type DecideRequest,
   type DecideResponse,
   type FirstOccurrenceRequest,
@@ -213,6 +220,13 @@ export const api = {
   excuse: (excuseId: string) => call<ExcuseResponse>(API_PATHS.excuse(encodeURIComponent(excuseId))),
   acceptExcuseRejection: (excuseId: string) =>
     post<AcceptExcuseRejectionResponse>(API_PATHS.acceptExcuseRejection(encodeURIComponent(excuseId))),
+  vacationOptions: () => call<VacationOptionsResponse>(API_PATHS.vacationOptions),
+  vacationPreview: (request: VacationPreviewRequest) =>
+    post<VacationPreviewResponse>(API_PATHS.vacationPreview, request),
+  fileVacation: (vacation: FileVacationRequest) => post<FileVacationResponse>(API_PATHS.vacations, vacation),
+  vacations: () => call<VacationsResponse>(API_PATHS.vacations),
+  withdrawVacation: (vacationId: string) =>
+    post<WithdrawVacationResponse>(API_PATHS.withdrawVacation(encodeURIComponent(vacationId))),
   acceptMiss: (pactId: string, occurrenceDate: string) =>
     post<AcceptMissResponse>(API_PATHS.acceptMiss(encodeURIComponent(pactId), encodeURIComponent(occurrenceDate))),
   reviewQueue: () => call<ReviewQueueResponse>(API_PATHS.reviewQueue),

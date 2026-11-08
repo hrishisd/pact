@@ -53,6 +53,11 @@ import {
   type DisconnectOuraResponse,
   type DecideRequest,
   type ExcuseOptionsResponse,
+  type FileVacationRequest,
+  type VacationOptionsResponse,
+  type VacationPreviewRequest,
+  type VacationPreviewResponse,
+  type VacationsResponse,
   type ExcusePreviewResponse,
   type ExcuseResponse,
   type FileExcuseResponse,
@@ -1358,6 +1363,63 @@ describe("excuses", () => {
       status: 400,
       body: { error: "invalid-request" },
     });
+  });
+});
+
+describe("vacations", () => {
+  test("the owner reads the options, previews, files, sees it on Profile and withdraws it", async () => {
+    const { s, owner, friendId, pactId } = await ownerWithPact();
+    const request: VacationPreviewRequest = { from: s.date("Mon+1"), to: s.date("Sun+1"), pactIds: [pactId] };
+
+    const options = await owner.get<VacationOptionsResponse>(API_PATHS.vacationOptions);
+    expect(options.body).toMatchObject({
+      today: s.date("Mon"),
+      recurring: [{ id: pactId, reviewers: [{ id: friendId, name: "friend" }] }],
+      oneTime: [],
+    });
+    const preview = await owner.post<VacationPreviewResponse>(API_PATHS.vacationPreview, request);
+    expect(preview.body).toMatchObject({ ok: true, preview: { days: 7, summary: { kind: "all" } } });
+
+    const filed = await owner.post(API_PATHS.vacations, {
+      ...request,
+      note: "Going to Portugal",
+      reviewerIds: [friendId],
+    } satisfies FileVacationRequest);
+    expect(filed).toEqual({ status: 200, body: { ok: true, vacationId: expect.any(String) } });
+    const { vacationId } = filed.body as { vacationId: string };
+    expect((await owner.get<VacationsResponse>(API_PATHS.vacations)).body).toEqual([
+      expect.objectContaining({ id: vacationId, note: "Going to Portugal", reviewerNames: ["friend"] }),
+    ]);
+
+    const withdraw = () => owner.post(API_PATHS.withdrawVacation(vacationId));
+    expect(await withdraw()).toEqual({ status: 200, body: { ok: true } });
+    expect(await withdraw()).toEqual({ status: 200, body: { ok: false, reason: "not-waiting" } });
+    expect((await owner.get<VacationsResponse>(API_PATHS.vacations)).body).toEqual([]);
+  });
+
+  test("the core's refusals are 200s; a body of another shape is a 400", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+    const request = { from: s.date("Mon+1"), to: s.date("Sun+1"), pactIds: [pactId] };
+
+    expect(await owner.post(API_PATHS.vacations, { ...request, reviewerIds: [] })).toEqual({
+      status: 200,
+      body: { ok: false, reason: "no-reviewers" },
+    });
+    expect(await owner.post(API_PATHS.vacationPreview, { ...request, from: s.date("Mon") })).toEqual({
+      status: 200,
+      body: { ok: false, reason: "not-after-today" },
+    });
+    for (const sent of [
+      { ...request, pactIds: pactId },
+      { from: request.from, to: request.to },
+    ]) {
+      const previewed = await owner.post(API_PATHS.vacationPreview, sent);
+      expect({ sent, ...previewed }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
+    }
+    for (const sent of [request, { ...request, reviewerIds: [], note: 5 }]) {
+      const filed = await owner.post(API_PATHS.vacations, sent);
+      expect({ sent, ...filed }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
+    }
   });
 });
 
