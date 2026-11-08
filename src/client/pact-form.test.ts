@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { termsOfForm } from "./CreatePact.tsx";
-import type { Form } from "./pact-form.ts";
+import { termsOfForm, type Form } from "./pact-form.ts";
 
 const FORM: Form = {
   kind: "camera",

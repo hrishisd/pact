@@ -25,17 +25,9 @@ import {
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
-import {
-  formOf,
-  ListsFailed,
-  PactFormStep,
-  PROBLEMS,
-  termsOfForm,
-  usePactFormLists,
-  type FormStep,
-} from "./CreatePact.tsx";
 import { formatDate, money, remindersText } from "./format.ts";
-import type { Form } from "./pact-form.ts";
+import { formOf, termsOfForm, type Form } from "./pact-form.ts";
+import { ListsFailed, PactFormStep, PROBLEMS, usePactFormLists, type FormStep } from "./pact-form-steps.tsx";
 import { LoadedFound, Sheet, useLoad, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
