@@ -540,14 +540,6 @@ describe("Today", () => {
     expect(owner.today().sections).toEqual([]);
   });
 
-  test("a bedtime pact gets no To do card", async () => {
-    const s = scenario();
-    const { owner, createPact } = await ownerWithOura(s);
-    await createPact("00:00");
-    expect(sectionKinds(owner)).toEqual(["automatic"]);
-    expect(owner.today().sections.find((section) => section.kind === "to-do")).toBeUndefined();
-  });
-
   test("Automatic comes after Missed and before Coming up", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithOura(s);

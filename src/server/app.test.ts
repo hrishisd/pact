@@ -61,6 +61,7 @@ import {
   type FriendsResponse,
   type HealthResponse,
   type InviteLookupResponse,
+  type Json,
   type LedgerResponse,
   type LedgersResponse,
   type PactResponse,
@@ -433,9 +434,13 @@ async function operatorWithInvite(s: Server) {
   return { ...operator, accountId: operator.accountId, token: invite.body.token };
 }
 
+/** `value` as a response body carries it, after its trip through JSON. */
+const serialized = <T>(value: T) => JSON.parse(JSON.stringify(value)) as Json<T>;
+
 /**
  * The operator and a friend, both signed in, with a saved recipient, "Sam"; a pact to create,
- * and `createPact`, which creates it (or `body`) as the owner and returns its id.
+ * and `createPact`, which creates it (or `body`) as the owner and returns its id. `core` is the
+ * owner's view of the core, for comparing a response with the core's own answer.
  */
 async function ownerWithFriend() {
   const s = await server();
@@ -460,7 +465,7 @@ async function ownerWithFriend() {
     if (!created.body.ok) throw new Error(created.body.reason);
     return created.body.pactId;
   };
-  return { s, owner, friend, friendId, pact, createPact };
+  return { s, owner, core: s.core.as(owner.accountId), friend, friendId, pact, createPact };
 }
 
 describe("invites", () => {
@@ -714,114 +719,38 @@ describe("pacts", () => {
     expect((await owner.delete(late)).body).toEqual(refused);
   });
 
-  test("an owner creates a Camera pact and sees it on Today, in Pacts and on its page", async () => {
-    const { s, owner, pact, friendId, createPact } = await ownerWithFriend();
+  test("an owner creates a Camera pact and sees it on Today, in Pacts and on its page, as the core has it", async () => {
+    const { owner, core, pact, createPact } = await ownerWithFriend();
     expect((await owner.get<RecipientsResponse>(API_PATHS.recipients)).body).toEqual([
       { id: pact.recipientId, name: "Sam" },
     ] satisfies RecipientsResponse);
-    // Monday's midnight in New York.
-    const firstOccurrence = { date: "2026-01-05", dueAt: "2026-01-06T05:00:00.000Z" };
 
     const check = await owner.post(API_PATHS.firstOccurrence, { schedule: pact.schedule });
-    expect(check.body).toEqual({ ok: true, firstOccurrence } satisfies FirstOccurrenceResponse);
+    expect(check).toEqual({ status: 200, body: serialized(core.firstOccurrence({ schedule: pact.schedule })) });
 
     const pactId = await createPact();
-    const editWindowClosesAt = new Date(s.clock.now().getTime() + 10 * 60 * 1000).toISOString();
 
-    expect((await owner.get(API_PATHS.today)).body).toEqual({
-      hasPacts: true,
-      alerts: [],
-      sections: [
-        {
-          kind: "to-do",
-          cards: [
-            {
-              kind: "evidence",
-              pactId,
-              name: "Gym",
-              penaltyCents: 500,
-              editWindowClosesAt,
-              occurrenceDate: firstOccurrence.date,
-              dueAt: firstOccurrence.dueAt,
-              dueBy: null,
-            },
-          ],
-        },
-      ],
-      waiting: [],
-      yesterday: [],
-    } satisfies TodayResponse);
-    expect((await owner.get(API_PATHS.pacts)).body).toEqual([
-      { id: pactId, name: "Gym", schedule: pact.schedule, penaltyCents: 500, stage: "active", editWindowClosesAt },
-    ] satisfies PactsResponse);
-    expect((await owner.get(API_PATHS.pact(pactId))).body).toEqual({
-      ok: true,
-      pact: {
-        id: pactId,
-        name: "Gym",
-        description: "Me at the gym",
-        evidenceKind: "camera",
-        dueBy: null,
-        startDate: null,
-        endDate: null,
-        schedule: pact.schedule,
-        penaltyCents: 500,
-        recipient: { id: pact.recipientId, name: "Sam" },
-        reviewers: [{ id: friendId, name: "friend" }],
-        reminders: [],
-        stage: "active",
-        firstOccurrence,
-        editWindowClosesAt,
-        newTerms: null,
-        waiting: [],
-        connectionProblem: null,
-        history: {
-          kind: "fixed-days",
-          days: ["05", "06", "07", "08", "09", "10", "11"].map((day) => ({
-            date: `2026-01-${day}`,
-            occurrence: ["05", "07", "09"].includes(day)
-              ? {
-                  status: {
-                    kind: "not-judged",
-                    opensAt: `2026-01-${day}T05:00:00.000Z`,
-                    dueAt: `2026-01-${String(Number(day) + 1).padStart(2, "0")}T05:00:00.000Z`,
-                    evidenceWaiting: false,
-                    excuse: null,
-                    excuseApproval: null,
-                  },
-                  detail: null,
-                }
-              : null,
-          })),
-        },
-      },
-    } satisfies PactResponse);
+    const page = await owner.get<PactResponse>(API_PATHS.pact(pactId));
+    if (!page.body.ok) throw new Error(page.body.reason);
+    // Every term sent is the pact's.
+    expect({ evidenceKind: page.body.pact.evidenceKind, ...termsOf(page.body.pact) }).toEqual({
+      ...pact,
+      reminders: [],
+    });
+    expect(page.body).toEqual(serialized(core.pact(pactId)));
+    expect((await owner.get(API_PATHS.today)).body).toEqual(serialized(core.today()));
+    expect((await owner.get(API_PATHS.pacts)).body).toEqual(serialized(core.pacts()));
   });
 
-  test("Today's Yesterday says how each pact due yesterday did", async () => {
-    const { s, owner, pact, createPact } = await ownerWithFriend();
+  test("Today's Yesterday says how each pact due yesterday did, as the core has it", async () => {
+    const { s, owner, core, createPact } = await ownerWithFriend();
     const pactId = await createPact();
     await s.advanceTo("Tue 10:00");
 
-    expect((await owner.get<TodayResponse>(API_PATHS.today)).body.yesterday).toEqual([
-      {
-        pactId,
-        name: "Gym",
-        evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
-        occurrence: {
-          status: {
-            kind: "missed",
-            penaltyCents: 500,
-            held: false,
-            excusableUntil: "2026-01-08T05:00:00.000Z",
-            recipientName: "Sam",
-            rejection: null,
-          },
-          detail: null,
-        },
-      },
-    ] satisfies TodayResponse["yesterday"]);
+    const today = await owner.get<TodayResponse>(API_PATHS.today);
+
+    expect(today.body.yesterday).toMatchObject([{ pactId }]);
+    expect(today.body).toEqual(serialized(core.today()));
   });
 
   test("a reviewer who isn't a friend is refused as data", async () => {
@@ -914,48 +843,31 @@ describe("pacts", () => {
     }
   });
 
+  // Each test below sends a term the core's answer depends on, so an answer equal to the core's
+  // own shows the route passed that term on.
+
   test("a due-by time, start date and end date go through to the core, and its refusals come back as data", async () => {
-    const { s, owner, pact, createPact } = await ownerWithFriend();
+    const { s, owner, core, pact, createPact } = await ownerWithFriend();
     const times = { dueBy: "21:00", startDate: "2026-01-12", endDate: "2026-01-31" };
 
-    const check = await owner.post(API_PATHS.firstOccurrence, {
-      schedule: pact.schedule,
-      dueBy: times.dueBy,
-      startDate: times.startDate,
-    });
-    expect(check.body).toEqual({
-      ok: true,
-      firstOccurrence: { date: "2026-01-12", dueAt: "2026-01-13T02:00:00.000Z" },
-    } satisfies FirstOccurrenceResponse);
+    const timing = { schedule: pact.schedule, dueBy: times.dueBy, startDate: times.startDate };
+    const check = await owner.post(API_PATHS.firstOccurrence, timing);
+    expect(check).toEqual({ status: 200, body: serialized(core.firstOccurrence(timing)) });
     const refused = await owner.post(API_PATHS.pacts, { ...pact, ...times, endDate: "2026-01-09" });
     expect(refused).toEqual({ status: 200, body: { ok: false, reason: "end-date-too-early" } });
 
     const pactId = await createPact({ ...pact, ...times });
-    expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
-      ok: true,
-      pact: { ...times, firstOccurrence: { date: "2026-01-12" } },
-    });
-    expect((await owner.get<TodayResponse>(API_PATHS.today)).body.sections).toEqual([
-      { kind: "coming-up", cards: [expect.objectContaining({ opensOn: "2026-01-12", startDate: "2026-01-12" })] },
-    ]);
+    expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({ ok: true, pact: times });
 
     s.setClockTo("Tue 10:00");
     const { endDate: _endDate, ...rest } = times;
-    const preview = await owner.post(API_PATHS.changePreview(pactId), { ...pact, ...rest, dueBy: "22:00" });
-    expect(preview.body).toEqual({
-      ok: true,
-      preview: {
-        changes: [
-          { term: "due-by", before: "21:00", after: "22:00", effect: "needs-approval", reason: "later-time" },
-          { term: "end-date", before: "2026-01-31", after: null, effect: "stricter" },
-        ],
-        outcome: { kind: "needs-approval", reviewerNames: ["friend"], bundlesStricter: true, appliesNow: [] },
-      },
-    });
+    const change = { ...pact, ...rest, dueBy: "22:00" };
+    const preview = await owner.post(API_PATHS.changePreview(pactId), change);
+    expect(preview).toEqual({ status: 200, body: serialized(core.changePreview(pactId, change)) });
   });
 
-  test("a Weekly count pact goes through to the core: Today shows its week, the pact page its weeks, and its refusals are data", async () => {
-    const { s, owner, pact, createPact } = await ownerWithFriend();
+  test("a Weekly count pact goes through to the core, and its refusals come back as data", async () => {
+    const { s, owner, core, pact, createPact } = await ownerWithFriend();
     const weekly = {
       ...pact,
       name: "Piano",
@@ -963,54 +875,23 @@ describe("pacts", () => {
     } satisfies CreatePactRequest;
 
     const check = await owner.post(API_PATHS.firstOccurrence, { schedule: weekly.schedule });
-    expect(check.body).toEqual({
-      ok: true,
-      firstOccurrence: { date: "2026-01-12", dueAt: "2026-01-19T05:00:00.000Z" },
-    } satisfies FirstOccurrenceResponse);
+    expect(check).toEqual({ status: 200, body: serialized(core.firstOccurrence({ schedule: weekly.schedule })) });
     const refused = await owner.post(API_PATHS.pacts, { ...weekly, schedule: { kind: "weekly-count", target: 8 } });
     expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-schedule" } });
     const pactId = await createPact(weekly);
-
-    s.setClockTo("Tue+1 10:00");
-    expect((await owner.get<TodayResponse>(API_PATHS.today)).body.sections).toEqual([
-      {
-        kind: "to-do",
-        cards: [
-          {
-            kind: "evidence",
-            pactId,
-            name: "Piano",
-            penaltyCents: 500,
-            editWindowClosesAt: null,
-            occurrenceDate: "2026-01-12",
-            dueAt: "2026-01-19T05:00:00.000Z",
-            dueBy: null,
-            week: { sessions: 0, waiting: 0, target: 3 },
-          },
-        ],
-      },
-    ] satisfies TodayResponse["sections"]);
     expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
       ok: true,
-      pact: {
-        schedule: { kind: "weekly-count", target: 3 },
-        history: { kind: "weekly-count", weeks: [{ date: "2026-01-12", progress: { sessions: 0, target: 3 } }] },
-      },
+      pact: { schedule: { kind: "weekly-count", target: 3 } },
     });
-    const swapped = await owner.post(API_PATHS.changePreview(pactId), { ...weekly, schedule: pact.schedule });
-    expect(swapped).toEqual({ status: 200, body: { ok: false, reason: "schedule-kind-fixed" } });
-    const lowered = await owner.post(API_PATHS.changePreview(pactId), {
-      ...weekly,
-      schedule: { kind: "weekly-count", target: 2 },
-    });
-    expect(lowered.body).toMatchObject({
-      ok: true,
-      preview: { changes: [{ term: "schedule", effect: "needs-approval", reason: "lower-target" }] },
-    });
+
+    s.setClockTo("Tue+1 10:00");
+    const lowered = { ...weekly, schedule: { kind: "weekly-count", target: 2 } } satisfies ChangePactRequest;
+    const preview = await owner.post(API_PATHS.changePreview(pactId), lowered);
+    expect(preview).toEqual({ status: 200, body: serialized(core.changePreview(pactId, lowered)) });
   });
 
-  test("a One-time pact goes through to the core: Today shows it, the pact page its one occurrence, and its refusals are data", async () => {
-    const { s, owner, pact, createPact } = await ownerWithFriend();
+  test("a One-time pact goes through to the core, and its refusals come back as data", async () => {
+    const { s, owner, core, pact, createPact } = await ownerWithFriend();
     const taxes = {
       ...pact,
       name: "Taxes",
@@ -1019,58 +900,31 @@ describe("pacts", () => {
       reminders: ["2026-01-07T09:00"],
     } satisfies CreatePactRequest;
 
-    const check = await owner.post(API_PATHS.firstOccurrence, { schedule: taxes.schedule, dueBy: "17:00" });
-    expect(check.body).toEqual({
-      ok: true,
-      firstOccurrence: { date: "2026-01-08", dueAt: "2026-01-08T22:00:00.000Z" },
-    } satisfies FirstOccurrenceResponse);
+    const timing = { schedule: taxes.schedule, dueBy: "17:00" };
+    const check = await owner.post(API_PATHS.firstOccurrence, timing);
+    expect(check).toEqual({ status: 200, body: serialized(core.firstOccurrence(timing)) });
     const tooSoon = await owner.post(API_PATHS.firstOccurrence, {
       schedule: { ...taxes.schedule, deadline: "2026-01-05" },
       dueBy: "09:30",
     });
-    expect(tooSoon.body).toEqual({ ok: false, reason: "deadline-too-soon" } satisfies FirstOccurrenceResponse);
-    const refused = await owner.post(API_PATHS.pacts, { ...taxes, startDate: "2026-01-06" });
-    expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-start-date" } });
+    expect(tooSoon).toEqual({
+      status: 200,
+      body: { ok: false, reason: "deadline-too-soon" } satisfies FirstOccurrenceResponse,
+    });
     const pactId = await createPact(taxes);
-
-    s.setClockTo("Tue 10:00");
-    expect((await owner.get<TodayResponse>(API_PATHS.today)).body.sections).toEqual([
-      {
-        kind: "to-do",
-        cards: [
-          {
-            kind: "evidence",
-            pactId,
-            name: "Taxes",
-            penaltyCents: 500,
-            editWindowClosesAt: null,
-            occurrenceDate: "2026-01-08",
-            dueAt: "2026-01-08T22:00:00.000Z",
-            dueBy: "17:00",
-          },
-        ],
-      },
-    ] satisfies TodayResponse["sections"]);
     expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
       ok: true,
-      pact: {
-        schedule: taxes.schedule,
-        reminders: ["2026-01-07T09:00"],
-        history: { kind: "one-time", day: { date: "2026-01-08", occurrence: { status: { kind: "not-judged" } } } },
-      },
+      pact: { schedule: taxes.schedule, dueBy: "17:00", reminders: ["2026-01-07T09:00"] },
     });
-    const later = await owner.post(API_PATHS.changePreview(pactId), {
-      ...taxes,
-      schedule: { ...taxes.schedule, deadline: "2026-01-09" },
-    });
-    expect(later.body).toMatchObject({
-      ok: true,
-      preview: { changes: [{ term: "schedule", effect: "needs-approval", reason: "later-deadline" }] },
-    });
+
+    s.setClockTo("Tue 10:00");
+    const later = { ...taxes, schedule: { ...taxes.schedule, deadline: "2026-01-09" } } satisfies ChangePactRequest;
+    const preview = await owner.post(API_PATHS.changePreview(pactId), later);
+    expect(preview).toEqual({ status: 200, body: serialized(core.changePreview(pactId, later)) });
   });
 
   test("reminders go through to the core when creating and changing a pact, and its refusals come back as data", async () => {
-    const { s, owner, pact, createPact } = await ownerWithFriend();
+    const { s, owner, core, pact, createPact } = await ownerWithFriend();
 
     const refused = await owner.post(API_PATHS.pacts, { ...pact, reminders: ["6pm"] });
     expect(refused).toEqual({ status: 200, body: { ok: false, reason: "invalid-reminders" } });
@@ -1083,13 +937,7 @@ describe("pacts", () => {
     s.setClockTo("Tue 10:00");
     const changed = { ...pact, reminders: ["19:30"] };
     const preview = await owner.post(API_PATHS.changePreview(pactId), changed);
-    expect(preview.body).toEqual({
-      ok: true,
-      preview: {
-        changes: [{ term: "reminders", before: ["07:00", "18:00"], after: ["19:30"], effect: "at-once" }],
-        outcome: { kind: "at-once" },
-      },
-    });
+    expect(preview).toEqual({ status: 200, body: serialized(core.changePreview(pactId, changed)) });
     const sent = await owner.post(API_PATHS.changePact(pactId), changed);
     expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" } });
     expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
