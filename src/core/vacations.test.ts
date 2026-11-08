@@ -4,7 +4,8 @@
 // withdrawing one. Ticket 02: the picked reviewers' review item, questions,
 // the decision, and Excused days once it's approved. Ticket 03: a vacation
 // still waiting when its first day comes, rejection and its alert, and held
-// penalties.
+// penalties. Ticket 04: Today's banner and covered occurrences left off
+// Today, vacation days on the heat map, and Profile on now and after.
 
 import { describe, expect, test } from "vitest";
 import type { NewVacation, Schedule } from "../shared/types.ts";
@@ -13,6 +14,7 @@ import { bedtimePact, sleep } from "./testing/bedtime-pact.ts";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import {
   cards,
+  dayOn,
   changed,
   ledgerHistory,
   ok,
@@ -1220,5 +1222,274 @@ describe("held penalties on the review item and the Profile card", () => {
     expect(item).not.toHaveProperty("heldCents");
     expect(item).not.toHaveProperty("covers.0.held");
     expect(owner.vacations()[0]).not.toHaveProperty("heldCents");
+  });
+});
+
+/**
+ * Gym, Bed and Piano as `ownerWithThreePacts` makes them, plus Read (Camera,
+ * every day, not on the vacation), with a vacation over Gym and Bed from
+ * Mon+1 to Sun+1 filed Wed 12:00 to the reviewer, approved unless `approve`
+ * is false.
+ */
+async function onVacationOverGymAndBed(s: Scenario, { approve = true } = {}) {
+  const setup = await ownerWithThreePacts(s, "Mon 10:00");
+  const { owner, reviewer, createPact, gym, bed } = setup;
+  const read = await createPact("Read", ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+  s.setClockTo("Wed 12:00");
+  const vacationId = await file(owner, {
+    ...vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, bed], [reviewer]),
+    note: "Going to Portugal",
+  });
+  if (approve) ok(await reviewer.decide(vacationId, { kind: "approve" }));
+  return { ...setup, read, vacationId };
+}
+
+/** The pact ids with a card in any of the owner's Today sections, or a Yesterday row. */
+function pactsOnToday(owner: AccountHandle): string[] {
+  return occurrencesOnToday(owner).map((shown) => shown.pactId);
+}
+
+/** Each occurrence with a card in any of the owner's Today sections, or a Yesterday row; a Coming up card by the day it opens. */
+function occurrencesOnToday(owner: AccountHandle): { pactId: string; date: string }[] {
+  const today = owner.today();
+  return [
+    ...today.sections.flatMap((section) =>
+      section.cards.flatMap((card) => {
+        if (!("pactId" in card)) return [];
+        return [{ pactId: card.pactId, date: "opensOn" in card ? card.opensOn : card.occurrenceDate }];
+      }),
+    ),
+    ...today.yesterday.map((entry) => ({ pactId: entry.pactId, date: entry.occurrenceDate })),
+  ];
+}
+
+describe("Today during an approved vacation", () => {
+  test("Bed's Sun night, before the vacation, is still on Missed on Wed+1 12:00, inside its 48 hours", async () => {
+    const s = scenario();
+    const { owner, bed } = await onVacationOverGymAndBed(s);
+
+    await s.advanceTo("Wed+1 12:00");
+
+    expect(cards(owner, "missed").filter((card) => card.pactId === bed)).toEqual([
+      expect.objectContaining({ occurrenceDate: s.date("Sun") }),
+    ]);
+  });
+
+  test("on Wed+1 Today has the banner, nothing for Gym or Bed in any section, and Piano's and Read's To do cards", async () => {
+    const s = scenario();
+    const { owner, gym, bed, piano, read, vacationId } = await onVacationOverGymAndBed(s);
+
+    // After Bed's Sun night, Missed before the vacation, has had its 48 hours on Missed.
+    await s.advanceTo("Wed+1 19:00");
+
+    expect(owner.today().vacations).toEqual([
+      {
+        id: vacationId,
+        from: s.date("Mon+1"),
+        to: s.date("Sun+1"),
+        note: "Going to Portugal",
+        pacts: { kind: "some", names: ["Gym", "Bed"] },
+        covers: [
+          expect.objectContaining({
+            pactId: gym,
+            name: "Gym",
+            evidenceKind: "camera",
+            covered: ["Mon+1", "Wed+1", "Fri+1"].map((day) => ({ date: s.date(day) })),
+          }),
+          expect.objectContaining({ pactId: bed, name: "Bed", evidenceKind: "oura" }),
+        ],
+      },
+    ]);
+    const shown = pactsOnToday(owner);
+    expect(shown).not.toContain(gym);
+    expect(shown).not.toContain(bed);
+    expect(cards(owner, "to-do").map((card) => ("pactId" in card ? card.pactId : null))).toEqual(
+      expect.arrayContaining([piano, read]),
+    );
+  });
+
+  test("a vacation over every pact says so", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym, bed, piano } = await ownerWithThreePacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, bed, piano], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    await s.advanceTo("Mon+1 12:00");
+
+    expect(owner.today().vacations).toMatchObject([{ id: vacationId, pacts: { kind: "all" }, note: null }]);
+  });
+
+  test("before its first day there's no banner", async () => {
+    const s = scenario();
+    const { owner } = await onVacationOverGymAndBed(s);
+
+    await s.advanceTo("Sun 12:00");
+
+    expect(owner.today()).not.toHaveProperty("vacations");
+  });
+
+  test("a covered One-time deadline leaves Coming up once the vacation is approved; an uncovered one stays", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const visa = await createPact("Visa", { kind: "one-time", deadline: s.date("Wed+1"), submitAnytime: false });
+    const forms = await createPact("Forms", { kind: "one-time", deadline: s.date("Fri+2"), submitAnytime: false });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [visa], [reviewer]));
+    expect(cards(owner, "coming-up").map((card) => card.pactId)).toEqual([visa, forms]);
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(cards(owner, "coming-up").map((card) => card.pactId)).toEqual([forms]);
+  });
+
+  test("on Mon+2 Yesterday has no row for Bed's Sun+1 but keeps Read's, and the banner is gone", async () => {
+    const s = scenario();
+    const { owner, bed, read } = await onVacationOverGymAndBed(s);
+
+    await s.advanceTo("Mon+2 12:00");
+
+    expect(owner.today().yesterday.map((entry) => entry.pactId)).toEqual([read]);
+    expect(occurrencesOnToday(owner)).not.toContainEqual({ pactId: bed, date: s.date("Sun+1") });
+    // Tonight isn't on the vacation.
+    expect(cards(owner, "automatic")).toEqual([
+      expect.objectContaining({ pactId: bed, occurrenceDate: s.date("Mon+2") }),
+    ]);
+    expect(owner.today()).not.toHaveProperty("vacations");
+  });
+
+  test("a covered Weekly count week Mon+1 to Sun+1 stays off Today on Sun+1, after a vacation ending Sat+1", async () => {
+    const s = scenario();
+    const { owner, second, piano } = await ownerWithThreePacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sat+1"), [piano], [second]));
+    ok(await second.decide(vacationId, { kind: "approve" }));
+
+    await s.advanceTo("Sun+1 12:00");
+
+    expect(pactsOnToday(owner)).not.toContain(piano);
+    expect(owner.today()).not.toHaveProperty("vacations");
+  });
+
+  test("a waiting vacation shows no banner and hides nothing", async () => {
+    const s = scenario();
+    const { owner, gym, bed } = await onVacationOverGymAndBed(s, { approve: false });
+
+    await s.advanceTo("Wed+1 12:00");
+
+    expect(owner.today()).not.toHaveProperty("vacations");
+    expect(cards(owner, "to-do").map((card) => ("pactId" in card ? card.pactId : null))).toContain(gym);
+    expect(owner.today().yesterday.map((entry) => entry.pactId)).toContain(bed);
+  });
+});
+
+describe("the heat map after an approved vacation", () => {
+  test("on Mon+2 Bed's Mon+1 to Sun+1 are marked as the vacation's with its dates; an ordinary excused night isn't, and a covered night Oura satisfied is Satisfied", async () => {
+    const s = scenario();
+    const { owner, reviewer, bed } = await onVacationOverGymAndBed(s);
+    ok(await owner.fileExcuse(bed, { from: s.date("Fri"), to: s.date("Fri"), reason: "Red-eye flight" }, []));
+    const excuseId = owner.today().waiting.find((item) => item.kind === "excuse")!.id;
+    ok(await reviewer.decide(excuseId, { kind: "approve" }));
+    s.ouraSource.addSleep(owner.id, sleep("Wed+1 23:00"));
+
+    await s.advanceTo("Mon+2 19:00");
+
+    const onVacation = { from: s.date("Mon+1"), to: s.date("Sun+1") };
+    for (const day of ["Mon+1", "Tue+1", "Thu+1", "Fri+1", "Sat+1", "Sun+1"]) {
+      expect(dayOn(owner, bed, s.date(day))?.status).toEqual({
+        kind: "excused",
+        excuseApproval: null,
+        vacation: onVacation,
+      });
+    }
+    expect(dayOn(owner, bed, s.date("Wed+1"))?.status).toEqual({ kind: "satisfied", approvedBy: null });
+    expect(dayOn(owner, bed, s.date("Fri"))?.status).toEqual({
+      kind: "excused",
+      excuseApproval: { reviewerName: "reviewer", reason: "Red-eye flight" },
+    });
+  });
+
+  test("a covered night not judged yet is marked as the vacation's, as one an approved excuse covers is Excused", async () => {
+    const s = scenario();
+    const { owner, bed } = await onVacationOverGymAndBed(s);
+
+    await s.advanceTo("Mon+1 12:00");
+
+    expect(dayOn(owner, bed, s.date("Tue+1"))?.status).toMatchObject({
+      kind: "not-judged",
+      excuse: "approved",
+      excuseApproval: null,
+      vacation: { from: s.date("Mon+1"), to: s.date("Sun+1") },
+    });
+  });
+
+  test("a covered Weekly count week is marked as the vacation's", async () => {
+    const s = scenario();
+    const { owner, second, piano } = await ownerWithThreePacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sat+1"), [piano], [second]));
+    ok(await second.decide(vacationId, { kind: "approve" }));
+
+    await s.advanceTo("Mon+2 12:00");
+
+    const { history } = pactOf(owner, piano);
+    if (history.kind !== "weekly-count") throw new Error("not a week heat map");
+    expect(history.weeks.find((week) => week.date === s.date("Mon+1"))?.occurrence?.status).toEqual({
+      kind: "excused",
+      excuseApproval: null,
+      vacation: { from: s.date("Mon+1"), to: s.date("Sat+1") },
+    });
+  });
+});
+
+describe("Profile during and after a vacation", () => {
+  test("the card says it's on now from its first to its last day; afterwards it's the last one", async () => {
+    const s = scenario();
+    const { owner, vacationId } = await onVacationOverGymAndBed(s);
+    expect(owner.lastVacation()).toBeNull();
+
+    await s.advanceTo("Sun 23:00");
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, state: { kind: "approved" } }]);
+    await s.advanceTo("Mon+1 00:00");
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, state: { kind: "on-now" } }]);
+    await s.advanceTo("Sun+1 23:00");
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, state: { kind: "on-now" } }]);
+    expect(owner.lastVacation()).toBeNull();
+
+    await s.advanceTo("Mon+2 00:00");
+    expect(owner.vacations()).toEqual([]);
+    expect(owner.lastVacation()).toEqual({ from: s.date("Mon+1"), to: s.date("Sun+1") });
+  });
+
+  test("the last one is the approved vacation that ended latest", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await onVacationOverGymAndBed(s);
+    const later = await file(owner, vacation(s.date("Mon+2"), s.date("Tue+2"), [gym], [reviewer]));
+    ok(await reviewer.decide(later, { kind: "approve" }));
+
+    await s.advanceTo("Wed+2 00:00");
+
+    expect(owner.lastVacation()).toEqual({ from: s.date("Mon+2"), to: s.date("Tue+2") });
+  });
+
+  test("a vacation still waiting after its last day stays a waiting card and isn't the last one; once approved, it is", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await onVacationOverGymAndBed(s, { approve: false });
+
+    await s.advanceTo("Wed+2 12:00");
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, state: { kind: "waiting" } }]);
+    expect(owner.lastVacation()).toBeNull();
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+    expect(owner.vacations()).toEqual([]);
+    expect(owner.lastVacation()).toEqual({ from: s.date("Mon+1"), to: s.date("Sun+1") });
+  });
+
+  test("a vacation still waiting after its last day can still be withdrawn, and then isn't the last one", async () => {
+    const s = scenario();
+    const { owner, vacationId } = await onVacationOverGymAndBed(s, { approve: false });
+
+    await s.advanceTo("Wed+2 12:00");
+
+    expect(await owner.withdrawVacation(vacationId)).toEqual({ ok: true });
+    expect(owner.vacations()).toEqual([]);
+    expect(owner.lastVacation()).toBeNull();
   });
 });

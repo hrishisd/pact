@@ -10,9 +10,11 @@ import {
   type AccountId,
   type ReviewItem,
   type TodayAlert,
+  type TodayVacation,
   type VacationCover,
   type VacationState,
   type FileVacationResult,
+  type LastVacation,
   type LocalDate,
   type NewVacation,
   type VacationCard,
@@ -290,9 +292,41 @@ export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCar
   );
   return rows.map((row) => ({
     ...vacationSummary(ctx, row),
-    state: vacationState(ctx, row),
+    state: vacationState(ctx, row, today),
     ...heldTotal(coveredPenalties(ctx, row.id)),
   }));
+}
+
+/** The owner's approved vacation whose last day passed most recently, or null when none has. */
+export function lastVacation(ctx: CoreContext, ownerId: AccountId): LastVacation | null {
+  const today = localDateOf(ctx.clock.now(), timezoneOf(ctx, ownerId));
+  const row = ctx.one<{ first_day: LocalDate; last_day: LocalDate }>(
+    `SELECT first_day, last_day FROM vacation
+     WHERE owner_account_id = ? AND decision = 'approved' AND last_day < ?
+     ORDER BY last_day DESC, filed_at DESC, id
+     LIMIT 1`,
+    ownerId,
+    today,
+  );
+  return row ? { from: row.first_day, to: row.last_day } : null;
+}
+
+/** The owner's approved vacations whose days include `today`, soonest first, as Today's banner shows them. */
+export function vacationsOnNow(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  timezone: string,
+  today: LocalDate,
+): TodayVacation[] {
+  const rows = ctx.all<VacationRow>(
+    `SELECT ${VACATION_COLUMNS} FROM vacation
+     WHERE owner_account_id = ? AND decision = 'approved' AND first_day <= ? AND last_day >= ?
+     ORDER BY first_day, filed_at, id`,
+    ownerId,
+    today,
+    today,
+  );
+  return rows.map((row) => ({ ...vacationBasics(ctx, row), covers: vacationCovers(ctx, row.id, timezone, []) }));
 }
 
 /** What a vacation's Profile card and review item both show: its dates, note, pacts and who it went to. */
@@ -300,6 +334,18 @@ function vacationSummary(
   ctx: CoreContext,
   row: VacationRow,
 ): Pick<VacationCard, "id" | "from" | "to" | "days" | "note" | "pacts" | "reviewerNames"> {
+  return {
+    ...vacationBasics(ctx, row),
+    days: dayCount(row.first_day, row.last_day),
+    reviewerNames: friendsSortedByName(ctx, pickedReviewers(ctx, row.id)).map((reviewer) => reviewer.name),
+  };
+}
+
+/** A vacation's dates, note and pacts, as Today's banner and its Profile card show them. */
+function vacationBasics(
+  ctx: CoreContext,
+  row: VacationRow,
+): Pick<VacationCard, "id" | "from" | "to" | "note" | "pacts"> {
   const names = ctx
     .all<{ name: string }>(
       `SELECT pact.name FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
@@ -311,17 +357,21 @@ function vacationSummary(
     id: row.id,
     from: row.first_day,
     to: row.last_day,
-    days: dayCount(row.first_day, row.last_day),
     note: row.note,
     pacts: row.pacts_summary === "some" ? { kind: "some", names } : { kind: row.pacts_summary },
-    reviewerNames: friendsSortedByName(ctx, pickedReviewers(ctx, row.id)).map((reviewer) => reviewer.name),
   };
 }
 
-/** Where a vacation not withdrawn stands for its owner: waiting, waiting on their reply, or approved. */
-function vacationState(ctx: CoreContext, row: VacationRow): VacationState {
-  if (row.decision === "approved")
-    return { kind: "approved", reviewerName: accountName(ctx, row.decided_by_account_id!) };
+/**
+ * Where a vacation not withdrawn stands for its owner on `today`: waiting,
+ * waiting on their reply, approved ahead, or on now.
+ */
+function vacationState(ctx: CoreContext, row: VacationRow, today: LocalDate): VacationState {
+  if (row.decision === "approved") {
+    return row.first_day <= today
+      ? { kind: "on-now" }
+      : { kind: "approved", reviewerName: accountName(ctx, row.decided_by_account_id!) };
+  }
   const { comments, waitingOnReply } = thread(ctx, row.id, row.decision === null);
   const asked = comments.at(-1);
   return waitingOnReply && asked

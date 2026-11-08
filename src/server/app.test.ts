@@ -59,6 +59,7 @@ import {
   type VacationOptionsResponse,
   type VacationPreviewRequest,
   type VacationPreviewResponse,
+  type LastVacationResponse,
   type VacationsResponse,
   type ExcusePreviewResponse,
   type ExcuseResponse,
@@ -1446,6 +1447,26 @@ describe("vacations", () => {
     expect((await owner.get<VacationsResponse>(API_PATHS.vacations)).body).toEqual([
       expect.objectContaining({ id: vacationId, state: { kind: "approved", reviewerName: "friend" } }),
     ]);
+  });
+
+  test("Profile reads the last vacation: none at first, then an approved one once it has ended", async () => {
+    const { s, owner, friend, friendId, pactId } = await ownerWithPact();
+    expect(await owner.get(API_PATHS.lastVacation)).toEqual({ status: 200, body: null });
+    const filed = await owner.post<FileVacationResponse>(API_PATHS.vacations, {
+      from: s.date("Mon+1"),
+      to: s.date("Tue+1"),
+      pactIds: [pactId],
+      reviewerIds: [friendId],
+    } satisfies FileVacationRequest);
+    if (!filed.body.ok) throw new Error(filed.body.reason);
+    await friend.post(API_PATHS.decide(filed.body.vacationId), { kind: "approve" } satisfies DecideRequest);
+
+    s.setClockTo("Wed+1 12:00");
+
+    expect(await owner.get<LastVacationResponse>(API_PATHS.lastVacation)).toEqual({
+      status: 200,
+      body: { from: s.date("Mon+1"), to: s.date("Tue+1") },
+    });
   });
 
   test("a rejected vacation is an alert; Take the L on it is a 200, and so is its refusal", async () => {

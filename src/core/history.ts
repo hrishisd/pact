@@ -17,7 +17,7 @@ import {
 } from "../shared/types.ts";
 import { laterDate, localDateOf, mondayOf, weekdayOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { occurrenceStatus, rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
+import { occurrenceStatus, rejection, vacationOn, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
@@ -96,7 +96,10 @@ export function heatMapWeeks(
     });
 }
 
-/** The owner's pacts due yesterday, by name, each with how its occurrence went. */
+/**
+ * The owner's pacts due yesterday, by name, each with how its occurrence
+ * went, except one an approved vacation covers: the owner was off that day.
+ */
 export function yesterdayEntries(ctx: CoreContext, ownerId: AccountId, timezone: string): TodayYesterdayEntry[] {
   const yesterday = addDays(localDateOf(ctx.clock.now(), timezone), -1);
   // A Weekly count week isn't due on any one day.
@@ -106,7 +109,7 @@ export function yesterdayEntries(ctx: CoreContext, ownerId: AccountId, timezone:
   );
   return pacts.flatMap((pact) =>
     occurrenceRecords(ctx, pact, timezone, yesterday, yesterday).flatMap(({ date, occurrence }) =>
-      occurrence
+      occurrence && vacationOn(ctx, pact.id, date) !== "approved"
         ? [{ pactId: pact.id, name: pact.name, evidenceKind: pact.evidence_kind, occurrenceDate: date, occurrence }]
         : [],
     ),
@@ -176,8 +179,9 @@ export function occurrenceRecord(
 /**
  * `status` with the decision that settled it: its approved evidence
  * (Satisfied), its rejected evidence and where the penalty went (Missed), or
- * the approved excuse that covers it (Excused, or a day not judged yet it
- * already excuses).
+ * the approved excuse or vacation that covers it (Excused, or a day not
+ * judged yet it already excuses). A covered occurrence that ended Satisfied
+ * stays Satisfied.
  */
 export function recordedStatus(
   ctx: CoreContext,
@@ -217,7 +221,27 @@ export function recordedStatus(
             date,
           )
         : undefined;
-      return { ...status, excuseApproval: row ? { reviewerName: row.name, reason: row.reason } : null };
+      const vacation = covered && !row ? approvedVacationOn(ctx, pactId, date) : undefined;
+      return {
+        ...status,
+        excuseApproval: row ? { reviewerName: row.name, reason: row.reason } : null,
+        ...(vacation && { vacation: { from: vacation.first_day, to: vacation.last_day } }),
+      };
     }
   }
+}
+
+/** The approved vacation covering the pact's occurrence on `date`, if one does. */
+function approvedVacationOn(
+  ctx: CoreContext,
+  pactId: string,
+  date: LocalDate,
+): { first_day: LocalDate; last_day: LocalDate } | undefined {
+  return ctx.one(
+    `SELECT vacation.first_day, vacation.last_day FROM vacation_day
+       JOIN vacation ON vacation.id = vacation_day.vacation_id
+       WHERE vacation_day.pact_id = ? AND vacation_day.date = ? AND vacation.decision = 'approved'`,
+    pactId,
+    date,
+  );
 }

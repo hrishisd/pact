@@ -70,6 +70,7 @@ import type {
   Today,
   FileVacationResult,
   NewVacation,
+  LastVacation,
   VacationCard,
   VacationOptions,
   VacationPreviewResult,
@@ -116,6 +117,7 @@ import {
   acceptVacationRejection,
   fileVacation,
   previewVacation,
+  lastVacation,
   vacationCards,
   vacationOptions,
   withdrawVacation,
@@ -348,8 +350,14 @@ export interface AccountView {
    * more than 62 days. A refusal writes nothing.
    */
   fileVacation(vacation: NewVacation): Promise<FileVacationResult>;
-  /** The owner's vacations waiting for approval, soonest first, as their Profile cards show them. */
+  /**
+   * The owner's vacations waiting for approval, and those approved whose last
+   * day hasn't passed (ahead or on now), soonest first, as their Profile
+   * cards show them.
+   */
   vacations(): VacationCard[];
+  /** The owner's approved vacation that ended last, for Profile's "Last one"; null when none has ended. */
+  lastVacation(): LastVacation | null;
   /** The owner withdraws a vacation waiting for approval: it covers nothing any more. */
   withdrawVacation(vacationId: string): Promise<WithdrawVacationResult>;
   /** The owner takes the L on a rejected vacation: its alert goes, with the Missed occurrences it covered. */
@@ -566,6 +574,7 @@ class Core implements PactCore {
       vacationPreview: (request) => previewVacation(this.#ctx, accountId, request),
       fileVacation: (vacation) => this.#command(() => fileVacation(this.#ctx, accountId, vacation)),
       vacations: () => vacationCards(this.#ctx, accountId),
+      lastVacation: () => lastVacation(this.#ctx, accountId),
       withdrawVacation: (vacationId) => this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId)),
       acceptVacationRejection: (vacationId) =>
         this.#command(() => acceptVacationRejection(this.#ctx, accountId, vacationId)),

@@ -21,3 +21,9 @@ Things that need a real phone and real push notifications. Steps marked **(human
 
 - [ ] **(human)** A rejection sends "Sam rejected your vacation" with the reason, and tapping it opens Today with the rejected-vacation alert.
 - [x] With a vacation still waiting after its first day, the day's reminder push still arrives, and no Missed push arrives when that day is judged Missed. Covered by an automated scenario instead of a phone check, with the push API assumed to work: "through its whole week, each day's reminder push goes out and no Missed push does" in `src/core/vacations.test.ts`. Its fake notifier replaces only `Notifier.deliver`.
+
+## After ticket 04
+
+- [ ] **(human)** On the iPhone home-screen app, the heat map's vacation square shows its grey hatching (not a flat grey), and it's easy to tell apart from an Excused square in sunlight.
+- [ ] **(human)** During an approved vacation, no reminder push arrives for a covered pact, and the first morning after the last day the app opens on Today with no banner and no Yesterday row for the covered pacts.
+- [ ] **(human)** On the phone, See what's excused opens and Hide closes the banner's list without the page jumping, with a long note and three or more covered pacts.

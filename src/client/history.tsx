@@ -6,7 +6,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type {
-  EvidenceKind,
   HeatMapDay,
   HeatMapWeek,
   LocalDate,
@@ -17,38 +16,52 @@ import type {
 import { addDays, parseLocalDate } from "../shared/calendar.ts";
 import { DayChip } from "./excuse-days.tsx";
 import { listNames } from "./change-terms.tsx";
-import { ankiMissText, clockText, clockTime, dateIn, formatDate, money } from "./format.ts";
+import { ankiMissText, clockText, clockTime, dateIn, dateSpan, formatDate, money } from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
 type Week = Json<HeatMapWeek>;
 
-/** How a square looks: an outcome, or for a day not judged yet whether it's ahead, open now or past due. */
-type Square = "satisfied" | "missed" | "excused" | "not-judged" | "open" | "ahead" | "none";
+/**
+ * How a square looks: an outcome, a day an approved vacation excuses ("vac"),
+ * or for a day not judged yet whether it's ahead, open now or past due.
+ */
+type Square = "satisfied" | "missed" | "excused" | "vac" | "not-judged" | "open" | "ahead" | "none";
 
 function squareOf(record: Occurrence | null, now: number): Square {
   if (record === null) return "none";
   const { status } = record;
+  if (vacationOf(status)) return "vac";
   if (status.kind !== "not-judged") return status.kind;
   if (status.excuse === "approved") return "excused";
   if (Date.parse(status.opensAt) > now) return "ahead";
   return Date.parse(status.dueAt) > now ? "open" : "not-judged";
 }
 
+/** The dates of the approved vacation that excuses an occurrence with `status`, if one does. */
+function vacationOf(status: Occurrence["status"]): { from: LocalDate; to: LocalDate } | undefined {
+  return status.kind === "excused" || status.kind === "not-judged" ? status.vacation : undefined;
+}
+
 /**
- * An occurrence's chip: as on excuses, except that a bedtime night past its
- * due time and not judged yet is waiting on Oura.
+ * An occurrence's chip: as on excuses, except that a day a vacation excuses
+ * says Vacation, and a bedtime night past its due time and not judged yet is
+ * waiting on Oura.
  */
 function OccurrenceChip({
   record,
-  evidenceKind,
   now,
+  week = false,
+  oura = false,
 }: {
   record: Occurrence;
-  evidenceKind: EvidenceKind;
   now: number;
+  week?: boolean;
+  /** A bedtime pact's night. */
+  oura?: boolean;
 }) {
-  return <DayChip status={record.status} now={now} oura={evidenceKind === "oura"} />;
+  if (vacationOf(record.status)) return <span className="chip c-vac">Vacation</span>;
+  return <DayChip status={record.status} now={now} week={week} oura={oura} />;
 }
 
 /**
@@ -80,6 +93,8 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
     }
     case "excused":
     case "not-judged":
+      if (status.vacation)
+        return `Vacation, ${dateSpan(status.vacation.from, status.vacation.to)}. Excused, no penalty.`;
       if (status.excuseApproval)
         return `Excuse approved by ${status.excuseApproval.reviewerName}: “${sentence(status.excuseApproval.reason)}”`;
       if (status.kind === "not-judged" && status.evidenceWaiting && reviewerNames.length > 0)
@@ -141,6 +156,7 @@ const SQUARE_TEXT: Record<Exclude<Square, "none">, string> = {
   satisfied: "Satisfied",
   missed: "Missed",
   excused: "Excused",
+  vac: "Vacation",
   "not-judged": "Not judged yet",
   open: "Due today",
   ahead: "Not open yet",
@@ -206,7 +222,7 @@ function OneTimeHistory({
             {dueOn ? (
               <span className="chip c-todo">Due {formatDate(day.date)}</span>
             ) : (
-              <OccurrenceChip record={record} evidenceKind={pact.evidenceKind} now={now} />
+              <OccurrenceChip record={record} now={now} oura={pact.evidenceKind === "oura"} />
             )}
           </span>
           {line && <span className="small muted">{line}</span>}
@@ -282,7 +298,7 @@ function DailyHeatMap({
               {formatDate(picked.date)}
               {pact.evidenceKind === "oura" && " night"}
             </b>
-            <OccurrenceChip record={picked.occurrence} evidenceKind={pact.evidenceKind} now={now} />
+            <OccurrenceChip record={picked.occurrence} now={now} oura={pact.evidenceKind === "oura"} />
           </div>
           {line && <span className="small muted">{line}</span>}
         </div>
@@ -317,6 +333,10 @@ function Legend() {
       <span>
         <i className="cell excused" />
         Excused
+      </span>
+      <span>
+        <i className="cell vac" />
+        Vacation
       </span>
       <span>
         <i className="cell not-judged" />
@@ -357,7 +377,7 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
                     aria-pressed={week.date === selected}
                     onClick={() => setSelected(week.date)}
                   >
-                    {square === "excused" || square === "ahead" ? "" : week.progress.sessions}
+                    {square === "excused" || square === "vac" || square === "ahead" ? "" : week.progress.sessions}
                   </button>
                 )}
               </div>
@@ -371,7 +391,7 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
         <div className="hmdetail" role="status">
           <div className="spread">
             <b>Week of {formatDate(picked.date)}</b>
-            <DayChip status={picked.occurrence.status} now={now} week />
+            <OccurrenceChip record={picked.occurrence} now={now} week />
           </div>
           <span className="small muted">{weekLine(picked, timezone)}</span>
         </div>
@@ -455,7 +475,7 @@ export function Yesterday({
                 <b>{entry.name}</b>
                 {line && <small>{line}</small>}
               </span>
-              <OccurrenceChip record={entry.occurrence} evidenceKind={entry.evidenceKind} now={now} />
+              <OccurrenceChip record={entry.occurrence} now={now} oura={entry.evidenceKind === "oura"} />
             </button>
           );
         })}

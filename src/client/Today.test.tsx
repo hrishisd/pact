@@ -211,3 +211,77 @@ describe("a rejected vacation's alert", () => {
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 });
+
+describe("the vacation banner", () => {
+  const onVacation = (pacts: { kind: "all" } | { kind: "some"; names: string[] }): TodayResponse => ({
+    hasPacts: true,
+    alerts: [],
+    sections: [],
+    waiting: [],
+    yesterday: [],
+    vacations: [
+      {
+        id: "v1",
+        from: "2026-12-20",
+        to: "2027-01-02",
+        note: "Going to Portugal",
+        pacts,
+        covers: [
+          {
+            pactId: "bed",
+            name: "Bed by midnight",
+            evidenceKind: "oura",
+            schedule: { kind: "fixed-days", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+            covered: Array.from({ length: 14 }, (_, i) => ({
+              date: i < 12 ? `2026-12-${20 + i}` : `2027-01-0${i - 11}`,
+            })),
+          },
+          {
+            pactId: "gym",
+            name: "Gym",
+            evidenceKind: "camera",
+            schedule: { kind: "weekly-count", target: 3 },
+            covered: [
+              { date: "2026-12-21", through: "2026-12-27" },
+              { date: "2026-12-28", through: "2027-01-03" },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  test("says until when, the note and which pacts are Excused; See what's excused lists each one's line, and Hide closes it", async () => {
+    stubApi({ today: answers(onVacation({ kind: "some", names: ["Bed by midnight", "Gym"] })) });
+    const { user } = renderToday();
+
+    const banner = await screen.findByRole("status");
+    expect(within(banner).getByText("On vacation until Sat Jan 2")).toBeTruthy();
+    expect(within(banner).getByText("Going to Portugal")).toBeTruthy();
+    expect(
+      within(banner).getByText(
+        "Bed by midnight and Gym are Excused on these days, with no reminders and no penalties.",
+      ),
+    ).toBeTruthy();
+    expect(within(banner).queryByText("14 nights off · Dec 20 – Jan 2")).toBeNull();
+    expect(screen.queryByText("Nothing to do right now")).toBeNull();
+
+    await user.click(within(banner).getByRole("button", { name: "See what's excused" }));
+    expect(within(banner).getByText("14 nights off · Dec 20 – Jan 2")).toBeTruthy();
+    expect(within(banner).getByText("2 weeks off · Dec 21 – Jan 3")).toBeTruthy();
+    expect(within(banner).getByText("Week of Dec 28: whole week off")).toBeTruthy();
+
+    await user.click(within(banner).getByRole("button", { name: "Hide" }));
+    expect(within(banner).queryByText("14 nights off · Dec 20 – Jan 2")).toBeNull();
+  });
+
+  test("covering every pact, it says your pacts are Excused", async () => {
+    stubApi({ today: answers(onVacation({ kind: "all" })) });
+    renderToday();
+
+    const banner = await screen.findByRole("status");
+    expect(
+      within(banner).getByText("Your pacts are Excused on these days, with no reminders and no penalties."),
+    ).toBeTruthy();
+  });
+});

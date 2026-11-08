@@ -4,6 +4,8 @@
 // in the File excuse sheet, opened from a To do or Missed card or an alert; a
 // payment is recorded in the Record a payment sheet, opened from a bill's To
 // do card or an overdue alert. Last, Yesterday: how each pact due yesterday did.
+// During an approved vacation, its banner comes after the alerts, and the
+// pacts it covers are gone from the sections.
 //
 // A bedtime night Oura hasn't reported yet comes first, as No Oura data. While
 // that card is on screen, Today checks Oura now: when it opens, when the app
@@ -56,6 +58,7 @@ import { Yesterday } from "./history.tsx";
 import { CameraIcon } from "./icons.tsx";
 import { WaitingRow } from "./item-page.tsx";
 import { usePhotoPicks } from "./photos.ts";
+import { VacationBanner } from "./VacationBanner.tsx";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
 import { EditWindowChip, Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
@@ -156,7 +159,7 @@ export function Today({
           </Empty>
         ) : (
           <>
-            {today.alerts.length === 0 && today.sections.length === 0 && (
+            {today.alerts.length === 0 && today.sections.length === 0 && !today.vacations && (
               <Empty
                 title="Nothing to do right now"
                 body="When one of your pacts needs something from you, it shows up here."
@@ -173,6 +176,9 @@ export function Today({
                 onOpenItem={openItem}
                 onChanged={reload}
               />
+            ))}
+            {today.vacations?.map((vacation) => (
+              <VacationBanner key={vacation.id} vacation={vacation} />
             ))}
             {today.sections.map((section) => (
               <Section

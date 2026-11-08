@@ -66,6 +66,7 @@ import {
   type ExcuseOptionsResponse,
   type FileVacationRequest,
   type FileVacationResponse,
+  type LastVacationResponse,
   type VacationOptionsResponse,
   type VacationPreviewRequest,
   type VacationPreviewResponse,
@@ -586,6 +587,7 @@ export function createApp({
   });
 
   app.get(API_PATHS.vacations, (c) => c.json<VacationsResponse>(account(c).vacations()));
+  app.get(API_PATHS.lastVacation, (c) => c.json<LastVacationResponse>(account(c).lastVacation()));
 
   app.post(API_PATHS.vacations, async (c) => {
     const vacation = await readJson(c, parseNewVacation);
