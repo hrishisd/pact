@@ -12,14 +12,14 @@ An owner going away for a week or two has to file one excuse per pact (story 45 
 
 1. **Name.** It's a **vacation**, not "vacation mode": a dated request, not a switch.
 2. **Reviewer approval.** Every vacation needs a reviewer's approval, however far ahead it's set. A no-approval rule (e.g. at least 10 days ahead and at most 2 weeks long) was considered and dropped as more complicated.
-3. **Outcome.** Occurrences a vacation covers are judged **Excused**, the same outcome an approved excuse gives. There's no separate "Vacation" outcome or heat map square.
+3. **Outcome.** Occurrences a vacation covers are judged **Excused**, the same outcome an approved excuse gives. There's no fourth outcome; only the heat map draws them differently (decision 13).
 4. **Earliest day.** A vacation covers only occurrences that haven't opened yet. An occurrence that's already open or past still needs an excuse.
 5. **Money.** A vacation doesn't pause the ledger. Bills are still made every Wednesday, and an Overdue spell's reminders and reviewer notices keep running.
 6. **Owners only.** Reviewers can't go on vacation. A reviewer who's away can turn off notifications.
 
-7. **Which pacts.** The owner picks the pacts it covers. Every recurring pact is ticked by default; One-time pacts are listed but unticked. A pact created after the vacation is filed isn't covered.
-8. **One review item, to reviewers the owner picks.** A vacation is one review item covering all its pacts, approved or rejected as a whole. The owner picks which reviewer or reviewers it goes to; it isn't sent to every reviewer automatically.
-9. **Partial weeks.** A Weekly count week partly inside a vacation is excused whole, as with excuses.
+7. **Which pacts.** The owner picks the pacts it covers from a checklist with Select all. Every recurring pact is ticked by default; One-time pacts are in their own section below, unticked. A pact created after the vacation is filed isn't covered.
+8. **One review item, to reviewers the owner picks.** A vacation is one review item covering all its pacts, approved or rejected as a whole. The owner picks which reviewer or reviewers it goes to, from the reviewers of the pacts they ticked, with nobody ticked by default; it isn't sent to every reviewer automatically. Any one picked reviewer can approve or reject it, and it then leaves the others' Review Queues.
+9. **Partial weeks.** A Weekly count week is excused whole if its Wednesday falls inside the vacation. Otherwise it keeps its full target. (This differs from excuses, where any covered day excuses the week: a vacation starting on a Sunday would otherwise excuse the week before it.)
 10. **One-time pacts.** A ticked One-time pact whose deadline falls inside the vacation has that deadline excused, and the pact ends.
 11. **Length.** At most 62 days, the same cap as excuses.
 12. **Withdrawing.** The owner can withdraw a vacation while it's waiting for approval. Once approved it can't be changed or ended early; days after an early return stay Excused.
@@ -32,10 +32,10 @@ An owner going away for a week or two has to file one excuse per pact (story 45 
 
 ## Open questions
 
-- Which reviewers the owner can pick from, the default, and whether one picked reviewer's decision is enough.
-- Whether a vacation day's outcome is Excused (drawn with its own heat map marker) or a fourth outcome.
-- Partial Weekly count weeks: the whole-week rule turns Sun Dec 20 – Sat Jan 2 into 3 Gym weeks off. Keep it, excuse a week only with at least 4 of its days inside, or lower the target.
-- Step 2's layout: "All pacts / Choose pacts" (V1) vs a plain checklist with Select all (V2).
+- Wednesday or Thursday as the day that decides a partial week.
+- Whether the Reviewers step is skipped when the ticked pacts have one reviewer between them.
+- Whether every covered pact must keep at least one of its own reviewers picked.
+- Notifications: who is told when a vacation is asked for, decided, and starts.
 
 ## Prototype
 
