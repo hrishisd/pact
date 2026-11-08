@@ -4,16 +4,15 @@
 // struck out and what it needs. Under the list, the core's verdict on the
 // whole change, an optional "Why?" when it needs approval, and Send or Apply.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type {
+  AppliesNow,
   ChangePactRefusal,
   ChangePreview,
   CreatePactRefusal,
-  Friend,
   PactChange,
   PactTerms,
-  Recipient,
 } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import {
@@ -26,26 +25,15 @@ import {
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
-import {
-  formOf,
-  GoalStep,
-  optionalTimes,
-  PenaltyStep,
-  PROBLEMS,
-  ReviewersStep,
-  scheduleOf,
-  ScheduleStep,
-  type Form,
-} from "./CreatePact.tsx";
-import { formatDate, money, parseCents, remindersText } from "./format.ts";
-import { RemindersStep } from "./reminders-step.tsx";
-import { Empty, Sheet, useLoad } from "./ui.tsx";
+import { formatDate, money, remindersText } from "./format.ts";
+import { formOf, termsOfForm, type Form } from "./pact-form.ts";
+import { ListsFailed, PactFormStep, PROBLEMS, usePactFormLists, type FormStep } from "./pact-form-steps.tsx";
+import { LoadedFound, Sheet, useLoad, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
-type Step = "goal" | "schedule" | "penalty" | "reviewers" | "reminders";
 
 /** The create form's step each term is changed on. */
-const STEP_OF: Record<Term, Step> = {
+const STEP_OF: Record<Term, FormStep> = {
   name: "goal",
   description: "goal",
   deck: "goal",
@@ -60,7 +48,7 @@ const STEP_OF: Record<Term, Step> = {
   reminders: "reminders",
 };
 
-const STEP_TITLES: Record<Step, string> = {
+const STEP_TITLES: Record<FormStep, string> = {
   goal: "Goal",
   schedule: "Schedule",
   penalty: "Penalty",
@@ -79,11 +67,11 @@ const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = 
   "nothing-changed": "Nothing changed yet.",
 };
 
-function refusalText(reason: ChangePactRefusal | "no-amount" | "no-recipient"): string {
-  return reason in REFUSALS
-    ? REFUSALS[reason as keyof typeof REFUSALS]
-    : PROBLEMS[reason as Exclude<typeof reason, keyof typeof REFUSALS>];
-}
+/** The words for each refusal: the create form's, then this page's own, which win where both have one. */
+const REFUSAL_TEXT = { ...PROBLEMS, ...REFUSALS } satisfies Record<
+  ChangePactRefusal | "no-amount" | "no-recipient",
+  string
+>;
 
 export function ChangePact({
   pactId,
@@ -95,38 +83,23 @@ export function ChangePact({
   onDone: () => void;
   onInvite: () => void;
 }) {
-  const { data, failed } = useLoad(() => api.pact(pactId));
-  if (failed) {
-    return (
-      <Empty
-        title="This pact couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    );
-  }
-  if (data === null) return null;
-  if (!data.ok) return <Empty title="Pact not found" body="It isn't one of your pacts." />;
-  return <ChangeForm pact={data.pact} onDone={onDone} onInvite={onInvite} />;
+  const { state } = useLoad(() => api.pact(pactId));
+  return (
+    <LoadedFound
+      state={state}
+      what="This pact"
+      notFound={{ title: "Pact not found", body: "It isn't one of your pacts." }}
+    >
+      {({ pact }) => <ChangeForm pact={pact} onDone={onDone} onInvite={onInvite} />}
+    </LoadedFound>
+  );
 }
 
-/** The form's terms as the core takes them, or what stops them being sent. */
+/** The form's terms and note as the core takes them, or what stops them being sent. */
 function changeOf(form: Form, note: string): PactChange | { problem: "no-amount" | "no-recipient" } {
-  const penaltyCents = parseCents(form.penalty);
-  if (penaltyCents === null) return { problem: "no-amount" };
-  if (form.recipientId === null) return { problem: "no-recipient" };
-  return {
-    name: form.name.trim(),
-    description: form.kind === "camera" ? form.description.trim() : "",
-    ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
-    ...(form.kind === "anki" && form.ankiDeckId !== null && { ankiDeckId: form.ankiDeckId }),
-    ...optionalTimes(form),
-    schedule: scheduleOf(form),
-    penaltyCents,
-    recipientId: form.recipientId,
-    reviewerIds: form.reviewerIds,
-    reminders: form.reminders,
-    ...(note.trim() !== "" && { note }),
-  };
+  const terms = termsOfForm(form);
+  if ("problem" in terms) return terms;
+  return { ...terms, ...(note.trim() !== "" && { note }) };
 }
 
 type Verdict =
@@ -141,24 +114,30 @@ const PREVIEW_DELAY_MS = 250;
 function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void; onInvite: () => void }) {
   const [form, setForm] = useState<Form>(() => formOf(pact));
   const [note, setNote] = useState("");
-  const [step, setStep] = useState<Step | null>(null);
-  const [friends, setFriends] = useState<Friend[] | null>(null);
-  const [recipients, setRecipients] = useState<Recipient[] | null>(null);
+  const [step, setStep] = useState<FormStep | null>(null);
+  // As on Create pact: a list that didn't load says so, rather than looking empty.
+  const lists = usePactFormLists();
   const [verdict, setVerdict] = useState<Verdict>({ kind: "loading" });
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const {
+    busy: sending,
+    error: sendError,
+    run: sendChange,
+  } = useSend(
+    async (sent: PactChange) => {
+      const result = await api.changePact(pact.id, sent);
+      if (!result.ok) return REFUSAL_TEXT[result.reason];
+      onDone();
+    },
+    (error) => `Couldn't send it. ${failureText(error, "Check your connection and try again.")}`,
+    // Done goes Back, which lands a moment later: the button stays disabled till then.
+    { leavesScreen: true },
+  );
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
-
-  const loadFriends = () => api.friends().then(setFriends, () => setFriends([]));
-  useEffect(() => {
-    void loadFriends();
-    api.recipients().then(setRecipients, () => setRecipients([]));
-  }, []);
 
   const change = changeOf(form, "");
   const key = JSON.stringify(change);
   useEffect(() => {
-    if ("problem" in change) return setVerdict({ kind: "refused", text: refusalText(change.problem) });
+    if ("problem" in change) return setVerdict({ kind: "refused", text: REFUSAL_TEXT[change.problem] });
     let current = true;
     const timer = window.setTimeout(() => {
       api.changePreview(pact.id, change).then(
@@ -167,7 +146,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           setVerdict(
             result.ok
               ? { kind: "loaded", preview: result.preview }
-              : { kind: "refused", text: refusalText(result.reason) },
+              : { kind: "refused", text: REFUSAL_TEXT[result.reason] },
           );
         },
         (error: unknown) => current && setVerdict({ kind: "failed", error }),
@@ -179,75 +158,36 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
     };
   }, [key]);
 
-  const send = async () => {
+  const send = () => {
     const sent = changeOf(form, note);
-    if ("problem" in sent) return;
-    setSending(true);
-    setSendError(null);
-    try {
-      const result = await api.changePact(pact.id, sent);
-      if (result.ok) return onDone();
-      setSendError(refusalText(result.reason));
-    } catch (error) {
-      setSendError(`Couldn't send it. ${failureText(error, "Check your connection and try again.")}`);
-    }
-    setSending(false);
+    if (!("problem" in sent)) sendChange(sent);
   };
 
   const changes = verdict.kind === "loaded" ? verdict.preview.changes : [];
   const reviewerNames = pact.reviewers.map((r) => r.name);
 
-  let sheet: ReactNode = null;
-  if (step !== null) {
-    let body: ReactNode;
-    switch (step) {
-      case "goal":
-        body = <GoalStep form={form} update={update} />;
-        break;
-      case "schedule":
-        body = <ScheduleStep form={form} update={update} kindFixed />;
-        break;
-      case "penalty":
-        body = (
-          <PenaltyStep
-            form={form}
-            update={update}
-            recipients={recipients}
-            onAdded={(recipient) => {
-              setRecipients((list) => [...(list ?? []), recipient]);
-              update({ recipientId: recipient.id });
-            }}
-          />
-        );
-        break;
-      case "reviewers":
-        body = (
-          <ReviewersStep
-            friends={friends}
-            reviewerIds={form.reviewerIds}
-            onReviewerIds={(reviewerIds) => update({ reviewerIds })}
-            kind={form.kind}
-            hint="Adding a reviewer applies at once. Removing one needs approval. There's always at least one."
-            onInvite={onInvite}
-            onCheckAgain={() => void loadFriends()}
-          />
-        );
-        break;
-      case "reminders":
-        body = (
-          <RemindersStep form={form} onReminders={(reminders) => update({ reminders })} hint="Changes apply at once." />
-        );
-        break;
-    }
-    sheet = (
-      <Sheet title={STEP_TITLES[step]} onClose={() => setStep(null)}>
-        <div className="stack step-in-sheet">{body}</div>
-        <button className="btn primary block" onClick={() => setStep(null)}>
-          Done
-        </button>
-      </Sheet>
-    );
-  }
+  const sheet = step !== null && (
+    <Sheet title={STEP_TITLES[step]} onClose={() => setStep(null)}>
+      <div className="stack step-in-sheet">
+        {lists.failed && (step === "penalty" || step === "reviewers") && <ListsFailed failed={lists.failed} />}
+        <PactFormStep
+          step={step}
+          form={form}
+          update={update}
+          lists={lists}
+          onInvite={onInvite}
+          kindFixed
+          hints={{
+            reviewers: "Adding a reviewer applies at once. Removing one needs approval. There's always at least one.",
+            reminders: "Changes apply at once.",
+          }}
+        />
+      </div>
+      <button className="btn primary block" onClick={() => setStep(null)}>
+        Done
+      </button>
+    </Sheet>
+  );
 
   return (
     <>
@@ -302,7 +242,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
       <button
         className="btn primary block"
         disabled={sending || verdict.kind !== "loaded" || verdict.preview.outcome.kind === "nothing"}
-        onClick={() => void send()}
+        onClick={send}
       >
         {buttonText(verdict)}
       </button>
@@ -319,7 +259,8 @@ function buttonText(verdict: Verdict): string {
       return "Nothing to send";
     case "needs-approval":
       return `Send to ${listNames(outcome.reviewerNames)}`;
-    default:
+    case "at-once":
+    case "stricter":
       return "Apply change";
   }
 }
@@ -354,21 +295,7 @@ function VerdictBox({
     case "loaded":
       break;
   }
-  const { outcome, changes } = verdict.preview;
-  // What applies now even inside a change that waits: the name, the reminders, and reviewers added.
-  const now = [
-    ...(changes.some((c) => c.term === "name") ? ["the name"] : []),
-    ...(changes.some((c) => c.term === "reminders") ? ["the reminders"] : []),
-    ...changes.flatMap((c) =>
-      c.term === "reviewers" && c.added.length > 0
-        ? [c.added.length === 1 ? "the new reviewer" : "the new reviewers"]
-        : [],
-    ),
-  ];
-  const nowLine =
-    now.length > 0
-      ? ` ${capitalize(listNames(now))} ${now.length === 1 && !now[0]!.endsWith("s") ? "changes" : "change"} now.`
-      : "";
+  const { outcome } = verdict.preview;
   switch (outcome.kind) {
     case "nothing":
       return <div className="verdict nothing">Nothing changed yet.</div>;
@@ -390,7 +317,7 @@ function VerdictBox({
                 : `Applies without approval from ${formatDate(outcome.appliesFrom)}.`}
             </b>
             {outcome.todayKeepsCents !== null && ` ${open} keeps ${money(outcome.todayKeepsCents)} per miss.`}
-            {nowLine}
+            {nowLine(outcome.appliesNow)}
           </p>
         </div>
       );
@@ -404,13 +331,28 @@ function VerdictBox({
             <b>{who}</b> Until then {pactName} keeps its current terms
             {outcome.bundlesStricter &&
               ", the stricter changes too, since a change that relaxes anything is reviewed as a whole"}
-            .{nowLine}
+            .{nowLine(outcome.appliesNow)}
           </p>
         </div>
       );
     }
   }
 }
+
+/** What applies at once inside a change that waits or is stricter: " The name and the new reviewers change now." */
+export function nowLine(appliesNow: AppliesNow[]): string {
+  const [first, ...rest] = appliesNow;
+  if (first === undefined) return "";
+  const verb = rest.length === 0 && !APPLIES_NOW[first].plural ? "changes" : "change";
+  return ` ${capitalize(listNames(appliesNow.map((what) => APPLIES_NOW[what].text)))} ${verb} now.`;
+}
+
+const APPLIES_NOW: Record<AppliesNow, { text: string; plural: boolean }> = {
+  name: { text: "the name", plural: false },
+  reminders: { text: "the reminders", plural: true },
+  "new-reviewer": { text: "the new reviewer", plural: false },
+  "new-reviewers": { text: "the new reviewers", plural: true },
+};
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);

@@ -1,6 +1,9 @@
 // How the client writes money, schedules, dates and time left.
 
-import { clockText, formatDate, formatDay } from "../shared/format.ts";
+import { parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
+import { clockText, formatDate, formatDay, partsIn } from "../shared/format.ts";
+import type { Json } from "../shared/api.ts";
+import type { AnkiCheck, ClockTime, DatedReminder, LocalDate } from "../shared/types.ts";
 
 export { clockText, formatDate, formatDay, inBedByName, money, scheduleText } from "../shared/format.ts";
 
@@ -12,14 +15,15 @@ export function parseCents(text: string): number | null {
 }
 
 /** A pact's reminders, in the order they go off: "6:00pm, 8:30pm", "Wed Jan 7, 9:00am" on One-time, or "None". */
-export function remindersText(reminders: string[]): string {
+export function remindersText(reminders: (ClockTime | DatedReminder)[]): string {
   return reminders.length === 0 ? "None" : reminders.map(reminderText).join(", ");
 }
 
-/** A reminder: a time of day, "6:00pm", or a One-time pact's "YYYY-MM-DDTHH:MM", "Wed Jan 7, 9:00am". */
-function reminderText(reminder: string): string {
-  const [date, time] = reminder.split("T");
-  return time === undefined ? clockText(reminder) : `${formatDate(date!)}, ${clockText(time)}`;
+/** A reminder: a time of day, "6:00pm", or a One-time pact's dated reminder, "Wed Jan 7, 9:00am". */
+function reminderText(reminder: ClockTime | DatedReminder): string {
+  if (!reminder.includes("T")) return clockText(reminder);
+  const { date, time } = parseDatedReminder(reminder);
+  return `${formatDate(date)}, ${clockText(time)}`;
 }
 
 /** Cents as an amount field starts out: "5" for whole dollars, "2.50" otherwise, with no "$". */
@@ -27,9 +31,9 @@ export function centsInputText(cents: number): string {
   return (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 }
 
-/** A calendar date, "YYYY-MM-DD", as its weekday, "Wednesday". Never shifted into another timezone. */
-export function weekdayName(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-").map(Number) as [number, number, number];
+/** A calendar date as its weekday, "Wednesday". Never shifted into another timezone. */
+export function weekdayName(date: LocalDate): string {
+  const { year, month, day } = parseLocalDate(date);
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(
     new Date(Date.UTC(year, month - 1, day)),
   );
@@ -37,11 +41,7 @@ export function weekdayName(isoDate: string): string {
 
 /** An instant, as an ISO string, as its day and time in `timeZone` (the profile's): "Thu Oct 22, 9:05pm". */
 export function formatDayTime(instant: string, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" }).formatToParts(
-    new Date(instant),
-  );
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${formatDay(instant, timeZone)}, ${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
+  return `${formatDay(instant, timeZone)}, ${clockTime(instant, timeZone)}`;
 }
 
 /**
@@ -50,15 +50,34 @@ export function formatDayTime(instant: string, timeZone: string): string {
  * off the hour.
  */
 export function formatDueAt(instant: string, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(instant));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
-  const clock = clockText(`${part("hour")}:${part("minute")}`);
-  return `${formatDay(instant, timeZone)} at ${clock.replace(":00", "")}`;
+  return `${formatDay(instant, timeZone)} at ${clockText(wallClockIn(instant, timeZone)).replace(":00", "")}`;
+}
+
+/** An instant, as an ISO string, as the time a day is due by in `timeZone` (the profile's): "9:00pm", or "midnight". */
+export function dueClockText(instant: string, timeZone: string): string {
+  const clock = wallClockIn(instant, timeZone);
+  return clock === "00:00" ? "midnight" : clockText(clock);
+}
+
+/** An instant, as an ISO string, as its wall-clock time in `timeZone`. */
+function wallClockIn(instant: string, timeZone: string): ClockTime {
+  const part = partsIn(instant, timeZone, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  return `${part("hour")}:${part("minute")}`;
+}
+
+/** `now` (ms) as its date in `timeZone` (the profile's), not this device's. */
+export function dateIn(now: number, timeZone: string): LocalDate {
+  const part = partsIn(now, timeZone, { year: "numeric", month: "2-digit", day: "2-digit" });
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+/**
+ * `date`, as written, unless it is today in `timeZone` (the profile's) at
+ * `now` (ms): "Thu Nov 12", or null for today. The same day of another
+ * year isn't today.
+ */
+export function dateUnlessToday(date: LocalDate, now: number, timeZone: string): string | null {
+  return date === dateIn(now, timeZone) ? null : formatDate(date);
 }
 
 /** Time left as "16h 19m", or "1d 21h" from 24 hours up. Never negative. */
@@ -82,12 +101,12 @@ export function minutesLeft(closesAt: string | null, now: number): number | null
   return ms > 0 ? Math.ceil(ms / 60_000) : null;
 }
 
-/** An instant, as an ISO string, as a time on this device: "2:24pm". */
-export function clockTime(instant: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).formatToParts(
-    new Date(instant),
-  );
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+/**
+ * An instant, as an ISO string, as a time in `timeZone` (the profile's):
+ * "2:24pm". Undefined reads it on this device's clock.
+ */
+export function clockTime(instant: string, timeZone: string | undefined): string {
+  const part = partsIn(instant, timeZone, { hour: "numeric", minute: "2-digit" });
   return `${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
 }
 
@@ -98,10 +117,11 @@ export function initial(name: string): string {
 
 /**
  * Why an Anki day is Missed: how many cards were left at Pact's last check
- * that counted for it ("12 cards left at 11:50pm"), or that no check reached
- * AnkiWeb that day.
+ * that counted for it ("12 cards left at 11:50pm" in `timeZone`, the
+ * profile's), or that no check reached AnkiWeb that day.
  */
-export function ankiMissText({ cardsLeft, checkedAt }: { cardsLeft: number | null; checkedAt: string | null }): string {
-  if (cardsLeft === null || checkedAt === null) return "AnkiWeb not reached";
-  return `${cardsLeft} ${cardsLeft === 1 ? "card" : "cards"} left at ${clockTime(checkedAt)}`;
+export function ankiMissText(check: Json<AnkiCheck> | null, timeZone: string): string {
+  if (check === null) return "AnkiWeb not reached";
+  const { cardsLeft, checkedAt } = check;
+  return `${cardsLeft} ${cardsLeft === 1 ? "card" : "cards"} left at ${clockTime(checkedAt, timeZone)}`;
 }

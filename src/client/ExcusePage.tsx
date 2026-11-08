@@ -4,14 +4,12 @@
 // one waits on the owner's reply. It opens from Today, a pact's page, an
 // approved excuse's push and a reviewer's question.
 
-import { API_PATHS, type Json } from "../shared/api.ts";
+import type { Json } from "../shared/api.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import { api } from "./api.ts";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
-import { formatDate, formatDayTime } from "./format.ts";
-import { ExcuseIcon } from "./icons.tsx";
-import { ReplyBox, Thread, WaitingChip } from "./questions.tsx";
-import { Empty, useLoad, useNow } from "./ui.tsx";
+import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, RejectionLine, SentTo } from "./item-page.tsx";
+import { LoadedFound, useLoad, useNow } from "./ui.tsx";
 
 export function ExcusePage({
   excuseId,
@@ -23,29 +21,36 @@ export function ExcusePage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { data: result, failed, reload } = useLoad(() => api.excuse(excuseId));
-  const now = useNow();
+  const { state, reload } = useLoad(() => api.excuse(excuseId));
 
-  if (result === null) {
-    return failed ? (
-      <Empty
-        title="This excuse couldn't load"
-        body={failureText(failed.error, "Check your connection and reopen Pact.")}
-      />
-    ) : null;
-  }
-  if (!result.ok) return <Empty title="Excuse not found" body="It isn't one of yours." />;
-  const { excuse } = result;
-  const { state } = excuse;
+  return (
+    <LoadedFound
+      state={state}
+      what="This excuse"
+      notFound={{ title: "Excuse not found", body: "It isn't one of yours." }}
+    >
+      {({ excuse }) => <ExcuseView excuse={excuse} timezone={timezone} onOpenPact={onOpenPact} onReplied={reload} />}
+    </LoadedFound>
+  );
+}
+
+function ExcuseView({
+  excuse,
+  timezone,
+  onOpenPact,
+  onReplied,
+}: {
+  excuse: Json<ExcuseDetail>;
+  timezone: string;
+  onOpenPact: (pactId: string, name: string) => void;
+  onReplied: () => void;
+}) {
+  const now = useNow();
   return (
     <>
-      <div className="row2">
-        <span className="kind k-excuse">
-          <ExcuseIcon />
-          Excuse
-        </span>
-        <StateChip excuse={excuse} />
-      </div>
+      <ItemKindHeader kind="excuse">
+        <ItemStateChip state={excuse.state} thread={excuse.thread} approvedClass="c-excused" />
+      </ItemKindHeader>
       <article className="card">
         <div className="stack-sm">
           <h3>
@@ -56,20 +61,8 @@ export function ExcusePage({
           <span className="meta">{excuseDatesText(excuse.days)}</span>
         </div>
         <span className="excuse-reason">“{excuse.reason}”</span>
-        {state.kind === "rejected" && (
-          <p className="small">
-            {state.reviewerName} said “{state.reason}”
-          </p>
-        )}
-        {excuse.photoIds.map((photoId, i) => {
-          const src = API_PATHS.photo(encodeURIComponent(photoId));
-          return (
-            // Opens the photo full size in a new tab.
-            <a key={photoId} href={src} target="_blank" rel="noreferrer">
-              <img className="big-photo" src={src} alt={`Photo ${i + 1} of ${excuse.photoIds.length}`} />
-            </a>
-          );
-        })}
+        <RejectionLine state={excuse.state} />
+        <PhotoLinks photoIds={excuse.photoIds} />
       </article>
       <section className="stack">
         <div className="label">Days</div>
@@ -84,23 +77,8 @@ export function ExcusePage({
           ))}
         </div>
       </section>
-      <Thread thread={excuse.thread} viewer="owner" timezone={timezone} />
-      {excuse.thread.waitingOnReply && <ReplyBox itemId={excuse.id} onReplied={reload} />}
-      <p className="meta">
-        Sent to {excuse.reviewerNames.join(" and ")} · {formatDayTime(excuse.filedAt, timezone)}
-      </p>
+      <OwnerThread itemId={excuse.id} thread={excuse.thread} timezone={timezone} onReplied={onReplied} />
+      <SentTo reviewerNames={excuse.reviewerNames} sentAt={excuse.filedAt} timezone={timezone} />
     </>
   );
-}
-
-function StateChip({ excuse }: { excuse: Json<ExcuseDetail> }) {
-  const { state } = excuse;
-  switch (state.kind) {
-    case "waiting":
-      return <WaitingChip thread={excuse.thread} />;
-    case "approved":
-      return <span className="chip c-excused">Approved by {state.reviewerName}</span>;
-    case "rejected":
-      return <span className="chip c-missed">Rejected by {state.reviewerName}</span>;
-  }
 }

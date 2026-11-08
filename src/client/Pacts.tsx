@@ -1,10 +1,10 @@
 // The Pacts tab: the owner's Active pacts, those in their edit window first,
 // then their Ended pacts folded away, each opening its page.
 
-import { api, failureText } from "./api.ts";
+import { api } from "./api.ts";
 import type { PactsResponse } from "../shared/api.ts";
 import { minutesLeft, money, scheduleText } from "./format.ts";
-import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
+import { EditWindowChip, Empty, LoadFailed, loadFailure, loadedData, useLoad, useNow } from "./ui.tsx";
 
 export function Pacts({
   onOpenPact,
@@ -13,7 +13,10 @@ export function Pacts({
   onOpenPact: (id: string, name: string) => void;
   onCreate: () => void;
 }) {
-  const { data: all, failed } = useLoad(api.pacts);
+  const { state } = useLoad(api.pacts);
+  const all = loadedData(state);
+  // A failed reload keeps the pacts shown, under what failed.
+  const failed = loadFailure(state);
   const now = useNow();
   const pacts = all?.filter((pact) => pact.stage === "active") ?? null;
   const ended = all?.filter((pact) => pact.stage === "ended") ?? [];
@@ -37,9 +40,7 @@ export function Pacts({
 
   return (
     <div className="stack">
-      {failed && (
-        <Empty title="Pacts couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
-      )}
+      {failed && <LoadFailed what="Pacts" error={failed.error} />}
       {pacts?.length === 0 && <Empty title="No pacts yet" body="Pacts you create show up here." />}
       {pacts !== null && pacts.length > 0 && (
         <section className="stack">

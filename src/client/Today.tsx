@@ -17,7 +17,9 @@ import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptExcuseRejectionResult,
   type AcceptMissRefusal,
+  type ConnectionService,
   type LedgerSummary,
+  type Refusal,
   type SubmitEvidenceRefusal,
   type TodayAlert,
   type TodayAnkiCard,
@@ -31,10 +33,12 @@ import {
 } from "../shared/types.ts";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
+import { listNames } from "./change-terms.tsx";
 import {
   ankiMissText,
   clockText,
   clockTime,
+  dateUnlessToday,
   formatDate,
   formatDay,
   formatDueAt,
@@ -46,11 +50,12 @@ import {
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
-import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
-import { shrinkForPreview, type ShrunkPhoto } from "./photos.ts";
+import { CameraIcon } from "./icons.tsx";
+import { WaitingRow } from "./item-page.tsx";
+import { usePhotoPicks } from "./photos.ts";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
-import { EditWindowChip, Empty, useLoad, useNow } from "./ui.tsx";
+import { EditWindowChip, Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** What the File excuse sheet is open on: a pact, and the day it was opened from (none for the pact-page form). */
 interface ExcuseTarget {
@@ -61,6 +66,11 @@ interface ExcuseTarget {
 
 /** Opens the File excuse sheet. */
 type OnFileExcuse = (target: ExcuseTarget) => void;
+
+/** File excuse from a card or alert about one of a pact's days: the sheet opens on that day. */
+function excuseTargetFor(about: { pactId: string; name: string; occurrenceDate: string }): ExcuseTarget {
+  return { pactId: about.pactId, pactName: about.name, day: about.occurrenceDate };
+}
 
 export function Today({
   timezone,
@@ -73,7 +83,7 @@ export function Today({
   onCreate,
   onInvite,
 }: {
-  /** The profile's timezone, for when bills are due. */
+  /** The profile's timezone, for when bills and days are due and when AnkiWeb was checked. */
   timezone: string;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
@@ -84,22 +94,24 @@ export function Today({
   onCreate: () => void;
   onInvite: () => void;
 }) {
-  const { data: today, failed, reload } = useLoad(api.today);
+  const { state, reload } = useLoad(api.today);
+  const today = loadedData(state);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
   // Back from reconnecting Oura: say so if it didn't work.
   const [ouraError] = useState(() => ouraResultText(takeOuraResult()));
-  const connectionProblem = today?.alerts.some((alert) => alert.kind === "oura-connection") ?? false;
+  const brokenConnection = (service: ConnectionService) =>
+    today?.alerts.some((alert) => alert.kind === "connection" && alert.service === service) ?? false;
+  const ouraConnectionProblem = brokenConnection("oura");
   // Checking can't help while the connection is broken.
   const checking = useCheckNow(
-    !connectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
+    !ouraConnectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
     api.checkOura,
     reload,
     CHECK_OURA_EVERY_MS,
   );
-  const ankiProblem = today?.alerts.some((alert) => alert.kind === "anki-connection") ?? false;
   const checkingAnki = useCheckNow(
-    !ankiProblem &&
+    !brokenConnection("anki") &&
       (today?.sections.some((section) => section.kind === "to-do" && section.cards.some((c) => c.kind === "anki")) ??
         false),
     api.checkAnki,
@@ -120,85 +132,87 @@ export function Today({
     }
   };
 
-  if (failed)
-    return (
-      <Empty title="Today couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
-    );
-  if (today === null) return null;
-
-  // Story 4: a new user's first screen says what to do next.
-  if (!today.hasPacts) {
-    return (
-      <Empty title="Nothing to do right now" body="Invite a friend to review your pacts, then create your first pact.">
-        <div className="row2">
-          <button className="btn primary" onClick={onInvite}>
-            Invite a friend
-          </button>
-          <button className="btn" onClick={onCreate}>
-            Create a pact
-          </button>
-        </div>
-      </Empty>
-    );
-  }
+  // A failed reload keeps the cards shown, with what failed above them.
   return (
-    <>
-      {today.alerts.length === 0 && today.sections.length === 0 && (
-        <Empty
-          title="Nothing to do right now"
-          body="When one of your pacts needs something from you, it shows up here."
-        />
-      )}
-      {today.alerts.map((alert) => (
-        <Alert
-          key={alertKey(alert)}
-          alert={alert}
-          timezone={timezone}
-          now={now}
-          ouraError={ouraError}
-          onFileExcuse={setExcusing}
-          onOpenItem={openItem}
-          onChanged={reload}
-        />
-      ))}
-      {today.sections.map((section) => (
-        <Section
-          key={section.kind}
-          section={section}
-          timezone={timezone}
-          now={now}
-          checkingOura={checking}
-          checkingAnki={checkingAnki}
-          connectionProblem={connectionProblem}
-          onOpenPact={onOpenPact}
-          onOpenLedger={onOpenLedger}
-          onFileExcuse={setExcusing}
-          onChanged={reload}
-        />
-      ))}
-      {today.waiting.length > 0 && (
-        <Waiting
-          items={today.waiting}
-          onOpenPact={onOpenPact}
-          onOpenLedger={onOpenLedger}
-          onOpenExcuse={onOpenExcuse}
-          onOpenChangeRequest={onOpenChangeRequest}
-        />
-      )}
-      <Yesterday entries={today.yesterday} now={now} onOpenPact={onOpenPact} />
-      {excusing && (
-        <ExcuseSheet
-          pactId={excusing.pactId}
-          pactName={excusing.pactName}
-          {...(excusing.day !== undefined && { day: excusing.day })}
-          onClose={() => setExcusing(null)}
-          onFiled={() => {
-            setExcusing(null);
-            reload();
-          }}
-        />
-      )}
-    </>
+    <Loaded state={state} what="Today">
+      {(today) =>
+        // Story 4: a new user's first screen says what to do next.
+        !today.hasPacts ? (
+          <Empty
+            title="Nothing to do right now"
+            body="Invite a friend to review your pacts, then create your first pact."
+          >
+            <div className="row2">
+              <button className="btn primary" onClick={onInvite}>
+                Invite a friend
+              </button>
+              <button className="btn" onClick={onCreate}>
+                Create a pact
+              </button>
+            </div>
+          </Empty>
+        ) : (
+          <>
+            {today.alerts.length === 0 && today.sections.length === 0 && (
+              <Empty
+                title="Nothing to do right now"
+                body="When one of your pacts needs something from you, it shows up here."
+              />
+            )}
+            {today.alerts.map((alert) => (
+              <Alert
+                key={alertKey(alert)}
+                alert={alert}
+                timezone={timezone}
+                now={now}
+                ouraError={ouraError}
+                onFileExcuse={setExcusing}
+                onOpenItem={openItem}
+                onChanged={reload}
+              />
+            ))}
+            {today.sections.map((section) => (
+              <Section
+                key={section.kind}
+                section={section}
+                timezone={timezone}
+                now={now}
+                checkingOura={checking}
+                checkingAnki={checkingAnki}
+                ouraConnectionProblem={ouraConnectionProblem}
+                onOpenPact={onOpenPact}
+                onOpenLedger={onOpenLedger}
+                onFileExcuse={setExcusing}
+                onChanged={reload}
+              />
+            ))}
+            {today.waiting.length > 0 && (
+              <Waiting
+                items={today.waiting}
+                onOpenPact={onOpenPact}
+                onOpenLedger={onOpenLedger}
+                onOpenExcuse={onOpenExcuse}
+                onOpenChangeRequest={onOpenChangeRequest}
+              />
+            )}
+            <Yesterday entries={today.yesterday} timezone={timezone} now={now} onOpenPact={onOpenPact} />
+            {excusing && (
+              <ExcuseSheet
+                pactId={excusing.pactId}
+                pactName={excusing.pactName}
+                timezone={timezone}
+                {...(excusing.day !== undefined && { day: excusing.day })}
+                onClose={() => setExcusing(null)}
+                onFiled={() => {
+                  setExcusing(null);
+                  reload();
+                }}
+              />
+            )}
+          </>
+        )
+      }
+    </Loaded>
   );
 }
 
@@ -213,10 +227,8 @@ function alertKey(alert: Json<TodayAlert>): string {
       return `overdue:${alert.recipientId}`;
     case "reviewer-question":
       return `question:${alert.item.id}`;
-    case "oura-connection":
-      return "oura";
-    case "anki-connection":
-      return "anki";
+    case "connection":
+      return alert.service;
   }
 }
 
@@ -275,7 +287,7 @@ function Section({
   now,
   checkingOura,
   checkingAnki,
-  connectionProblem,
+  ouraConnectionProblem,
   onOpenPact,
   onOpenLedger,
   onFileExcuse,
@@ -289,7 +301,7 @@ function Section({
   /** Whether a check of AnkiWeb is running now. */
   checkingAnki: boolean;
   /** Whether Pact can't read the owner's Oura: syncing won't help, reconnecting will. */
-  connectionProblem: boolean;
+  ouraConnectionProblem: boolean;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onFileExcuse: OnFileExcuse;
@@ -304,74 +316,82 @@ function Section({
           card={card}
           now={now}
           checking={checkingOura}
-          connectionProblem={connectionProblem}
+          ouraConnectionProblem={ouraConnectionProblem}
           onOpen={() => onOpenPact(card.pactId, card.name)}
-          onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+          onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
         />
       ));
     case "to-do":
-      return section.cards.map((card) =>
-        card.kind === "bill" ? (
-          <BillCard
-            key={`bill:${card.recipientId}`}
-            card={card}
-            timezone={timezone}
-            now={now}
-            onOpenLedger={onOpenLedger}
-            onPaid={onChanged}
-          />
-        ) : card.kind === "anki" ? (
-          <AnkiCard
-            key={`anki:${card.pactId}`}
-            card={card}
-            now={now}
-            checking={checkingAnki}
-            onOpen={() => onOpenPact(card.pactId, card.name)}
-            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
-          />
-        ) : (
-          <PactCard
-            key={`evidence:${card.pactId}`}
-            name={card.name}
-            penaltyCents={card.penaltyCents}
-            editWindowClosesAt={card.editWindowClosesAt}
-            now={now}
-            chip={<span className="chip c-todo">To do</span>}
-            onOpen={() => onOpenPact(card.pactId, card.name)}
-          >
-            {card.week ? (
-              <WeekToDo card={card} week={card.week} timezone={timezone} />
-            ) : (
-              <div className="meta due">
-                Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
-                {timeLeft(Date.parse(card.dueAt) - now)}
-              </div>
-            )}
-            <EvidenceForm
-              pactId={card.pactId}
-              weekly={card.week !== undefined}
-              onSubmitted={onChanged}
-              onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
-            />
-          </PactCard>
-        ),
-      );
+      return section.cards.map((card) => {
+        switch (card.kind) {
+          case "bill":
+            return (
+              <BillCard
+                key={`bill:${card.recipientId}`}
+                card={card}
+                timezone={timezone}
+                now={now}
+                onOpenLedger={onOpenLedger}
+                onPaid={onChanged}
+              />
+            );
+          case "anki":
+            return (
+              <AnkiCard
+                key={`anki:${card.pactId}`}
+                card={card}
+                timezone={timezone}
+                now={now}
+                checking={checkingAnki}
+                onOpen={() => onOpenPact(card.pactId, card.name)}
+                onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
+              />
+            );
+          case "evidence":
+            return (
+              <PactCard
+                key={`evidence:${card.pactId}`}
+                name={card.name}
+                penaltyCents={card.penaltyCents}
+                editWindowClosesAt={card.editWindowClosesAt}
+                now={now}
+                chip={<span className="chip c-todo">To do</span>}
+                onOpen={() => onOpenPact(card.pactId, card.name)}
+              >
+                {card.week ? (
+                  <WeekToDo card={card} week={card.week} timezone={timezone} />
+                ) : (
+                  <div className="meta due">
+                    Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
+                    {timeLeft(Date.parse(card.dueAt) - now)}
+                  </div>
+                )}
+                <EvidenceForm
+                  pactId={card.pactId}
+                  weekly={card.week !== undefined}
+                  onSubmitted={onChanged}
+                  onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
+                />
+              </PactCard>
+            );
+        }
+      });
     case "missed":
       return section.cards.map((card) => (
         <PactCard
           key={`${card.pactId}:${card.occurrenceDate}`}
           name={card.name}
           penaltyCents={card.penaltyCents}
-          chip={<span className="chip c-missed">{card.closed ? "Closed" : "Missed"}</span>}
+          chip={<span className="chip c-missed">{card.detail?.kind === "closed" ? "Closed" : "Missed"}</span>}
           onOpen={() => onOpenPact(card.pactId, card.name)}
         >
-          <div className="meta">{missedLine(card)}</div>
+          <div className="meta">{missedLine(card, timezone)}</div>
           <MissedActions
             pactId={card.pactId}
             occurrenceDate={card.occurrenceDate}
             excusableUntil={card.excusableUntil}
             now={now}
-            onFileExcuse={() => onFileExcuse({ pactId: card.pactId, pactName: card.name, day: card.occurrenceDate })}
+            onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
             onTaken={onChanged}
           />
         </PactCard>
@@ -421,9 +441,8 @@ function Section({
  * anytime is due on the deadline's date ("Thu Nov 12 "). Empty for today.
  */
 function dueDayText(card: Json<TodayToDoCard>, timezone: string, now: number): string {
-  const today = formatDay(new Date(now).toISOString(), timezone);
-  const due = formatDate(card.occurrenceDate);
-  return due === today ? "" : `${due} `;
+  const day = dateUnlessToday(card.occurrenceDate, now, timezone);
+  return day === null ? "" : `${day} `;
 }
 
 /**
@@ -464,14 +483,14 @@ function NoOuraDataCard({
   card,
   now,
   checking,
-  connectionProblem,
+  ouraConnectionProblem,
   onOpen,
   onFileExcuse,
 }: {
   card: Json<TodayNoOuraDataCard>;
   now: number;
   checking: boolean;
-  connectionProblem: boolean;
+  ouraConnectionProblem: boolean;
   onOpen: () => void;
   onFileExcuse: () => void;
 }) {
@@ -489,7 +508,7 @@ function NoOuraDataCard({
       <div className="meta">
         {checking
           ? "Checking Oura…"
-          : `${night} night hasn't synced. ${connectionProblem ? "Reconnect Oura to count it." : "Open the Oura app."}`}
+          : `${night} night hasn't synced. ${ouraConnectionProblem ? "Reconnect Oura to count it." : "Open the Oura app."}`}
       </div>
       <div className="meta due">Counts as missed at 6pm · {timeLeft(Date.parse(card.closesAt) - now)}</div>
       {tonight && (
@@ -497,11 +516,11 @@ function NoOuraDataCard({
           Tonight, in bed by {clockText(tonight.inBedBy)} · {timeLeft(Date.parse(tonight.dueAt) - now)}
         </div>
       )}
-      <div className="row2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <CardActions className="row2">
         <button className="btn sm" onClick={onFileExcuse}>
           File excuse
         </button>
-      </div>
+      </CardActions>
     </PactCard>
   );
 }
@@ -513,12 +532,15 @@ function NoOuraDataCard({
  */
 function AnkiCard({
   card,
+  timezone,
   now,
   checking,
   onOpen,
   onFileExcuse,
 }: {
   card: Json<TodayAnkiCard>;
+  /** The profile's timezone, for when AnkiWeb was checked. */
+  timezone: string;
   now: number;
   /** Whether a check of AnkiWeb is running now. */
   checking: boolean;
@@ -541,7 +563,9 @@ function AnkiCard({
             <span className="leftbig">{lastCheck.cardsLeft}</span>{" "}
             <span className="muted">{lastCheck.cardsLeft === 1 ? "card" : "cards"} left</span>
           </div>
-          <div className="meta">{checking ? <CheckingAnkiWeb /> : `Checked ${clockTime(lastCheck.checkedAt)}`}</div>
+          <div className="meta">
+            {checking ? <CheckingAnkiWeb /> : `Checked ${clockTime(lastCheck.checkedAt, timezone)}`}
+          </div>
         </>
       ) : (
         <div className="meta">{checking ? <CheckingAnkiWeb /> : "Not checked yet today."}</div>
@@ -554,11 +578,11 @@ function AnkiCard({
       ) : (
         <div className="meta">Finish {card.deckName ?? "the deck"} in Anki and sync.</div>
       )}
-      <div className="row2" onClick={(e) => e.stopPropagation()}>
+      <CardActions className="row2">
         <button className="btn" onClick={onFileExcuse}>
           File excuse
         </button>
-      </div>
+      </CardActions>
     </PactCard>
   );
 }
@@ -577,16 +601,21 @@ function CheckingAnkiWeb() {
  * into bed, or for an Anki day why. Today's day past its due-by time says when evidence was due. A
  * Weekly count week says how far it got.
  */
-function missedLine(card: Json<TodayMissedCard>): string {
-  if (card.closed) return `Evidence was due by ${clockText(card.closed.dueBy)}.`;
-  if (card.week) {
-    const { sessions, target } = card.week;
-    return `Week of ${formatDate(card.occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
+function missedLine({ detail, occurrenceDate }: Json<TodayMissedCard>, timezone: string): string {
+  switch (detail?.kind) {
+    case "closed":
+      return `Evidence was due by ${clockText(detail.dueBy)}.`;
+    case "week": {
+      const { sessions, target } = detail.progress;
+      return `Week of ${formatDate(occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
+    }
+    case "anki":
+      return `${formatDate(occurrenceDate)} · ${ankiMissText(detail.lastCheck, timezone)}`;
+    case "night":
+      return `${formatDate(occurrenceDate)} night · ${detail.inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(detail.inBedAt)}`}`;
+    case undefined:
+      return formatDate(occurrenceDate);
   }
-  if (card.anki) return `${formatDate(card.occurrenceDate)} · ${ankiMissText(card.anki)}`;
-  if (!card.night) return formatDate(card.occurrenceDate);
-  const { inBedAt } = card.night;
-  return `${formatDate(card.occurrenceDate)} night · ${inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(inBedAt)}`}`;
 }
 
 /**
@@ -639,25 +668,22 @@ function RecordPaymentAction({
   onSent: () => void;
 }) {
   const [ledger, setLedger] = useState<Json<LedgerSummary> | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const open = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const {
+    busy,
+    error,
+    run: open,
+  } = useSend(
+    async () => {
       const result = await api.ledger(recipientId);
-      if (result.ok) setLedger(result.ledger.summary);
-      else setError("This ledger wasn't found.");
-    } catch (failure) {
-      setError(failureText(failure, "Couldn't open it. Check your connection and try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
+      if (!result.ok) return "This ledger wasn't found.";
+      setLedger(result.ledger.summary);
+    },
+    (failure) => failureText(failure, "Couldn't open it. Check your connection and try again."),
+  );
   return (
-    <div className="stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <CardActions className="stack">
       <div className="row2">
-        <button className={primary ? "btn primary" : "btn sm"} disabled={busy} onClick={() => void open()}>
+        <button className={primary ? "btn primary" : "btn sm"} disabled={busy} onClick={() => open()}>
           {busy ? "Opening…" : "Record payment"}
         </button>
       </div>
@@ -672,7 +698,7 @@ function RecordPaymentAction({
           }}
         />
       )}
-    </div>
+    </CardActions>
   );
 }
 
@@ -698,7 +724,7 @@ function OverdueAlert({
       <span className="small">
         Your {formatDate(alert.billedOn)} bill was due {formatDay(alert.dueAt, timezone)}.
         {reviewerNames.length > 0 &&
-          ` ${reviewerNames.join(" and ")} ${reviewerNames.length === 1 ? "has" : "have"} been told.`}
+          ` ${listNames(reviewerNames)} ${reviewerNames.length === 1 ? "has" : "have"} been told.`}
       </span>
       <RecordPaymentAction recipientId={alert.recipientId} onSent={onPaid} />
     </div>
@@ -733,10 +759,12 @@ function Alert({
       return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "bill-overdue":
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
-    case "oura-connection":
-      return <OuraConnectionAlert status={alert.status} error={ouraError} />;
-    case "anki-connection":
-      return <AnkiConnectionAlert status={alert.status} onReconnected={onChanged} />;
+    case "connection":
+      return alert.service === "oura" ? (
+        <OuraConnectionAlert status={alert.status} error={ouraError} />
+      ) : (
+        <AnkiConnectionAlert status={alert.status} onReconnected={onChanged} />
+      );
   }
 }
 
@@ -790,22 +818,15 @@ function useTakeTheL<Refusal extends string>(
   refusalText: Record<Refusal, string>,
   onTaken: () => void,
 ) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const take = async () => {
-    setBusy(true);
-    setError(null);
-    try {
+  const { busy, error, run } = useSend(
+    async () => {
       const result = await send();
-      if (result.ok) return onTaken();
-      setError(refusalText[result.reason]);
-    } catch (failure) {
-      setError(failureText(failure, "Couldn't send. Check your connection and try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { busy, error, take: () => void take() };
+      if (!result.ok) return refusalText[result.reason];
+      onTaken();
+    },
+    (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
+  );
+  return { busy, error, take: run };
 }
 
 /** "File excuse · 31h 12m left" until `excusableUntil`; nothing once it's passed. */
@@ -838,7 +859,7 @@ function MissedActions({
   );
   const fileLabel = fileExcuseLabel("File excuse", excusableUntil, now);
   return (
-    <div className="stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <CardActions className="stack">
       <div className="row2">
         {fileLabel && (
           <button className="btn" onClick={onFileExcuse}>
@@ -850,7 +871,7 @@ function MissedActions({
         </button>
       </div>
       {error && <p className="error small">{error}</p>}
-    </div>
+    </CardActions>
   );
 }
 
@@ -876,8 +897,8 @@ function RejectedEvidenceAlert({
     ACCEPT_MISS_REFUSAL_TEXT,
     onTaken,
   );
-  // A Weekly count week isn't judged yet, so filing has no 48 hours running.
-  const fileLabel = alert.week ? "File excuse" : fileExcuseLabel("File excuse", alert.excusableUntil, now);
+  const fileLabel =
+    alert.excusableUntil === null ? "File excuse" : fileExcuseLabel("File excuse", alert.excusableUntil, now);
 
   return (
     <div className="alert bad" role="status">
@@ -897,10 +918,7 @@ function RejectedEvidenceAlert({
       )}
       <div className="row2">
         {fileLabel && (
-          <button
-            className="btn sm"
-            onClick={() => onFileExcuse({ pactId: alert.pactId, pactName: alert.name, day: alert.occurrenceDate })}
-          >
+          <button className="btn sm" onClick={() => onFileExcuse(excuseTargetFor(alert))}>
             {fileLabel}
           </button>
         )}
@@ -988,10 +1006,7 @@ function RejectedExcuseAlert({
   );
 }
 
-const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<
-  Extract<AcceptExcuseRejectionResult, { ok: false }>["reason"],
-  string
-> = {
+const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<Refusal<AcceptExcuseRejectionResult>, string> = {
   "excuse-not-found": "This excuse wasn't found.",
   "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
 };
@@ -1018,51 +1033,48 @@ function Waiting({
     <section className="stack">
       <div className="label">Waiting for approval</div>
       <div className="cards">
-        {items.map((item) =>
-          item.kind === "change-request" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenChangeRequest(item.id)}>
-              <span className="kico k-change">
-                <PencilIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>{item.endsPact ? "Change · End this pact" : "Change"}</small>
-              </span>
-            </button>
-          ) : item.kind === "excuse" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenExcuse(item.id)}>
-              <span className="kico k-excuse">
-                <ExcuseIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>Excuse · {datesText(item.firstDate, item.lastDate)}</small>
-              </span>
-            </button>
-          ) : item.kind === "evidence" ? (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenPact(item.pactId, item.name)}>
-              <span className="kico k-evidence">
-                <CameraIcon />
-              </span>
-              <span className="rt">
-                <b>{item.name}</b>
-                <small>Evidence</small>
-              </span>
-            </button>
-          ) : (
-            <button key={item.id} className="rowbtn" onClick={() => onOpenLedger(item.recipientId, item.recipientName)}>
-              <span className="kico k-payment">
-                <DollarIcon />
-              </span>
-              <span className="rt">
-                <b>
-                  {money(item.amountCents)} to {item.recipientName}
-                </b>
-                <small>Payment</small>
-              </span>
-            </button>
-          ),
-        )}
+        {items.map((item) => {
+          switch (item.kind) {
+            case "change-request":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="change-request"
+                  title={item.name}
+                  detail={item.endsPact ? "End this pact" : undefined}
+                  onOpen={() => onOpenChangeRequest(item.id)}
+                />
+              );
+            case "excuse":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="excuse"
+                  title={item.name}
+                  detail={datesText(item.firstDate, item.lastDate)}
+                  onOpen={() => onOpenExcuse(item.id)}
+                />
+              );
+            case "evidence":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="evidence"
+                  title={item.name}
+                  onOpen={() => onOpenPact(item.pactId, item.name)}
+                />
+              );
+            case "payment":
+              return (
+                <WaitingRow
+                  key={item.id}
+                  kind="payment"
+                  title={`${money(item.amountCents)} to ${item.recipientName}`}
+                  onOpen={() => onOpenLedger(item.recipientId, item.recipientName)}
+                />
+              );
+          }
+        })}
       </div>
     </section>
   );
@@ -1086,70 +1098,40 @@ function EvidenceForm({
   onSubmitted: () => void;
   onFileExcuse: () => void;
 }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [photos, setPhotos] = useState<ShrunkPhoto[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const urls = useRef<string[]>([]);
-  urls.current = photos.map((photo) => photo.url);
-  useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
-
-  const takePhoto = () => input.current?.click();
-  const add = async (file: File) => {
-    setError(null);
-    try {
-      const photo = await shrinkForPreview(file);
-      setPhotos((taken) => [...taken, photo]);
-    } catch {
-      setError("That photo couldn't be read. Take it again.");
-    }
-  };
-  const remove = (photo: ShrunkPhoto) => {
-    URL.revokeObjectURL(photo.url);
-    setPhotos((taken) => taken.filter((p) => p !== photo));
-  };
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.submitEvidence(
-        pactId,
-        photos.map((photo) => photo.blob),
-      );
-      if (result.ok) return onSubmitted();
-      setError(
-        weekly && result.reason === "already-judged" ? WEEKLY_ALREADY_REJECTED_TEXT : REFUSAL_TEXT[result.reason],
-      );
-    } catch (failure) {
-      setError(
-        uploadFailureText(
-          failure,
-          "A photo was too large to send. Remove it and take it again.",
-          "Couldn't send. Check your connection and try again.",
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const {
+    busy,
+    error,
+    setError,
+    run: submit,
+  } = useSend(
+    async (photoBlobs: Blob[]) => {
+      const result = await api.submitEvidence(pactId, photoBlobs);
+      if (!result.ok) {
+        return weekly && result.reason === "already-judged"
+          ? WEEKLY_ALREADY_REJECTED_TEXT
+          : REFUSAL_TEXT[result.reason];
+      }
+      onSubmitted();
+    },
+    (failure) =>
+      uploadFailureText(
+        failure,
+        "A photo was too large to send. Remove it and take it again.",
+        "Couldn't send. Check your connection and try again.",
+      ),
+  );
+  const picks = usePhotoPicks({
+    max: MAX_EVIDENCE_PHOTOS,
+    unreadable: "That photo couldn't be read. Take it again.",
+    setError,
+  });
+  const { photos } = picks;
   return (
-    <div className="evidence stack" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <input
-        ref={input}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (file) void add(file);
-        }}
-      />
+    <CardActions className="evidence stack">
+      <input ref={picks.input} type="file" accept="image/*" capture="environment" hidden onChange={picks.onChange} />
       {photos.length === 0 ? (
         <div className="row2">
-          <button className="btn primary" onClick={takePhoto}>
+          <button className="btn primary" onClick={picks.choose}>
             <CameraIcon />
             Take photo
           </button>
@@ -1163,24 +1145,24 @@ function EvidenceForm({
             {photos.map((photo, i) => (
               <div key={photo.url} className="thumb">
                 <img src={photo.url} alt={`Photo ${i + 1}`} />
-                <button className="remove" aria-label={`Remove photo ${i + 1}`} onClick={() => remove(photo)}>
+                <button className="remove" aria-label={`Remove photo ${i + 1}`} onClick={() => picks.remove(photo)}>
                   ×
                 </button>
               </div>
             ))}
             {photos.length < MAX_EVIDENCE_PHOTOS && (
-              <button className="ph-add" aria-label="Take another photo" onClick={takePhoto}>
+              <button className="ph-add" aria-label="Take another photo" onClick={picks.choose}>
                 +
               </button>
             )}
           </div>
-          <button className="btn primary" disabled={busy} onClick={() => void submit()}>
+          <button className="btn primary" disabled={busy} onClick={() => submit(photos.map((photo) => photo.blob))}>
             {busy ? "Sending…" : "Submit"}
           </button>
         </>
       )}
       {error && <p className="error small">{error}</p>}
-    </div>
+    </CardActions>
   );
 }
 
@@ -1195,6 +1177,25 @@ const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "already-approved": "Evidence for today is already approved.",
   "already-judged": "Today is already Missed, so new photos can't count.",
 };
+
+/**
+ * A card's own buttons and forms. A click or Enter on them stays here
+ * rather than opening what the card opens. Other keys go on, so Escape still
+ * reaches an open sheet.
+ */
+function CardActions({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <div
+      className={className}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.stopPropagation();
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 /**
  * A Today card: the pact's name (or for a bill, "Pay Sam"), a chip, its

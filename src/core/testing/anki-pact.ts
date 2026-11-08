@@ -3,6 +3,7 @@
 
 import { WEEKDAYS, type NewPact, type Weekday } from "../../shared/types.ts";
 import type { AccountHandle, Scenario } from "./scenario.ts";
+import { ok } from "./queries.ts";
 
 /** The deck every scenario's pact is on, unless it says otherwise. */
 export const SPANISH = "1700000000001";
@@ -18,17 +19,14 @@ export async function ownerWithAnki(s: Scenario, signedIn?: AccountHandle) {
   const owner = signedIn ?? (await s.signIn("owner"));
   await owner.setTimezone("America/New_York");
   const reviewer = await s.befriend(owner, `${owner.name}-reviewer`);
-  const added = await owner.addRecipient({ name: "Sam" });
-  if (!added.ok) throw new Error(added.reason);
+  const added = ok(await owner.addRecipient({ name: "Sam" }));
   await owner.connectAnki();
   s.ankiSource.setDeck(owner.id, { id: SPANISH, name: "Spanish", review: 42 });
-  const listed = await owner.ankiDecks();
-  if (!listed.ok) throw new Error(listed.reason);
+  ok(await owner.ankiDecks());
   const createPact = async (
     options: Partial<Pick<NewPact, "dueBy" | "ankiDeckId" | "name">> & { days?: Weekday[] } = {},
   ) => {
-    const created = await owner.createPact(ankiPact(added.recipient.id, reviewer, options));
-    if (!created.ok) throw new Error(created.reason);
+    const created = ok(await owner.createPact(ankiPact(added.recipient.id, reviewer, options)));
     return created.pactId;
   };
   /** What the next check of `deck` finds: the counts, for Anki day `ankiDate`, evaluated at `asOf`. */

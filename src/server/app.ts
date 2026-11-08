@@ -10,17 +10,15 @@ import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type {
-  AccountId,
-  AnkiConnector,
-  NewPayment,
-  OuraConnector,
-  PactCore,
-  Photo,
-  Schedule,
-  Weekday,
-} from "../core/index.ts";
-import { MAX_EVIDENCE_PHOTOS, MAX_EXCUSE_PHOTOS, NOTIFICATION_SETTINGS, WEEKDAYS } from "../shared/types.ts";
+import type { AccountId, AnkiConnector, OuraConnector, PactCore, Photo, Schedule } from "../core/index.ts";
+import {
+  EVIDENCE_KINDS,
+  MAX_EVIDENCE_PHOTOS,
+  MAX_EXCUSE_PHOTOS,
+  NOTIFICATION_SETTINGS,
+  WEEKDAYS,
+  type NewPact,
+} from "../shared/types.ts";
 import {
   API_PATHS,
   AUTH_BASE_PATH,
@@ -31,7 +29,6 @@ import {
   EXCUSE_REASON_FIELD,
   EXCUSE_TO_FIELD,
   INVITE_REQUIRED_PATH,
-  invitePath,
   APP_PATHS,
   MAX_PHOTO_BYTES,
   OURA_RESULT_PARAM,
@@ -46,6 +43,7 @@ import {
   type ConnectAnkiRequest,
   type ConnectAnkiResponse,
   type DisconnectAnkiResponse,
+  type AskOwnerRequest,
   type DisconnectOuraResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
@@ -65,14 +63,17 @@ import {
   type DeletePactResponse,
   type EditPactResponse,
   type ExcuseOptionsResponse,
+  type ExcusePreviewQuery,
   type ExcusePreviewResponse,
   type ExcuseResponse,
+  type FileExcuseRequest,
   type FileExcuseResponse,
   type DecideRequest,
   type DecideResponse,
   type AskOwnerResponse,
   type EvidenceResponse,
   type PaymentResponse,
+  type ReplyRequest,
   type ReplyResponse,
   type WaitingOnReplyResponse,
   type FirstOccurrenceRequest,
@@ -89,8 +90,10 @@ import {
   type PactResponse,
   type PactsResponse,
   type RecipientsResponse,
+  type RecordPaymentRequest,
   type RecordPaymentResponse,
   type RemovePushSubscriptionRequest,
+  type RemovePushSubscriptionResponse,
   type ReviewQueueResponse,
   type SavePushSubscriptionRequest,
   type SavePushSubscriptionResponse,
@@ -101,8 +104,10 @@ import {
   type SubmitEvidenceResponse,
   type TodayResponse,
 } from "../shared/api.ts";
-import { INVITE_REQUIRED_CODE, type Auth } from "./auth.ts";
+import { INVITE_REQUIRED_CODE, isInviteRequired, type Auth } from "./auth.ts";
+import { connections } from "./connections.ts";
 import { inviteRequiredPage, signInFailedPage } from "./pages.ts";
+import { arrayOf, boolean, number, object, oneOf, optional, string, union, type Fields, type Parser } from "./parse.ts";
 
 export interface AppOptions {
   core: PactCore;
@@ -182,7 +187,11 @@ export function createApp({
 }: AppOptions) {
   const app = new Hono<Env>();
 
-  /** The account's profile, as GET /api/me and Oura's disconnect answer with it. */
+  /** The signed-in account, as the core knows it. */
+  const account = (c: Context<Env>) => core.as(c.get("accountId"));
+  const connection = connections({ core, oura, anki, log });
+
+  /** The account's profile, as GET /api/me and the disconnect routes answer with it. */
   const me = (accountId: AccountId): MeResponse => ({
     ...json(core.as(accountId).profile()),
     ouraAvailable: oura !== null,
@@ -190,9 +199,9 @@ export function createApp({
   });
 
   /**
-   * One line per photo upload (evidence, or a payment's screenshot), to see
-   * sizes and speeds in the server log. Nothing from the request's URL goes
-   * in, so a request can't forge a line.
+   * One line per photo upload (evidence, an excuse's photos, or a payment's
+   * screenshot), to see sizes and speeds in the server log. Nothing from the
+   * request's URL goes in, so a request can't forge a line.
    */
   const logUpload = (upload: Upload, fields: Record<string, string | number>) =>
     log(
@@ -202,31 +211,34 @@ export function createApp({
     );
 
   /**
-   * A multipart upload of photos in EVIDENCE_PHOTO_FIELD: evidence, or a
-   * payment's screenshot. Transport checks only: a form that won't parse, a
-   * field there that isn't a photo, or a form `valid` refuses is a 400
-   * invalid-request; a photo over the size cap is a 400 photo-too-large.
-   * Otherwise `send` calls the core with the photos and its result is the
-   * response. Each upload that parsed logs one line (`logUpload`) with its
-   * sizes and timings and what `outcome` says became of it, except a form
-   * refused for its shape.
+   * A multipart upload of photos in EVIDENCE_PHOTO_FIELD: evidence, an
+   * excuse's photos, or a payment's screenshot. Transport checks only: a form
+   * that won't parse, a field there that isn't a photo, or a form `parse`
+   * refuses is a 400 invalid-request; a photo over the size cap is a 400
+   * photo-too-large. Otherwise `send` calls the core with the photos and its
+   * result is the response. Each upload that parsed logs one line (`logUpload`) with its
+   * sizes and timings and what became of it (the new item's id, under the
+   * upload's name, when it was accepted), except a form refused for its shape.
    */
-  const receivePhotos = async <Body extends { ok: boolean }, Fields>(
+  const receivePhotos = async <Id extends string, Fields>(
     c: Context<Env>,
     upload: Upload,
     {
       parse,
       send,
-      outcome,
+      id,
     }: {
       /**
        * Shape checks beyond the photos, given the parsed form and how many
        * photos it has: the other fields `send` needs, or null if malformed.
        */
       parse: (form: UploadForm, photoCount: number) => Fields | null;
-      send: (fields: Fields, photos: Photo[]) => Promise<Body>;
-      /** For the log line: what became of the upload, and the new item's id when it was accepted. */
-      outcome: (body: Body) => Record<string, string>;
+      send: (
+        fields: Fields,
+        photos: Photo[],
+      ) => Promise<({ ok: true } & Record<Id, string>) | { ok: false; reason: string }>;
+      /** For the log line: the field of an accepted upload's result that holds the new item's id. */
+      id: Id;
     },
   ) => {
     if (!c.req.header("Content-Type")?.startsWith("multipart/form-data")) return apiError(c, 400, "invalid-request");
@@ -260,7 +272,8 @@ export function createApp({
     const storing = performance.now();
     const body = await send(parsed, photos);
     const storeMs = Math.round(performance.now() - storing);
-    logUpload(upload, { ...outcome(body), ...sizes, receiveMs, storeMs });
+    const outcome = body.ok ? { outcome: "ok", [upload]: body[id] } : { outcome: body.reason };
+    logUpload(upload, { ...outcome, ...sizes, receiveMs, storeMs });
     return c.json(body);
   };
 
@@ -269,8 +282,7 @@ export function createApp({
   // volume alerts via /health instead of taking the only machine out of rotation.
   app.get("/healthz", (c) => {
     core.lastTick();
-    const body: LivenessResponse = { ok: true };
-    return c.json(body);
+    return c.json<LivenessResponse>({ ok: true });
   });
   // For the uptime monitor: the scheduler is ticking and the volume has room.
   app.get("/health", (c) => {
@@ -320,11 +332,12 @@ export function createApp({
           returnHeaders: true,
         });
         for (const cookie of headers.getSetCookie()) c.header("Set-Cookie", cookie, { append: true });
-      } catch {
-        return c.redirect(INVITE_REQUIRED_PATH);
+      } catch (error) {
+        if (isInviteRequired(error)) return c.redirect(INVITE_REQUIRED_PATH);
+        throw error;
       }
       // As Google's sign-in does: back to the invite, to accept it, or home.
-      return c.redirect(inviteToken === undefined ? "/" : invitePath(inviteToken));
+      return c.redirect(inviteToken === undefined ? "/" : APP_PATHS.invite(inviteToken));
     });
   }
 
@@ -335,8 +348,7 @@ export function createApp({
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     const accountId = session && core.accountIdForEmail(session.user.email);
     const token = c.req.param("token");
-    const body: InviteLookupResponse = json(accountId ? core.as(accountId).invite(token) : core.invite(token));
-    return c.json(body);
+    return c.json<InviteLookupResponse>(json(accountId ? core.as(accountId).invite(token) : core.invite(token)));
   });
 
   // Every other /api route is made as the signed-in account. Better Auth
@@ -383,304 +395,190 @@ export function createApp({
     if (expected === undefined || state !== expected) return back("failed");
     // Oura's page sends the browser back with an error when the owner says no.
     if (error !== undefined || code === undefined) return back(error === "access_denied" ? "cancelled" : "failed");
-    const accountId = c.get("accountId");
-    const connected = await oura.connect(accountId, code).catch((failure: unknown) => {
-      log(`oura connect failed: ${failure instanceof Error ? failure.message : String(failure)}`);
-      return { ok: false as const };
-    });
-    if (!connected.ok) return back("failed");
-    await core.as(accountId).connectOura();
-    return back("connected");
+    return back(await connection.connectOura(c.get("accountId"), code));
   });
 
   app.post(API_PATHS.ouraCheck, async (c) => {
-    await core.as(c.get("accountId")).checkOura();
-    const body: CheckOuraResponse = { ok: true };
-    return c.json(body);
+    await account(c).checkOura();
+    return c.json<CheckOuraResponse>({ ok: true });
   });
 
-  // The core first, so a failure leaves the connection as it was; then Oura's tokens go.
   app.post(API_PATHS.ouraDisconnect, async (c) => {
-    const accountId = c.get("accountId");
-    await core.as(accountId).disconnectOura();
-    oura?.forget(accountId);
-    const body: DisconnectOuraResponse = me(accountId);
-    return c.json(body);
+    await connection.disconnect(c.get("accountId"), "oura");
+    return c.json<DisconnectOuraResponse>(me(c.get("accountId")));
   });
 
-  // Connecting AnkiWeb: the adapter trades the email and password for a host key, and the password goes no further.
   app.post(API_PATHS.ankiConnect, async (c) => {
-    const request = (await c.req.json().catch(() => null)) as Partial<Record<keyof ConnectAnkiRequest, unknown>> | null;
-    if (typeof request?.email !== "string" || typeof request.password !== "string") {
-      return apiError(c, 400, "invalid-request");
-    }
-    const accountId = c.get("accountId");
-    if (!anki) return c.json({ ok: false, reason: "unavailable" } satisfies ConnectAnkiResponse);
-    const connected = await anki.login(accountId, request.email.trim(), request.password).catch((failure: unknown) => {
-      log(`anki connect failed: ${failure instanceof Error ? failure.message : String(failure)}`);
-      return { ok: false as const, reason: "unreachable" as const };
-    });
-    if (connected.ok) await core.as(accountId).connectAnki();
-    const body: ConnectAnkiResponse = connected;
-    return c.json(body);
+    const request = await readJson(c, parseConnectAnki);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<ConnectAnkiResponse>(await connection.connectAnki(c.get("accountId"), request));
   });
 
-  app.get(API_PATHS.ankiDecks, async (c) => {
-    const body: AnkiDecksResponse = await core.as(c.get("accountId")).ankiDecks();
-    return c.json(body);
-  });
+  app.get(API_PATHS.ankiDecks, async (c) => c.json<AnkiDecksResponse>(await account(c).ankiDecks()));
 
   app.post(API_PATHS.ankiCheck, async (c) => {
-    await core.as(c.get("accountId")).checkAnki();
-    const body: CheckAnkiResponse = { ok: true };
-    return c.json(body);
+    await account(c).checkAnki();
+    return c.json<CheckAnkiResponse>({ ok: true });
   });
 
-  // The core first, so a failure leaves the connection as it was; then the host key and the collection copy go,
-  // once any check already running for the account has finished.
   app.post(API_PATHS.ankiDisconnect, async (c) => {
-    const accountId = c.get("accountId");
-    await core.as(accountId).disconnectAnki();
-    await anki?.forget(accountId);
-    const body: DisconnectAnkiResponse = me(accountId);
-    return c.json(body);
+    await connection.disconnect(c.get("accountId"), "anki");
+    return c.json<DisconnectAnkiResponse>(me(c.get("accountId")));
   });
 
-  app.get(API_PATHS.me, (c) => {
-    const body: MeResponse = me(c.get("accountId"));
-    return c.json(body);
-  });
+  app.get(API_PATHS.me, (c) => c.json<MeResponse>(me(c.get("accountId"))));
 
   // A refused zone is a result, not an error: 200 either way.
   app.post(API_PATHS.timezone, async (c) => {
-    const request = (await c.req.json().catch(() => null)) as Partial<SetTimezoneRequest> | null;
-    if (typeof request?.timezone !== "string") return apiError(c, 400, "invalid-request");
-    const result: SetTimezoneResponse = await core.as(c.get("accountId")).setTimezone(request.timezone);
-    return c.json(result);
+    const request = await readJson(c, parseSetTimezone);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<SetTimezoneResponse>(await account(c).setTimezone(request.timezone));
   });
 
-  app.get(API_PATHS.today, (c) => {
-    const body: TodayResponse = json(core.as(c.get("accountId")).today());
-    return c.json(body);
-  });
+  app.get(API_PATHS.today, (c) => c.json<TodayResponse>(json(account(c).today())));
 
-  app.post(API_PATHS.invites, async (c) => {
-    const body: CreateInviteResponse = json(await core.as(c.get("accountId")).createInvite());
-    return c.json(body);
-  });
+  app.post(API_PATHS.invites, async (c) => c.json<CreateInviteResponse>(json(await account(c).createInvite())));
 
-  app.post(API_PATHS.acceptInvite(":token"), async (c) => {
-    const body: AcceptInviteResponse = await core.as(c.get("accountId")).acceptInvite(c.req.param("token"));
-    return c.json(body);
-  });
+  app.post(API_PATHS.acceptInvite(":token"), async (c) =>
+    c.json<AcceptInviteResponse>(await account(c).acceptInvite(c.req.param("token"))),
+  );
 
-  app.get(API_PATHS.friends, (c) => {
-    const body: FriendsResponse = core.as(c.get("accountId")).friends();
-    return c.json(body);
-  });
+  app.get(API_PATHS.friends, (c) => c.json<FriendsResponse>(account(c).friends()));
 
-  app.get(API_PATHS.recipients, (c) => {
-    const body: RecipientsResponse = core.as(c.get("accountId")).recipients();
-    return c.json(body);
-  });
+  app.get(API_PATHS.recipients, (c) => c.json<RecipientsResponse>(account(c).recipients()));
 
   app.post(API_PATHS.recipients, async (c) => {
-    const recipient = parseNewRecipient(await c.req.json().catch(() => null));
+    const recipient = await readJson(c, parseNewRecipient);
     if (!recipient) return apiError(c, 400, "invalid-request");
-    const body: AddRecipientResponse = await core.as(c.get("accountId")).addRecipient(recipient);
-    return c.json(body);
+    return c.json<AddRecipientResponse>(await account(c).addRecipient(recipient));
   });
 
-  app.get(API_PATHS.pacts, (c) => {
-    const body: PactsResponse = json(core.as(c.get("accountId")).pacts());
-    return c.json(body);
-  });
+  app.get(API_PATHS.pacts, (c) => c.json<PactsResponse>(json(account(c).pacts())));
 
   app.post(API_PATHS.pacts, async (c) => {
-    const pact = parseNewPact(await c.req.json().catch(() => null));
+    const pact = await readJson(c, parseNewPact);
     if (!pact) return apiError(c, 400, "invalid-request");
-    const body: CreatePactResponse = await core.as(c.get("accountId")).createPact(pact);
-    return c.json(body);
+    return c.json<CreatePactResponse>(await account(c).createPact(pact));
   });
 
   app.post(API_PATHS.firstOccurrence, async (c) => {
-    const request = (await c.req.json().catch(() => null)) as Partial<
-      Record<keyof FirstOccurrenceRequest, unknown>
-    > | null;
-    const schedule = parseSchedule(request?.schedule);
-    if (!schedule) return apiError(c, 400, "invalid-request");
-    const editing = request?.editing;
-    if (editing !== undefined && typeof editing !== "string") return apiError(c, 400, "invalid-request");
-    const timing = parseOptionalStrings(request ?? {}, ["inBedBy", "dueBy", "startDate"]);
-    if (!timing) return apiError(c, 400, "invalid-request");
-    const evidenceKind = request?.evidenceKind;
-    if (evidenceKind !== undefined && !isEvidenceKind(evidenceKind)) return apiError(c, 400, "invalid-request");
-    const body: FirstOccurrenceResponse = json(
-      core
-        .as(c.get("accountId"))
-        .firstOccurrence({ schedule, ...timing, ...(evidenceKind !== undefined && { evidenceKind }) }, editing),
-    );
-    return c.json(body);
+    const request = await readJson(c, parseFirstOccurrence);
+    if (!request) return apiError(c, 400, "invalid-request");
+    const { editing, ...timing } = request;
+    return c.json<FirstOccurrenceResponse>(json(account(c).firstOccurrence(timing, editing)));
   });
 
-  app.get(API_PATHS.pact(":id"), (c) => {
-    const body: PactResponse = json(core.as(c.get("accountId")).pact(c.req.param("id")));
-    return c.json(body);
-  });
+  app.get(API_PATHS.pact(":id"), (c) => c.json<PactResponse>(json(account(c).pact(c.req.param("id")))));
 
   app.put(API_PATHS.pact(":id"), async (c) => {
-    const pact = parseNewPact(await c.req.json().catch(() => null));
+    const pact = await readJson(c, parseNewPact);
     if (!pact) return apiError(c, 400, "invalid-request");
-    const body: EditPactResponse = await core.as(c.get("accountId")).editPact(c.req.param("id"), pact);
-    return c.json(body);
+    return c.json<EditPactResponse>(await account(c).editPact(c.req.param("id"), pact));
   });
 
   app.post(API_PATHS.changePreview(":id"), async (c) => {
-    const change = parsePactChange(await c.req.json().catch(() => null));
+    const change = await readJson(c, parsePactChange);
     if (!change) return apiError(c, 400, "invalid-request");
-    const body: ChangePreviewResponse = core.as(c.get("accountId")).changePreview(c.req.param("id"), change);
-    return c.json(body);
+    return c.json<ChangePreviewResponse>(account(c).changePreview(c.req.param("id"), change));
   });
 
   app.post(API_PATHS.changePact(":id"), async (c) => {
-    const change = parsePactChange(await c.req.json().catch(() => null));
+    const change = await readJson(c, parsePactChange);
     if (!change) return apiError(c, 400, "invalid-request");
-    const body: ChangePactResponse = await core.as(c.get("accountId")).changePact(c.req.param("id"), change);
-    return c.json(body);
+    return c.json<ChangePactResponse>(await account(c).changePact(c.req.param("id"), change));
   });
 
   app.post(API_PATHS.endPact(":id"), async (c) => {
-    const request = (await c.req.json().catch(() => null)) as Partial<Record<keyof EndPactRequest, unknown>> | null;
-    if (!isRecord(request) || (request.note !== undefined && typeof request.note !== "string")) {
-      return apiError(c, 400, "invalid-request");
-    }
-    const body: EndPactResponse = await core.as(c.get("accountId")).requestEnd(c.req.param("id"), request.note);
-    return c.json(body);
+    const request = await readJson(c, parseEndPact);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<EndPactResponse>(await account(c).requestEnd(c.req.param("id"), request.note));
   });
 
-  app.get(API_PATHS.changeRequest(":id"), (c) => {
-    const body: ChangeRequestResponse = json(core.as(c.get("accountId")).changeRequest(c.req.param("id")));
-    return c.json(body);
-  });
+  app.get(API_PATHS.changeRequest(":id"), (c) =>
+    c.json<ChangeRequestResponse>(json(account(c).changeRequest(c.req.param("id")))),
+  );
 
-  app.post(API_PATHS.withdrawChangeRequest(":id"), async (c) => {
-    const body: WithdrawChangeRequestResponse = await core
-      .as(c.get("accountId"))
-      .withdrawChangeRequest(c.req.param("id"));
-    return c.json(body);
-  });
+  app.post(API_PATHS.withdrawChangeRequest(":id"), async (c) =>
+    c.json<WithdrawChangeRequestResponse>(await account(c).withdrawChangeRequest(c.req.param("id"))),
+  );
 
-  app.delete(API_PATHS.pact(":id"), async (c) => {
-    const body: DeletePactResponse = await core.as(c.get("accountId")).deletePact(c.req.param("id"));
-    return c.json(body);
-  });
+  app.delete(API_PATHS.pact(":id"), async (c) =>
+    c.json<DeletePactResponse>(await account(c).deletePact(c.req.param("id"))),
+  );
 
   // Transport checks only: every photo is checked against the size cap before
   // the core is called, which decides how many photos evidence may have. The
   // body limit stops a huge upload being read at all: past it, some photo
   // must be over the cap, or there are too many.
-  app.post(
-    API_PATHS.evidence(":id"),
-    bodyLimit({
-      maxSize: MAX_EVIDENCE_PHOTOS * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
-      onError: (c) => apiError(c, 400, "photo-too-large"),
+  app.post(API_PATHS.evidence(":id"), photoBodyLimit(MAX_EVIDENCE_PHOTOS), (c) =>
+    receivePhotos(c, "evidence", {
+      parse: () => ({}),
+      send: (_fields, photos): Promise<SubmitEvidenceResponse> => account(c).submitEvidence(c.req.param("id"), photos),
+      id: "evidenceId",
     }),
-    (c) =>
-      receivePhotos(c, "evidence", {
-        parse: () => ({}),
-        send: (_fields, photos): Promise<SubmitEvidenceResponse> =>
-          core.as(c.get("accountId")).submitEvidence(c.req.param("id"), photos),
-        outcome: (body): Record<string, string> =>
-          body.ok ? { outcome: "ok", evidence: body.evidenceId } : { outcome: body.reason },
-      }),
   );
 
   // Transport and shape checks only, as for evidence: the amount must be a
   // number, and there may be at most one screenshot, under the size cap. The
   // core decides the rest, a missing screenshot included.
-  app.post(
-    API_PATHS.payments(":id"),
-    bodyLimit({
-      maxSize: MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
-      onError: (c) => apiError(c, 400, "photo-too-large"),
+  app.post(API_PATHS.payments(":id"), photoBodyLimit(1), (c) =>
+    receivePhotos(c, "payment", {
+      parse: (form, photoCount): RecordPaymentRequest | null => {
+        const amount = form[PAYMENT_AMOUNT_FIELD];
+        const note = form[PAYMENT_NOTE_FIELD];
+        if (typeof amount !== "string" || !/^-?\d+(\.\d+)?$/.test(amount)) return null;
+        if (note !== undefined && typeof note !== "string") return null;
+        if (photoCount > 1) return null;
+        return { amountCents: Number(amount), ...(note !== undefined && { note }) };
+      },
+      send: (fields, [screenshot]): Promise<RecordPaymentResponse> =>
+        account(c).recordPayment({ recipientId: c.req.param("id"), ...fields }, screenshot ?? null),
+      id: "paymentId",
     }),
-    (c) =>
-      receivePhotos(c, "payment", {
-        parse: (form, photoCount): Omit<NewPayment, "recipientId"> | null => {
-          const amount = form[PAYMENT_AMOUNT_FIELD];
-          const note = form[PAYMENT_NOTE_FIELD];
-          if (typeof amount !== "string" || !/^-?\d+(\.\d+)?$/.test(amount)) return null;
-          if (note !== undefined && typeof note !== "string") return null;
-          if (photoCount > 1) return null;
-          return { amountCents: Number(amount), ...(note !== undefined && { note }) };
-        },
-        send: (fields, [screenshot]): Promise<RecordPaymentResponse> =>
-          core.as(c.get("accountId")).recordPayment({ recipientId: c.req.param("id"), ...fields }, screenshot ?? null),
-        outcome: (body): Record<string, string> =>
-          body.ok ? { outcome: "ok", payment: body.paymentId } : { outcome: body.reason },
-      }),
   );
 
   // Transport and shape checks only, as for evidence: the dates and reason
   // must be text. The core decides the rest, how many photos included; the
   // body limit lets one more photo than allowed through, so that's its refusal.
-  app.post(
-    API_PATHS.excuses(":id"),
-    bodyLimit({
-      maxSize: (MAX_EXCUSE_PHOTOS + 1) * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
-      onError: (c) => apiError(c, 400, "photo-too-large"),
+  app.post(API_PATHS.excuses(":id"), photoBodyLimit(MAX_EXCUSE_PHOTOS + 1), (c) =>
+    receivePhotos(c, "excuse", {
+      parse: (form): FileExcuseRequest | null => {
+        const [from, to, reason] = [form[EXCUSE_FROM_FIELD], form[EXCUSE_TO_FIELD], form[EXCUSE_REASON_FIELD]];
+        if (typeof from !== "string" || typeof to !== "string" || typeof reason !== "string") return null;
+        return { from, to, reason };
+      },
+      send: (excuse, photos): Promise<FileExcuseResponse> => account(c).fileExcuse(c.req.param("id"), excuse, photos),
+      id: "excuseId",
     }),
-    (c) =>
-      receivePhotos(c, "excuse", {
-        parse: (form) => {
-          const [from, to, reason] = [form[EXCUSE_FROM_FIELD], form[EXCUSE_TO_FIELD], form[EXCUSE_REASON_FIELD]];
-          if (typeof from !== "string" || typeof to !== "string" || typeof reason !== "string") return null;
-          return { from, to, reason };
-        },
-        send: (excuse, photos): Promise<FileExcuseResponse> =>
-          core.as(c.get("accountId")).fileExcuse(c.req.param("id"), excuse, photos),
-        outcome: (body): Record<string, string> =>
-          body.ok ? { outcome: "ok", excuse: body.excuseId } : { outcome: body.reason },
-      }),
   );
 
   app.get(API_PATHS.excusePreview(":id"), (c) => {
     const [from, to] = [c.req.query("from"), c.req.query("to")];
     if (from === undefined || to === undefined) return apiError(c, 400, "invalid-request");
-    const body: ExcusePreviewResponse = json(
-      core.as(c.get("accountId")).excusePreview(c.req.param("id"), { from, to }),
-    );
-    return c.json(body);
+    const query: ExcusePreviewQuery = { from, to };
+    return c.json<ExcusePreviewResponse>(json(account(c).excusePreview(c.req.param("id"), query)));
   });
 
-  app.get(API_PATHS.excuseOptions(":id"), (c) => {
-    const body: ExcuseOptionsResponse = json(core.as(c.get("accountId")).excuseOptions(c.req.param("id")));
-    return c.json(body);
-  });
+  app.get(API_PATHS.excuseOptions(":id"), (c) =>
+    c.json<ExcuseOptionsResponse>(json(account(c).excuseOptions(c.req.param("id")))),
+  );
 
-  app.get(API_PATHS.excuse(":id"), (c) => {
-    const body: ExcuseResponse = json(core.as(c.get("accountId")).excuse(c.req.param("id")));
-    return c.json(body);
-  });
+  app.get(API_PATHS.excuse(":id"), (c) => c.json<ExcuseResponse>(json(account(c).excuse(c.req.param("id")))));
 
-  app.post(API_PATHS.acceptExcuseRejection(":id"), async (c) => {
-    const body: AcceptExcuseRejectionResponse = await core
-      .as(c.get("accountId"))
-      .acceptExcuseRejection(c.req.param("id"));
-    return c.json(body);
-  });
+  app.post(API_PATHS.acceptExcuseRejection(":id"), async (c) =>
+    c.json<AcceptExcuseRejectionResponse>(await account(c).acceptExcuseRejection(c.req.param("id"))),
+  );
 
   app.post(API_PATHS.acceptMiss(":id", ":date"), async (c) => {
     const date = c.req.param("date");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return apiError(c, 400, "invalid-request");
-    const body: AcceptMissResponse = await core.as(c.get("accountId")).acceptMiss(c.req.param("id"), date);
-    return c.json(body);
+    return c.json<AcceptMissResponse>(await account(c).acceptMiss(c.req.param("id"), date));
   });
 
   // Bytes, not JSON, so a photo the account may not see is a 404, as if it
   // didn't exist. Private: only this browser may cache it.
   app.get(API_PATHS.photo(":id"), async (c) => {
-    const result = await core.as(c.get("accountId")).photo(c.req.param("id"));
+    const result = await account(c).photo(c.req.param("id"));
     if (!result.ok) return apiError(c, 404, "not-found");
     return c.body(result.photo.bytes as Uint8Array<ArrayBuffer>, 200, {
       "Content-Type": result.photo.contentType,
@@ -689,86 +587,62 @@ export function createApp({
     });
   });
 
-  app.get(API_PATHS.reviewQueue, (c) => {
-    const body: ReviewQueueResponse = json(core.as(c.get("accountId")).reviewQueue());
-    return c.json(body);
-  });
+  app.get(API_PATHS.reviewQueue, (c) => c.json<ReviewQueueResponse>(json(account(c).reviewQueue())));
 
   app.post(API_PATHS.decide(":id"), async (c) => {
-    const decision = parseDecision(await c.req.json().catch(() => null));
+    const decision = await readJson(c, parseDecision);
     if (!decision) return apiError(c, 400, "invalid-request");
-    const body: DecideResponse = await core.as(c.get("accountId")).decide(c.req.param("id"), decision);
-    return c.json(body);
+    return c.json<DecideResponse>(await account(c).decide(c.req.param("id"), decision));
   });
 
-  app.get(API_PATHS.waitingOnReply, (c) => {
-    const body: WaitingOnReplyResponse = json(core.as(c.get("accountId")).waitingOnReply());
-    return c.json(body);
-  });
+  app.get(API_PATHS.waitingOnReply, (c) => c.json<WaitingOnReplyResponse>(json(account(c).waitingOnReply())));
 
   app.post(API_PATHS.askOwner(":id"), async (c) => {
-    const request = (await c.req.json().catch(() => null)) as unknown;
-    if (!isRecord(request) || typeof request.question !== "string") return apiError(c, 400, "invalid-request");
-    const body: AskOwnerResponse = await core.as(c.get("accountId")).askOwner(c.req.param("id"), request.question);
-    return c.json(body);
+    const request = await readJson(c, parseAskOwner);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<AskOwnerResponse>(await account(c).askOwner(c.req.param("id"), request.question));
   });
 
   app.post(API_PATHS.reply(":id"), async (c) => {
-    const request = (await c.req.json().catch(() => null)) as unknown;
-    if (!isRecord(request) || typeof request.reply !== "string") return apiError(c, 400, "invalid-request");
-    const body: ReplyResponse = await core.as(c.get("accountId")).reply(c.req.param("id"), request.reply);
-    return c.json(body);
+    const request = await readJson(c, parseReply);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<ReplyResponse>(await account(c).reply(c.req.param("id"), request.reply));
   });
 
-  app.get(API_PATHS.evidenceItem(":id"), (c) => {
-    const body: EvidenceResponse = json(core.as(c.get("accountId")).evidence(c.req.param("id")));
-    return c.json(body);
-  });
+  app.get(API_PATHS.evidenceItem(":id"), (c) => c.json<EvidenceResponse>(json(account(c).evidence(c.req.param("id")))));
 
-  app.get(API_PATHS.paymentItem(":id"), (c) => {
-    const body: PaymentResponse = json(core.as(c.get("accountId")).payment(c.req.param("id")));
-    return c.json(body);
-  });
+  app.get(API_PATHS.paymentItem(":id"), (c) => c.json<PaymentResponse>(json(account(c).payment(c.req.param("id")))));
 
-  app.get(API_PATHS.ledgers, (c) => {
-    const body: LedgersResponse = json(core.as(c.get("accountId")).ledgers());
-    return c.json(body);
-  });
+  app.get(API_PATHS.ledgers, (c) => c.json<LedgersResponse>(json(account(c).ledgers())));
 
-  app.get(API_PATHS.ledger(":id"), (c) => {
-    const body: LedgerResponse = json(core.as(c.get("accountId")).ledger(c.req.param("id")));
-    return c.json(body);
-  });
+  app.get(API_PATHS.ledger(":id"), (c) => c.json<LedgerResponse>(json(account(c).ledger(c.req.param("id")))));
 
-  app.get(API_PATHS.notifications, (c) => {
-    const body: NotificationsResponse = {
-      settings: core.as(c.get("accountId")).notificationSettings(),
+  app.get(API_PATHS.notifications, (c) =>
+    c.json<NotificationsResponse>({
+      settings: account(c).notificationSettings(),
       vapidPublicKey,
-    };
-    return c.json(body);
-  });
+    }),
+  );
 
   app.post(API_PATHS.notifications, async (c) => {
-    const request = parseSetNotificationSetting(await c.req.json().catch(() => null));
+    const request = await readJson(c, parseSetNotificationSetting);
     if (!request) return apiError(c, 400, "invalid-request");
-    const body: SetNotificationSettingResponse = await core
-      .as(c.get("accountId"))
-      .setNotificationSetting(request.setting, request.enabled);
-    return c.json(body);
+    return c.json<SetNotificationSettingResponse>(
+      await account(c).setNotificationSetting(request.setting, request.enabled),
+    );
   });
 
   app.post(API_PATHS.pushSubscriptions, async (c) => {
-    const device = parsePushDevice(await c.req.json().catch(() => null));
+    const device = await readJson(c, parsePushDevice);
     if (!device) return apiError(c, 400, "invalid-request");
-    const body: SavePushSubscriptionResponse = await core.as(c.get("accountId")).savePushSubscription(device);
-    return c.json(body);
+    return c.json<SavePushSubscriptionResponse>(await account(c).savePushSubscription(device));
   });
 
   app.delete(API_PATHS.pushSubscriptions, async (c) => {
-    const request = (await c.req.json().catch(() => null)) as Partial<RemovePushSubscriptionRequest> | null;
-    if (typeof request?.endpoint !== "string") return apiError(c, 400, "invalid-request");
-    await core.as(c.get("accountId")).removePushSubscription(request.endpoint);
-    return c.json({ ok: true });
+    const request = await readJson(c, parseRemovePushSubscription);
+    if (!request) return apiError(c, 400, "invalid-request");
+    await account(c).removePushSubscription(request.endpoint);
+    return c.json<RemovePushSubscriptionResponse>({ ok: true });
   });
 
   app.all("/api/*", (c) => apiError(c, 404, "not-found"));
@@ -824,6 +698,22 @@ function apiError(c: Context, status: 400 | 401 | 404, error: ApiErrorResponse["
 }
 
 /**
+ * The body limit for an upload of up to `photos` photos: past it, some photo
+ * must be over the size cap (or there are too many), so it isn't read at all.
+ */
+function photoBodyLimit(photos: number) {
+  return bodyLimit({
+    maxSize: photos * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
+    onError: (c) => apiError(c, 400, "photo-too-large"),
+  });
+}
+
+/** The request's JSON body as `parse` reads it: null when it isn't JSON or `parse` refuses it. */
+async function readJson<T>(c: Context, parse: Parser<T>): Promise<T | null> {
+  return parse(await c.req.json().catch(() => null));
+}
+
+/**
  * A core result as the client will receive it: c.json turns each Date into
  * its ISO string, and this states that in the type.
  */
@@ -833,144 +723,58 @@ function json<T>(value: T): Json<T> {
 
 // Request bodies are checked for shape only; the core judges their content.
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const schedule = union<Schedule>({
+  "fixed-days": object({ days: arrayOf(oneOf(WEEKDAYS)) }),
+  "weekly-count": object({ target: number }),
+  "one-time": object({ deadline: string, submitAnytime: boolean }),
+});
 
-function isWeekday(value: string): value is Weekday {
-  return (WEEKDAYS as readonly string[]).includes(value);
-}
+const parseSetTimezone = object<SetTimezoneRequest>({ timezone: string });
+const parseConnectAnki = object<ConnectAnkiRequest>({ email: string, password: string });
+const parseNewRecipient = object<AddRecipientRequest>({ name: string });
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
+const parseFirstOccurrence = object<FirstOccurrenceRequest>({
+  schedule,
+  evidenceKind: optional(oneOf(EVIDENCE_KINDS)),
+  inBedBy: optional(string),
+  dueBy: optional(string),
+  startDate: optional(string),
+  editing: optional(string),
+});
 
-function parseSchedule(value: unknown): Schedule | null {
-  if (!isRecord(value)) return null;
-  if (value.kind === "weekly-count") {
-    const { target } = value;
-    return typeof target === "number" ? { kind: "weekly-count", target } : null;
-  }
-  if (value.kind === "one-time") {
-    const { deadline, submitAnytime } = value;
-    return typeof deadline === "string" && typeof submitAnytime === "boolean"
-      ? { kind: "one-time", deadline, submitAnytime }
-      : null;
-  }
-  if (value.kind !== "fixed-days") return null;
-  const { days } = value;
-  if (!isStringArray(days) || !days.every(isWeekday)) return null;
-  return { kind: "fixed-days", days };
-}
+/** The terms a new pact and a change share. */
+const PACT_TERMS: Fields<Omit<NewPact, "evidenceKind">> = {
+  name: string,
+  description: string,
+  schedule,
+  penaltyCents: number,
+  recipientId: string,
+  reviewerIds: arrayOf(string),
+  inBedBy: optional(string),
+  dueBy: optional(string),
+  startDate: optional(string),
+  endDate: optional(string),
+  ankiDeckId: optional(string),
+  reminders: optional(arrayOf(string)),
+};
 
-function parseNewRecipient(value: unknown): AddRecipientRequest | null {
-  if (!isRecord(value) || typeof value.name !== "string") return null;
-  return { name: value.name };
-}
+const parseNewPact = object<CreatePactRequest>({ evidenceKind: oneOf(EVIDENCE_KINDS), ...PACT_TERMS });
+const parsePactChange = object<ChangePactRequest>({ ...PACT_TERMS, note: optional(string) });
+const parseEndPact = object<EndPactRequest>({ note: optional(string) });
 
-/** The optional string fields `keys` of `value`, those it has; null if any isn't a string. */
-function parseOptionalStrings<Key extends string>(
-  value: Record<string, unknown>,
-  keys: readonly Key[],
-): Partial<Record<Key, string>> | null {
-  const found: Partial<Record<Key, string>> = {};
-  for (const key of keys) {
-    const field = value[key];
-    if (field === undefined) continue;
-    if (typeof field !== "string") return null;
-    found[key] = field;
-  }
-  return found;
-}
+const parseDecision = union<DecideRequest>({
+  approve: object({}),
+  reject: object({ reason: string }),
+});
 
-/** A pact's optional times: the in-bed-by and due-by times, and the start and end dates. */
-const PACT_TIMES = ["inBedBy", "dueBy", "startDate", "endDate"] as const;
-
-function isEvidenceKind(value: unknown): value is CreatePactRequest["evidenceKind"] {
-  return value === "camera" || value === "oura" || value === "anki";
-}
-
-/** A pact's reminders, if sent: a list of strings, or undefined for none. False when malformed. */
-function parseReminders(value: Record<string, unknown>): { reminders?: string[] } | false {
-  if (value.reminders === undefined) return {};
-  return isStringArray(value.reminders) ? { reminders: value.reminders } : false;
-}
-
-function parseNewPact(value: unknown): CreatePactRequest | null {
-  if (!isRecord(value)) return null;
-  const { evidenceKind, name, description, penaltyCents, recipientId, reviewerIds } = value;
-  const schedule = parseSchedule(value.schedule);
-  const times = parseOptionalStrings(value, [...PACT_TIMES, "ankiDeckId"]);
-  const reminders = parseReminders(value);
-  if (
-    !isEvidenceKind(evidenceKind) ||
-    !times ||
-    !reminders ||
-    typeof name !== "string" ||
-    typeof description !== "string" ||
-    !schedule ||
-    typeof penaltyCents !== "number" ||
-    !Number.isSafeInteger(penaltyCents) ||
-    typeof recipientId !== "string" ||
-    !isStringArray(reviewerIds)
-  ) {
-    return null;
-  }
-  return { evidenceKind, name, description, schedule, penaltyCents, recipientId, reviewerIds, ...times, ...reminders };
-}
-
-function parsePactChange(value: unknown): ChangePactRequest | null {
-  if (!isRecord(value)) return null;
-  const { name, description, penaltyCents, recipientId, reviewerIds, note } = value;
-  const schedule = parseSchedule(value.schedule);
-  const times = parseOptionalStrings(value, [...PACT_TIMES, "ankiDeckId"]);
-  const reminders = parseReminders(value);
-  if (
-    !times ||
-    !reminders ||
-    (note !== undefined && typeof note !== "string") ||
-    typeof name !== "string" ||
-    typeof description !== "string" ||
-    !schedule ||
-    typeof penaltyCents !== "number" ||
-    !Number.isSafeInteger(penaltyCents) ||
-    typeof recipientId !== "string" ||
-    !isStringArray(reviewerIds)
-  ) {
-    return null;
-  }
-  return {
-    name,
-    description,
-    schedule,
-    penaltyCents,
-    recipientId,
-    reviewerIds,
-    ...times,
-    ...reminders,
-    ...(note !== undefined && { note }),
-  };
-}
-
-function parseDecision(value: unknown): DecideRequest | null {
-  if (!isRecord(value)) return null;
-  if (value.kind === "approve") return { kind: "approve" };
-  if (value.kind === "reject" && typeof value.reason === "string") return { kind: "reject", reason: value.reason };
-  return null;
-}
-
-function parseSetNotificationSetting(value: unknown): SetNotificationSettingRequest | null {
-  if (!isRecord(value) || typeof value.enabled !== "boolean") return null;
-  const setting = NOTIFICATION_SETTINGS.find((known) => known === value.setting);
-  return setting ? { setting, enabled: value.enabled } : null;
-}
-
-function parsePushDevice(value: unknown): SavePushSubscriptionRequest | null {
-  if (!isRecord(value)) return null;
-  const { endpoint, p256dh, auth } = value;
-  if (typeof endpoint !== "string" || typeof p256dh !== "string" || typeof auth !== "string") return null;
-  return { endpoint, p256dh, auth };
-}
+const parseAskOwner = object<AskOwnerRequest>({ question: string });
+const parseReply = object<ReplyRequest>({ reply: string });
+const parseSetNotificationSetting = object<SetNotificationSettingRequest>({
+  setting: oneOf(NOTIFICATION_SETTINGS),
+  enabled: boolean,
+});
+const parsePushDevice = object<SavePushSubscriptionRequest>({ endpoint: string, p256dh: string, auth: string });
+const parseRemovePushSubscription = object<RemovePushSubscriptionRequest>({ endpoint: string });
 
 function readIndexHtml(staticDir: string): string | null {
   try {

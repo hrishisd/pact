@@ -12,6 +12,10 @@
 // "Wed+1 18:00" is the next week's Wednesday (14 Jan). Any ISO 8601 string
 // with an offset or "Z" is accepted as is. The clock starts at "Mon 09:00".
 //
+// DATES. A day on its own names that day's date in the reference week, with
+// the same "+N": `s.date("Tue")` is "2026-01-06", `s.date("Wed+1")` is
+// "2026-01-14".
+//
 // NAMES. `s.signIn("owner")` signs in as owner@example.test, display name
 // "owner". The operator (whose first sign-in may create an account without
 // an invite) is "owner".
@@ -20,13 +24,21 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { onTestFinished } from "vitest";
-import { zonedWallTimeToInstant } from "../calendar.ts";
+import { wallTime } from "../calendar.ts";
+import { addDays } from "../../shared/calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
-import type { AccountId, SignInResult } from "../../shared/types.ts";
+import type { AccountId, ChangePactResult, LocalDate, SignInResult } from "../../shared/types.ts";
 import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
 
 /** A named account. Every AccountView query and command, plus its id. */
 export type AccountHandle = AccountView & { readonly id: AccountId; readonly name: string };
+
+/** The id of the change request a sent change became; throws if it became none. */
+export function changeRequestIdOf(result: ChangePactResult): string {
+  if (!result.ok || result.outcome.kind !== "needs-approval")
+    throw new Error(`no change request: ${JSON.stringify(result)}`);
+  return result.outcome.changeRequestId;
+}
 
 /** As on the invite page: sign in carrying the invite link's token. */
 interface SignInOptions {
@@ -52,6 +64,8 @@ export interface Scenario {
 
   /** The instant a time string names (see TIME STRINGS above). */
   at(when: string): Date;
+  /** The local date a day names, "Tue" or "Wed+1" (see DATES above). */
+  date(day: string): LocalDate;
   /** Signs in as `name`; throws if the sign-in is refused. */
   signIn(name: string, options?: SignInOptions): Promise<AccountHandle>;
   /** Signs in as `name` and returns the core's answer, refused or not. */
@@ -71,7 +85,7 @@ export interface Scenario {
 }
 
 const TIMEZONE = "America/New_York";
-const REFERENCE_WEEK_MONDAY = { year: 2026, month: 1, day: 5 } as const;
+const REFERENCE_WEEK_MONDAY = "2026-01-05";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const OPERATOR = "owner";
 
@@ -137,6 +151,7 @@ export function scenario(): Scenario {
     logs,
     dbPath,
     at,
+    date: referenceDate,
     attemptSignIn: (name, options) => core.signIn({ email: emailFor(name), name }, options),
     async signIn(name, options) {
       const result = await s.attemptSignIn(name, options);
@@ -172,16 +187,26 @@ function emailFor(name: string): string {
 /** Reads a time string as described under TIME STRINGS at the top of this file. */
 function at(when: string): Date {
   if (/^\d{4}-\d{2}-\d{2}T.*(Z|[+-]\d{2}:\d{2})$/.test(when)) return new Date(when);
-  const match = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:\+(\d+))? (\d{2}):(\d{2})$/.exec(when);
-  if (!match) throw new Error(`unreadable scenario time "${when}" (want e.g. "Mon 18:00" or "Wed+1 18:00")`);
-  const [, day, weeks, hh, mm] = match as unknown as [
-    string,
-    (typeof DAYS)[number],
-    string | undefined,
-    string,
-    string,
-  ];
-  const { year, month, day: monday } = REFERENCE_WEEK_MONDAY;
-  const dayOfMonth = monday + 7 * Number(weeks ?? 0) + DAYS.indexOf(day);
-  return zonedWallTimeToInstant(year, month, dayOfMonth, Number(hh), Number(mm), TIMEZONE);
+  const match = /^(\S+) (\d{2}):(\d{2})$/.exec(when);
+  const date = match && readDay(match[1]!);
+  if (!date) throw new Error(`unreadable scenario time "${when}" (want e.g. "Mon 18:00" or "Wed+1 18:00")`);
+  return wallTime(date, Number(match[2]), Number(match[3]), TIMEZONE);
+}
+
+/**
+ * The local date a day names, as described under DATES at the top of this
+ * file. Exported for the helpers that have no scenario at hand.
+ */
+export function referenceDate(day: string): LocalDate {
+  const date = readDay(day);
+  if (!date) throw new Error(`unreadable scenario day "${day}" (want e.g. "Tue" or "Wed+1")`);
+  return date;
+}
+
+/** "Tue" or "Wed+1" as a reference-week date; undefined if unreadable. */
+function readDay(day: string): LocalDate | undefined {
+  const match = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:\+(\d+))?$/.exec(day);
+  if (!match) return undefined;
+  const [, name, weeks] = match as unknown as [string, (typeof DAYS)[number], string | undefined];
+  return addDays(REFERENCE_WEEK_MONDAY, 7 * Number(weeks ?? 0) + DAYS.indexOf(name));
 }

@@ -10,10 +10,11 @@
 # 2. Watches that run, which ends with the deploy.
 # 3. Polls /health until it reports the commit.
 #
-# Exits 0 once /health reports the commit; 1 on a CI failure, on a time limit,
-# or when /health reports another commit; 2 on a bad argument. RUN_TIMEOUT and
-# HEALTH_TIMEOUT (seconds) change the limits on steps 1 and 3; POLL_SECONDS the
-# gap between their polls. Step 2 has no limit of its own: it lasts as long as CI.
+# Exits 0 once /health reports the commit; 1 on a CI failure or on a time
+# limit; 2 on a bad argument. While /health reports another commit, step 3
+# keeps polling until its limit. RUN_TIMEOUT and HEALTH_TIMEOUT (seconds) change
+# the limits on steps 1 and 3; POLL_SECONDS the gap between their polls. Step 2
+# has no limit of its own: it lasts as long as CI.
 
 set -euo pipefail
 

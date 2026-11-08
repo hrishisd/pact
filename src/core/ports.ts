@@ -1,7 +1,8 @@
 // The five ports outside the Pact core. Each has a production adapter
-// (adapters.ts, photo-stores.ts, web-push.ts) and a fake for tests (testing/fakes.ts).
+// (adapters.ts, oura.ts, anki.ts, photo-stores.ts, web-push.ts) and a fake for
+// tests (testing/fakes.ts).
 
-import type { AccountId, AnkiCounts, AnkiDeck, PushDevice } from "../shared/types.ts";
+import type { AccountId, AnkiCounts, AnkiDeck, PushDevice, ReviewItem } from "../shared/types.ts";
 
 export type { AnkiCounts, AnkiDeck, PushDevice };
 
@@ -98,22 +99,52 @@ export type NotificationKind =
   | "overdue-bill"
   /** To the owner: Oura refused its tokens, or at 15:00 a bedtime night still has no sleep data. */
   | "connection-problem";
-export type NotificationChannel = "push";
 
-export interface NotificationPayload {
-  /** What the notification says, and the app path it opens. */
+/** What a notification says, and the app path it opens: all a push carries. */
+interface NotificationText {
   title: string;
   body: string;
   url: string;
-  [detail: string]: unknown;
 }
 
-export interface Notification {
-  recipient: AccountId;
-  kind: NotificationKind;
-  channel: NotificationChannel;
-  payload: NotificationPayload;
+/** What a reviewer decided, on a "...-decided" notification; a rejection has its reason. */
+type DecisionDetails = { decision: "approved" } | { decision: "rejected"; reason: string };
+
+/**
+ * By kind, what a notification is about, stored beside its text. Never
+ * pushed: they tell notifications apart in the outbox and in tests.
+ */
+interface NotificationDetails {
+  "operator-alert":
+    { alert: "reminders-dropped"; dropped: number } | { alert: "database-restored"; lastTick: string | null };
+  "picked-as-reviewer": { pactId: string };
+  "review-item":
+    | { itemKind: "evidence" | "excuse" | "change-request"; itemId: string; pactId: string }
+    | { itemKind: "payment"; itemId: string; recipientId: string };
+  "evidence-decided": { itemKind: "evidence"; itemId: string; pactId: string } & DecisionDetails;
+  "excuse-decided": { itemKind: "excuse"; itemId: string; pactId: string } & DecisionDetails;
+  "payment-decided": { itemKind: "payment"; itemId: string; recipientId: string } & DecisionDetails;
+  "change-request-decided": { itemKind: "change-request"; itemId: string; pactId: string } & DecisionDetails;
+  "reviewer-question": { itemKind: ReviewItem["kind"]; itemId: string };
+  "owner-replied": { itemKind: ReviewItem["kind"]; itemId: string };
+  /** `occurrenceDate`: "YYYY-MM-DD", the day judged. */
+  "missed-occurrence": { pactId: string; occurrenceDate: string };
+  "new-bill": { recipientId: string };
+  /** `occurrenceDate`: "YYYY-MM-DD", the day the reminder is about. */
+  reminder: { pactId: string; occurrenceDate: string };
+  "overdue-bill": { recipientId: string };
+  /** `occurrenceDate`: "YYYY-MM-DD", the night with no sleep data; none when the service needs reconnecting. */
+  "connection-problem": { occurrenceDate?: string };
 }
+
+/** A notification of kind `K`. */
+export interface NotificationOf<K extends NotificationKind> {
+  recipient: AccountId;
+  kind: K;
+  payload: NotificationText & NotificationDetails[K];
+}
+
+export type Notification = { [K in NotificationKind]: NotificationOf<K> }[NotificationKind];
 
 export interface DeliveryReport {
   /** Endpoints of devices the push service says are gone; the core removes them. */

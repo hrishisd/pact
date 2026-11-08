@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { UnknownAccountError } from "./rows.ts";
 import { scenario } from "./testing/scenario.ts";
 
 describe("sign-in", () => {
@@ -65,5 +66,15 @@ describe("sign-in", () => {
     // The operator's first sign-in still creates the account: the lookup changed nothing.
     const owner = await s.signIn("owner");
     expect(s.core.accountIdForEmail("owner@example.test")).toBe(owner.id);
+  });
+
+  test("acting as an account that doesn't exist throws, for queries and commands alike", async () => {
+    const s = scenario();
+    const nobody = s.core.as("no-such-account");
+
+    expect(() => nobody.pacts()).toThrow(UnknownAccountError);
+    expect(() => nobody.pact("no-such-pact")).toThrow(UnknownAccountError);
+    await expect(nobody.setTimezone("Europe/London")).rejects.toThrow(UnknownAccountError);
+    await expect(nobody.submitEvidence("no-such-pact", [])).rejects.toThrow(UnknownAccountError);
   });
 });

@@ -6,7 +6,7 @@ import type { NotificationSetting, NotificationSettingState } from "../shared/ty
 import { api, failureText } from "./api.ts";
 import { AddIcon, ShareIcon } from "./icons.tsx";
 import { deviceName, isIos, type Push } from "./push.ts";
-import { useLoad } from "./ui.tsx";
+import { loadFailure, loadedData, useLoad, useSend } from "./ui.tsx";
 
 const ALERT_CLEARED_KEY = "pact.notifications-alert-cleared";
 
@@ -82,25 +82,18 @@ export function NotificationsPage({ push, onDone }: { push: Push; onDone: () => 
 }
 
 function Guide({ push: { state, turnOn }, onDone }: { push: Push; onDone: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onTurnOn = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await turnOn();
-    } catch (cause) {
+  const {
+    busy,
+    error,
+    run: onTurnOn,
+  } = useSend(
+    () => turnOn(),
+    (cause) =>
       // The browser's own failures aren't the server's: say so, not "on our side".
-      setError(
-        cause instanceof DOMException
-          ? `Your ${deviceName()} couldn't turn them on. Try again.`
-          : `Couldn't turn them on. ${failureText(cause, "Check your connection and try again.")}`,
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
+      cause instanceof DOMException
+        ? `Your ${deviceName()} couldn't turn them on. Try again.`
+        : `Couldn't turn them on. ${failureText(cause, "Check your connection and try again.")}`,
+  );
 
   switch (state) {
     case "checking":
@@ -147,7 +140,7 @@ function Guide({ push: { state, turnOn }, onDone }: { push: Push; onDone: () => 
             </p>
           </div>
           {error && <p className="error">{error}</p>}
-          <button className="btn primary block" disabled={busy} onClick={() => void onTurnOn()}>
+          <button className="btn primary block" disabled={busy} onClick={() => onTurnOn()}>
             Turn on notifications
           </button>
         </>
@@ -209,7 +202,9 @@ function Guide({ push: { state, turnOn }, onDone }: { push: Push; onDone: () => 
 
 /** The profile's section: this device's state, then one switch per kind, grouped in one block. */
 export function NotificationsSection({ push: { state }, onSetUp }: { push: Push; onSetUp: () => void }) {
-  const { data, failed } = useLoad(api.notifications);
+  const { state: load } = useLoad(api.notifications);
+  const data = loadedData(load);
+  const failed = loadFailure(load);
   const [changed, setChanged] = useState<NotificationSettingState[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const settings = changed ?? data?.settings ?? null;

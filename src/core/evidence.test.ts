@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 describe("submitting evidence", () => {
   test("on Monday, for a Mon/Wed/Fri pact, moves the pact from To do to Waiting for approval", async () => {
@@ -23,7 +24,7 @@ describe("submitting evidence", () => {
           id: submitted.ok && submitted.evidenceId,
           pactId: gym,
           name: "Gym",
-          occurrenceDate: "2026-01-05",
+          occurrenceDate: s.date("Mon"),
           submittedAt: s.at("Mon 18:00"),
         },
       ],
@@ -37,12 +38,10 @@ describe("submitting evidence", () => {
     const gym = await createPact("Gym", MON_WED_FRI);
 
     s.setClockTo("Mon 18:00");
-    const submitted = await owner.submitEvidence(gym, [photo()]);
-    if (!submitted.ok) throw new Error(submitted.reason);
+    const submitted = ok(await owner.submitEvidence(gym, [photo()]));
 
     const reviewItem = {
       kind: "review-item",
-      channel: "push",
       payload: {
         itemKind: "evidence",
         itemId: submitted.evidenceId,
@@ -109,6 +108,18 @@ describe("evidence is refused", () => {
     };
 
     expect(await owner.submitEvidence(gym, [photo()])).toEqual({ ok: false, reason: "not-open" });
+    expect(owner.today().waiting).toEqual([]);
+    expect(s.notifier.sentTo(reviewer)).toEqual([]);
+  });
+
+  test("when storing a photo fails: the submit fails and writes nothing", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    s.photoStore.store = () => Promise.reject(new Error("upload failed"));
+
+    await expect(owner.submitEvidence(gym, [photo()])).rejects.toThrow("upload failed");
     expect(owner.today().waiting).toEqual([]);
     expect(s.notifier.sentTo(reviewer)).toEqual([]);
   });

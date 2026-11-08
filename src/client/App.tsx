@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { inviteTokenFromPath, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { ChangePact } from "./ChangePact.tsx";
@@ -14,13 +14,13 @@ import { InvitePage } from "./InvitePage.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
 import { forgetThisDevice, usePush, type Push } from "./push.ts";
 import { LedgerPage, Ledgers } from "./Ledgers.tsx";
-import { useNavigation, type TabId } from "./navigation.ts";
+import { inviteTokenFromPath, useNavigation, type Page, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
 import { PaymentPage } from "./PaymentPage.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
-import { Centered, Sheet } from "./ui.tsx";
+import { Centered, Sheet, useSend } from "./ui.tsx";
 
 type Session =
   | { kind: "loading" }
@@ -165,7 +165,7 @@ function ConfirmTimezone({
       </div>
       {error && <p className="error">{error}</p>}
       <div className="stack">
-        <button className="btn primary block" disabled={saving} onClick={() => void save(zone)}>
+        <button className="btn primary block" disabled={saving} onClick={() => save(zone)}>
           {picking ? "Use this timezone" : "Confirm"}
         </button>
         {!picking && (
@@ -195,32 +195,32 @@ function TimezoneSelect({ value, onChange }: { value: string; onChange: (zone: s
 }
 
 function useSaveTimezone(profile: MeResponse, onSaved: (p: ConfirmedProfile) => void) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const save = async (timezone: string) => {
-    setSaving(true);
-    setError(null);
-    try {
+  const { busy, error, run } = useSend(
+    async (timezone: string) => {
       const result = await api.setTimezone(timezone);
-      if (result.ok) onSaved({ ...profile, timezone: result.timezone });
-      else setError("That timezone isn't recognised. Pick one from the list.");
-    } catch (error) {
-      setError(`Couldn't save. ${failureText(error, "Check your connection and try again.")}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-  return { save, saving, error };
+      if (!result.ok) return "That timezone isn't recognised. Pick one from the list.";
+      onSaved({ ...profile, timezone: result.timezone });
+    },
+    (error) => `Couldn't save. ${failureText(error, "Check your connection and try again.")}`,
+  );
+  return { save: run, saving: busy, error };
 }
 
 // ---------- App shell ----------
 
-const TABS: { id: TabId; label: string; Icon: typeof TodayIcon }[] = [
-  { id: "today", label: "Today", Icon: TodayIcon },
-  { id: "pacts", label: "Pacts", Icon: PactsIcon },
-  { id: "review", label: "Review", Icon: ReviewIcon },
-  { id: "ledgers", label: "Ledgers", Icon: LedgersIcon },
-];
+const TABS: Record<TabId, { label: string; Icon: typeof TodayIcon }> = {
+  today: { label: "Today", Icon: TodayIcon },
+  pacts: { label: "Pacts", Icon: PactsIcon },
+  review: { label: "Review", Icon: ReviewIcon },
+  ledgers: { label: "Ledgers", Icon: LedgersIcon },
+};
+
+/** What the shell shows: the header's title (and subtitle), and the screen under it. */
+interface View {
+  title: string;
+  subtitle?: string;
+  body: ReactNode;
+}
 
 function Shell({
   profile,
@@ -240,6 +240,7 @@ function Shell({
   const [pactNames, pactLoaded] = useLearntNames();
   const [ledgerNames, ledgerLoaded] = useLearntNames();
 
+  const openProfile = () => setProfileOpen(true);
   const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
   const openLedger = (recipientId: string, name: string) => nav.push({ kind: "ledger", recipientId, name });
   const openExcuse = (id: string) => nav.push({ kind: "excuse", id });
@@ -252,29 +253,137 @@ function Shell({
     nav.push({ kind: "notifications" });
   };
 
-  let title: string;
-  let subtitle = "";
-  if (page?.kind === "pact") title = pactNames[page.id] ?? page.name ?? "";
-  else if (page?.kind === "create") title = "New pact";
-  else if (page?.kind === "edit-pact") title = "Edit pact";
-  else if (page?.kind === "change-pact") title = "Request change";
-  else if (page?.kind === "change-request") title = "Change request";
-  else if (page?.kind === "ledger") title = ledgerNames[page.recipientId] ?? page.name ?? "";
-  else if (page?.kind === "excuse") title = "Excuse";
-  else if (page?.kind === "evidence") title = "Evidence";
-  else if (page?.kind === "payment") title = "Payment";
-  else if (page?.kind === "notifications") title = "Notifications";
-  else {
-    title = TABS.find((t) => t.id === tab)!.label;
-    if (tab === "today") {
-      subtitle = new Intl.DateTimeFormat("en-US", {
-        timeZone: profile.timezone,
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      }).format(new Date());
+  const pageView = (page: Page): View => {
+    switch (page.kind) {
+      case "pact":
+        return {
+          title: pactNames[page.id] ?? page.name ?? "",
+          body: (
+            <PactPage
+              key={page.id}
+              pactId={page.id}
+              timezone={profile.timezone}
+              onLoaded={pactLoaded}
+              onEdit={() => nav.push({ kind: "edit-pact", id: page.id })}
+              onDeleted={nav.back}
+              onRequestChange={() => nav.push({ kind: "change-pact", id: page.id })}
+              onOpenExcuse={openExcuse}
+              onOpenChangeRequest={openChangeRequest}
+              onInvite={openProfile}
+            />
+          ),
+        };
+      case "create":
+        return {
+          title: "New pact",
+          body: (
+            <CreatePact
+              connections={{
+                ouraConnected: profile.connections.some((connection) => connection.service === "oura"),
+                ouraAvailable: profile.ouraAvailable,
+                ankiConnected: profile.connections.some((connection) => connection.service === "anki"),
+                ankiAvailable: profile.ankiAvailable,
+              }}
+              onCancel={nav.back}
+              onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
+              onInvite={openProfile}
+            />
+          ),
+        };
+      case "edit-pact":
+        return {
+          title: "Edit pact",
+          body: <EditPact key={page.id} pactId={page.id} onDone={nav.back} onInvite={openProfile} />,
+        };
+      case "change-pact":
+        return {
+          title: "Request change",
+          body: <ChangePact key={page.id} pactId={page.id} onDone={nav.back} onInvite={openProfile} />,
+        };
+      case "change-request":
+        return {
+          title: "Change request",
+          body: (
+            <ChangeRequestPage
+              key={page.id}
+              changeRequestId={page.id}
+              timezone={profile.timezone}
+              onOpenPact={openPact}
+            />
+          ),
+        };
+      case "ledger":
+        return {
+          title: ledgerNames[page.recipientId] ?? page.name ?? "",
+          body: (
+            <LedgerPage
+              key={page.recipientId}
+              recipientId={page.recipientId}
+              timezone={profile.timezone}
+              onLoaded={ledgerLoaded}
+              onOpenPact={openPact}
+            />
+          ),
+        };
+      case "excuse":
+        return {
+          title: "Excuse",
+          body: <ExcusePage key={page.id} excuseId={page.id} timezone={profile.timezone} onOpenPact={openPact} />,
+        };
+      case "evidence":
+        return {
+          title: "Evidence",
+          body: <EvidencePage key={page.id} evidenceId={page.id} timezone={profile.timezone} onOpenPact={openPact} />,
+        };
+      case "payment":
+        return {
+          title: "Payment",
+          body: <PaymentPage key={page.id} paymentId={page.id} timezone={profile.timezone} onOpenLedger={openLedger} />,
+        };
+      case "notifications":
+        return { title: "Notifications", body: <NotificationsPage push={push} onDone={nav.back} /> };
     }
-  }
+  };
+
+  const tabView = (tab: TabId): View => {
+    const { label } = TABS[tab];
+    switch (tab) {
+      case "today":
+        return {
+          title: label,
+          subtitle: new Intl.DateTimeFormat("en-US", {
+            timeZone: profile.timezone,
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          }).format(new Date()),
+          body: (
+            <>
+              <NotificationsAlert push={push} onSetUp={openNotifications} />
+              <Today
+                timezone={profile.timezone}
+                onOpenPact={openPact}
+                onOpenLedger={openLedger}
+                onOpenExcuse={openExcuse}
+                onOpenChangeRequest={openChangeRequest}
+                onOpenEvidence={openEvidence}
+                onOpenPayment={openPayment}
+                onCreate={create}
+                onInvite={openProfile}
+              />
+            </>
+          ),
+        };
+      case "pacts":
+        return { title: label, body: <Pacts onOpenPact={openPact} onCreate={create} /> };
+      case "review":
+        return { title: label, body: <Review timezone={profile.timezone} onQueue={reviewCount.set} /> };
+      case "ledgers":
+        return { title: label, body: <Ledgers timezone={profile.timezone} onOpenLedger={openLedger} /> };
+    }
+  };
+
+  const { title, subtitle = "", body } = page ? pageView(page) : tabView(tab);
 
   return (
     <div className="app">
@@ -288,107 +397,34 @@ function Shell({
           {title}
           <span className="sub">{subtitle}</span>
         </h1>
-        <button className="avatar" aria-label="Profile" onClick={() => setProfileOpen(true)}>
+        <button className="avatar" aria-label="Profile" onClick={openProfile}>
           {initial(profile.name)}
         </button>
       </header>
-      <main className="scroll gut">
-        {page?.kind === "pact" && (
-          <PactPage
-            key={page.id}
-            pactId={page.id}
-            timezone={profile.timezone}
-            onLoaded={pactLoaded}
-            onEdit={() => nav.push({ kind: "edit-pact", id: page.id })}
-            onDeleted={nav.back}
-            onRequestChange={() => nav.push({ kind: "change-pact", id: page.id })}
-            onOpenExcuse={openExcuse}
-            onOpenChangeRequest={openChangeRequest}
-            onInvite={() => setProfileOpen(true)}
-          />
-        )}
-        {page?.kind === "change-pact" && (
-          <ChangePact key={page.id} pactId={page.id} onDone={nav.back} onInvite={() => setProfileOpen(true)} />
-        )}
-        {page?.kind === "change-request" && (
-          <ChangeRequestPage
-            key={page.id}
-            changeRequestId={page.id}
-            timezone={profile.timezone}
-            onOpenPact={openPact}
-          />
-        )}
-        {page?.kind === "edit-pact" && (
-          <EditPact key={page.id} pactId={page.id} onDone={nav.back} onInvite={() => setProfileOpen(true)} />
-        )}
-        {page?.kind === "create" && (
-          <CreatePact
-            ouraConnected={profile.connections.some((connection) => connection.service === "oura")}
-            ouraAvailable={profile.ouraAvailable}
-            ankiConnected={profile.connections.some((connection) => connection.service === "anki")}
-            ankiAvailable={profile.ankiAvailable}
-            onCancel={nav.back}
-            onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
-            onInvite={() => setProfileOpen(true)}
-          />
-        )}
-        {page?.kind === "notifications" && <NotificationsPage push={push} onDone={nav.back} />}
-        {!page && tab === "today" && <NotificationsAlert push={push} onSetUp={openNotifications} />}
-        {!page && tab === "today" && (
-          <Today
-            timezone={profile.timezone}
-            onOpenPact={openPact}
-            onOpenLedger={openLedger}
-            onOpenExcuse={openExcuse}
-            onOpenChangeRequest={openChangeRequest}
-            onOpenEvidence={openEvidence}
-            onOpenPayment={openPayment}
-            onCreate={create}
-            onInvite={() => setProfileOpen(true)}
-          />
-        )}
-        {!page && tab === "pacts" && <Pacts onOpenPact={openPact} onCreate={create} />}
-        {!page && tab === "review" && <Review timezone={profile.timezone} onQueue={reviewCount.set} />}
-        {page?.kind === "ledger" && (
-          <LedgerPage
-            key={page.recipientId}
-            recipientId={page.recipientId}
-            timezone={profile.timezone}
-            onLoaded={ledgerLoaded}
-            onOpenPact={openPact}
-          />
-        )}
-        {page?.kind === "excuse" && (
-          <ExcusePage key={page.id} excuseId={page.id} timezone={profile.timezone} onOpenPact={openPact} />
-        )}
-        {page?.kind === "evidence" && (
-          <EvidencePage key={page.id} evidenceId={page.id} timezone={profile.timezone} onOpenPact={openPact} />
-        )}
-        {page?.kind === "payment" && (
-          <PaymentPage key={page.id} paymentId={page.id} timezone={profile.timezone} onOpenLedger={openLedger} />
-        )}
-        {!page && tab === "ledgers" && <Ledgers timezone={profile.timezone} onOpenLedger={openLedger} />}
-      </main>
+      <main className="scroll gut">{body}</main>
       <nav className="tabbar" aria-label="Main">
-        {TABS.map(({ id, label, Icon }) => (
-          // The current tab stays marked while a page is pushed on top of it.
-          <button
-            key={id}
-            className="tab"
-            aria-current={tab === id ? (page ? "true" : "page") : undefined}
-            onClick={() => nav.selectTab(id)}
-          >
-            <span className="tile">
-              <Icon />
-              {label}
-              {id === "review" && reviewCount.value > 0 && (
-                <span className="badge" aria-label={`${reviewCount.value} to review`}>
-                  {reviewCount.value}
-                </span>
-              )}
-            </span>
-          </button>
-        ))}
+        {(Object.keys(TABS) as TabId[]).map((id) => {
+          const { label, Icon } = TABS[id];
+          return (
+            // The current tab stays marked while a page is pushed on top of it.
+            <button
+              key={id}
+              className="tab"
+              aria-current={tab === id ? (page ? "true" : "page") : undefined}
+              onClick={() => nav.selectTab(id)}
+            >
+              <span className="tile">
+                <Icon />
+                {label}
+                {id === "review" && reviewCount.value > 0 && (
+                  <span className="badge" aria-label={`${reviewCount.value} to review`}>
+                    {reviewCount.value}
+                  </span>
+                )}
+              </span>
+            </button>
+          );
+        })}
       </nav>
       {profileOpen && (
         <ProfileSheet
@@ -480,7 +516,7 @@ function ProfileSheet({
             <TimezoneSelect value={zone} onChange={setZone} />
             {error && <p className="error">{error}</p>}
             <div className="row2">
-              <button className="btn primary" disabled={saving} onClick={() => void save(zone)}>
+              <button className="btn primary" disabled={saving} onClick={() => save(zone)}>
                 Save
               </button>
               <button className="btn" onClick={() => setChanging(false)}>
@@ -540,7 +576,10 @@ function ConnectionsSection({
   );
 }
 
-/** What each service's row says, and how it disconnects. */
+/**
+ * What each service's row says, how it disconnects, and how it reconnects:
+ * Oura through its own sign-in page, AnkiWeb with a form right here.
+ */
 const SERVICES = {
   oura: {
     name: "Oura Ring",
@@ -549,6 +588,7 @@ const SERVICES = {
     icon: <RingIcon />,
     iconClass: "k-ring",
     disconnect: () => api.disconnectOura(),
+    reconnect: { kind: "link", href: OURA_RECONNECT_PATH },
   },
   anki: {
     name: "AnkiWeb",
@@ -557,6 +597,7 @@ const SERVICES = {
     icon: <CardsIcon />,
     iconClass: "k-anki",
     disconnect: () => api.disconnectAnki(),
+    reconnect: { kind: "form" },
   },
 } as const;
 
@@ -569,26 +610,23 @@ function ConnectionRow({
   timezone: string;
   onProfile: (p: MeResponse) => void;
 }) {
-  const [asking, setAsking] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Asking: Disconnect's warning is open. Reconnecting: AnkiWeb's sign-in form is.
+  const [mode, setMode] = useState<"idle" | "asking" | "reconnecting">("idle");
   const service = SERVICES[connection.service];
-  const disconnect = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      onProfile(await service.disconnect());
-    } catch (failure) {
-      setError(`Couldn't disconnect. ${failureText(failure, "Check your connection and try again.")}`);
-      setBusy(false);
-    }
-  };
+  const {
+    busy,
+    error,
+    setError,
+    run: disconnect,
+  } = useSend(
+    async () => onProfile(await service.disconnect()),
+    (failure) => `Couldn't disconnect. ${failureText(failure, "Check your connection and try again.")}`,
+  );
   const reconnected = async () => {
     setError(null);
     try {
       onProfile(await api.me());
-      setReconnecting(false);
+      setMode("idle");
     } catch (failure) {
       setError(`Reconnected, but couldn't reload. ${failureText(failure, "Reopen Pact.")}`);
     }
@@ -612,7 +650,7 @@ function ConnectionRow({
           )}
         </div>
       </div>
-      {asking ? (
+      {mode === "asking" ? (
         <div className="alert amber" role="status">
           <span>
             {n > 0 ? (
@@ -627,29 +665,29 @@ function ConnectionRow({
             )}
           </span>
           <div className="row2">
-            <button className="btn sm" disabled={busy} onClick={() => setAsking(false)}>
+            <button className="btn sm" disabled={busy} onClick={() => setMode("idle")}>
               Keep connected
             </button>
-            <button className="btn sm danger" disabled={busy} onClick={() => void disconnect()}>
+            <button className="btn sm danger" disabled={busy} onClick={() => disconnect()}>
               {busy ? "Disconnecting…" : "Disconnect"}
             </button>
           </div>
         </div>
-      ) : reconnecting ? (
-        <AnkiReconnectForm onReconnected={() => void reconnected()} onCancel={() => setReconnecting(false)} />
+      ) : mode === "reconnecting" ? (
+        <AnkiReconnectForm onReconnected={() => void reconnected()} onCancel={() => setMode("idle")} />
       ) : (
         <div className="row2">
-          {connection.status === "needs-reconnecting" && connection.service === "oura" && (
-            <a className="btn sm primary" href={OURA_RECONNECT_PATH}>
-              Reconnect
-            </a>
-          )}
-          {connection.status === "needs-reconnecting" && connection.service === "anki" && (
-            <button className="btn sm primary" onClick={() => setReconnecting(true)}>
-              Reconnect
-            </button>
-          )}
-          <button className="btn sm" onClick={() => setAsking(true)}>
+          {connection.status === "needs-reconnecting" &&
+            (service.reconnect.kind === "link" ? (
+              <a className="btn sm primary" href={service.reconnect.href}>
+                Reconnect
+              </a>
+            ) : (
+              <button className="btn sm primary" onClick={() => setMode("reconnecting")}>
+                Reconnect
+              </button>
+            ))}
+          <button className="btn sm" onClick={() => setMode("asking")}>
             Disconnect
           </button>
         </div>

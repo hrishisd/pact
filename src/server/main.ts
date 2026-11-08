@@ -16,10 +16,8 @@ import {
   unavailableAnki,
   unavailableOura,
   webPushNotifier,
-  type AnkiConnector,
-  type AnkiSource,
-  type OuraConnector,
-  type OuraSource,
+  type AnkiAdapter,
+  type OuraAdapter,
 } from "../core/index.ts";
 import { createApp } from "./app.ts";
 import { createAuth } from "./auth.ts";
@@ -58,7 +56,7 @@ if (!config.production) {
 
 // Production without Oura credentials gets no connector (connecting is refused)
 // and a source with no sleep; only development falls back to the stand-in.
-const oura: (OuraSource & OuraConnector & { close?: () => void }) | null = config.oura
+const oura: OuraAdapter | null = config.oura
   ? ouraAdapter(
       config.dbPath,
       { ...config.oura, redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString() },
@@ -70,7 +68,7 @@ const oura: (OuraSource & OuraConnector & { close?: () => void }) | null = confi
 
 // As for Oura: production without an Anki token key gets no connector and nothing to check;
 // only development falls back to the stand-in. Collection copies live on the volume, outside pact.db.
-const anki: (AnkiSource & AnkiConnector & { close?: () => void }) | null = config.anki
+const anki: AnkiAdapter | null = config.anki
   ? ankiAdapter(config.dbPath, { tokenKey: config.anki.tokenKey, collectionsDir: join(dataDir, "anki") }, systemClock, {
       python: config.anki.python,
     })
@@ -140,8 +138,8 @@ async function shutdown(signal: string): Promise<void> {
   ]);
   await scheduler.stop();
   await core.close();
-  oura?.close?.();
-  anki?.close?.();
+  oura?.close();
+  anki?.close();
   closeAuth();
   process.exit(0);
 }

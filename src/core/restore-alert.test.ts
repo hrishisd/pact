@@ -17,7 +17,6 @@ describe("operator alert after a restore", () => {
       {
         recipient: owner.id,
         kind: "operator-alert",
-        channel: "push",
         payload: {
           alert: "database-restored",
           lastTick: "2026-01-05T23:00:00.000Z",

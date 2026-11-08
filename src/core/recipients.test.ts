@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
+import { MON_WED_FRI, ownerWithReviewers } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
+import { ok } from "./testing/queries.ts";
 
 describe("recipients", () => {
   test("an owner can add a recipient by name", async () => {
@@ -43,5 +45,29 @@ describe("recipients", () => {
 
     expect(owner.recipients().map((r) => r.name)).toEqual(["Animal Shelter", "Zoe"]);
     expect(friend.recipients()).toEqual([]);
+  });
+});
+
+describe("people are listed by name the same way on every page", () => {
+  test('"alice" comes before "Bob": friends, recipients, ledgers, a pact\'s and an excuse\'s reviewers', async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const bob = await s.befriend(owner, "Bob");
+    const alice = await s.befriend(owner, "alice");
+    const bobRecipient = ok(await owner.addRecipient({ name: "Bob" }));
+    const aliceRecipient = ok(await owner.addRecipient({ name: "alice" }));
+    await createPact("Gym", MON_WED_FRI, { reviewers: [bob, alice], recipientId: bobRecipient.recipient.id });
+    const run = await createPact("Run", MON_WED_FRI, {
+      reviewers: [bob, alice],
+      recipientId: aliceRecipient.recipient.id,
+    });
+    s.setClockTo("Mon 10:00"); // after the edit window
+    const filed = ok(await owner.fileExcuse(run, { from: s.date("Wed"), to: s.date("Wed"), reason: "Trip" }, []));
+
+    expect(owner.friends().map((f) => f.name)).toEqual(["alice", "Bob", "reviewer", "second"]);
+    expect(owner.recipients().map((r) => r.name)).toEqual(["alice", "Bob", "Sam"]);
+    expect(owner.ledgers().map((l) => l.name)).toEqual(["alice", "Bob"]);
+    expect(owner.pact(run)).toMatchObject({ pact: { reviewers: [{ name: "alice" }, { name: "Bob" }] } });
+    expect(owner.excuse(filed.excuseId)).toMatchObject({ excuse: { reviewerNames: ["alice", "Bob"] } });
   });
 });

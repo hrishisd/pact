@@ -3,51 +3,44 @@
 // yesterday did.
 
 import { describe, expect, test } from "vitest";
-import type { HeatMapDay, OccurrenceRecord, PactChange, Weekday } from "../shared/types.ts";
+import type { EvidenceRejection, OccurrenceDetail, OccurrenceRecord } from "../shared/types.ts";
 import { ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
-
-const EVERY_DAY: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-
-function historyOf(owner: AccountHandle, pactId: string): HeatMapDay[] {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  const { history } = result.pact;
-  if (history.kind !== "fixed-days") throw new Error(`a ${history.kind} heat map`);
-  return history.days;
-}
-
-/** Submits a photo for today's occurrence as `owner`; returns the evidence's id. */
-async function submit(owner: AccountHandle, pactId: string): Promise<string> {
-  const submitted = await owner.submitEvidence(pactId, [photo()]);
-  if (!submitted.ok) throw new Error(submitted.reason);
-  return submitted.evidenceId;
-}
+import { changed, heatMapDays, ok } from "./testing/queries.ts";
 
 /** Files an excuse for `date` on `pactId` as `owner`, and has `reviewer` approve it. */
 async function excused(owner: AccountHandle, reviewer: AccountHandle, pactId: string, date: string, reason: string) {
-  const filed = await owner.fileExcuse(pactId, { from: date, to: date, reason }, []);
-  if (!filed.ok) throw new Error(filed.reason);
+  const filed = ok(await owner.fileExcuse(pactId, { from: date, to: date, reason }, []));
   await reviewer.decide(filed.excuseId, { kind: "approve" });
 }
 
-const satisfied = (reviewerName: string): OccurrenceRecord => ({
-  status: { kind: "satisfied" },
-  decidedBy: { kind: "evidence-approved", reviewerName },
-  recipientName: null,
+const satisfied = (approvedBy: string | null, detail: OccurrenceDetail | null = null): OccurrenceRecord => ({
+  status: { kind: "satisfied", approvedBy },
+  detail,
 });
 
-const missed = (s: Scenario, judgedAt: string, decidedBy: OccurrenceRecord["decidedBy"] = null): OccurrenceRecord => ({
+const missed = (
+  s: Scenario,
+  judgedAt: string,
+  rejection: EvidenceRejection | null = null,
+  detail: OccurrenceDetail | null = null,
+): OccurrenceRecord => ({
   status: {
     kind: "missed",
     penaltyCents: 500,
     held: false,
     excusableUntil: new Date(s.at(judgedAt).getTime() + 48 * 3600_000),
+    recipientName: "Sam",
+    rejection,
   },
-  decidedBy,
-  recipientName: "Sam",
+  detail,
+});
+
+const excusedBy = (reviewerName: string, reason: string): OccurrenceRecord => ({
+  status: { kind: "excused", excuseApproval: { reviewerName, reason } },
+  detail: null,
 });
 
 const notJudged = (s: Scenario, day: string, next: string, evidenceWaiting = false): OccurrenceRecord => ({
@@ -57,9 +50,9 @@ const notJudged = (s: Scenario, day: string, next: string, evidenceWaiting = fal
     dueAt: s.at(`${next} 00:00`),
     evidenceWaiting,
     excuse: null,
+    excuseApproval: null,
   },
-  decidedBy: null,
-  recipientName: null,
+  detail: null,
 });
 
 describe("the heat map", () => {
@@ -74,42 +67,34 @@ describe("the heat map", () => {
     await reviewer.decide(await submit(owner, gym), { kind: "reject", reason: "That's Monday's photo" });
     // Friday: no photo.
     await s.advanceTo("Sun 10:00");
-    await excused(owner, reviewer, gym, "2026-01-12", "Away at a wedding");
+    await excused(owner, reviewer, gym, s.date("Mon+1"), "Away at a wedding");
     s.setClockTo("Wed+1 18:00");
     await submit(owner, gym);
     await s.advanceTo("Thu+1 10:00");
 
-    expect(historyOf(owner, gym)).toEqual([
-      { date: "2026-01-05", occurrence: satisfied("reviewer") },
-      { date: "2026-01-06", occurrence: null },
+    expect(heatMapDays(owner, gym)).toEqual([
+      { date: s.date("Mon"), occurrence: satisfied("reviewer") },
+      { date: s.date("Tue"), occurrence: null },
       {
-        date: "2026-01-07",
-        occurrence: missed(s, "Wed 18:00", {
-          kind: "evidence-rejected",
-          reviewerName: "reviewer",
-          reason: "That's Monday's photo",
-        }),
+        date: s.date("Wed"),
+        occurrence: missed(s, "Wed 18:00", { reviewerName: "reviewer", reason: "That's Monday's photo" }),
       },
-      { date: "2026-01-08", occurrence: null },
-      { date: "2026-01-09", occurrence: missed(s, "Sat 00:00") },
-      { date: "2026-01-10", occurrence: null },
-      { date: "2026-01-11", occurrence: null },
+      { date: s.date("Thu"), occurrence: null },
+      { date: s.date("Fri"), occurrence: missed(s, "Sat 00:00") },
+      { date: s.date("Sat"), occurrence: null },
+      { date: s.date("Sun"), occurrence: null },
       {
-        date: "2026-01-12",
-        occurrence: {
-          status: { kind: "excused" },
-          decidedBy: { kind: "excuse-approved", reviewerName: "reviewer", reason: "Away at a wedding" },
-          recipientName: null,
-        },
+        date: s.date("Mon+1"),
+        occurrence: excusedBy("reviewer", "Away at a wedding"),
       },
-      { date: "2026-01-13", occurrence: null },
+      { date: s.date("Tue+1"), occurrence: null },
       // Its photo is still waiting for a reviewer, past its due time.
-      { date: "2026-01-14", occurrence: notJudged(s, "Wed+1", "Thu+1", true) },
-      { date: "2026-01-15", occurrence: null },
+      { date: s.date("Wed+1"), occurrence: notJudged(s, "Wed+1", "Thu+1", true) },
+      { date: s.date("Thu+1"), occurrence: null },
       // Ahead.
-      { date: "2026-01-16", occurrence: notJudged(s, "Fri+1", "Sat+1") },
-      { date: "2026-01-17", occurrence: null },
-      { date: "2026-01-18", occurrence: null },
+      { date: s.date("Fri+1"), occurrence: notJudged(s, "Fri+1", "Sat+1") },
+      { date: s.date("Sat+1"), occurrence: null },
+      { date: s.date("Sun+1"), occurrence: null },
     ]);
   });
 
@@ -119,10 +104,10 @@ describe("the heat map", () => {
     s.setClockTo("Wed 10:00");
     const gym = await createPact("Gym", ["fri"]);
 
-    expect(historyOf(owner, gym)).toEqual([
-      { date: "2026-01-09", occurrence: notJudged(s, "Fri", "Sat") },
-      { date: "2026-01-10", occurrence: null },
-      { date: "2026-01-11", occurrence: null },
+    expect(heatMapDays(owner, gym)).toEqual([
+      { date: s.date("Fri"), occurrence: notJudged(s, "Fri", "Sat") },
+      { date: s.date("Sat"), occurrence: null },
+      { date: s.date("Sun"), occurrence: null },
     ]);
   });
 
@@ -133,14 +118,14 @@ describe("the heat map", () => {
     s.setClockTo("Sun 23:30");
     const gym = await createPact("Gym", ["mon"]);
 
-    expect(historyOf(owner, gym).map((day) => day.date)).toEqual([
-      "2026-01-12",
-      "2026-01-13",
-      "2026-01-14",
-      "2026-01-15",
-      "2026-01-16",
-      "2026-01-17",
-      "2026-01-18",
+    expect(heatMapDays(owner, gym).map((day) => day.date)).toEqual([
+      s.date("Mon+1"),
+      s.date("Tue+1"),
+      s.date("Wed+1"),
+      s.date("Thu+1"),
+      s.date("Fri+1"),
+      s.date("Sat+1"),
+      s.date("Sun+1"),
     ]);
   });
 
@@ -150,21 +135,21 @@ describe("the heat map", () => {
     const gym = await createPact("Gym", ["mon"]);
     // A stricter change applies from the first day not open yet.
     s.setClockTo("Wed 10:00");
-    const result = await owner.changePact(gym, {
-      ...termsOf(owner, gym),
-      schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] },
-    });
+    const result = await owner.changePact(
+      gym,
+      changed(owner, gym, { schedule: { kind: "fixed-days", days: ["mon", "wed", "fri"] } }),
+    );
     expect(result).toMatchObject({ ok: true, outcome: { kind: "stricter" } });
 
-    expect(historyOf(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
-      ["2026-01-05", "not-judged"],
-      ["2026-01-06", null],
+    expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
+      [s.date("Mon"), "not-judged"],
+      [s.date("Tue"), null],
       // Today was open before the change: it keeps Monday only.
-      ["2026-01-07", null],
-      ["2026-01-08", null],
-      ["2026-01-09", "not-judged"],
-      ["2026-01-10", null],
-      ["2026-01-11", null],
+      [s.date("Wed"), null],
+      [s.date("Thu"), null],
+      [s.date("Fri"), "not-judged"],
+      [s.date("Sat"), null],
+      [s.date("Sun"), null],
     ]);
   });
 
@@ -173,19 +158,18 @@ describe("the heat map", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", EVERY_DAY);
     await s.advanceTo("Tue 10:00");
-    const end = await owner.requestEnd(gym);
-    if (!end.ok) throw new Error(end.reason);
+    const end = ok(await owner.requestEnd(gym));
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     await s.advanceTo("Wed+1 10:00");
 
-    expect(historyOf(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
-      ["2026-01-05", "missed"],
-      ["2026-01-06", null],
-      ["2026-01-07", null],
-      ["2026-01-08", null],
-      ["2026-01-09", null],
-      ["2026-01-10", null],
-      ["2026-01-11", null],
+    expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
+      [s.date("Mon"), "missed"],
+      [s.date("Tue"), null],
+      [s.date("Wed"), null],
+      [s.date("Thu"), null],
+      [s.date("Fri"), null],
+      [s.date("Sat"), null],
+      [s.date("Sun"), null],
     ]);
   });
 
@@ -197,18 +181,10 @@ describe("the heat map", () => {
     // Wednesday's night: nothing from Oura by 18:00 Thursday.
     await s.advanceTo("Thu 18:00");
 
-    expect(historyOf(owner, bed).slice(0, 3)).toEqual([
-      {
-        date: "2026-01-05",
-        occurrence: {
-          status: { kind: "satisfied" },
-          decidedBy: null,
-          recipientName: null,
-          night: { inBedAt: "23:40" },
-        },
-      },
-      { date: "2026-01-06", occurrence: { ...missed(s, "Thu 18:00"), night: { inBedAt: "01:10" } } },
-      { date: "2026-01-07", occurrence: { ...missed(s, "Thu 18:00"), night: { inBedAt: null } } },
+    expect(heatMapDays(owner, bed).slice(0, 3)).toEqual([
+      { date: s.date("Mon"), occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }) },
+      { date: s.date("Tue"), occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: "01:10" }) },
+      { date: s.date("Wed"), occurrence: missed(s, "Thu 18:00", null, { kind: "night", inBedAt: null }) },
     ]);
   });
 });
@@ -223,7 +199,7 @@ describe("Yesterday on Today", () => {
     await createPact("Run", ["tue", "wed"]);
     s.setClockTo("Mon 18:00");
     await reviewer.decide(await submit(owner, gym), { kind: "approve" });
-    await excused(owner, reviewer, piano, "2026-01-05", "Sick with the flu");
+    await excused(owner, reviewer, piano, s.date("Mon"), "Sick with the flu");
     await s.advanceTo("Tue 10:00");
 
     expect(owner.today().yesterday).toEqual([
@@ -231,25 +207,21 @@ describe("Yesterday on Today", () => {
         pactId: gym,
         name: "Gym",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: satisfied("reviewer"),
       },
       {
         pactId: piano,
         name: "Piano",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
-        occurrence: {
-          status: { kind: "excused" },
-          decidedBy: { kind: "excuse-approved", reviewerName: "reviewer", reason: "Sick with the flu" },
-          recipientName: null,
-        },
+        occurrenceDate: s.date("Mon"),
+        occurrence: excusedBy("reviewer", "Sick with the flu"),
       },
       {
         pactId: read,
         name: "Read",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: missed(s, "Tue 00:00"),
       },
     ]);
@@ -268,7 +240,7 @@ describe("Yesterday on Today", () => {
         pactId: gym,
         name: "Gym",
         evidenceKind: "camera",
-        occurrenceDate: "2026-01-05",
+        occurrenceDate: s.date("Mon"),
         occurrence: notJudged(s, "Mon", "Tue", true),
       },
     ]);
@@ -286,13 +258,8 @@ describe("Yesterday on Today", () => {
         pactId: bed,
         name: "In bed by midnight",
         evidenceKind: "oura",
-        occurrenceDate: "2026-01-05",
-        occurrence: {
-          status: { kind: "satisfied" },
-          decidedBy: null,
-          recipientName: null,
-          night: { inBedAt: "23:40" },
-        },
+        occurrenceDate: s.date("Mon"),
+        occurrence: satisfied(null, { kind: "night", inBedAt: "23:40" }),
       },
     ]);
   });
@@ -304,27 +271,11 @@ describe("Yesterday on Today", () => {
     expect(owner.today().yesterday).toEqual([]);
 
     await s.advanceTo("Tue 10:00");
-    const end = await owner.requestEnd(gym);
-    if (!end.ok) throw new Error(end.reason);
+    const end = ok(await owner.requestEnd(gym));
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     // Ended Tuesday: Monday's day is still yesterday's on Tuesday, but there's no Tuesday on Wednesday.
-    expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual(["2026-01-05"]);
+    expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual([s.date("Mon")]);
     await s.advanceTo("Wed 10:00");
     expect(owner.today().yesterday).toEqual([]);
   });
 });
-
-/** The pact's terms as the Request change form starts out: as they stand. */
-function termsOf(owner: AccountHandle, pactId: string): PactChange {
-  const result = owner.pact(pactId);
-  if (!result.ok) throw new Error(result.reason);
-  const { pact } = result;
-  return {
-    name: pact.name,
-    description: pact.description,
-    schedule: pact.schedule,
-    penaltyCents: pact.penaltyCents,
-    recipientId: pact.recipient.id,
-    reviewerIds: pact.reviewers.map((r) => r.id),
-  };
-}

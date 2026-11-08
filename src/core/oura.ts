@@ -76,7 +76,12 @@ interface StoredTokens extends Tokens {
   refreshOutcomeUnknownAt: string | null;
 }
 
-export function ouraAdapter(dbPath: string, client: OuraClient, clock: Clock, options: OuraAdapterOptions = {}) {
+export function ouraAdapter(
+  dbPath: string,
+  client: OuraClient,
+  clock: Clock,
+  options: OuraAdapterOptions = {},
+): OuraAdapter {
   return new Oura(openWithPragmas(dbPath), client, clock, options);
 }
 
@@ -94,12 +99,13 @@ export const unavailableOura: OuraSource = {
  * sleep comes from `oura-sleep.json` in `dir`, an array of periods in Oura's
  * shape, read on every call. With no file there's no sleep.
  */
-export function devOura(dir: string, callbackPath: string): OuraSource & OuraConnector {
+export function devOura(dir: string, callbackPath: string): OuraAdapter {
   const file = join(dir, "oura-sleep.json");
   return {
     authorizeUrl: (state) => `${callbackPath}?code=dev&state=${encodeURIComponent(state)}`,
     connect: async () => ({ ok: true }),
     forget: () => {},
+    close: () => {},
     async sleepPeriods(_account, range) {
       const periods = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as OuraSleepPeriod[]) : [];
       return { ok: true, periods: periods.filter((p) => p.day >= range.startDate && p.day <= range.endDate) };

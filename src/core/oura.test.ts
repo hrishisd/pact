@@ -3,7 +3,7 @@
 // reaches the network. Tokens go in the scenario's real database.
 
 import { existsSync, readFileSync } from "node:fs";
-import { describe, expect, test } from "vitest";
+import { describe, expect, onTestFinished, test } from "vitest";
 import { openWithPragmas } from "./db.ts";
 import { ouraAdapter, type OuraAdapterOptions, type OuraClient } from "./oura.ts";
 import { sleep } from "./testing/bedtime-pact.ts";
@@ -96,9 +96,17 @@ class FakeOura {
   }
 }
 
+/** The adapter on the scenario's database, with `options`; it closes when the test ends. */
+function adapterOn(s: Scenario, options?: OuraAdapterOptions) {
+  const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock, options);
+  onTestFinished(() => adapter.close());
+  return adapter;
+}
+
+/** The owner, connected through an adapter that a fake Oura answers. */
 async function connected(s: Scenario, options: OuraAdapterOptions = {}) {
   const oura = new FakeOura();
-  const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock, {
+  const adapter = adapterOn(s, {
     fetch: oura.fetch as typeof fetch,
     log: (line) => s.logs.push(line),
     authorizeUrl: "https://cloud.oura.test/oauth/authorize",
@@ -113,7 +121,7 @@ async function connected(s: Scenario, options: OuraAdapterOptions = {}) {
 
 test("the authorize page asks for the daily scope, with the browser's state", () => {
   const s = scenario();
-  const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock);
+  const adapter = adapterOn(s);
   const url = new URL(adapter.authorizeUrl("state-123"));
   expect(url.origin + url.pathname).toBe("https://cloud.ouraring.com/oauth/authorize");
   expect(Object.fromEntries(url.searchParams)).toEqual({
@@ -123,7 +131,6 @@ test("the authorize page asks for the daily scope, with the browser's state", ()
     scope: "daily",
     state: "state-123",
   });
-  adapter.close();
 });
 
 describe("connecting", () => {
@@ -137,6 +144,7 @@ describe("connecting", () => {
       client_id: CLIENT.clientId,
       client_secret: CLIENT.clientSecret,
     });
+    // Closed before the database's files are read; the close when the test ends then does nothing.
     adapter.close();
     await s.core.close();
     const bytes = [s.dbPath, `${s.dbPath}-wal`]
@@ -162,7 +170,6 @@ describe("connecting", () => {
     db.close();
 
     await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("Invalid authentication tag length");
-    adapter.close();
   });
 
   test("forgetting an account deletes its tokens: it's disconnected, with no call to Oura", async () => {
@@ -171,14 +178,12 @@ describe("connecting", () => {
     adapter.forget(owner.id);
     expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
     expect(oura.sleepRequests).toEqual([]);
-    adapter.close();
   });
 
   test("a code Oura refuses connects nothing", async () => {
     const s = scenario();
     const { adapter, owner } = await connected(s);
     expect(await adapter.connect(owner.id, "bad-code")).toEqual({ ok: false, reason: "exchange-failed" });
-    adapter.close();
   });
 });
 
@@ -194,7 +199,6 @@ describe("sleep periods", () => {
       [{ start_date: "2026-01-05", end_date: "2026-01-06" }, "Bearer access-1"],
       [{ start_date: "2026-01-05", end_date: "2026-01-06", next_token: "2" }, "Bearer access-1"],
     ]);
-    adapter.close();
   });
 
   test("a next_token Oura gives again, or pages without end, stop the call instead of looping", async () => {
@@ -213,7 +217,6 @@ describe("sleep periods", () => {
     };
     await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("pages");
     expect(oura.sleepRequests.length).toBeLessThan(200);
-    adapter.close();
   });
 
   test("a page without a data array stops the call", async () => {
@@ -221,7 +224,6 @@ describe("sleep periods", () => {
     const { oura, adapter, owner } = await connected(s);
     oura.sleepPage = { next_token: null };
     await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("no data");
-    adapter.close();
   });
 
   test("an account that never connected is disconnected", async () => {
@@ -229,7 +231,6 @@ describe("sleep periods", () => {
     const { adapter } = await connected(s);
     const other = await s.befriend(await s.signIn("owner"), "friend");
     expect(await adapter.sleepPeriods(other.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
-    adapter.close();
   });
 
   test("an expired access token is refreshed first, and the new refresh token is the one used next", async () => {
@@ -242,7 +243,6 @@ describe("sleep periods", () => {
 
     expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([null, "refresh-1", "refresh-2"]);
     expect(oura.sleepRequests.map((r) => r.authorization)).toEqual(["Bearer access-2", "Bearer access-3"]);
-    adapter.close();
   });
 
   test("two concurrent calls with an expired token make one refresh and never reuse its refresh token", async () => {
@@ -259,7 +259,6 @@ describe("sleep periods", () => {
       { ok: true, periods: oura.periods },
     ]);
     expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([null, "refresh-1"]);
-    adapter.close();
   });
 
   test("a reconnect while a refresh is in flight keeps the reconnect's tokens", async () => {
@@ -279,7 +278,6 @@ describe("sleep periods", () => {
     await adapter.sleepPeriods(owner.id, RANGE);
     expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([null, "refresh-1", null, "refresh-2"]);
     expect(oura.sleepRequests.map((r) => r.authorization)).toEqual(["Bearer access-2", "Bearer access-4"]);
-    adapter.close();
   });
 
   test("forgetting an account while a refresh is in flight stores nothing: it stays disconnected", async () => {
@@ -295,7 +293,6 @@ describe("sleep periods", () => {
     expect(await reading).toEqual({ ok: false, reason: "disconnected" });
     expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
     expect(oura.sleepRequests).toEqual([]);
-    adapter.close();
   });
 
   test("a refresh whose answer was lost, then refused, is disconnected with one operator alert", async () => {
@@ -312,7 +309,6 @@ describe("sleep periods", () => {
     expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([
       expect.stringMatching(new RegExp(`OPERATOR_ALERT Oura refresh token for account ${owner.id} .*lost`)),
     ]);
-    adapter.close();
   });
 
   test("a refresh that failed and then worked raises no alert when a later one is refused", async () => {
@@ -331,14 +327,13 @@ describe("sleep periods", () => {
     });
     expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
     expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([]);
-    adapter.close();
   });
 
   test("the token request waits longer than a sleep request before giving up", async () => {
     const s = scenario();
     const { oura, adapter, owner } = await connected(s);
     s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
-    const slow = ouraAdapter(s.dbPath, CLIENT, s.clock, {
+    const slow = adapterOn(s, {
       tokenUrl: "https://api.oura.test/oauth/token",
       apiBase: "https://api.oura.test",
       timeoutMs: 20,
@@ -355,8 +350,6 @@ describe("sleep periods", () => {
       }) as typeof fetch,
     });
     expect(await slow.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
-    slow.close();
-    adapter.close();
   });
 
   test("a 401 refreshes once and tries again", async () => {
@@ -365,7 +358,6 @@ describe("sleep periods", () => {
     oura.revokeAccess();
     expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
     expect(oura.sleepRequests.map((r) => r.authorization)).toEqual(["Bearer access-1", "Bearer access-2"]);
-    adapter.close();
   });
 
   test("a refused refresh token, or a 403 (lapsed membership), is disconnected", async () => {
@@ -382,7 +374,6 @@ describe("sleep periods", () => {
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "refresh-1", ...secret() }).toString(),
     });
     expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: false, reason: "disconnected" });
-    adapter.close();
   });
 
   test("a server error throws, so that account has no data this tick and the next retries", async () => {
@@ -390,13 +381,12 @@ describe("sleep periods", () => {
     const { oura, adapter, owner } = await connected(s);
     oura.sleepStatus = 500;
     await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("HTTP 500");
-    adapter.close();
   });
 
   test("a call that takes too long is abandoned", async () => {
     const s = scenario();
     const { adapter, owner } = await connected(s, { timeoutMs: 20 });
-    const hanging = ouraAdapter(s.dbPath, CLIENT, s.clock, {
+    const hanging = adapterOn(s, {
       apiBase: "https://api.oura.test",
       timeoutMs: 20,
       fetch: ((_input: unknown, init?: RequestInit) =>
@@ -406,8 +396,6 @@ describe("sleep periods", () => {
     });
     // The timeout itself, not some other failure on the way.
     await expect(hanging.sleepPeriods(owner.id, RANGE)).rejects.toMatchObject({ name: "TimeoutError" });
-    hanging.close();
-    adapter.close();
   });
 });
 

@@ -3,7 +3,7 @@
 
 import { createECDH, createHash, createPublicKey, verify } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import type { Notification, PushDevice } from "./ports.ts";
+import type { NotificationOf, PushDevice } from "./ports.ts";
 import { FakeClock } from "./testing/fakes.ts";
 import { encryptForDevice, webPushNotifier } from "./web-push.ts";
 
@@ -25,11 +25,17 @@ const vapid = (() => {
   return { publicKey: ecdh.getPublicKey("base64url"), privateKey: ecdh.getPrivateKey("base64url") };
 })();
 
-const notification: Notification = {
+const notification: NotificationOf<"review-item"> = {
   recipient: "reviewer-id",
   kind: "review-item",
-  channel: "push",
-  payload: { title: "Sam submitted evidence", body: "Gym · Mon Jan 5", url: "/review", itemId: "secret-detail" },
+  payload: {
+    title: "Sam submitted evidence",
+    body: "Gym · Mon Jan 5",
+    url: "/review",
+    itemKind: "evidence",
+    itemId: "secret-detail",
+    pactId: "secret-pact",
+  },
 };
 
 /** A browser's side of a subscription, able to read what's sent to it. */

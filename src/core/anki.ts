@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { localDateOf } from "./calendar.ts";
 import { openWithPragmas, type Db } from "./db.ts";
 import { secretBox, type SecretBox } from "./secret-box.ts";
-import type { AccountId, AnkiDeck } from "../shared/types.ts";
+import type { AccountId, AnkiCounts, AnkiDeck } from "../shared/types.ts";
 import type { AnkiCountsResult, AnkiDeckListResult, AnkiSource, Clock } from "./ports.ts";
 
 export interface AnkiSetup {
@@ -94,7 +94,7 @@ export const unavailableAnki: AnkiSource = {
  * no decks. With `refused: true` in the file, AnkiWeb refuses the login:
  * decks and counts answer "disconnected".
  */
-export function devAnki(dir: string, clock: Clock): AnkiSource & AnkiConnector {
+export function devAnki(dir: string, clock: Clock): AnkiAdapter {
   const file = join(dir, "anki-decks.json");
   const read = (): { rolloverHour: number; timezone: string; decks: AnkiDeck[]; refused: boolean } => {
     const stored = existsSync(file)
@@ -120,6 +120,7 @@ export function devAnki(dir: string, clock: Clock): AnkiSource & AnkiConnector {
           ? { ok: false, reason: "unreachable" }
           : { ok: true },
     forget: async () => {},
+    close: () => {},
     decks: async () => {
       const { decks, rolloverHour, refused } = read();
       return refused ? { ok: false, reason: "disconnected" } : { ok: true, decks, rolloverHour };
@@ -140,19 +141,35 @@ export function devAnki(dir: string, clock: Clock): AnkiSource & AnkiConnector {
   };
 }
 
-/** The script's answers, as anki_check.py writes them. */
-type ScriptAnswer =
-  | { ok: true; hostKey: string; endpoint: string | null }
-  | { ok: true; decks: AnkiDeck[]; rolloverHour: number; endpoint: string | null }
-  | {
-      ok: true;
-      ankiDate: string;
-      asOf: number;
-      decks: Record<string, AnkiDeck["counts"] | null>;
-      names: Record<string, string>;
-      endpoint: string | null;
-    }
-  | { ok: false; error: "auth" | "network" | "protocol"; message: string };
+type ScriptOp = AnkiScriptRequest["op"];
+
+/** The script's answer to each op when it succeeds, as anki_check.py writes it. */
+interface ScriptAnswers {
+  login: { hostKey: string; endpoint: string | null };
+  decks: { decks: AnkiDeck[]; rolloverHour: number; endpoint: string | null };
+  counts: {
+    ankiDate: string;
+    asOf: number;
+    decks: Record<string, AnkiCounts | null>;
+    names: Record<string, string>;
+    endpoint: string | null;
+  };
+}
+
+type ScriptFailure = { ok: false; error: "auth" | "network" | "protocol"; message: string };
+
+/** The script's answer to an `op` request. */
+type ScriptAnswer<Op extends ScriptOp> = ({ ok: true } & ScriptAnswers[Op]) | ScriptFailure;
+
+/** A field each op's successful answer must have, and what's wrong when it doesn't. */
+const ANSWER_CHECKS: { [Op in ScriptOp]: { field: keyof ScriptAnswers[Op]; missing: string } } = {
+  login: { field: "hostKey", missing: "AnkiWeb login answered without a host key" },
+  decks: { field: "rolloverHour", missing: "AnkiWeb deck list answered without decks" },
+  counts: { field: "ankiDate", missing: "AnkiWeb counts answered without counts" },
+};
+
+/** The script said it succeeded but answered something else: its bug, not a failure to reach AnkiWeb. */
+class WrongAnswer extends Error {}
 
 class Anki implements AnkiAdapter {
   readonly #db: Db;
@@ -178,7 +195,7 @@ class Anki implements AnkiAdapter {
   async login(account: AccountId, username: string, password: string): Promise<AnkiLoginResult> {
     // The whole login, storing included, holds the account's turn: a disconnect or check waits for it.
     return this.#oneAtATime(account, async () => {
-      let answer: ScriptAnswer;
+      let answer: ScriptAnswer<"login">;
       try {
         answer = await this.#ask({
           op: "login",
@@ -187,6 +204,8 @@ class Anki implements AnkiAdapter {
           ...(this.#loginEndpoint !== undefined && { endpoint: this.#loginEndpoint }),
         });
       } catch (error) {
+        // A script bug, not AnkiWeb out of reach: it fails the login.
+        if (error instanceof WrongAnswer) throw error;
         this.#log(`AnkiWeb login failed for account ${account}: ${error instanceof Error ? error.message : error}`);
         return { ok: false, reason: "unreachable" };
       }
@@ -196,7 +215,6 @@ class Anki implements AnkiAdapter {
         else this.#log(`AnkiWeb login failed for account ${account}: ${answer.error} error: ${answer.message}`);
         return { ok: false, reason: "unreachable" };
       }
-      if (!("hostKey" in answer)) throw new Error("AnkiWeb login answered without a host key");
       this.#db
         .prepare(
           `INSERT INTO anki_connection (account_id, host_key, endpoint, updated_at) VALUES (?, ?, ?, ?)
@@ -221,7 +239,6 @@ class Anki implements AnkiAdapter {
   async decks(account: AccountId): Promise<AnkiDeckListResult> {
     const answer = await this.#withLogin(account, (login) => this.#ask({ op: "decks", ...login }));
     if (answer === null) return { ok: false, reason: "disconnected" };
-    if (!("rolloverHour" in answer)) throw new Error("AnkiWeb deck list answered without decks");
     return { ok: true, decks: answer.decks, rolloverHour: answer.rolloverHour };
   }
 
@@ -230,7 +247,6 @@ class Anki implements AnkiAdapter {
       this.#ask({ op: "counts", ...login, deckIds: [...deckIds] }),
     );
     if (answer === null) return { ok: false, reason: "disconnected" };
-    if (!("ankiDate" in answer)) throw new Error("AnkiWeb counts answered without counts");
     return {
       ok: true,
       ankiDate: answer.ankiDate,
@@ -249,10 +265,10 @@ class Anki implements AnkiAdapter {
    * account, and keeps the endpoint AnkiWeb moved it to. Null when there's no
    * login, or AnkiWeb refused it. A network or protocol error throws.
    */
-  async #withLogin(
+  async #withLogin<Op extends ScriptOp>(
     account: AccountId,
-    operation: (login: { hostKey: string; endpoint: string | null; collection: string }) => Promise<ScriptAnswer>,
-  ): Promise<Extract<ScriptAnswer, { ok: true }> | null> {
+    operation: (login: { hostKey: string; endpoint: string | null; collection: string }) => Promise<ScriptAnswer<Op>>,
+  ): Promise<({ ok: true } & ScriptAnswers[Op]) | null> {
     return this.#oneAtATime(account, async () => {
       const row = this.#db
         .prepare(`SELECT host_key, endpoint FROM anki_connection WHERE account_id = ?`)
@@ -279,13 +295,19 @@ class Anki implements AnkiAdapter {
     );
   }
 
-  /** The script's answer to `request`, checked to be one. */
-  async #ask(request: AnkiScriptRequest): Promise<ScriptAnswer> {
+  /**
+   * The script's answer to `request`, checked to be one: this is where the
+   * script's output is trusted. An answer that says it succeeded but lacks
+   * what the op returns throws a WrongAnswer.
+   */
+  async #ask<Op extends ScriptOp>(request: Extract<AnkiScriptRequest, { op: Op }>): Promise<ScriptAnswer<Op>> {
     const answer = await this.#run(request);
-    if (typeof answer !== "object" || answer === null || typeof (answer as { ok?: unknown }).ok !== "boolean") {
+    if (typeof answer !== "object" || answer === null || !("ok" in answer) || typeof answer.ok !== "boolean") {
       throw new Error("the Anki script's answer wasn't one");
     }
-    return answer as ScriptAnswer;
+    const { field, missing } = ANSWER_CHECKS[request.op];
+    if (answer.ok && !(field in answer)) throw new WrongAnswer(missing);
+    return answer as ScriptAnswer<Op>;
   }
 
   #oneAtATime<T>(account: AccountId, operation: () => Promise<T>): Promise<T> {

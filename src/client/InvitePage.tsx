@@ -3,19 +3,17 @@
 
 import { useEffect, useState } from "react";
 import type { AcceptInviteResponse, InviteLookupResponse, MeResponse } from "../shared/api.ts";
-import type { InviteUnusableReason } from "../shared/types.ts";
+import type { InviteUnusableReason, Refusal } from "../shared/types.ts";
 import { api, failureText, signInWithInvite } from "./api.ts";
 import { GoogleIcon } from "./icons.tsx";
 import { initial } from "./format.ts";
-import { Centered } from "./ui.tsx";
-
-type Refusal = Extract<AcceptInviteResponse, { ok: false }>["reason"];
+import { Centered, useSend } from "./ui.tsx";
 
 type State =
   | { kind: "loading" }
   | { kind: "failed"; error: unknown }
   | { kind: "open"; inviterName: string }
-  | { kind: "refused"; reason: Refusal; inviterName?: string }
+  | { kind: "refused"; reason: Refusal<AcceptInviteResponse>; inviterName?: string }
   | { kind: "accepted"; friendName: string };
 
 export function InvitePage({
@@ -30,8 +28,7 @@ export function InvitePage({
   onDone: () => void;
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [busy, setBusy] = useState(false);
-  const [acceptFailed, setAcceptFailed] = useState<{ error: unknown } | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
   // Google sign-in that went wrong comes back here with ?error=<code>.
   const [signInFailed] = useState(() => new URLSearchParams(window.location.search).has("error"));
 
@@ -47,22 +44,22 @@ export function InvitePage({
   };
   useEffect(load, [token]);
 
-  const accept = async (inviterName: string) => {
-    setBusy(true);
-    setAcceptFailed(null);
-    try {
+  // A refusal is a screen of its own, not an error under Accept.
+  const {
+    busy,
+    error: acceptError,
+    run: accept,
+  } = useSend(
+    async (inviterName: string) => {
       const result = await api.acceptInvite(token);
       setState(
         result.ok
           ? { kind: "accepted", friendName: result.friend.name }
           : { kind: "refused", reason: result.reason, inviterName },
       );
-    } catch (error) {
-      setAcceptFailed({ error });
-    } finally {
-      setBusy(false);
-    }
-  };
+    },
+    (error) => `Couldn't accept. ${failureText(error, "Check your connection and try again.")}`,
+  );
 
   const openPact = profile && (
     <button className="btn block" onClick={onDone}>
@@ -120,12 +117,8 @@ export function InvitePage({
           </div>
           {profile ? (
             <div className="stack">
-              {acceptFailed && (
-                <p className="error">
-                  Couldn't accept. {failureText(acceptFailed.error, "Check your connection and try again.")}
-                </p>
-              )}
-              <button className="btn primary block" disabled={busy} onClick={() => void accept(inviterName)}>
+              {acceptError && <p className="error">{acceptError}</p>}
+              <button className="btn primary block" disabled={busy} onClick={() => accept(inviterName)}>
                 Accept
               </button>
               <button className="btn block" onClick={onDone}>
@@ -138,10 +131,10 @@ export function InvitePage({
               {signInFailed && <p className="error">Sign-in didn't work. Try again.</p>}
               <button
                 className="btn block google"
-                disabled={busy}
+                disabled={signingIn}
                 onClick={() => {
-                  setBusy(true);
-                  signInWithInvite(token).catch(() => setBusy(false));
+                  setSigningIn(true);
+                  signInWithInvite(token).catch(() => setSigningIn(false));
                 }}
               >
                 <GoogleIcon />
@@ -156,22 +149,32 @@ export function InvitePage({
   }
 }
 
-function refusalText(reason: Refusal, inviterName: string | undefined): { title: string; body: string } {
-  const unusable: Record<InviteUnusableReason, { title: string; body: string }> = {
-    "invite-not-found": {
-      title: "This invite link doesn't work",
-      body: "Check you have the whole link, or ask your friend for a new one.",
-    },
-    "invite-used": {
-      title: "This invite has been used",
-      body: "Each invite link works once. Ask your friend for a new one.",
-    },
-    "invite-expired": {
-      title: "This invite has expired",
-      body: "Invite links last 7 days. Ask your friend for a new one.",
-    },
-  };
+/** What an invite link that can't be used says, by why. */
+const UNUSABLE_TEXT: Record<InviteUnusableReason, { title: string; body: string }> = {
+  "invite-not-found": {
+    title: "This invite link doesn't work",
+    body: "Check you have the whole link, or ask your friend for a new one.",
+  },
+  "invite-used": {
+    title: "This invite has been used",
+    body: "Each invite link works once. Ask your friend for a new one.",
+  },
+  "invite-expired": {
+    title: "This invite has expired",
+    body: "Invite links last 7 days. Ask your friend for a new one.",
+  },
+};
+
+/** What a refused accept says. */
+function refusalText(
+  reason: Refusal<AcceptInviteResponse>,
+  inviterName: string | undefined,
+): { title: string; body: string } {
   switch (reason) {
+    case "invite-not-found":
+    case "invite-used":
+    case "invite-expired":
+      return UNUSABLE_TEXT[reason];
     case "own-invite":
       return { title: "This is your own invite", body: "Send the link to a friend so they can accept it." };
     case "already-friends":
@@ -179,7 +182,5 @@ function refusalText(reason: Refusal, inviterName: string | undefined): { title:
         title: inviterName ? `You and ${inviterName} are already friends` : "You're already friends",
         body: "You can already pick each other to review pacts.",
       };
-    default:
-      return unusable[reason];
   }
 }

@@ -6,18 +6,10 @@
 
 import { describe, expect, test } from "vitest";
 import type { NewExcuse, TodayAlert } from "../shared/types.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
-import type { AccountHandle, Scenario } from "./testing/scenario.ts";
-import { scenario } from "./testing/scenario.ts";
-
-const MONDAY = "2026-01-05";
-const TUESDAY = "2026-01-06";
-const WEDNESDAY = "2026-01-07";
-const THURSDAY = "2026-01-08";
-const FRIDAY = "2026-01-09";
-const SATURDAY = "2026-01-10";
-const SUNDAY = "2026-01-11";
-const EVERY_DAY = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
+import type { AccountHandle } from "./testing/scenario.ts";
+import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
+import { changed, ledgerHistory, ok, owed } from "./testing/queries.ts";
 
 /** An excuse for `from` to `to` (or just `from`), "Sick with the flu". */
 function sick(from: string, to = from): NewExcuse {
@@ -26,9 +18,7 @@ function sick(from: string, to = from): NewExcuse {
 
 /** Files an excuse as `owner`; returns its id, or throws if it's refused. */
 async function fileExcuse(owner: AccountHandle, pactId: string, excuse: NewExcuse, photos = [photo()]) {
-  const filed = await owner.fileExcuse(pactId, excuse, photos);
-  if (!filed.ok) throw new Error(filed.reason);
-  return filed.excuseId;
+  return ok(await owner.fileExcuse(pactId, excuse, photos)).excuseId;
 }
 
 /** The spec's example: a Mon/Wed/Fri $5 Gym pact, and Monday Missed at Tue 00:00. */
@@ -40,27 +30,18 @@ async function gymMissedMonday() {
   return { s, ...setup, gym };
 }
 
-function owed(owner: AccountHandle): number {
-  return owner.ledgers()[0]!.owedCents;
-}
-
-function history(s: Scenario, owner: AccountHandle) {
-  const ledger = owner.ledger(owner.ledgers()[0]!.recipientId);
-  if (!ledger.ok) throw new Error(ledger.reason);
-  void s;
-  return ledger.ledger.history;
-}
-
 describe("the spec's example", () => {
   test("Monday Missed, $5 owed → excuse within 48h → held, owed $0 → approved → Excused, owed $0, no penalty in the history", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     expect(owed(owner)).toBe(500);
     s.setClockTo("Tue 08:00");
 
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
 
     expect(owed(owner)).toBe(0);
-    expect(history(s, owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: true, paidCents: 0 })]);
+    expect(ledgerHistory(owner)).toEqual([
+      expect.objectContaining({ occurrenceDate: s.date("Mon"), held: true, paidCents: 0 }),
+    ]);
     expect(owner.today()).toMatchObject({
       alerts: [],
       sections: [],
@@ -70,8 +51,8 @@ describe("the spec's example", () => {
           id: excuseId,
           pactId: gym,
           name: "Gym",
-          firstDate: MONDAY,
-          lastDate: MONDAY,
+          firstDate: s.date("Mon"),
+          lastDate: s.date("Mon"),
           filedAt: s.at("Tue 08:00"),
         },
       ],
@@ -81,13 +62,13 @@ describe("the spec's example", () => {
     expect(await reviewer.decide(excuseId, { kind: "approve" })).toEqual({ ok: true });
 
     expect(owed(owner)).toBe(0);
-    expect(history(s, owner)).toEqual([]);
+    expect(ledgerHistory(owner)).toEqual([]);
     expect(owner.today()).toMatchObject({ alerts: [], sections: [], waiting: [] });
     expect(owner.excuse(excuseId)).toMatchObject({
       ok: true,
       excuse: {
         state: { kind: "approved", reviewerName: "reviewer", decidedAt: s.at("Tue 12:00") },
-        days: [{ date: MONDAY, status: { kind: "excused" } }],
+        days: [{ date: s.date("Mon"), status: { kind: "excused" } }],
       },
     });
   });
@@ -95,13 +76,13 @@ describe("the spec's example", () => {
   test("the same, rejected → $5 owed again, and a rejected-excuse alert is raised", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
     s.setClockTo("Tue 12:00");
 
     expect(await reviewer.decide(excuseId, { kind: "reject", reason: "You were at the movies" })).toEqual({ ok: true });
 
     expect(owed(owner)).toBe(500);
-    expect(history(s, owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: false })]);
+    expect(ledgerHistory(owner)).toEqual([expect.objectContaining({ occurrenceDate: s.date("Mon"), held: false })]);
     expect(owner.today()).toEqual({
       hasPacts: true,
       alerts: [
@@ -112,8 +93,8 @@ describe("the spec's example", () => {
           name: "Gym",
           reviewerName: "reviewer",
           reason: "You were at the movies",
-          firstDate: MONDAY,
-          lastDate: MONDAY,
+          firstDate: s.date("Mon"),
+          lastDate: s.date("Mon"),
           owedAgainCents: 500,
           hasDaysNotJudged: false,
           refile: { closesAt: s.at("Thu 00:00") },
@@ -123,7 +104,10 @@ describe("the spec's example", () => {
       sections: [],
       waiting: [],
       yesterday: [
-        expect.objectContaining({ occurrenceDate: MONDAY, occurrence: expect.objectContaining({ decidedBy: null }) }),
+        expect.objectContaining({
+          occurrenceDate: s.date("Mon"),
+          occurrence: expect.objectContaining({ status: expect.objectContaining({ kind: "missed", rejection: null }) }),
+        }),
       ],
     });
     expect(owner.excuse(excuseId)).toMatchObject({
@@ -136,21 +120,21 @@ describe("re-filing after a rejection", () => {
   test("a new excuse for Monday inside the original 48 hours is accepted and resolves the alert; after them it's refused", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const first = await fileExcuse(owner, gym, sick(MONDAY));
+    const first = await fileExcuse(owner, gym, sick(s.date("Mon")));
     await reviewer.decide(first, { kind: "reject", reason: "No" });
 
     s.setClockTo("Wed 23:00");
-    const second = await fileExcuse(owner, gym, { ...sick(MONDAY), reason: "Here's the doctor's note" });
+    const second = await fileExcuse(owner, gym, { ...sick(s.date("Mon")), reason: "Here's the doctor's note" });
     expect(owner.today().alerts).toEqual([]);
     expect(owed(owner)).toBe(0);
     await reviewer.decide(second, { kind: "reject", reason: "Still no" });
 
     // The window runs from Monday's miss, Tue 00:00; a rejection never restarts it.
     s.setClockTo("Thu 00:00");
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toEqual({ ok: false, reason: "nothing-to-excuse" });
-    expect(owner.excusePreview(gym, sick(MONDAY))).toEqual({
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toEqual({ ok: false, reason: "nothing-to-excuse" });
+    expect(owner.excusePreview(gym, sick(s.date("Mon")))).toEqual({
       ok: true,
-      preview: { covered: [], skipped: [{ date: MONDAY, reason: "window-closed" }], heldCents: 0 },
+      preview: { covered: [], skipped: [{ date: s.date("Mon"), reason: "window-closed" }], heldCents: 0 },
     });
     expect(owner.today().alerts).toEqual([expect.objectContaining({ kind: "excuse-rejected", refile: null })]);
   });
@@ -160,16 +144,47 @@ describe("the 48 hours after a miss", () => {
   test("an excuse filed 47 hours after Monday's miss is accepted", async () => {
     const { s, owner, gym } = await gymMissedMonday();
     s.setClockTo("Wed 23:00");
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toEqual({ ok: true, excuseId: expect.any(String) });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toEqual({ ok: true, excuseId: expect.any(String) });
   });
 
   test("one filed 49 hours after is refused, and writes nothing", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Thu 01:00");
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [photo()])).toEqual({ ok: false, reason: "nothing-to-excuse" });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [photo()])).toEqual({
+      ok: false,
+      reason: "nothing-to-excuse",
+    });
     expect(owner.today().waiting).toEqual([]);
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(owed(owner)).toBe(500);
+  });
+
+  test("judged when the server received the photos: one received at Wed 23:59 is accepted, though the upload finished after", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Wed 23:59");
+    // A slow upload: the server has the photo at Wed 23:59, but writes the excuse at Thu 00:01.
+    const store = s.photoStore.store.bind(s.photoStore);
+    s.photoStore.store = async (p) => {
+      const stored = await store(p);
+      s.setClockTo("Thu 00:01");
+      return stored;
+    };
+
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [photo()])).toEqual({
+      ok: true,
+      excuseId: expect.any(String),
+    });
+    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", filedAt: s.at("Wed 23:59") })]);
+  });
+
+  test("when storing a photo fails: filing fails and writes nothing", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Tue 10:00");
+    s.photoStore.store = () => Promise.reject(new Error("upload failed"));
+
+    await expect(owner.fileExcuse(gym, sick(s.date("Mon")), [photo()])).rejects.toThrow("upload failed");
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(s.notifier.sentTo(reviewer).filter((n) => n.kind === "review-item")).toEqual([]);
   });
 });
 
@@ -177,13 +192,13 @@ describe("days ahead", () => {
   test("an excuse for Fri–Sun filed Wednesday and approved Thursday: those days are Excused when they end, with no penalty", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
-    const run = await createPact("Run", [...EVERY_DAY]);
+    const run = await createPact("Run", EVERY_DAY);
     await s.advanceTo("Wed 10:00");
 
-    const excuseId = await fileExcuse(owner, run, { from: FRIDAY, to: SUNDAY, reason: "Trip" });
+    const excuseId = await fileExcuse(owner, run, { from: s.date("Fri"), to: s.date("Sun"), reason: "Trip" });
     expect(owner.excuse(excuseId)).toMatchObject({
       excuse: {
-        days: [FRIDAY, SATURDAY, SUNDAY].map((date) => ({
+        days: [s.date("Fri"), s.date("Sat"), s.date("Sun")].map((date) => ({
           date,
           status: { kind: "not-judged", evidenceWaiting: false, excuse: "waiting" },
         })),
@@ -197,17 +212,24 @@ describe("days ahead", () => {
     await s.advanceTo("2026-01-12T05:00:00Z"); // Mon Jan 12, 00:00 in New York
 
     expect(owner.excuse(excuseId)).toMatchObject({
-      excuse: { days: [FRIDAY, SATURDAY, SUNDAY].map((date) => ({ date, status: { kind: "excused" } })) },
+      excuse: {
+        days: [s.date("Fri"), s.date("Sat"), s.date("Sun")].map((date) => ({ date, status: { kind: "excused" } })),
+      },
     });
     // Mon–Thu were Missed; Fri–Sun added nothing, and their owner wasn't told they were Missed.
-    expect(history(s, owner).map((entry) => entry.kind === "penalty" && entry.occurrenceDate)).toEqual([
-      THURSDAY,
-      WEDNESDAY,
-      TUESDAY,
-      MONDAY,
+    expect(ledgerHistory(owner).map((entry) => entry.kind === "penalty" && entry.occurrenceDate)).toEqual([
+      s.date("Thu"),
+      s.date("Wed"),
+      s.date("Tue"),
+      s.date("Mon"),
     ]);
     const missedPushes = s.notifier.sent.filter((n) => n.kind === "missed-occurrence");
-    expect(missedPushes.map((n) => n.payload.occurrenceDate)).toEqual([MONDAY, TUESDAY, WEDNESDAY, THURSDAY]);
+    expect(missedPushes.map((n) => n.payload.occurrenceDate)).toEqual([
+      s.date("Mon"),
+      s.date("Tue"),
+      s.date("Wed"),
+      s.date("Thu"),
+    ]);
   });
 });
 
@@ -218,17 +240,17 @@ describe("an excuse covering today", () => {
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 15:00");
 
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
 
     expect(owner.today()).toMatchObject({
       sections: [],
-      waiting: [{ kind: "excuse", id: excuseId, firstDate: MONDAY, lastDate: MONDAY }],
+      waiting: [{ kind: "excuse", id: excuseId, firstDate: s.date("Mon"), lastDate: s.date("Mon") }],
     });
     await s.advanceTo("Tue 08:00");
     expect(owed(owner)).toBe(0);
-    expect(history(s, owner)).toEqual([expect.objectContaining({ occurrenceDate: MONDAY, held: true })]);
+    expect(ledgerHistory(owner)).toEqual([expect.objectContaining({ occurrenceDate: s.date("Mon"), held: true })]);
     expect(owner.excuse(excuseId)).toMatchObject({
-      excuse: { days: [{ date: MONDAY, status: { kind: "missed", penaltyCents: 500, held: true } }] },
+      excuse: { days: [{ date: s.date("Mon"), status: { kind: "missed", penaltyCents: 500, held: true } }] },
     });
     // A miss with an excuse waiting isn't on Today's Missed section, and isn't pushed.
     expect(owner.today().sections).toEqual([]);
@@ -237,7 +259,7 @@ describe("an excuse covering today", () => {
     await reviewer.decide(excuseId, { kind: "approve" });
 
     expect(owner.excuse(excuseId)).toMatchObject({ excuse: { days: [{ status: { kind: "excused" } }] } });
-    expect(history(s, owner)).toEqual([]);
+    expect(ledgerHistory(owner)).toEqual([]);
   });
 });
 
@@ -248,31 +270,30 @@ describe("which days an excuse covers", () => {
     const gym = await createPact("Gym", MON_WED_FRI);
     // Monday Missed (Tue 00:00); Wednesday Satisfied; Friday not judged yet.
     s.setClockTo("Wed 12:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     await reviewer.decide(evidence.evidenceId, { kind: "approve" });
     await s.advanceTo("Fri 08:00");
 
-    const dates = { from: MONDAY, to: SUNDAY };
+    const dates = { from: s.date("Mon"), to: s.date("Sun") };
     const fridayOpen = { kind: "not-judged", evidenceWaiting: false, excuse: null };
     expect(owner.excusePreview(gym, dates)).toEqual({
       ok: true,
       preview: {
         covered: [
           {
-            date: FRIDAY,
+            date: s.date("Fri"),
             status: { ...fridayOpen, opensAt: s.at("Fri 00:00"), dueAt: new Date("2026-01-10T05:00:00Z") },
           },
         ],
         skipped: [
-          { date: MONDAY, reason: "window-closed" },
-          { date: WEDNESDAY, reason: "satisfied" },
+          { date: s.date("Mon"), reason: "window-closed" },
+          { date: s.date("Wed"), reason: "satisfied" },
         ],
         heldCents: 0,
       },
     });
     const excuseId = await fileExcuse(owner, gym, { ...dates, reason: "Sick" });
-    expect(owner.excuse(excuseId)).toMatchObject({ excuse: { days: [{ date: FRIDAY }] } });
+    expect(owner.excuse(excuseId)).toMatchObject({ excuse: { days: [{ date: s.date("Fri") }] } });
     expect(owed(owner)).toBe(500);
   });
 
@@ -281,15 +302,14 @@ describe("which days an excuse covers", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Wed 12:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     await reviewer.decide(evidence.evidenceId, { kind: "approve" });
     await s.advanceTo("Thu 08:00");
 
     const nothing = { ok: false, reason: "nothing-to-excuse" };
-    expect(await owner.fileExcuse(gym, sick(MONDAY, WEDNESDAY), [])).toEqual(nothing);
-    expect(await owner.fileExcuse(gym, sick(TUESDAY), [])).toEqual(nothing);
-    expect(owner.excusePreview(gym, sick(TUESDAY))).toEqual({
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon"), s.date("Wed")), [])).toEqual(nothing);
+    expect(await owner.fileExcuse(gym, sick(s.date("Tue")), [])).toEqual(nothing);
+    expect(owner.excusePreview(gym, sick(s.date("Tue")))).toEqual({
       ok: true,
       preview: { covered: [], skipped: [], heldCents: 0 },
     });
@@ -299,13 +319,13 @@ describe("which days an excuse covers", () => {
   test("a day already on a waiting excuse can't go on a second one", async () => {
     const { s, owner, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    await fileExcuse(owner, gym, sick(MONDAY));
+    await fileExcuse(owner, gym, sick(s.date("Mon")));
 
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toEqual({ ok: false, reason: "nothing-to-excuse" });
-    expect(owner.excusePreview(gym, sick(MONDAY, WEDNESDAY))).toMatchObject({
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toEqual({ ok: false, reason: "nothing-to-excuse" });
+    expect(owner.excusePreview(gym, sick(s.date("Mon"), s.date("Wed")))).toMatchObject({
       preview: {
-        covered: [{ date: WEDNESDAY }],
-        skipped: [{ date: MONDAY, reason: "on-waiting-excuse" }],
+        covered: [{ date: s.date("Wed") }],
+        skipped: [{ date: s.date("Mon"), reason: "on-waiting-excuse" }],
       },
     });
   });
@@ -313,15 +333,15 @@ describe("which days an excuse covers", () => {
   test("an approved day ahead, or an Excused day, is skipped as Excused", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY, WEDNESDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon"), s.date("Wed")));
     await reviewer.decide(excuseId, { kind: "approve" });
 
-    expect(owner.excusePreview(gym, sick(MONDAY, FRIDAY))).toMatchObject({
+    expect(owner.excusePreview(gym, sick(s.date("Mon"), s.date("Fri")))).toMatchObject({
       preview: {
-        covered: [{ date: FRIDAY }],
+        covered: [{ date: s.date("Fri") }],
         skipped: [
-          { date: MONDAY, reason: "excused" },
-          { date: WEDNESDAY, reason: "excused" },
+          { date: s.date("Mon"), reason: "excused" },
+          { date: s.date("Wed"), reason: "excused" },
         ],
       },
     });
@@ -334,15 +354,15 @@ describe("filing is refused", () => {
     s.setClockTo("Tue 08:00");
 
     const refused = (reason: string) => ({ ok: false, reason });
-    expect(await owner.fileExcuse(gym, { ...sick(MONDAY), reason: "  " }, [])).toEqual(refused("blank-reason"));
-    expect(await owner.fileExcuse(gym, sick(WEDNESDAY, MONDAY), [])).toEqual(refused("invalid-dates"));
+    expect(await owner.fileExcuse(gym, { ...sick(s.date("Mon")), reason: "  " }, [])).toEqual(refused("blank-reason"));
+    expect(await owner.fileExcuse(gym, sick(s.date("Wed"), s.date("Mon")), [])).toEqual(refused("invalid-dates"));
     expect(await owner.fileExcuse(gym, sick("2026-02-30"), [])).toEqual(refused("invalid-dates"));
     expect(await owner.fileExcuse(gym, sick("Monday"), [])).toEqual(refused("invalid-dates"));
     // 62 days is fine; 63 isn't.
-    expect(owner.excusePreview(gym, sick(MONDAY, "2026-03-07"))).toMatchObject({ ok: true });
-    expect(await owner.fileExcuse(gym, sick(MONDAY, "2026-03-08"), [])).toEqual(refused("too-many-days"));
+    expect(owner.excusePreview(gym, sick(s.date("Mon"), "2026-03-07"))).toMatchObject({ ok: true });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon"), "2026-03-08"), [])).toEqual(refused("too-many-days"));
     const photos = [photo(1), photo(2), photo(3), photo(4)];
-    expect(await owner.fileExcuse(gym, sick(MONDAY), photos)).toEqual(refused("too-many-photos"));
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), photos)).toEqual(refused("too-many-photos"));
 
     expect(owner.today().waiting).toEqual([]);
     expect(reviewer.reviewQueue()).toEqual([]);
@@ -354,12 +374,15 @@ describe("filing is refused", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
 
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toEqual({ ok: false, reason: "edit-window-open" });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toEqual({ ok: false, reason: "edit-window-open" });
     expect(owner.excuseOptions(gym)).toEqual({ ok: false, reason: "edit-window-open" });
     s.setClockTo("Mon 09:10");
-    expect(await reviewer.fileExcuse(gym, sick(MONDAY), [])).toEqual({ ok: false, reason: "pact-not-found" });
-    expect(await owner.fileExcuse("no-such-pact", sick(MONDAY), [])).toEqual({ ok: false, reason: "pact-not-found" });
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toMatchObject({ ok: true });
+    expect(await reviewer.fileExcuse(gym, sick(s.date("Mon")), [])).toEqual({ ok: false, reason: "pact-not-found" });
+    expect(await owner.fileExcuse("no-such-pact", sick(s.date("Mon")), [])).toEqual({
+      ok: false,
+      reason: "pact-not-found",
+    });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toMatchObject({ ok: true });
   });
 });
 
@@ -369,13 +392,16 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Tue 09:00");
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
 
     expect(owner.today().alerts).toEqual([
-      expect.objectContaining({ kind: "evidence-rejected", occurrenceDate: MONDAY, excusableUntil: s.at("Thu 09:00") }),
+      expect.objectContaining({
+        kind: "evidence-rejected",
+        occurrenceDate: s.date("Mon"),
+        excusableUntil: s.at("Thu 09:00"),
+      }),
     ]);
   });
 
@@ -384,14 +410,13 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Tue 09:00");
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
 
     // Monday was judged Missed at the rejection, so its window runs to Thu 09:00, not Thu 00:00.
     s.setClockTo("Thu 08:00");
-    const excuseId = await fileExcuse(owner, gym, { ...sick(MONDAY), reason: "That was the gym's mirror" });
+    const excuseId = await fileExcuse(owner, gym, { ...sick(s.date("Mon")), reason: "That was the gym's mirror" });
 
     expect(owner.today()).toMatchObject({ alerts: [], sections: [], waiting: [{ kind: "excuse", id: excuseId }] });
     expect(owed(owner)).toBe(0);
@@ -408,15 +433,14 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Tue 09:00");
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
-    await owner.acceptMiss(gym, MONDAY);
+    await owner.acceptMiss(gym, s.date("Mon"));
     expect(owner.today().alerts).toEqual([]);
 
     s.setClockTo("Thu 08:59");
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toMatchObject({ ok: true });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toMatchObject({ ok: true });
   });
 
   test("evidence rejected on a day with an excuse waiting: Missed with its penalty held, and no evidence alert", async () => {
@@ -424,9 +448,8 @@ describe("rejected evidence", () => {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 13:00");
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
-    await fileExcuse(owner, gym, sick(MONDAY));
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
+    await fileExcuse(owner, gym, sick(s.date("Mon")));
     await reviewer.decide(evidence.evidenceId, { kind: "reject", reason: "Blurry" });
 
     expect(owed(owner)).toBe(0);
@@ -440,30 +463,32 @@ describe("Take the L", () => {
     expect(owner.today().sections).toEqual([
       {
         kind: "missed",
-        cards: [expect.objectContaining({ pactId: gym, occurrenceDate: MONDAY, excusableUntil: s.at("Thu 00:00") })],
+        cards: [
+          expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon"), excusableUntil: s.at("Thu 00:00") }),
+        ],
       },
     ]);
 
-    await owner.acceptMiss(gym, MONDAY);
+    await owner.acceptMiss(gym, s.date("Mon"));
     expect(owner.today().sections).toEqual([]);
     expect(owed(owner)).toBe(500);
 
     s.setClockTo("Wed 20:00");
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toMatchObject({ ok: true });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toMatchObject({ ok: true });
     expect(owed(owner)).toBe(0);
   });
 
   test("a Missed card leaves Today while an excuse for it waits", async () => {
     const { s, owner, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    await fileExcuse(owner, gym, sick(MONDAY));
+    await fileExcuse(owner, gym, sick(s.date("Mon")));
     expect(owner.today().sections).toEqual([]);
   });
 
   test("on a rejected-excuse alert: it leaves Today with its Missed days, owed is unchanged, and a new excuse is still accepted inside the window", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
     await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
 
     expect(await owner.acceptExcuseRejection(excuseId)).toEqual({ ok: true });
@@ -472,13 +497,13 @@ describe("Take the L", () => {
     expect(owed(owner)).toBe(500);
     expect(await owner.acceptExcuseRejection(excuseId)).toEqual({ ok: false, reason: "nothing-to-accept" });
     expect(await reviewer.acceptExcuseRejection(excuseId)).toEqual({ ok: false, reason: "excuse-not-found" });
-    expect(await owner.fileExcuse(gym, sick(MONDAY), [])).toMatchObject({ ok: true });
+    expect(await owner.fileExcuse(gym, sick(s.date("Mon")), [])).toMatchObject({ ok: true });
   });
 
   test("only on a rejected excuse: one waiting or approved has nothing to accept", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
     expect(await owner.acceptExcuseRejection(excuseId)).toEqual({ ok: false, reason: "nothing-to-accept" });
     await reviewer.decide(excuseId, { kind: "approve" });
     expect(await owner.acceptExcuseRejection(excuseId)).toEqual({ ok: false, reason: "nothing-to-accept" });
@@ -489,14 +514,14 @@ describe("a rejected excuse with days not judged yet", () => {
   test("its days ahead are judged as usual, and the alert says so", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY, FRIDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon"), s.date("Fri")));
     await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
 
     expect(owner.today().alerts).toEqual([
       expect.objectContaining({
         kind: "excuse-rejected",
-        firstDate: MONDAY,
-        lastDate: FRIDAY,
+        firstDate: s.date("Mon"),
+        lastDate: s.date("Fri"),
         owedAgainCents: 500,
         hasDaysNotJudged: true,
         refile: { closesAt: s.at("Thu 00:00") },
@@ -506,14 +531,29 @@ describe("a rejected excuse with days not judged yet", () => {
     // Wednesday is Missed as usual, with its push, and its own Missed card.
     expect(owed(owner)).toBe(1000);
     expect(s.notifier.sent.filter((n) => n.kind === "missed-occurrence").map((n) => n.payload.occurrenceDate)).toEqual([
-      MONDAY,
-      WEDNESDAY,
+      s.date("Mon"),
+      s.date("Wed"),
     ]);
     expect(owner.today().sections).toEqual([
-      { kind: "missed", cards: [expect.objectContaining({ occurrenceDate: WEDNESDAY })] },
+      { kind: "missed", cards: [expect.objectContaining({ occurrenceDate: s.date("Wed") })] },
     ]);
     // Wednesday, Missed after the rejection, can be excused until Sat 00:00; Friday is not judged yet.
     expect(owner.today().alerts).toEqual([expect.objectContaining({ refile: { closesAt: s.at("Sat 00:00") } })]);
+  });
+  test("an approved change takes all its days off the schedule: no alert is left, and Today still loads", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Tue 08:00");
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Fri")));
+    await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
+    expect(owner.today().alerts).toEqual([expect.objectContaining({ kind: "excuse-rejected", excuseId })]);
+
+    const sent = await owner.changePact(
+      gym,
+      changed(owner, gym, { schedule: { kind: "fixed-days", days: ["mon", "wed"] } }),
+    );
+    await reviewer.decide(changeRequestIdOf(sent), { kind: "approve" });
+
+    expect(owner.today().alerts).toEqual([]);
   });
 });
 
@@ -521,7 +561,7 @@ describe("holds and payments", () => {
   test("a held penalty isn't owed, so a payment can't cover it; released by a rejection, it's owed and payable again", async () => {
     const { s, owner, reviewer, gym, sam } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0 })]);
     expect(await owner.recordPayment({ recipientId: sam.id, amountCents: 500 }, photo())).toEqual({
@@ -538,7 +578,7 @@ describe("holds and payments", () => {
     const { s, owner, reviewer, gym, sam } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
     await reviewer.decide(await recordPayment(owner, { recipientId: sam.id, amountCents: 500 }), { kind: "approve" });
-    await reviewer.decide(await fileExcuse(owner, gym, sick(MONDAY)), { kind: "approve" });
+    await reviewer.decide(await fileExcuse(owner, gym, sick(s.date("Mon"))), { kind: "approve" });
 
     expect(owner.ledgers()).toEqual([
       expect.objectContaining({ owedCents: 0, payableCents: 0, paidCents: 500, overdueCents: 0, billDue: null }),
@@ -551,8 +591,8 @@ describe("holds and payments", () => {
     // Wednesday's miss is paid already; Friday's is owed.
     await s.advanceTo("Thu 00:00");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0 })]);
-    expect(history(s, owner).filter((entry) => entry.kind === "penalty")).toEqual([
-      expect.objectContaining({ occurrenceDate: WEDNESDAY, paidCents: 500 }),
+    expect(ledgerHistory(owner).filter((entry) => entry.kind === "penalty")).toEqual([
+      expect.objectContaining({ occurrenceDate: s.date("Wed"), paidCents: 500 }),
     ]);
     await s.advanceTo("Sat 00:00");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 500, payableCents: 500 })]);
@@ -562,7 +602,7 @@ describe("holds and payments", () => {
     const { s, owner, reviewer, gym, sam } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
     const paymentId = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
-    await fileExcuse(owner, gym, sick(MONDAY));
+    await fileExcuse(owner, gym, sick(s.date("Mon")));
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, awaitingCents: 500, payableCents: 0 })]);
     expect(reviewer.reviewQueue()).toContainEqual(
       expect.objectContaining({ kind: "payment", owedCents: 0, owedAfterApprovalCents: 0 }),
@@ -572,13 +612,25 @@ describe("holds and payments", () => {
 
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0, paidCents: 500 })]);
   });
+
+  test("an excuse holds a penalty a payment already part paid: the Review Queue says $0 owed, not below", async () => {
+    const { s, owner, reviewer, gym, sam } = await gymMissedMonday();
+    s.setClockTo("Tue 08:00");
+    await reviewer.decide(await recordPayment(owner, { recipientId: sam.id, amountCents: 300 }), { kind: "approve" });
+    const waiting = await recordPayment(owner, { recipientId: sam.id, amountCents: 200 });
+    await fileExcuse(owner, gym, sick(s.date("Mon")));
+
+    expect(reviewer.reviewQueue()).toContainEqual(
+      expect.objectContaining({ kind: "payment", id: waiting, owedCents: 0, owedAfterApprovalCents: 0 }),
+    );
+  });
 });
 
 describe("who decides", () => {
   test("either reviewer of a two-reviewer pact can decide; the second decision is refused", async () => {
     const { s, owner, reviewer, second, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
     expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId })]);
     expect(second.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId })]);
 
@@ -595,7 +647,7 @@ describe("who decides", () => {
   test("the owner can't decide their own excuse, and a rejection needs a reason", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
     expect(await owner.decide(excuseId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
     expect(await reviewer.decide(excuseId, { kind: "reject", reason: " " })).toEqual({
       ok: false,
@@ -608,7 +660,7 @@ describe("the review item", () => {
   test("shows the reason, photos, the days with their held penalties, and what's held", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY, WEDNESDAY), [photo(1), photo(2)]);
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon"), s.date("Wed")), [photo(1), photo(2)]);
 
     const [item] = reviewer.reviewQueue();
     expect(item).toEqual({
@@ -622,11 +674,11 @@ describe("the review item", () => {
       filedAt: s.at("Tue 08:00"),
       days: [
         {
-          date: MONDAY,
+          date: s.date("Mon"),
           status: { kind: "missed", penaltyCents: 500, held: true, excusableUntil: s.at("Thu 00:00") },
         },
         {
-          date: WEDNESDAY,
+          date: s.date("Wed"),
           status: {
             kind: "not-judged",
             opensAt: s.at("Wed 00:00"),
@@ -653,7 +705,7 @@ describe("notifications", () => {
   test("each reviewer is told of a new excuse; the owner is told the decision", async () => {
     const { s, owner, reviewer, second, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY, WEDNESDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon"), s.date("Wed")));
 
     const items = s.notifier.sent.filter((n) => n.kind === "review-item");
     expect(items.map((n) => n.recipient).toSorted()).toEqual([reviewer.id, second.id].toSorted());
@@ -685,17 +737,16 @@ describe("the pact page", () => {
     expect(owner.excuseOptions(gym)).toEqual({
       ok: true,
       options: {
-        today: WEDNESDAY,
+        today: s.date("Wed"),
         recentDays: [
-          { date: WEDNESDAY, status: expect.objectContaining({ kind: "not-judged" }) },
-          { date: MONDAY, status: expect.objectContaining({ kind: "missed", held: false }) },
+          { date: s.date("Wed"), status: expect.objectContaining({ kind: "not-judged" }) },
+          { date: s.date("Mon"), status: expect.objectContaining({ kind: "missed", held: false }) },
         ],
       },
     });
-    const evidence = await owner.submitEvidence(gym, [photo()]);
-    if (!evidence.ok) throw new Error(evidence.reason);
+    const evidence = ok(await owner.submitEvidence(gym, [photo()]));
     s.setClockTo("Wed 11:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
 
     expect(owner.pact(gym)).toMatchObject({
       pact: {
@@ -712,13 +763,13 @@ describe("restarts", () => {
   test("an excuse waiting for approval survives a restart with its holds intact", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");
-    const excuseId = await fileExcuse(owner, gym, sick(MONDAY));
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
 
     await s.restart();
 
     expect(owed(owner)).toBe(0);
     expect(owner.today().waiting).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId })]);
     await reviewer.decide(excuseId, { kind: "approve" });
-    expect(history(s, owner)).toEqual([]);
+    expect(ledgerHistory(owner)).toEqual([]);
   });
 });

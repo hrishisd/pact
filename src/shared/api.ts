@@ -3,7 +3,6 @@
 
 import type {
   AnkiDecksResult,
-  EvidenceKind,
   AcceptExcuseRejectionResult,
   AcceptInviteResult,
   AcceptMissResult,
@@ -23,6 +22,7 @@ import type {
   EditPactResult,
   ExcuseOptionsResult,
   ExcusePreviewResult,
+  ExcuseDates,
   ExcuseResult,
   FileExcuseResult,
   DecideResult,
@@ -32,11 +32,14 @@ import type {
   InviteLookup,
   LedgerResult,
   LedgerSummary,
+  NewExcuse,
   NewPact,
+  NewPayment,
   NewRecipient,
   NotificationSetting,
   NotificationSettingState,
   PactResult,
+  PactTiming,
   PactSummary,
   Profile,
   PushDevice,
@@ -45,7 +48,6 @@ import type {
   ReviewDecision,
   ReviewItem,
   SavePushSubscriptionResult,
-  Schedule,
   SetTimezoneResult,
   SubmitEvidenceResult,
   Today,
@@ -53,7 +55,8 @@ import type {
 
 /**
  * A value as it arrives after a trip through JSON: every Date is its ISO 8601
- * string. Response types that carry dates are wrapped in this.
+ * string. Every response type is wrapped in this, those without dates too,
+ * so a Date added to one later can't reach the client mistyped.
  */
 export type Json<T> = T extends Date
   ? string
@@ -95,17 +98,6 @@ export const INVITE_TOKEN_SIGN_IN_KEY = "inviteToken";
 export const OURA_RESULT_PARAM = "oura";
 export type OuraResult = "connected" | "cancelled" | "failed" | "unavailable";
 
-/** The client route of an invite link; the SPA renders it. */
-export function invitePath(token: string): string {
-  return `/invite/${token}`;
-}
-
-/** The token of the invite link `pathname` is (the inverse of `invitePath`), or null. */
-export function inviteTokenFromPath(pathname: string): string | null {
-  const match = /^\/invite\/([^/]+)$/.exec(pathname);
-  return match?.[1] === undefined ? null : decodeURIComponent(match[1]);
-}
-
 /** The app's own pages, for its navigation and for where a notification opens. */
 export const APP_PATHS = {
   today: "/",
@@ -124,12 +116,16 @@ export const APP_PATHS = {
   evidence: (evidenceId: string) => `/evidence/${encodeURIComponent(evidenceId)}`,
   /** A payment's page, for its owner: where a reviewer's question about it opens. */
   payment: (paymentId: string) => `/payments/${encodeURIComponent(paymentId)}`,
+  /** The device's push and the account's notification settings, opened from Profile. */
+  notifications: "/notifications",
+  /** An invite link. It shows before sign-in, so the app reads it apart from the other pages. */
+  invite: (token: string) => `/invite/${encodeURIComponent(token)}`,
 } as const;
 
 /**
- * The JSON API's routes. Tokens and ids are URL-safe as made (base64url,
- * UUIDs), so they go into paths as they are; the server registers its routes
- * by calling these with ":param" placeholders.
+ * The JSON API's routes. Callers encode their arguments; the server registers
+ * its routes by calling these with ":param" placeholders, which must not be
+ * encoded.
  */
 export const API_PATHS = {
   me: "/api/me",
@@ -240,6 +236,11 @@ export const EXCUSE_REASON_FIELD = "reason";
 /** The photo types the server accepts and serves back: JPEG, which the client always sends after shrinking. */
 export const PHOTO_CONTENT_TYPES: readonly string[] = ["image/jpeg"];
 
+/** The answer of a route that only ever succeeds. */
+export interface OkResponse {
+  ok: true;
+}
+
 /** POST /api/invites: a new single-use invite, expiring 7 days from now. */
 export type CreateInviteResponse = Json<Invite>;
 
@@ -247,43 +248,34 @@ export type CreateInviteResponse = Json<Invite>;
 export type InviteLookupResponse = Json<InviteLookup>;
 
 /** POST /api/invites/:token/accept (no body). */
-export type AcceptInviteResponse = AcceptInviteResult;
+export type AcceptInviteResponse = Json<AcceptInviteResult>;
 
 /** GET /api/friends */
-export type FriendsResponse = Friend[];
+export type FriendsResponse = Json<Friend[]>;
 
 /** GET /api/recipients: the owner's saved recipients. */
-export type RecipientsResponse = Recipient[];
+export type RecipientsResponse = Json<Recipient[]>;
 
 /** POST /api/recipients */
 export type AddRecipientRequest = NewRecipient;
-export type AddRecipientResponse = AddRecipientResult;
+export type AddRecipientResponse = Json<AddRecipientResult>;
 
 /** POST /api/pacts */
 export type CreatePactRequest = NewPact;
-export type CreatePactResponse = CreatePactResult;
+export type CreatePactResponse = Json<CreatePactResult>;
 
 /** PUT /api/pacts/:id: an edit in the pact's edit window. */
 export type EditPactRequest = NewPact;
-export type EditPactResponse = EditPactResult;
+export type EditPactResponse = Json<EditPactResult>;
 
 /** DELETE /api/pacts/:id (no body): a delete in the pact's edit window. */
-export type DeletePactResponse = DeletePactResult;
+export type DeletePactResponse = Json<DeletePactResult>;
 
 /** POST /api/pacts/first-occurrence: the form's Check step, before the pact exists or its edit is saved. */
-export interface FirstOccurrenceRequest {
-  schedule: Schedule;
-  /** Anki days open at the collection's rollover hour. Default Camera. */
-  evidenceKind?: EvidenceKind;
-  /** Oura Ring only: the in-bed-by time, "HH:MM". */
-  inBedBy?: string;
-  /** Camera and Anki: the due-by time, "HH:MM". */
-  dueBy?: string;
-  /** The start date, "YYYY-MM-DD". */
-  startDate?: string;
+export type FirstOccurrenceRequest = PactTiming & {
   /** The pact being edited: the rule then counts from when it was created. */
   editing?: string;
-}
+};
 export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
 
 /**
@@ -292,20 +284,20 @@ export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
  * 400 "invalid-request"; the core's refusals are 200s.
  */
 export type ChangePactRequest = PactChange;
-export type ChangePreviewResponse = ChangePreviewResult;
-export type ChangePactResponse = ChangePactResult;
+export type ChangePreviewResponse = Json<ChangePreviewResult>;
+export type ChangePactResponse = Json<ChangePactResult>;
 
 /** POST /api/pacts/:id/end, with an optional note. */
 export interface EndPactRequest {
   note?: string;
 }
-export type EndPactResponse = RequestEndResult;
+export type EndPactResponse = Json<RequestEndResult>;
 
 /** GET /api/changes/:id: someone else's change request, or none, is a 200 refusal. */
 export type ChangeRequestResponse = Json<ChangeRequestResult>;
 
 /** POST /api/changes/:id/withdraw (no body). */
-export type WithdrawChangeRequestResponse = WithdrawChangeRequestResult;
+export type WithdrawChangeRequestResponse = Json<WithdrawChangeRequestResult>;
 
 /** GET /api/pacts: the Pacts tab. */
 export type PactsResponse = Json<PactSummary>[];
@@ -320,14 +312,14 @@ export type PactResponse = Json<PactResult>;
  * PHOTO_CONTENT_TYPES, is a 400 "invalid-request". The core's refusals,
  * "no-photos" and "too-many-photos" included, are 200s.
  */
-export type SubmitEvidenceResponse = SubmitEvidenceResult;
+export type SubmitEvidenceResponse = Json<SubmitEvidenceResult>;
 
 /**
  * POST /api/pacts/:id/occurrences/:date/accept-miss (no body): the owner
  * accepts a Missed occurrence (Take the L). A date not shaped "YYYY-MM-DD"
  * is a 400 "invalid-request"; the core's refusals are 200s.
  */
-export type AcceptMissResponse = AcceptMissResult;
+export type AcceptMissResponse = Json<AcceptMissResult>;
 
 /**
  * POST /api/pacts/:id/excuses: multipart form data with EXCUSE_FROM_FIELD,
@@ -336,9 +328,11 @@ export type AcceptMissResponse = AcceptMissResult;
  * type outside PHOTO_CONTENT_TYPES is a 400, as for evidence; the core's
  * refusals ("too-many-photos" and "invalid-dates" included) are 200s.
  */
-export type FileExcuseResponse = FileExcuseResult;
+export type FileExcuseRequest = NewExcuse;
+export type FileExcuseResponse = Json<FileExcuseResult>;
 
 /** GET /api/pacts/:id/excuses/preview?from=&to= (both required, else a 400). The core's refusals are 200s. */
+export type ExcusePreviewQuery = ExcuseDates;
 export type ExcusePreviewResponse = Json<ExcusePreviewResult>;
 
 /** GET /api/pacts/:id/excuses/options */
@@ -348,9 +342,9 @@ export type ExcuseOptionsResponse = Json<ExcuseOptionsResult>;
 export type ExcuseResponse = Json<ExcuseResult>;
 
 /** POST /api/excuses/:id/accept-rejection (no body). */
-export type AcceptExcuseRejectionResponse = AcceptExcuseRejectionResult;
+export type AcceptExcuseRejectionResponse = Json<AcceptExcuseRejectionResult>;
 
-/** GET /api/review: the signed-in account's Review Queue, oldest first. */
+/** GET /api/review: the signed-in account's Review Queue, change requests first, then the rest oldest first. */
 export type ReviewQueueResponse = Json<ReviewItem[]>;
 
 /**
@@ -358,7 +352,7 @@ export type ReviewQueueResponse = Json<ReviewItem[]>;
  * "invalid-request"; the core's refusals ("blank-reason" included) are 200s.
  */
 export type DecideRequest = ReviewDecision;
-export type DecideResponse = DecideResult;
+export type DecideResponse = Json<DecideResult>;
 
 /** GET /api/review/waiting-on-reply: in the Review Queue's order. */
 export type WaitingOnReplyResponse = Json<ReviewItem[]>;
@@ -370,13 +364,13 @@ export type WaitingOnReplyResponse = Json<ReviewItem[]>;
 export interface AskOwnerRequest {
   question: string;
 }
-export type AskOwnerResponse = AskOwnerResult;
+export type AskOwnerResponse = Json<AskOwnerResult>;
 
 /** POST /api/review/:id/reply, as the item's owner. Shapes and refusals as for a question. */
 export interface ReplyRequest {
   reply: string;
 }
-export type ReplyResponse = ReplyResult;
+export type ReplyResponse = Json<ReplyResult>;
 
 /** GET /api/evidence/:id: the evidence's page. Someone else's evidence, or none, is a 200 refusal. */
 export type EvidenceResponse = Json<EvidenceResult>;
@@ -399,7 +393,8 @@ export type LedgerResponse = Json<LedgerResult>;
  * 400 "invalid-request". The core's refusals, "no-screenshot" and
  * "invalid-amount" (say, a fraction of a cent) included, are 200s.
  */
-export type RecordPaymentResponse = RecordPaymentResult;
+export type RecordPaymentRequest = Omit<NewPayment, "recipientId">;
+export type RecordPaymentResponse = Json<RecordPaymentResult>;
 
 /** GET /api/notifications: the account's settings, and the key a browser subscribes with. */
 export interface NotificationsResponse {
@@ -412,7 +407,7 @@ export interface SetNotificationSettingRequest {
   setting: NotificationSetting;
   enabled: boolean;
 }
-export type SetNotificationSettingResponse = NotificationSettingState[];
+export type SetNotificationSettingResponse = Json<NotificationSettingState[]>;
 
 /**
  * POST /api/push-subscriptions: this device gets this account's notifications.
@@ -420,12 +415,13 @@ export type SetNotificationSettingResponse = NotificationSettingState[];
  * endpoint or keys it doesn't accept with a 200.
  */
 export type SavePushSubscriptionRequest = PushDevice;
-export type SavePushSubscriptionResponse = SavePushSubscriptionResult;
+export type SavePushSubscriptionResponse = Json<SavePushSubscriptionResult>;
 
 /** DELETE /api/push-subscriptions: this device stops getting them. Answers 200 whether or not it was saved. */
 export interface RemovePushSubscriptionRequest {
   endpoint: string;
 }
+export type RemovePushSubscriptionResponse = OkResponse;
 
 /**
  * GET /api/me: the signed-in account's profile, and whether this server has
@@ -441,12 +437,10 @@ export interface SetTimezoneRequest {
   /** IANA zone, e.g. "America/New_York". */
   timezone: string;
 }
-export type SetTimezoneResponse = SetTimezoneResult;
+export type SetTimezoneResponse = Json<SetTimezoneResult>;
 
 /** POST /api/oura/check: always `{ ok: true }`, whether Oura was asked or the check was ignored. */
-export interface CheckOuraResponse {
-  ok: true;
-}
+export type CheckOuraResponse = OkResponse;
 
 /** POST /api/oura/disconnect: the profile, now without its Oura connection. */
 export type DisconnectOuraResponse = MeResponse;
@@ -463,12 +457,10 @@ export interface ConnectAnkiRequest {
 export type ConnectAnkiResponse = { ok: true } | { ok: false; reason: "wrong-login" | "unreachable" | "unavailable" };
 
 /** GET /api/anki/decks */
-export type AnkiDecksResponse = AnkiDecksResult;
+export type AnkiDecksResponse = Json<AnkiDecksResult>;
 
 /** POST /api/anki/check: always `{ ok: true }`, whether AnkiWeb was asked or the check was ignored. */
-export interface CheckAnkiResponse {
-  ok: true;
-}
+export type CheckAnkiResponse = OkResponse;
 
 /** POST /api/anki/disconnect: the profile, now without its AnkiWeb connection. */
 export type DisconnectAnkiResponse = MeResponse;
@@ -477,9 +469,7 @@ export type DisconnectAnkiResponse = MeResponse;
 export type TodayResponse = Json<Today>;
 
 /** GET /healthz: liveness only (process up, database readable). */
-export interface LivenessResponse {
-  ok: true;
-}
+export type LivenessResponse = OkResponse;
 
 /**
  * GET /health: fails (503) when the scheduler has not ticked for 5 minutes or

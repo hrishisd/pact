@@ -4,7 +4,8 @@
 
 import { describe, expect, test } from "vitest";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
-import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { changeRequestIdOf, scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { changed, ok } from "./testing/queries.ts";
 
 /** A friend of the owner's who reviews only a pact of theirs with another recipient, "Food bank". */
 async function reviewerForAnotherRecipient(
@@ -12,8 +13,7 @@ async function reviewerForAnotherRecipient(
   { owner, createPact }: Pick<Awaited<ReturnType<typeof ownerWithReviewers>>, "owner" | "createPact">,
 ) {
   const friend = await s.befriend(owner, "friend");
-  const added = await owner.addRecipient({ name: "Food bank" });
-  if (!added.ok) throw new Error(added.reason);
+  const added = ok(await owner.addRecipient({ name: "Food bank" }));
   await createPact("Read", ["sun"], { reviewers: [friend], recipientId: added.recipient.id });
   return friend;
 }
@@ -38,6 +38,7 @@ describe("recording a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 500,
+        suggestedPaymentCents: 500,
       },
     ]);
 
@@ -61,6 +62,7 @@ describe("recording a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 0,
+        suggestedPaymentCents: 0,
       },
     ]);
   });
@@ -84,8 +86,7 @@ describe("a refused payment", () => {
   test("a recipient that isn't the owner's, or none", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await fifteenOwed(s);
-    const theirs = await reviewer.addRecipient({ name: "Sam" });
-    if (!theirs.ok) throw new Error(theirs.reason);
+    const theirs = ok(await reviewer.addRecipient({ name: "Sam" }));
 
     const notFound = { ok: false, reason: "recipient-not-found" };
     expect(await owner.recordPayment({ recipientId: theirs.recipient.id, amountCents: 500 }, photo())).toEqual(
@@ -169,7 +170,6 @@ describe("a recorded payment", () => {
 
     const reviewItem = {
       kind: "review-item",
-      channel: "push",
       payload: {
         itemKind: "payment",
         itemId: paymentId,
@@ -179,11 +179,11 @@ describe("a recorded payment", () => {
         url: "/review",
       },
     };
-    const reviewItems = (account: AccountHandle) => s.notifier.sentTo(account).filter((n) => n.kind === "review-item");
+    const reviewItems = (account: AccountHandle) => s.notifier.sentTo(account, "review-item");
     expect(reviewItems(reviewer)).toEqual([{ ...reviewItem, recipient: reviewer.id }]);
     expect(reviewItems(second)).toEqual([{ ...reviewItem, recipient: second.id }]);
     expect(s.notifier.sentTo(friend)).toEqual([]);
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "review-item")).toEqual([]);
+    expect(s.notifier.sentTo(owner, "review-item")).toEqual([]);
   });
 
   test("survives a restart, still awaiting approval", async () => {
@@ -257,6 +257,7 @@ describe("deciding a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 500,
+        suggestedPaymentCents: 500,
       },
     ]);
   });
@@ -280,6 +281,7 @@ describe("deciding a payment", () => {
         overdueCents: 0,
         billDue: null,
         payableCents: 1500,
+        suggestedPaymentCents: 1500,
       },
     ]);
   });
@@ -302,27 +304,13 @@ describe("deciding a payment", () => {
     const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
     await s.advanceTo("Tue 12:00"); // Monday Missed: $5 to Sam
-    const redCross = await owner.addRecipient({ name: "Red Cross" });
-    if (!redCross.ok) throw new Error(redCross.reason);
-    const current = owner.pact(gym);
-    if (!current.ok) throw new Error(current.reason);
-    const { pact } = current;
-    const changed = await owner.changePact(gym, {
-      name: pact.name,
-      description: pact.description,
-      schedule: pact.schedule,
-      penaltyCents: pact.penaltyCents,
-      recipientId: redCross.recipient.id,
-      reviewerIds: [reviewer.id],
-    });
-    if (!changed.ok || changed.changeRequestId === null) throw new Error(JSON.stringify(changed));
-    await reviewer.decide(changed.changeRequestId, { kind: "approve" });
+    const redCross = ok(await owner.addRecipient({ name: "Red Cross" }));
+    const sent = await owner.changePact(gym, changed(owner, gym, { recipientId: redCross.recipient.id }));
+    await reviewer.decide(changeRequestIdOf(sent), { kind: "approve" });
 
     // Unpaid, the $5 to Sam is billed Wed+1 and overdue Wed+2.
     await s.advanceTo("Wed+2 18:00");
-    const aboutSam = s.notifier
-      .sentTo(reviewer)
-      .filter((n) => n.kind === "overdue-bill" && n.payload.recipientId === sam.id);
+    const aboutSam = s.notifier.sentTo(reviewer, "overdue-bill").filter((n) => n.payload.recipientId === sam.id);
     expect(aboutSam.map((n) => n.payload)).toEqual([
       expect.objectContaining({ title: "owner is overdue", body: "$5 to Sam, due Wed Jan 21" }),
     ]);
@@ -331,12 +319,7 @@ describe("deciding a payment", () => {
     ).toEqual([expect.objectContaining({ overdueCents: 500, reviewerNames: ["reviewer"] })]);
 
     const paymentId = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
-    expect(
-      s.notifier
-        .sentTo(reviewer)
-        .filter((n) => n.kind === "review-item")
-        .at(-1),
-    ).toMatchObject({
+    expect(s.notifier.sentTo(reviewer, "review-item").at(-1)).toMatchObject({
       payload: { itemKind: "payment", itemId: paymentId },
     });
     expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "payment", id: paymentId })]);
@@ -406,8 +389,8 @@ describe("deciding a payment", () => {
     await reviewer.decide(paymentId, { kind: "approve" });
     await reviewer.decide(second, { kind: "reject", reason: "That's not Sam's account" });
 
-    const decided = { recipient: owner.id, kind: "payment-decided", channel: "push" };
-    expect(s.notifier.sentTo(owner).filter((n) => n.kind === "payment-decided")).toEqual([
+    const decided = { recipient: owner.id, kind: "payment-decided" };
+    expect(s.notifier.sentTo(owner, "payment-decided")).toEqual([
       {
         ...decided,
         payload: {
@@ -447,19 +430,18 @@ async function evidencePaymentEvidence(s: Scenario) {
   await createPact("Gym", ["mon"]);
   const run = await createPact("Run", ["mon", "tue"]);
   s.setClockTo("Mon 20:00");
-  const monday = await owner.submitEvidence(run, [photo(1)]);
+  const monday = ok(await owner.submitEvidence(run, [photo(1)]));
   await s.advanceTo("Tue 09:00");
   const payment = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 }, photo(2));
   s.setClockTo("Tue 10:00");
-  const tuesday = await owner.submitEvidence(run, [photo(3)]);
-  if (!monday.ok || !tuesday.ok) throw new Error("refused");
+  const tuesday = ok(await owner.submitEvidence(run, [photo(3)]));
   return { ...setup, monday: monday.evidenceId, payment, tuesday: tuesday.evidenceId };
 }
 
 describe("a payment in the Review Queue", () => {
   test("is in the queue of each account that may decide it, with what the Review screen needs", async () => {
     const s = scenario();
-    const { owner, reviewer, second, sam, createPact, paymentId } = await tenRecorded(s);
+    const { owner, reviewer, second, createPact, paymentId } = await tenRecorded(s);
     const friend = await reviewerForAnotherRecipient(s, { owner, createPact });
 
     const item = {
@@ -495,6 +477,24 @@ describe("a payment in the Review Queue", () => {
 
     expect(reviewer.reviewQueue()).toEqual([
       expect.objectContaining({ id: five, owedCents: 500, owedAfterApprovalCents: 0 }),
+    ]);
+  });
+
+  test("says what's owed to that payment's recipient, not to the owner's others", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
+    const foodBank = ok(await owner.addRecipient({ name: "Food bank" }));
+    await createPact("Gym", MON_WED_FRI);
+    await createPact("Read", ["mon"], { recipientId: foodBank.recipient.id });
+    await s.advanceTo("Sat 00:00");
+    s.setClockTo("Sat 09:00");
+    const toSam = await recordPayment(owner, { recipientId: sam.id, amountCents: 1000 });
+    s.setClockTo("Sat 10:00");
+    const toFoodBank = await recordPayment(owner, { recipientId: foodBank.recipient.id, amountCents: 200 }, photo(2));
+
+    expect(reviewer.reviewQueue()).toEqual([
+      expect.objectContaining({ id: toSam, owedCents: 1500, owedAfterApprovalCents: 500 }),
+      expect.objectContaining({ id: toFoodBank, owedCents: 500, owedAfterApprovalCents: 300 }),
     ]);
   });
 

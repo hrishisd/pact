@@ -5,25 +5,14 @@
 
 import { describe, expect, test } from "vitest";
 import type { Today } from "../shared/types.ts";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { gymEvidenceWaiting, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
-
-const MONDAY = "2026-01-05";
-
-/** An owner with a Mon/Wed/Fri $5 "Gym" pact, and Monday's evidence submitted at Mon 13:00. */
-async function evidenceOnMonday() {
-  const s = scenario();
-  const setup = await ownerWithReviewers(s);
-  const gym = await setup.createPact("Gym", MON_WED_FRI);
-  s.setClockTo("Mon 13:00");
-  const submitted = await setup.owner.submitEvidence(gym, [photo()]);
-  if (!submitted.ok) throw new Error(submitted.reason);
-  return { s, ...setup, gym, evidenceId: submitted.evidenceId };
-}
+import { ok } from "./testing/queries.ts";
 
 describe("a rejection is final straight away", () => {
   test("rejected Monday afternoon, while the day is still open: Missed at once, $5 owed; the pact leaves To do; Today shows only the alert", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
 
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
@@ -37,10 +26,11 @@ describe("a rejection is final straight away", () => {
           name: "Gym",
           reviewerName: "reviewer",
           reason: "Blurry",
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Wed 15:00"),
+          week: false,
         },
       ],
       sections: [],
@@ -49,12 +39,13 @@ describe("a rejection is final straight away", () => {
     } satisfies Today);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 500 })]);
     expect(owner.ledger(owner.ledgers()[0]!.recipientId)).toMatchObject({
-      ledger: { history: [{ pactId: gym, occurrenceDate: MONDAY, addedAt: s.at("Mon 15:00") }] },
+      ledger: { history: [{ pactId: gym, occurrenceDate: s.date("Mon"), addedAt: s.at("Mon 15:00") }] },
     });
   });
 
   test("rejected Tuesday, after Monday's due time: the same alert, and Monday isn't in the Missed section", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     await s.advanceTo("Tue 00:00");
     s.setClockTo("Tue 08:00");
 
@@ -69,19 +60,23 @@ describe("a rejection is final straight away", () => {
           name: "Gym",
           reviewerName: "reviewer",
           reason: "That's last week's photo",
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Thu 08:00"),
+          week: false,
         },
       ],
       sections: [],
       waiting: [],
       yesterday: [
         expect.objectContaining({
-          occurrenceDate: MONDAY,
+          occurrenceDate: s.date("Mon"),
           occurrence: expect.objectContaining({
-            decidedBy: { kind: "evidence-rejected", reviewerName: "reviewer", reason: "That's last week's photo" },
+            status: expect.objectContaining({
+              kind: "missed",
+              rejection: { reviewerName: "reviewer", reason: "That's last week's photo" },
+            }),
           }),
         }),
       ],
@@ -90,7 +85,8 @@ describe("a rejection is final straight away", () => {
   });
 
   test("when the day ends it isn't judged again: still one penalty, as of the rejection", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
 
@@ -99,14 +95,15 @@ describe("a rejection is final straight away", () => {
     expect(owner.ledger(owner.ledgers()[0]!.recipientId)).toMatchObject({
       ledger: {
         summary: { owedCents: 500 },
-        history: [{ pactId: gym, occurrenceDate: MONDAY, addedAt: s.at("Mon 15:00") }],
+        history: [{ pactId: gym, occurrenceDate: s.date("Mon"), addedAt: s.at("Mon 15:00") }],
       },
     });
-    expect(owner.today()).toMatchObject({ alerts: [{ pactId: gym, occurrenceDate: MONDAY }], sections: [] });
+    expect(owner.today()).toMatchObject({ alerts: [{ pactId: gym, occurrenceDate: s.date("Mon") }], sections: [] });
   });
 
   test("evidence for a day whose evidence was rejected is refused, and nothing reaches the reviewers", async () => {
-    const { s, owner, reviewer, second, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, second, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     const today = owner.today();
@@ -124,26 +121,56 @@ describe("a rejection is final straight away", () => {
 });
 
 describe("the rejected-evidence alert", () => {
+  test("an excuse is accepted until 48 hours after the rejection, on Fixed days and One-time; on Weekly count the week isn't judged, so there's no limit", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", { kind: "weekly-count", target: 2 });
+    const essay = await createPact("Essay", { kind: "one-time", deadline: s.date("Fri+1"), submitAnytime: true });
+    const gym = await createPact("Gym", ["tue"]);
+    s.setClockTo("Tue+1 10:00");
+    const photos = [await submit(owner, piano), await submit(owner, essay), await submit(owner, gym)];
+    s.setClockTo("Tue+1 11:00");
+    for (const id of photos) await reviewer.decide(id, { kind: "reject", reason: "Blurry" });
+
+    const alerts = owner
+      .today()
+      .alerts.map((alert) =>
+        alert.kind === "evidence-rejected" ? [alert.name, alert.excusableUntil, alert.week] : alert.kind,
+      );
+    expect(alerts).toEqual(
+      expect.arrayContaining([
+        ["Gym", s.at("Thu+1 11:00"), false],
+        ["Essay", s.at("Thu+1 11:00"), false],
+        ["Piano", null, true],
+      ]),
+    );
+    expect(alerts).toHaveLength(3);
+  });
+
   test("Take the L clears it; owed and the ledger's history are unchanged", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     const [summary] = owner.ledgers();
     const ledger = owner.ledger(summary!.recipientId);
 
     s.setClockTo("Mon 16:00");
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual({ ok: true });
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual({ ok: true });
 
     expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
     expect(owner.ledgers()).toEqual([summary]);
     expect(owner.ledger(summary!.recipientId)).toEqual(ledger);
     expect(ledger).toMatchObject({
-      ledger: { history: [{ occurrenceDate: MONDAY, rejection: { reviewerName: "reviewer", reason: "Blurry" } }] },
+      ledger: {
+        history: [{ occurrenceDate: s.date("Mon"), rejection: { reviewerName: "reviewer", reason: "Blurry" } }],
+      },
     });
   });
 
   test("is still there after 48 hours, and after a restart, if Take the L wasn't tapped", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
 
@@ -151,40 +178,46 @@ describe("the rejected-evidence alert", () => {
     await s.restart();
 
     expect(owner.today().alerts).toEqual([
-      expect.objectContaining({ kind: "evidence-rejected", pactId: gym, occurrenceDate: MONDAY, reason: "Blurry" }),
+      expect.objectContaining({
+        kind: "evidence-rejected",
+        pactId: gym,
+        occurrenceDate: s.date("Mon"),
+        reason: "Blurry",
+      }),
     ]);
   });
 
   test("one per rejected occurrence, newest rejection first; Take the L clears only its own", async () => {
-    const { s, owner, reviewer, second, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, second, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
     s.setClockTo("Wed 09:00");
-    const wednesday = await owner.submitEvidence(gym, [photo(2)]);
-    if (!wednesday.ok) throw new Error(wednesday.reason);
+    const wednesday = ok(await owner.submitEvidence(gym, [photo(2)]));
     s.setClockTo("Wed 10:00");
     await second.decide(wednesday.evidenceId, { kind: "reject", reason: "That's last week's photo" });
 
     expect(owner.today().alerts).toEqual([
-      expect.objectContaining({ occurrenceDate: "2026-01-07", reviewerName: "second" }),
-      expect.objectContaining({ occurrenceDate: MONDAY, reviewerName: "reviewer" }),
+      expect.objectContaining({ occurrenceDate: s.date("Wed"), reviewerName: "second" }),
+      expect.objectContaining({ occurrenceDate: s.date("Mon"), reviewerName: "reviewer" }),
     ]);
 
-    await owner.acceptMiss(gym, "2026-01-07");
+    await owner.acceptMiss(gym, s.date("Wed"));
 
-    expect(owner.today().alerts).toEqual([expect.objectContaining({ occurrenceDate: MONDAY })]);
+    expect(owner.today().alerts).toEqual([expect.objectContaining({ occurrenceDate: s.date("Mon") })]);
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 1000 })]);
   });
 
   test("Take the L survives a restart", async () => {
-    const { s, owner, reviewer, gym, evidenceId } = await evidenceOnMonday();
+    const s = scenario();
+    const { owner, reviewer, gym, evidenceId } = await gymEvidenceWaiting(s, "Mon 13:00");
     s.setClockTo("Mon 15:00");
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
-    await owner.acceptMiss(gym, MONDAY);
+    await owner.acceptMiss(gym, s.date("Mon"));
 
     await s.restart();
 
     expect(owner.today().alerts).toEqual([]);
-    expect(await owner.acceptMiss(gym, MONDAY)).toEqual({ ok: false, reason: "nothing-to-accept" });
+    expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual({ ok: false, reason: "nothing-to-accept" });
   });
 });

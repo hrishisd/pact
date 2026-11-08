@@ -5,15 +5,15 @@
 // reviewer can still open and decide.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { API_PATHS, type Json } from "../shared/api.ts";
+import type { Json, ReviewQueueResponse } from "../shared/api.ts";
 import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { formatDate, formatDayTime, money, weekdayName } from "./format.ts";
 import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
 import { DiffList, EverythingElse, startsText } from "./change-terms.tsx";
-import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
+import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-page.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
-import { Empty, useLoad, useNow } from "./ui.tsx";
+import { Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
 export function Review({
@@ -24,8 +24,10 @@ export function Review({
   timezone: string;
   onQueue: (length: number) => void;
 }) {
-  const { data: queue, failed, reload } = useLoad(api.reviewQueue);
-  const { data: waiting, reload: reloadWaiting } = useLoad(api.waitingOnReply);
+  const { state, reload } = useLoad(api.reviewQueue);
+  const queue = loadedData(state);
+  const { state: waitingState, reload: reloadWaiting } = useLoad(api.waitingOnReply);
+  const waiting = loadedData(waitingState);
   const [index, setIndex] = useState(0);
   // Says why the last decision didn't go through, above the next item.
   const [notice, setNotice] = useState<string | null>(null);
@@ -36,12 +38,6 @@ export function Review({
   useEffect(() => {
     if (queue) onQueue(queue.length);
   }, [queue, onQueue]);
-
-  if (failed)
-    return (
-      <Empty title="Review couldn't load" body={failureText(failed.error, "Check your connection and reopen Pact.")} />
-    );
-  if (queue === null) return null;
 
   const refresh = () => {
     setOpenedId(null);
@@ -77,64 +73,74 @@ export function Review({
     />
   );
 
-  const opened = waiting?.find((item) => item.id === openedId);
-  if (opened) {
+  /** The queue as loaded: the item opened from below it, or the item at `index`, then what waits on a reply. */
+  const queueView = (queue: ReviewQueueResponse): ReactNode => {
+    const opened = waiting?.find((item) => item.id === openedId);
+    if (opened) {
+      return (
+        <>
+          <button className="link self-start" onClick={() => setOpenedId(null)}>
+            ‹ Back to your queue
+          </button>
+          <ItemView item={opened} timezone={timezone} onDecided={decided} onAsk={() => setAsking(opened)} />
+          {askSheet}
+        </>
+      );
+    }
+
+    if (queue.length === 0)
+      return (
+        <>
+          {notice && <p className="error small">{notice}</p>}
+          <Empty
+            title="Nothing to review"
+            body={
+              waitingList
+                ? "What's left is waiting on a reply, below."
+                : "When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here."
+            }
+          />
+          {waitingList}
+        </>
+      );
+
+    const at = Math.min(index, queue.length - 1);
+    const item = queue[at]!;
+    const step = (by: number) => {
+      setNotice(null);
+      setIndex((at + by + queue.length) % queue.length);
+    };
+
     return (
       <>
-        <button className="link self-start" onClick={() => setOpenedId(null)}>
-          ‹ Back to your queue
-        </button>
-        <ItemView item={opened} timezone={timezone} onDecided={decided} onAsk={() => setAsking(opened)} />
+        <div className="spread">
+          <span className="counter">
+            {at + 1} of {queue.length} to review
+          </span>
+          {queue.length > 1 && (
+            <div className="row2">
+              <button className="btn sm" onClick={() => step(-1)}>
+                ‹ Prev
+              </button>
+              <button className="btn sm" onClick={() => step(1)}>
+                Skip ›
+              </button>
+            </div>
+          )}
+        </div>
+        {notice && <p className="error small">{notice}</p>}
+        <ItemView item={item} timezone={timezone} onDecided={decided} onAsk={() => setAsking(item)} />
+        {waitingList}
         {askSheet}
       </>
     );
-  }
-
-  if (queue.length === 0)
-    return (
-      <>
-        {notice && <p className="error small">{notice}</p>}
-        <Empty
-          title="Nothing to review"
-          body={
-            waitingList
-              ? "What's left is waiting on a reply, below."
-              : "When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here."
-          }
-        />
-        {waitingList}
-      </>
-    );
-
-  const at = Math.min(index, queue.length - 1);
-  const item = queue[at]!;
-  const step = (by: number) => {
-    setNotice(null);
-    setIndex((at + by + queue.length) % queue.length);
   };
 
+  // A failed reload keeps the queue shown, under what failed.
   return (
-    <>
-      <div className="spread">
-        <span className="counter">
-          {at + 1} of {queue.length} to review
-        </span>
-        {queue.length > 1 && (
-          <div className="row2">
-            <button className="btn sm" onClick={() => step(-1)}>
-              ‹ Prev
-            </button>
-            <button className="btn sm" onClick={() => step(1)}>
-              Skip ›
-            </button>
-          </div>
-        )}
-      </div>
-      {notice && <p className="error small">{notice}</p>}
-      <ItemView item={item} timezone={timezone} onDecided={decided} onAsk={() => setAsking(item)} />
-      {waitingList}
-      {askSheet}
-    </>
+    <Loaded state={state} what="Review">
+      {queueView}
+    </Loaded>
   );
 }
 
@@ -183,13 +189,6 @@ function itemTitle(item: Json<ReviewItem>): string {
   }
 }
 
-const KIND_ROW: Record<ReviewItem["kind"], { label: string; className: string; Icon: typeof CameraIcon }> = {
-  evidence: { label: "Evidence", className: "k-evidence", Icon: CameraIcon },
-  excuse: { label: "Excuse", className: "k-excuse", Icon: ExcuseIcon },
-  payment: { label: "Payment", className: "k-payment", Icon: DollarIcon },
-  "change-request": { label: "Change", className: "k-change", Icon: PencilIcon },
-};
-
 /**
  * Items out of the queue until their owner replies, under one label per
  * owner. Each opens on its own, to read and decide.
@@ -213,21 +212,15 @@ function WaitingOnReply({
             {items
               .filter((item) => item.ownerName === owner)
               .map((item) => {
-                const { label, className, Icon } = KIND_ROW[item.kind];
                 const asked = item.thread.comments.at(-1);
                 return (
-                  <button key={item.id} className="rowbtn" onClick={() => onOpen(item.id)}>
-                    <span className={`kico ${className}`}>
-                      <Icon />
-                    </span>
-                    <span className="rt">
-                      <b>{itemTitle(item)}</b>
-                      <small>
-                        {label}
-                        {asked && ` · asked ${formatDayTime(asked.sentAt, timezone)}`}
-                      </small>
-                    </span>
-                  </button>
+                  <WaitingRow
+                    key={item.id}
+                    kind={item.kind}
+                    title={itemTitle(item)}
+                    detail={asked && `asked ${formatDayTime(asked.sentAt, timezone)}`}
+                    onOpen={() => onOpen(item.id)}
+                  />
                 );
               })}
           </div>
@@ -260,17 +253,20 @@ interface ItemProps {
   onAsk: () => void;
 }
 
+/** The top of an item: its kind, and whose it is. */
+function FromOwner({ item }: { item: Json<ReviewItem> }) {
+  return (
+    <ItemKindHeader kind={item.kind}>
+      <span className="muted">from {item.ownerName}</span>
+    </ItemKindHeader>
+  );
+}
+
 /** An Evidence item: the pact's description of what counts and the photos. */
 function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: EvidenceReviewItem }) {
   return (
     <>
-      <div className="row2">
-        <span className="kind k-evidence">
-          <CameraIcon />
-          Evidence
-        </span>
-        <span className="muted">from {item.ownerName}</span>
-      </div>
+      <FromOwner item={item} />
       <article className="card">
         <div className="spread">
           <h3>{item.pactName}</h3>
@@ -285,15 +281,7 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
           <span className="label">What counts</span>
           <span>{item.description}</span>
         </div>
-        {item.photoIds.map((photoId, i) => {
-          const src = API_PATHS.photo(encodeURIComponent(photoId));
-          return (
-            // Opens the photo full size in a new tab.
-            <a key={photoId} href={src} target="_blank" rel="noreferrer">
-              <img className="big-photo" src={src} alt={`Photo ${i + 1} of ${item.photoIds.length}`} />
-            </a>
-          );
-        })}
+        <PhotoLinks photoIds={item.photoIds} />
       </article>
       <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
@@ -335,13 +323,7 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
   const which = item.days.length === 1 ? excuseDatesText(item.days) : `all ${item.days.length} days`;
   return (
     <>
-      <div className="row2">
-        <span className="kind k-excuse">
-          <ExcuseIcon />
-          Excuse
-        </span>
-        <span className="muted">from {item.ownerName}</span>
-      </div>
+      <FromOwner item={item} />
       <article className="card">
         <div className="spread">
           <h3>{item.pactName}</h3>
@@ -351,20 +333,12 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
           <span className="label">Reason</span>
           <span className="quote">“{item.reason}”</span>
         </div>
-        {item.photoIds.map((photoId, i) => {
-          const src = API_PATHS.photo(encodeURIComponent(photoId));
-          return (
-            // Opens the photo full size in a new tab.
-            <a key={photoId} href={src} target="_blank" rel="noreferrer">
-              <img className="big-photo" src={src} alt={`Photo ${i + 1} of ${item.photoIds.length}`} />
-            </a>
-          );
-        })}
+        <PhotoLinks photoIds={item.photoIds} />
         <span className="label">Covers</span>
         <div className="list">
           {item.days.map((day) => {
             const { date, status } = day;
-            const note = dayNote(status, now, day.through !== undefined);
+            const note = dayNote(status, now, timezone, day.through !== undefined);
             return (
               <div key={date} className="covrow">
                 <span className="rt">
@@ -400,13 +374,7 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
 function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: ChangeReviewItem }) {
   return (
     <>
-      <div className="row2">
-        <span className="kind k-change">
-          <PencilIcon />
-          Change
-        </span>
-        <span className="muted">from {item.ownerName}</span>
-      </div>
+      <FromOwner item={item} />
       <article className="card">
         <h3>{item.endsPact ? `End ${item.pactName}` : item.pactName}</h3>
         {item.note !== null && <span className="quote">“{item.note}”</span>}
@@ -437,24 +405,14 @@ function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { i
 
 /** A Payment item: the screenshot, the owner's note, and what approving does to what they owe. */
 function PaymentItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: PaymentReviewItem }) {
-  const src = API_PATHS.photo(encodeURIComponent(item.photoId));
   return (
     <>
-      <div className="row2">
-        <span className="kind k-payment">
-          <DollarIcon />
-          Payment
-        </span>
-        <span className="muted">from {item.ownerName}</span>
-      </div>
+      <FromOwner item={item} />
       <article className="card">
         <h3>
           {money(item.amountCents)} to {item.recipientName}
         </h3>
-        {/* Opens the screenshot full size in a new tab. */}
-        <a href={src} target="_blank" rel="noreferrer">
-          <img className="big-photo whole" src={src} alt="Payment screenshot" />
-        </a>
+        <ScreenshotLink photoId={item.photoId} />
         <dl className="kv">
           <dt>Note</dt>
           <dd>{item.note ?? "—"}</dd>
@@ -499,8 +457,17 @@ function Decision({
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    busy,
+    error,
+    run: decide,
+  } = useSend(
+    async (decision: ReviewDecision) => {
+      const result = await api.decide(itemId, decision);
+      onDecided(result.ok ? null : result.reason);
+    },
+    (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
+  );
   const rejectForm = useRef<HTMLDivElement>(null);
   const reasonField = useRef<HTMLTextAreaElement>(null);
 
@@ -510,19 +477,6 @@ function Decision({
     rejectForm.current?.scrollIntoView({ block: "end", behavior: "smooth" });
     reasonField.current?.focus({ preventScroll: true });
   }, [rejecting]);
-
-  const decide = async (decision: ReviewDecision) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.decide(itemId, decision);
-      onDecided(result.ok ? null : result.reason);
-    } catch (failure) {
-      setError(failureText(failure, "Couldn't send. Check your connection and try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <>
@@ -547,7 +501,7 @@ function Decision({
             <button
               className="btn danger grow"
               disabled={busy || reason.trim() === ""}
-              onClick={() => void decide({ kind: "reject", reason })}
+              onClick={() => decide({ kind: "reject", reason })}
             >
               Reject
             </button>
@@ -561,7 +515,7 @@ function Decision({
           <button className="btn" disabled={busy} onClick={onAsk}>
             Ask
           </button>
-          <button className="btn ok" disabled={busy} onClick={() => void decide({ kind: "approve" })}>
+          <button className="btn ok" disabled={busy} onClick={() => decide({ kind: "approve" })}>
             Approve
           </button>
         </div>

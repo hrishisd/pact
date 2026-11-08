@@ -5,12 +5,21 @@
 
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
-import type { ChangeRequestView, CurrentTerms, Schedule, TermChange } from "../shared/types.ts";
+import type {
+  ApprovalReason,
+  ChangeRequestView,
+  CurrentTerms,
+  EvidenceKind,
+  Schedule,
+  TermChange,
+} from "../shared/types.ts";
 import { clockText, formatDate, money, remindersText, scheduleText } from "./format.ts";
 
 export type Term = TermChange["term"];
 type Change = Json<TermChange>;
 type Current = Json<CurrentTerms>;
+/** A change request that changes terms rather than ending the pact. */
+type TermsChangeRequestView = Extract<ChangeRequestView, { endsPact: false }>;
 
 export const TERM_LABELS: Record<Term, string> = {
   name: "Name",
@@ -38,8 +47,12 @@ export function openOccurrenceText(schedule: Pick<Schedule, "kind">): string {
   return schedule.kind === "weekly-count" ? "This week" : "Today";
 }
 
-/** The terms a pact of this kind lists, in the Request change order. A One-time pact has no start or end date. */
-export function termsOfKind(current: Pick<Current, "evidenceKind" | "schedule">): Term[] {
+/**
+ * The terms a pact of this evidence kind and kind of schedule has, in the
+ * Request change order. A One-time pact has no start or end date; an Oura
+ * Ring pact has no due-by time.
+ */
+export function termsOfKind(current: { evidenceKind: EvidenceKind; schedule: Pick<Schedule, "kind"> }): Term[] {
   if (current.schedule.kind === "one-time") {
     return ["name", "description", "schedule", "due-by", "penalty", "recipient", "reviewers", "reminders"];
   }
@@ -79,15 +92,15 @@ export function currentValue(term: Exclude<Term, "reminders">, current: Current)
     case "name":
       return current.name;
     case "deck":
-      return deckText(current.anki?.deckName ?? null);
+      return deckText(current.evidenceKind === "anki" ? current.anki.deckName : null);
     case "description":
       return current.description;
     case "in-bed-by":
-      return current.inBedBy === null ? "—" : clockText(current.inBedBy);
+      return current.evidenceKind === "oura" ? clockText(current.inBedBy) : "—";
     case "schedule":
       return scheduleText(current.schedule);
     case "due-by":
-      return dueByText(current.dueBy);
+      return dueByText(current.evidenceKind === "oura" ? null : current.dueBy);
     case "start-date":
       return dateText(current.startDate, "No start date");
     case "end-date":
@@ -146,46 +159,45 @@ export function changeValue(change: Change, side: "before" | "after"): string {
 
 /** What a changed term needs, as its tag says: "Needs approval: a lower penalty", "Stricter", "Applies now". */
 export function effectText(change: Change): string {
-  if (change.effect === "stricter") return "Stricter";
-  if (change.term === "reviewers") {
-    const joins = change.added.length > 0 ? listNames(change.added.map((r) => r.name)) : null;
-    if (change.removed.length === 0)
-      return `Applies now. ${joins} ${change.added.length === 1 ? "hears" : "hear"} about it`;
-    const removing = `Needs approval: removing ${listNames(change.removed.map((r) => r.name))}`;
-    return joins ? `${removing}. ${joins} ${change.added.length === 1 ? "joins" : "join"} now` : removing;
-  }
-  if (change.effect === "at-once") return "Applies now";
-  switch (change.term) {
-    case "description":
-      return "Needs approval: it defines what a photo must show";
-    case "deck":
-      return "Needs approval: any change of deck";
-    case "in-bed-by":
-      return "Needs approval: a later time";
-    case "schedule":
-      return scheduleNeeds(change.before, change.after);
-    case "due-by":
-      return change.after === null ? "Needs approval: due at midnight instead" : "Needs approval: a later time";
-    case "start-date":
-      return change.before === null ? "Needs approval: adding a start date" : "Needs approval: a later start";
-    case "end-date":
-      return change.before === null ? "Needs approval: adding an end date" : "Needs approval: an earlier end";
-    case "penalty":
-      return "Needs approval: a lower penalty";
-    case "recipient":
-      return "Needs approval: any change of recipient";
-    case "name":
-    case "reminders":
-      return "Applies now";
+  switch (change.effect) {
+    case "stricter":
+      return "Stricter";
+    case "at-once":
+      if (change.term !== "reviewers") return "Applies now";
+      return `Applies now. ${addedNames(change)} ${change.added.length === 1 ? "hears" : "hear"} about it`;
+    case "needs-approval": {
+      const needs = `Needs approval: ${APPROVAL_REASONS[change.reason]}`;
+      if (change.term !== "reviewers") return needs;
+      const removing = `${needs} ${listNames(change.removed.map((r) => r.name))}`;
+      if (change.added.length === 0) return removing;
+      return `${removing}. ${addedNames(change)} ${change.added.length === 1 ? "joins" : "join"} now`;
+    }
   }
 }
 
-/** Why a changed schedule needs approval, as its tag says after "Needs approval: ". */
-function scheduleNeeds(before: Schedule, after: Schedule): string {
-  if (before.kind === "weekly-count") return "Needs approval: a lower target";
-  if (before.kind !== "one-time" || after.kind !== "one-time") return "Needs approval: fewer days";
-  if (after.submitAnytime && !before.submitAnytime) return "Needs approval: Submit anytime";
-  return after.submitAnytime ? "Needs approval: a later deadline" : "Needs approval: any change of date";
+/** Why a changed term needs approval, as its tag says after "Needs approval: ". */
+const APPROVAL_REASONS: Record<ApprovalReason, string> = {
+  "defines-photo": "it defines what a photo must show",
+  "deck-changed": "any change of deck",
+  "later-time": "a later time",
+  "due-at-midnight": "due at midnight instead",
+  "fewer-days": "fewer days",
+  "lower-target": "a lower target",
+  "submit-anytime-on": "Submit anytime",
+  "later-deadline": "a later deadline",
+  "date-moved": "any change of date",
+  "start-added": "adding a start date",
+  "later-start": "a later start",
+  "end-added": "adding an end date",
+  "earlier-end": "an earlier end",
+  "lower-penalty": "a lower penalty",
+  "recipient-changed": "any change of recipient",
+  // Followed by who: "removing Sam".
+  "reviewers-removed": "removing",
+};
+
+function addedNames(change: Extract<Change, { term: "reviewers" }>): string {
+  return listNames(change.added.map((r) => r.name));
 }
 
 /** A change request's changed terms: old struck out, new in bold. */
@@ -206,7 +218,7 @@ export function DiffList({ changes }: { changes: Change[] }) {
 }
 
 /** The terms a change request leaves alone, folded away. Reminders are the owner's own, so reviewers don't see them. */
-export function EverythingElse({ request }: { request: Json<ChangeRequestView> }) {
+export function EverythingElse({ request }: { request: Json<TermsChangeRequestView> }) {
   const changed = new Set(request.changes.map((change) => change.term));
   const rest = termsOfKind(request.current).filter(
     (term): term is Exclude<Term, "reminders"> => !changed.has(term) && term !== "reminders",
@@ -231,17 +243,18 @@ export function EverythingElse({ request }: { request: Json<ChangeRequestView> }
  * applies from Wed Nov 4, the first Gym day not open yet. Today keeps $5 per miss." A Weekly count
  * pact's applies from a week, and this week keeps its penalty.
  */
-export function startsText(request: Json<ChangeRequestView>, lead: string): string {
-  if (request.appliesFrom === null) return "";
+export function startsText(request: Json<TermsChangeRequestView>, lead: string): string {
+  const { start } = request;
+  if (start === null) return "";
   const { schedule } = request.current;
   // A One-time pact's one occurrence takes a change even once it's open.
   if (schedule.kind === "one-time") return `${lead} at once, to its one deadline, even if it's open.`;
   const unit = request.current.evidenceKind === "oura" ? "night" : schedule.kind === "weekly-count" ? "week" : "day";
   const today =
-    request.todayKeepsCents === null
+    start.todayKeepsCents === null
       ? ""
-      : ` ${openOccurrenceText(schedule)} keeps ${money(request.todayKeepsCents)} per miss.`;
-  return `${lead} from ${formatDate(request.appliesFrom)}, the first ${request.pactName} ${unit} not open yet.${today}`;
+      : ` ${openOccurrenceText(schedule)} keeps ${money(start.todayKeepsCents)} per miss.`;
+  return `${lead} from ${formatDate(start.appliesFrom)}, the first ${request.pactName} ${unit} not open yet.${today}`;
 }
 
 /** "Sam", "Sam and Alex", "Sam, Alex and Jo". */
