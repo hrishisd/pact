@@ -1,0 +1,283 @@
+// Reads the other parts of the core share: pact rows and the terms an
+// occurrence follows, names, reviewers and recipients, and each pact's
+// occurrences.
+
+import type {
+  AccountId,
+  AnkiCheck,
+  ClockTime,
+  EvidenceKind,
+  Friend,
+  LocalDate,
+  PactTerms,
+  Recipient,
+  ReviewState,
+  Schedule,
+} from "../shared/types.ts";
+import { zoneOffsetAt } from "./calendar.ts";
+import type { CoreContext } from "./context.ts";
+import {
+  hasSchedule,
+  occurrencesOverTime,
+  utcOffsetMs,
+  type EarlierTerms,
+  type Occurrences,
+  type OccurrenceTerms,
+  type OneTimeTerms,
+  type OuraOffset,
+  type RecurringTerms,
+} from "./occurrences.ts";
+import { utcOffsetOf } from "./oura-clock.ts";
+import { dayClockOf } from "./pact-rules.ts";
+
+export interface PactRow {
+  id: string;
+  name: string;
+  description: string;
+  evidence_kind: EvidenceKind;
+  schedule: string;
+  in_bed_by: string | null;
+  due_by: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  penalty_cents: number;
+  recipient_id: string;
+  stage: PactTerms["stage"];
+  first_occurrence: string;
+  created_at: string;
+  reviewers_notified_at: string | null;
+  ended_at: string | null;
+  /** JSON: "HH:MM" each, in the order they go off. */
+  reminders: string;
+  reminded_through: string | null;
+  owner_account_id: AccountId;
+  anki_deck_id: string | null;
+  anki_rollover_hour: number | null;
+}
+
+/** The terms an occurrence follows: the pact's, as they stood when it opened. */
+export type DatedTerms = Pick<
+  PactRow,
+  "description" | "schedule" | "in_bed_by" | "due_by" | "penalty_cents" | "recipient_id" | "anki_deck_id"
+>;
+
+/** What a pact's day clock and One-time occurrence follow from, besides its times. */
+export type PactClock = Pick<PactRow, "evidence_kind" | "anki_rollover_hour" | "created_at">;
+
+/** A pact row's occurrence terms, its stored schedule parsed. */
+export function occurrenceTermsOf(
+  row: PactClock & Pick<PactRow, "schedule" | "first_occurrence" | "in_bed_by" | "due_by" | "end_date">,
+): OccurrenceTerms {
+  const terms = scheduleTermsOf(row, scheduleOf(row.schedule), row.in_bed_by, row.due_by);
+  return { ...terms, firstOccurrence: row.first_occurrence, endDate: row.end_date };
+}
+
+/** `pact`'s terms on `schedule` with the times `inBedBy` and `dueBy`, as its columns store them. */
+export function scheduleTermsOf(
+  pact: PactClock,
+  schedule: Schedule,
+  inBedBy: ClockTime | null,
+  dueBy: ClockTime | null,
+): RecurringTerms | OneTimeTerms {
+  switch (schedule.kind) {
+    case "fixed-days":
+      return { schedule, day: dayClockOf(pact, inBedBy, dueBy) };
+    case "weekly-count":
+      return { schedule, dueBy };
+    case "one-time":
+      return { schedule, dueBy, createdAt: new Date(pact.created_at) };
+  }
+}
+
+/** A pact's stored schedule. Its kind never changes once the edit window has closed. */
+export function scheduleOf(json: string): Schedule {
+  return JSON.parse(json) as Schedule;
+}
+
+/** A pact's stored reminders: "HH:MM" times, or dated ones on One-time. */
+export function remindersOf(json: string): string[] {
+  return JSON.parse(json) as string[];
+}
+
+/**
+ * A pact owner's timezone. Every pact's owner has one: creating a pact needs
+ * it, and a timezone can be changed but never cleared.
+ */
+export function ownerZone(timezone: string | null, ownerId: AccountId): string {
+  if (timezone === null) throw new Error(`account ${ownerId} owns a pact but has no timezone`);
+  return timezone;
+}
+
+/**
+ * Orders people (accounts or recipients) by name the same way on every page:
+ * by the en-US collation, so "alice" comes before "Bob", ties broken by id.
+ */
+export function byName(a: { id: string; name: string }, b: { id: string; name: string }): number {
+  return a.name.localeCompare(b.name, "en-US") || a.id.localeCompare(b.id, "en-US");
+}
+
+/** A reviewer's decision on some evidence or a payment, as stored. */
+export type ReviewOutcome = "approved" | "rejected";
+
+/** SQL: the columns `reviewStateOf` reads from `table`, joined to its deciding reviewer as `reviewer`. */
+export function reviewStateColumns(table: "evidence" | "excuse" | "payment"): string {
+  return `${table}.decision, ${table}.decided_at, ${table}.reject_reason, reviewer.name AS reviewer_name`;
+}
+
+export interface ReviewStateRow {
+  decision: ReviewOutcome | null;
+  decided_at: string | null;
+  reject_reason: string | null;
+  reviewer_name: string | null;
+}
+
+export function reviewStateOf(row: ReviewStateRow): ReviewState {
+  if (row.decision === null) return { kind: "waiting" };
+  const decided = { reviewerName: row.reviewer_name!, decidedAt: new Date(row.decided_at!) };
+  return row.decision === "approved"
+    ? { kind: "approved", ...decided }
+    : { kind: "rejected", ...decided, reason: row.reject_reason! };
+}
+
+/** `ownerId`'s pact `pactId`, if it is one. */
+export function ownPact(ctx: CoreContext, ownerId: AccountId, pactId: string): PactRow | undefined {
+  return ctx.one<PactRow>(`SELECT * FROM pact WHERE id = ? AND owner_account_id = ?`, pactId, ownerId);
+}
+
+/** The terms the pact's occurrence dated `date` follows: those in force when it opened. */
+export function termsOn(ctx: CoreContext, pactId: string, date: LocalDate): DatedTerms {
+  const columns = `description, schedule, in_bed_by, due_by, penalty_cents, recipient_id, anki_deck_id`;
+  const earlier = ctx.one<DatedTerms>(
+    `SELECT ${columns} FROM pact_earlier_terms WHERE pact_id = ? AND until > ? ORDER BY until LIMIT 1`,
+    pactId,
+    date,
+  );
+  return earlier ?? (ctx.db.prepare(`SELECT ${columns} FROM pact WHERE id = ?`).get(pactId) as DatedTerms);
+}
+
+export function reviewersOf(ctx: CoreContext, pactId: string): AccountId[] {
+  return ctx
+    .all<{ reviewer_account_id: AccountId }>(
+      `SELECT reviewer_account_id FROM pact_reviewer WHERE pact_id = ? ORDER BY reviewer_account_id`,
+      pactId,
+    )
+    .map((row) => row.reviewer_account_id);
+}
+
+export function accountName(ctx: CoreContext, accountId: AccountId): string {
+  return (ctx.db.prepare(`SELECT name FROM account WHERE id = ?`).get(accountId) as { name: string }).name;
+}
+
+export function pactName(ctx: CoreContext, pactId: string): string {
+  return (ctx.db.prepare(`SELECT name FROM pact WHERE id = ?`).get(pactId) as { name: string }).name;
+}
+
+export function recipientName(ctx: CoreContext, recipientId: string): string {
+  return (ctx.db.prepare(`SELECT name FROM recipient WHERE id = ?`).get(recipientId) as { name: string }).name;
+}
+
+/** The recipients matching the SQL `condition` on `recipient`, sorted by name. */
+export function selectRecipients(ctx: CoreContext, condition: string, ...params: string[]): Recipient[] {
+  const recipients = ctx.db.prepare(`SELECT id, name FROM recipient WHERE ${condition}`).all(...params);
+  return (recipients as Recipient[]).sort(byName);
+}
+
+/** The accounts `ids` as friends, sorted by name. */
+export function friendsSortedByName(ctx: CoreContext, ids: AccountId[]): Friend[] {
+  return ids.map((id) => ({ id, name: accountName(ctx, id) })).sort(byName);
+}
+
+/**
+ * The timing terms `pact` had before each change, oldest first. A One-time
+ * change applies to its one occurrence, so it has none that count.
+ */
+export function earlierTermsOf(ctx: CoreContext, pact: PactClock & Pick<PactRow, "id">): EarlierTerms[] {
+  const rows = ctx.all<{ until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }>(
+    `SELECT until, schedule, in_bed_by, due_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`,
+    pact.id,
+  );
+  return rows.flatMap((row) => {
+    const terms = scheduleTermsOf(pact, scheduleOf(row.schedule), row.in_bed_by, row.due_by);
+    return hasSchedule(terms, "one-time") ? [] : [{ ...terms, until: row.until }];
+  });
+}
+
+/**
+ * The occurrences of pact `pactId` in `timezone`, each dated one on the
+ * terms it opened with. A bedtime night closes on Oura's clock where the
+ * owner is (`ouraOffset`).
+ */
+export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string): Occurrences {
+  const pact = ctx.one<
+    Pick<
+      PactRow,
+      | "id"
+      | "schedule"
+      | "first_occurrence"
+      | "in_bed_by"
+      | "due_by"
+      | "end_date"
+      | "created_at"
+      | "evidence_kind"
+      | "owner_account_id"
+      | "anki_rollover_hour"
+    >
+  >(
+    `SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id,
+              evidence_kind, anki_rollover_hour
+       FROM pact WHERE id = ?`,
+    pactId,
+  );
+  if (!pact) throw new Error(`no pact ${pactId}`);
+  const offset = pact.evidence_kind === "oura" ? ouraOffset(ctx, pact.owner_account_id, timezone) : null;
+  return occurrencesOverTime(occurrenceTermsOf(pact), earlierTermsOf(ctx, pact), timezone, offset);
+}
+
+/**
+ * The UTC offset a bedtime night with no period yet closes on: the one on
+ * the latest sleep Oura reported for `account`. Null, the account's
+ * `timezone`, when Oura hasn't reported one with an offset, or when that
+ * offset is the timezone's own at that moment: the owner was at home, and
+ * the timezone also knows when its clocks change.
+ */
+export function ouraOffset(ctx: CoreContext, account: AccountId, timezone: string): OuraOffset {
+  const row = ctx.one<{ oura_latest_bedtime_start: string | null }>(
+    `SELECT oura_latest_bedtime_start FROM account WHERE id = ?`,
+    account,
+  );
+  const latest = row?.oura_latest_bedtime_start ?? null;
+  const offset = latest === null ? null : utcOffsetOf(latest);
+  if (latest === null || offset === null) return null;
+  return utcOffsetMs(offset) === zoneOffsetAt(new Date(latest), timezone) ? null : offset;
+}
+
+/** The deck an Anki pact's day `date` is judged on: the one in force when it opened. */
+export function ankiDeckOn(ctx: CoreContext, pactId: string, date: LocalDate): string {
+  const deckId = termsOn(ctx, pactId, date).anki_deck_id;
+  if (deckId === null) throw new Error(`pact ${pactId} has no Anki deck`);
+  return deckId;
+}
+
+/**
+ * The latest check of the Anki pact's deck for its day `date`: all of
+ * them, or with `before`, only those that count for a day due then, made
+ * and evaluated before it.
+ */
+export function lastAnkiCheck(ctx: CoreContext, pactId: string, date: LocalDate, before?: Date): AnkiCheck | null {
+  const until = before?.toISOString() ?? "9999-12-31T23:59:59.999Z";
+  const row = ctx.one<{ cards_left: number; checked_at: string }>(
+    `SELECT anki_check.new_count + anki_check.learn_count + anki_check.review_count AS cards_left,
+              anki_check.checked_at
+       FROM anki_check JOIN pact ON pact.owner_account_id = anki_check.account_id
+       WHERE pact.id = ? AND anki_check.deck_id = ? AND anki_check.anki_date = ? AND anki_check.as_of < ?
+         AND anki_check.checked_at < ?
+       ORDER BY anki_check.checked_at DESC, anki_check.id DESC
+       LIMIT 1`,
+    pactId,
+    ankiDeckOn(ctx, pactId, date),
+    date,
+    until,
+    until,
+  );
+  return row ? { cardsLeft: row.cards_left, checkedAt: new Date(row.checked_at) } : null;
+}
