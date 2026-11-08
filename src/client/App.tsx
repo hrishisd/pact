@@ -21,7 +21,7 @@ import { PlanVacation } from "./PlanVacation.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
-import { Centered, Sheet, useSend } from "./ui.tsx";
+import { Centered, Sheet, loadedData, useLoad, useSend } from "./ui.tsx";
 import { VacationSection } from "./VacationSection.tsx";
 
 type Session =
@@ -532,6 +532,7 @@ function ProfileSheet({
     onProfile(next);
     setChanging(false);
   });
+  const lastVacation = loadedData(useLoad(api.lastVacation).state) ?? null;
 
   return (
     <Sheet title="Profile" closeLabel="Done" onClose={onClose}>
@@ -543,7 +544,7 @@ function ProfileSheet({
         </span>
       </div>
 
-      <VacationSection message={vacationMessage} onPlan={onPlanVacation} />
+      <VacationSection message={vacationMessage} lastOne={lastVacation} onPlan={onPlanVacation} />
 
       <FriendsSection />
 

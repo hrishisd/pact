@@ -58,6 +58,7 @@ import {
   type VacationOptionsResponse,
   type VacationPreviewRequest,
   type VacationPreviewResponse,
+  type LastVacationResponse,
   type VacationsResponse,
   type WithdrawVacationResponse,
   type DecideRequest,
@@ -226,6 +227,7 @@ export const api = {
     post<VacationPreviewResponse>(API_PATHS.vacationPreview, request),
   fileVacation: (vacation: FileVacationRequest) => post<FileVacationResponse>(API_PATHS.vacations, vacation),
   vacations: () => call<VacationsResponse>(API_PATHS.vacations),
+  lastVacation: () => call<LastVacationResponse>(API_PATHS.lastVacation),
   withdrawVacation: (vacationId: string) =>
     post<WithdrawVacationResponse>(API_PATHS.withdrawVacation(encodeURIComponent(vacationId))),
   acceptVacationRejection: (vacationId: string) =>

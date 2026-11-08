@@ -1,20 +1,30 @@
 // The Profile sheet's Vacation section: the owner's vacations waiting for
-// approval or approved ahead, soonest first, and Plan a vacation below them.
-// A waiting one has Withdraw; one waiting on the owner's reply also has Reply.
+// approval, approved ahead or on now, soonest first, and Plan a vacation
+// below them, beside when the last one was if none is planned. A waiting one
+// has Withdraw; one waiting on the owner's reply also has Reply.
 
 import { useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type { VacationCard } from "../shared/types.ts";
+import type { LastVacation, VacationCard } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
-import { dateSpan, money } from "./format.ts";
+import { dateSpan, formatDate, money } from "./format.ts";
 import { ReplyBox } from "./questions.tsx";
 import { loadedData, loadFailure, useLoad, useSend } from "./ui.tsx";
 import { firstName, pactsText, plural } from "./vacation-text.ts";
 
 const WITHDRAWN = "Vacation withdrawn. Your pacts keep all their days.";
 
-export function VacationSection({ message, onPlan }: { message: string | null; onPlan: () => void }) {
+export function VacationSection({
+  message,
+  lastOne = null,
+  onPlan,
+}: {
+  message: string | null;
+  /** The last approved vacation that has ended, for "Last one" when none is planned. */
+  lastOne?: Json<LastVacation> | null;
+  onPlan: () => void;
+}) {
   const { state, reload } = useLoad(api.vacations);
   const vacations = loadedData(state);
   const [said, setSaid] = useState(message);
@@ -41,7 +51,11 @@ export function VacationSection({ message, onPlan }: { message: string | null; o
         />
       ))}
       <div className="spread">
-        {vacations?.length === 0 ? <span className="muted">None planned</span> : <span />}
+        {vacations?.length === 0 ? (
+          <span className="muted">{lastOne ? `Last one: ${dateSpan(lastOne.from, lastOne.to)}` : "None planned"}</span>
+        ) : (
+          <span />
+        )}
         <button className="link" onClick={onPlan}>
           Plan a vacation
         </button>
@@ -61,6 +75,7 @@ const CHIPS: Record<VacationCard["state"]["kind"], { className: string; text: st
   waiting: { className: "c-wait", text: "Waiting for approval" },
   "waiting-on-reply": { className: "c-reply", text: "Waiting on your reply" },
   approved: { className: "c-ok", text: "Approved" },
+  "on-now": { className: "c-ok", text: "On now" },
 };
 
 /** One vacation's card: its dates, note and pacts, then where it stands and what the owner can do. */
@@ -78,7 +93,11 @@ function VacationCardView({
   return (
     <div className="card vaccard">
       <div className="spread">
-        <b>Vacation {dateSpan(vacation.from, vacation.to)}</b>
+        <b>
+          {state.kind === "on-now"
+            ? `On vacation until ${formatDate(vacation.to)}`
+            : `Vacation ${dateSpan(vacation.from, vacation.to)}`}
+        </b>
         <span className={`chip ${chip.className}`}>{chip.text}</span>
       </div>
       {vacation.note && <div className="vacnote">{vacation.note}</div>}
@@ -87,7 +106,7 @@ function VacationCardView({
       </small>
       {state.kind === "approved" ? (
         <small className="muted">Approved by {state.reviewerName}. It can't be changed now.</small>
-      ) : (
+      ) : state.kind === "on-now" ? null : (
         <WaitingActions vacation={vacation} onWithdrawn={onWithdrawn} onReplied={onReplied} />
       )}
     </div>

@@ -22,6 +22,8 @@
   --excused: #8f5c0c;
   --excused-bg: #f4e8cf;
   --excused-cell: #c99a3d; /* a heat map's Excused square: lighter than --excused, as the prototype has it */
+  --vacation-line: #a3ada6; /* a heat map's Vacation square: grey hatching, as the prototype has it */
+  --vacation-hatch: #bcc6bf;
   --slate: #4f5675;
   --slate-bg: #e4e6ef;
   --amber: #8a5300;
@@ -435,6 +437,11 @@ p {
 .c-excused {
   background: var(--excused-bg);
   color: var(--excused);
+}
+.c-vac {
+  background: var(--sunk);
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--vacation-line);
 }
 .c-wait {
   background: var(--slate-bg);
@@ -1434,6 +1441,12 @@ details.folded .kv {
 .cell.excused {
   background: var(--excused-cell);
 }
+/* A day a vacation excused: hatched grey, so a trip doesn't read as a run of excuses. */
+.cell.vac {
+  background: repeating-linear-gradient(135deg, var(--vacation-hatch) 0 2px, var(--surface) 2px 4.5px);
+  outline: 1px solid var(--vacation-line);
+  outline-offset: -1px;
+}
 .cell.not-judged {
   background: var(--slate-bg);
   outline: 1.5px solid var(--slate);
@@ -1676,4 +1689,11 @@ details.folded .kv {
   height: 18px;
   background: linear-gradient(to bottom, transparent, var(--paper));
   pointer-events: none;
+}
+/* Today's banner during a vacation: See what's excused lists each pact on white. */
+.vacban .list {
+  background: var(--surface);
+}
+.vacban .list .covrow {
+  padding: 8px 12px;
 }

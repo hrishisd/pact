@@ -127,3 +127,36 @@ test("Withdraw on a vacation holding penalties says what becomes owed", async ()
 
   expect(screen.getByText("Withdraw this vacation? $15 held becomes owed.")).toBeTruthy();
 });
+
+test("a vacation on now says until when, with the On now chip and no Withdraw", async () => {
+  stubApi({ vacations: answers<VacationsResponse>([{ ...WAITING[0]!, state: { kind: "on-now" } }]) });
+  renderWithUser(<VacationSection message={null} onPlan={vi.fn()} />);
+
+  expect(await screen.findByText("On vacation until Sat Jan 2")).toBeTruthy();
+  expect(screen.getByText("On now")).toBeTruthy();
+  expect(screen.getByText("Going to Portugal")).toBeTruthy();
+  expect(screen.getByText("All recurring pacts · 14 days")).toBeTruthy();
+  expect(screen.queryByText("Vacation Dec 20 – Jan 2")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
+});
+
+test("with nothing planned after one ended, it says when the last one was beside Plan a vacation", async () => {
+  stubApi({ vacations: answers<VacationsResponse>([]) });
+  renderWithUser(
+    <VacationSection message={null} lastOne={{ from: "2026-12-20", to: "2027-01-02" }} onPlan={vi.fn()} />,
+  );
+
+  expect(await screen.findByText("Last one: Dec 20 – Jan 2")).toBeTruthy();
+  expect(screen.queryByText("None planned")).toBeNull();
+  expect(screen.getByRole("button", { name: "Plan a vacation" })).toBeTruthy();
+});
+
+test("with a vacation planned, the last one isn't mentioned", async () => {
+  stubApi({ vacations: answers(WAITING) });
+  renderWithUser(
+    <VacationSection message={null} lastOne={{ from: "2026-10-01", to: "2026-10-04" }} onPlan={vi.fn()} />,
+  );
+
+  expect(await screen.findByText("Vacation Dec 20 – Jan 2")).toBeTruthy();
+  expect(screen.queryByText(/Last one/)).toBeNull();
+});
