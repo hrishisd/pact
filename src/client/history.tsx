@@ -6,7 +6,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type {
-  EvidenceKind,
   HeatMapDay,
   HeatMapWeek,
   LocalDate,
@@ -51,17 +50,18 @@ function vacationOf(status: Occurrence["status"]): { from: LocalDate; to: LocalD
  */
 function OccurrenceChip({
   record,
-  evidenceKind,
   now,
   week = false,
+  oura = false,
 }: {
   record: Occurrence;
-  evidenceKind: EvidenceKind;
   now: number;
   week?: boolean;
+  /** A bedtime pact's night. */
+  oura?: boolean;
 }) {
   if (vacationOf(record.status)) return <span className="chip c-vac">Vacation</span>;
-  return <DayChip status={record.status} now={now} week={week} oura={evidenceKind === "oura"} />;
+  return <DayChip status={record.status} now={now} week={week} oura={oura} />;
 }
 
 /**
@@ -222,7 +222,7 @@ function OneTimeHistory({
             {dueOn ? (
               <span className="chip c-todo">Due {formatDate(day.date)}</span>
             ) : (
-              <OccurrenceChip record={record} evidenceKind={pact.evidenceKind} now={now} />
+              <OccurrenceChip record={record} now={now} oura={pact.evidenceKind === "oura"} />
             )}
           </span>
           {line && <span className="small muted">{line}</span>}
@@ -298,7 +298,7 @@ function DailyHeatMap({
               {formatDate(picked.date)}
               {pact.evidenceKind === "oura" && " night"}
             </b>
-            <OccurrenceChip record={picked.occurrence} evidenceKind={pact.evidenceKind} now={now} />
+            <OccurrenceChip record={picked.occurrence} now={now} oura={pact.evidenceKind === "oura"} />
           </div>
           {line && <span className="small muted">{line}</span>}
         </div>
@@ -391,7 +391,7 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
         <div className="hmdetail" role="status">
           <div className="spread">
             <b>Week of {formatDate(picked.date)}</b>
-            <OccurrenceChip record={picked.occurrence} evidenceKind="camera" now={now} week />
+            <OccurrenceChip record={picked.occurrence} now={now} week />
           </div>
           <span className="small muted">{weekLine(picked, timezone)}</span>
         </div>
@@ -475,7 +475,7 @@ export function Yesterday({
                 <b>{entry.name}</b>
                 {line && <small>{line}</small>}
               </span>
-              <OccurrenceChip record={entry.occurrence} evidenceKind={entry.evidenceKind} now={now} />
+              <OccurrenceChip record={entry.occurrence} now={now} oura={entry.evidenceKind === "oura"} />
             </button>
           );
         })}
