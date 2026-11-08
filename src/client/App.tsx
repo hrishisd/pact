@@ -17,10 +17,12 @@ import { LedgerPage, Ledgers } from "./Ledgers.tsx";
 import { inviteTokenFromPath, useNavigation, type Page, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
 import { PaymentPage } from "./PaymentPage.tsx";
+import { PlanVacation } from "./PlanVacation.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
 import { Centered, Sheet, useSend } from "./ui.tsx";
+import { VacationSection } from "./VacationSection.tsx";
 
 type Session =
   | { kind: "loading" }
@@ -220,6 +222,8 @@ interface View {
   title: string;
   subtitle?: string;
   body: ReactNode;
+  /** The body ends in a footer bar, so the screen leaves no padding under it. */
+  foot?: boolean;
 }
 
 function Shell({
@@ -234,13 +238,22 @@ function Shell({
   const nav = useNavigation();
   const { tab, page } = nav;
   const [profileOpen, setProfileOpen] = useState(false);
+  // What the Profile sheet's Vacation section says when it opens, after a vacation is sent.
+  const [vacationMessage, setVacationMessage] = useState<string | null>(null);
   const reviewCount = useReviewCount(tab);
   const push = usePush();
   // Pact and recipient names learnt by loading their pages, for a page opened from a link.
   const [pactNames, pactLoaded] = useLearntNames();
   const [ledgerNames, ledgerLoaded] = useLearntNames();
 
-  const openProfile = () => setProfileOpen(true);
+  const openProfile = () => {
+    setVacationMessage(null);
+    setProfileOpen(true);
+  };
+  const planVacation = () => {
+    setProfileOpen(false);
+    nav.push({ kind: "plan-vacation" });
+  };
   const openPact = (id: string, name: string) => nav.push({ kind: "pact", id, name });
   const openLedger = (recipientId: string, name: string) => nav.push({ kind: "ledger", recipientId, name });
   const openExcuse = (id: string) => nav.push({ kind: "excuse", id });
@@ -342,6 +355,21 @@ function Shell({
         };
       case "notifications":
         return { title: "Notifications", body: <NotificationsPage push={push} onDone={nav.back} /> };
+      case "plan-vacation":
+        return {
+          title: "Vacation",
+          foot: true,
+          body: (
+            <PlanVacation
+              onCancel={nav.back}
+              onSent={(message) => {
+                nav.replaceWithToday();
+                setVacationMessage(message);
+                setProfileOpen(true);
+              }}
+            />
+          ),
+        };
     }
   };
 
@@ -383,7 +411,7 @@ function Shell({
     }
   };
 
-  const { title, subtitle = "", body } = page ? pageView(page) : tabView(tab);
+  const { title, subtitle = "", body, foot = false } = page ? pageView(page) : tabView(tab);
 
   return (
     <div className="app">
@@ -401,7 +429,7 @@ function Shell({
           {initial(profile.name)}
         </button>
       </header>
-      <main className="scroll gut">{body}</main>
+      <main className={foot ? "scroll gut has-foot" : "scroll gut"}>{body}</main>
       <nav className="tabbar" aria-label="Main">
         {(Object.keys(TABS) as TabId[]).map((id) => {
           const { label, Icon } = TABS[id];
@@ -431,6 +459,8 @@ function Shell({
           profile={profile}
           push={push}
           onSetUpNotifications={openNotifications}
+          vacationMessage={vacationMessage}
+          onPlanVacation={planVacation}
           onClose={() => setProfileOpen(false)}
           onProfile={onProfile}
           onSignedOut={onSignedOut}
@@ -472,6 +502,8 @@ function ProfileSheet({
   profile,
   push,
   onSetUpNotifications,
+  vacationMessage,
+  onPlanVacation,
   onClose,
   onProfile,
   onSignedOut,
@@ -479,6 +511,9 @@ function ProfileSheet({
   profile: ConfirmedProfile;
   push: Push;
   onSetUpNotifications: () => void;
+  /** What the Vacation section says on opening, such as "Sent to Sam for approval." */
+  vacationMessage: string | null;
+  onPlanVacation: () => void;
   onClose: () => void;
   onProfile: (p: MeResponse) => void;
   onSignedOut: () => void;
@@ -500,6 +535,8 @@ function ProfileSheet({
           <span className="muted small">{profile.email}</span>
         </span>
       </div>
+
+      <VacationSection message={vacationMessage} onPlan={onPlanVacation} />
 
       <FriendsSection />
 

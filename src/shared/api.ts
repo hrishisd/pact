@@ -125,6 +125,8 @@ export const APP_PATHS = {
   payment: (paymentId: string) => `/payments/${encodeURIComponent(paymentId)}`,
   /** The device's push and the account's notification settings, opened from Profile. */
   notifications: "/notifications",
+  /** Plan a vacation, opened from Profile. */
+  newVacation: "/vacation/new",
   /** An invite link. It shows before sign-in, so the app reads it apart from the other pages. */
   invite: (token: string) => `/invite/${encodeURIComponent(token)}`,
 } as const;
