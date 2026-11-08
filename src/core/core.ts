@@ -68,7 +68,14 @@ import type {
   SignInResult,
   SubmitEvidenceResult,
   Today,
+  FileVacationResult,
+  NewVacation,
+  VacationCard,
+  VacationOptions,
+  VacationPreviewResult,
+  VacationRequest,
   WithdrawChangeRequestResult,
+  WithdrawVacationResult,
 } from "../shared/types.ts";
 import {
   acceptInvite,
@@ -104,6 +111,7 @@ import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from 
 import { droppedText, remind } from "./reminders.ts";
 import { askOwner, decide, ownerReply, reviewQueue, viewPhoto, waitingOnReply, type PhotoResult } from "./review.ts";
 import { todayPage } from "./today.ts";
+import { fileVacation, previewVacation, vacationCards, vacationOptions, withdrawVacation } from "./vacations.ts";
 
 export interface PactCoreOptions {
   /** SQLite file. Production: on the /data volume. */
@@ -309,6 +317,33 @@ export interface AccountView {
    * its days is still accepted inside their 48 hours.
    */
   acceptExcuseRejection(excuseId: string): Promise<AcceptExcuseRejectionResult>;
+  /**
+   * What Plan a vacation offers: the owner's Active pacts whose edit window
+   * has closed, recurring and One-time apart, each with its reviewers.
+   */
+  vacationOptions(): VacationOptions;
+  /**
+   * What a vacation with `request`'s dates and ticked pacts would cover if
+   * filed now, for every offered pact, and what it would skip and why: what
+   * the confirm step shows. `fileVacation` files exactly what this returns.
+   */
+  vacationPreview(request: VacationRequest): VacationPreviewResult;
+  /**
+   * The owner asks the reviewers in `vacation` for its dates off from its
+   * ticked pacts. It covers the occurrences in its dates that haven't opened
+   * yet, fixed at filing: each scheduled day, a Weekly count week whose
+   * Thursday is inside, a One-time deadline inside. It skips those already
+   * Excused, on an excuse waiting for approval or on another vacation. Refused
+   * when no pact is ticked or none is left to cover, no reviewer is picked or
+   * one reviews no ticked pact, a ticked pact isn't offered, or the dates are
+   * refused: the first day today or earlier, the last before the first, or
+   * more than 62 days. A refusal writes nothing.
+   */
+  fileVacation(vacation: NewVacation): Promise<FileVacationResult>;
+  /** The owner's vacations waiting for approval, soonest first, as their Profile cards show them. */
+  vacations(): VacationCard[];
+  /** The owner withdraws a vacation waiting for approval: it covers nothing any more. */
+  withdrawVacation(vacationId: string): Promise<WithdrawVacationResult>;
   /**
    * A photo of some evidence or an excuse, for the pact's owner or one of its reviewers;
    * anyone else is told it isn't found. A query: async only because the photo
@@ -517,6 +552,11 @@ class Core implements PactCore {
         fileExcuse(this.#ctx, accountId, pactId, excuse, photos, this.#photoStore, (change) => this.#command(change)),
       excuse: (excuseId) => excusePage(this.#ctx, accountId, excuseId),
       acceptExcuseRejection: (excuseId) => this.#command(() => acceptExcuseRejection(this.#ctx, accountId, excuseId)),
+      vacationOptions: () => vacationOptions(this.#ctx, accountId),
+      vacationPreview: (request) => previewVacation(this.#ctx, accountId, request),
+      fileVacation: (vacation) => this.#command(() => fileVacation(this.#ctx, accountId, vacation)),
+      vacations: () => vacationCards(this.#ctx, accountId),
+      withdrawVacation: (vacationId) => this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId)),
       recordPayment: (payment, screenshot) =>
         recordPayment(this.#ctx, accountId, payment, screenshot, this.#photoStore, (change) => this.#command(change)),
       photo: (photoId) => viewPhoto(this.#ctx, accountId, photoId, this.#photoStore),

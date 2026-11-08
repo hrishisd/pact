@@ -17,6 +17,7 @@ import {
   type ExcusePreview,
   type ExcusePreviewResult,
   type ExcuseResult,
+  type ExcuseSkipReason,
   type ExcuseView,
   type FileExcuseRefusal,
   type FileExcuseResult,
@@ -29,8 +30,15 @@ import {
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { judge } from "./judging.ts";
-import { dueAfterEnd, judgingReached, occurrenceStatus, skipReason } from "./occurrence-state.ts";
-import { lastDayOf, type Occurrence } from "./occurrences.ts";
+import {
+  dueAfterEnd,
+  judgingReached,
+  occurrenceSpan,
+  occurrenceStatus,
+  skipReason,
+  vacationOn,
+} from "./occurrence-state.ts";
+import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { editWindowClosesAt, EXCUSE_WINDOW_MS, isLocalDate } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
@@ -47,8 +55,6 @@ import {
   reviewersOf,
   reviewStateColumns,
   reviewStateOf,
-  scheduleOf,
-  termsOn,
   thread,
   type Decided,
   type PactRow,
@@ -77,7 +83,7 @@ export function excuseOptions(ctx: CoreContext, accountId: AccountId, pactId: st
   const recentDays = overlapping(earliest ?? today, today)
     .filter((occurrence) => !dueAfterEnd(ctx, pactId, occurrence))
     .map((occurrence) => excuseDay(ctx, pactId, occurrence))
-    .filter(({ status }) => skipReason(status, now) === null)
+    .filter((day) => excuseSkipReason(ctx, pactId, day, now) === null)
     .toReversed();
   return { ok: true, options: { today, recentDays } };
 }
@@ -242,7 +248,7 @@ function excusePreview(
   for (const occurrence of occurrencesOf(ctx, pactId, timezone).overlapping(from, to)) {
     if (dueAfterEnd(ctx, pactId, occurrence)) continue;
     const day = excuseDay(ctx, pactId, occurrence);
-    const skipped = skipReason(day.status, now);
+    const skipped = excuseSkipReason(ctx, pactId, day, now);
     if (skipped !== null) {
       preview.skipped.push({ date: occurrence.date, reason: skipped });
       continue;
@@ -251,6 +257,16 @@ function excusePreview(
     if (day.status.kind === "missed") preview.heldCents += day.status.penaltyCents;
   }
   return { ok: true, preview };
+}
+
+/**
+ * Why an excuse filed at `now` can't cover the pact's `day`, or null if it
+ * can. A day is on at most one excuse or vacation waiting for approval.
+ */
+function excuseSkipReason(ctx: CoreContext, pactId: string, day: ExcuseDay, now: Date): ExcuseSkipReason | null {
+  const reason = skipReason(day.status, now);
+  if (reason !== null) return reason;
+  return vacationOn(ctx, pactId, day.date) === "waiting" ? "on-waiting-vacation" : null;
 }
 
 /**
@@ -272,12 +288,7 @@ export function excuseDays(ctx: CoreContext, excuseId: string, pactId: string, t
 
 /** The pact's `occurrence` as an excuse's day: a Weekly count week runs through its Sunday. */
 export function excuseDay(ctx: CoreContext, pactId: string, occurrence: Occurrence): ExcuseDay {
-  const schedule = scheduleOf(termsOn(ctx, pactId, occurrence.date).schedule);
-  return {
-    date: occurrence.date,
-    ...(schedule.kind === "weekly-count" && { through: lastDayOf(schedule, occurrence.date) }),
-    status: occurrenceStatus(ctx, pactId, occurrence),
-  };
+  return { ...occurrenceSpan(ctx, pactId, occurrence), status: occurrenceStatus(ctx, pactId, occurrence) };
 }
 
 /** The photos of an excuse, in the order added. */

@@ -1634,3 +1634,42 @@ details.folded .kv {
     }
   }
 }
+
+/* Vacations: the Profile card and the Plan a vacation flow. */
+.vaccard {
+  gap: 8px;
+}
+.vacnote {
+  font-weight: 600;
+}
+.covrow .rt small + small {
+  margin-top: 1px;
+}
+/* Check it over: Dates, Pacts and Reviewers, each with Edit. */
+.sumrow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sumrow .spread {
+  align-items: baseline;
+}
+/* A page that ends in a footer bar: the bar sits flush on the tab bar, and
+   content fades out above it instead of scrolling under its buttons. */
+.scroll.has-foot {
+  padding-bottom: 0;
+}
+.has-foot > .footbar {
+  background: var(--paper);
+  padding-bottom: 14px;
+}
+.has-foot > .footbar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 18px;
+  background: linear-gradient(to bottom, transparent, var(--paper));
+  pointer-events: none;
+}

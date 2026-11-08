@@ -117,6 +117,11 @@ export function ownerZone(timezone: string | null, ownerId: AccountId): string {
   return timezone;
 }
 
+/** The timezone of an account that owns a pact, read from its row. */
+export function timezoneOf(ctx: CoreContext, accountId: AccountId): string {
+  return ownerZone(accountRow(ctx, accountId).timezone, accountId);
+}
+
 /**
  * Orders people (accounts or recipients) by name the same way on every page:
  * by the en-US collation, so "alice" comes before "Bob", ties broken by id.

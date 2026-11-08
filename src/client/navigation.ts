@@ -30,7 +30,8 @@ export type Page =
   | { kind: "excuse"; id: string }
   | { kind: "evidence"; id: string }
   | { kind: "payment"; id: string }
-  | { kind: "notifications" };
+  | { kind: "notifications" }
+  | { kind: "plan-vacation" };
 
 interface Route {
   tab: TabId;
@@ -66,6 +67,8 @@ export function pagePath(page: Page): string {
       return APP_PATHS.payment(page.id);
     case "notifications":
       return APP_PATHS.notifications;
+    case "plan-vacation":
+      return APP_PATHS.newVacation;
   }
 }
 
@@ -95,6 +98,10 @@ const PAGE_ROUTES: { pattern: RegExp; route: (id: string) => Route }[] = [
   {
     pattern: pathPattern(APP_PATHS.notifications),
     route: () => ({ tab: "today", stack: [{ kind: "notifications" }] }),
+  },
+  {
+    pattern: pathPattern(APP_PATHS.newVacation),
+    route: () => ({ tab: "today", stack: [{ kind: "plan-vacation" }] }),
   },
   {
     pattern: pathPattern(APP_PATHS.editPact),
@@ -200,6 +207,8 @@ export function useNavigation() {
     push: (page: Page) => go({ tab: route.tab, stack: [...route.stack, page] }),
     /** Swaps the top page for another, so Back skips the one replaced (e.g. the create form, once the pact exists). */
     replace: (page: Page) => swap({ route: { tab: route.tab, stack: [...route.stack.slice(0, -1), page] }, inApp }),
+    /** Replaces this entry with Today's own screen, so Back doesn't return to a page that's done. */
+    replaceWithToday: () => swap({ route: { tab: "today", stack: [] }, inApp }),
     back: () => {
       if (inApp) return window.history.back();
       // Opened from a link: there's no app entry behind this one, so step up in place.

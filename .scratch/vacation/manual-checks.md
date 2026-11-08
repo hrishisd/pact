@@ -5,6 +5,7 @@ Things that need a real phone and real push notifications. Steps marked **(human
 ## After ticket 01
 
 - [ ] **(human)** On the iPhone home-screen app, the First day and Last day fields open the native calendar picker, and the footer bar stays above the tab bar while the Pacts step scrolls.
+- [ ] **(human)** On the iPhone, after Ask for approval lands on Today with the Profile sheet up, closing the sheet and swiping back doesn't reopen the finished Vacation flow.
 
 ## After ticket 02
 
