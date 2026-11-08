@@ -5,7 +5,16 @@ import { clockText, formatDate, formatDay, partsIn } from "../shared/format.ts";
 import type { Json } from "../shared/api.ts";
 import type { AnkiCheck, ClockTime, DatedReminder, LocalDate } from "../shared/types.ts";
 
-export { clockText, formatDate, formatDay, inBedByName, money, scheduleText } from "../shared/format.ts";
+export {
+  clockText,
+  dateSpan,
+  formatDate,
+  formatDay,
+  inBedByName,
+  monthDay,
+  money,
+  scheduleText,
+} from "../shared/format.ts";
 
 /** Dollars as typed ("5", "$2.50", "0.5", ".50") in whole cents, or null when it isn't an amount. */
 export function parseCents(text: string): number | null {

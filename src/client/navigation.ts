@@ -161,6 +161,14 @@ export function routeFromPath(pathname: string): Route {
   return { tab, stack: [] };
 }
 
+/**
+ * Whether a fresh load of `pathname` opens the Profile sheet over Today, as
+ * a vacation's decision and questions do. Its route is Today's.
+ */
+export function opensProfileSheet(pathname: string): boolean {
+  return pathname === APP_PATHS.profile;
+}
+
 const INVITE_PATTERN = pathPattern(APP_PATHS.invite);
 
 /** The token of the invite link `pathname` is, or null. */

@@ -33,6 +33,13 @@ import {
 } from "./money.ts";
 import { pactsToJudge } from "./occurrence-state.ts";
 import { tellAll } from "./outbox.ts";
+import {
+  decideVacation,
+  ownVacation,
+  vacationsToReview,
+  vacationToDecide,
+  type VacationToDecide,
+} from "./vacations.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
 import {
   accountRow,
@@ -138,6 +145,9 @@ export function decide(
     case "payment":
       decidePayment(ctx, item.row, decided, accountId);
       break;
+    case "vacation":
+      decideVacation(ctx, item.row, decided, accountId);
+      break;
     case "change-request":
       if (decided.outcome === "approved") {
         // Judging catches up on the pact first, as the scheduler would have: a change never
@@ -161,7 +171,8 @@ export function decide(
  * The review item `itemId`, if `reviewerId` may decide it (decided or not):
  * evidence or an excuse for a pact they review (evidence once the pact's
  * edit window has closed), a payment to a recipient of any of the owner's
- * pacts they review, or a change request not withdrawn, for an Active pact.
+ * pacts they review, a change request not withdrawn, for an Active pact, or
+ * a vacation not withdrawn that the owner picked them for.
  */
 function itemToDecide(ctx: CoreContext, reviewerId: AccountId, itemId: string): ItemToDecide | undefined {
   const evidence = ctx.one<EvidenceToDecide>(
@@ -189,6 +200,8 @@ function itemToDecide(ctx: CoreContext, reviewerId: AccountId, itemId: string): 
   if (excuse) return { kind: "excuse", row: excuse };
   const payment = paymentToDecide(ctx, reviewerId, itemId);
   if (payment) return { kind: "payment", row: payment };
+  const vacation = vacationToDecide(ctx, reviewerId, itemId);
+  if (vacation) return { kind: "vacation", row: vacation };
   const mayDecideRequest =
     ctx.db
       .prepare(
@@ -245,6 +258,8 @@ function ownItem(
       reviewerIds: reviewersOf(ctx, request.pact_id),
     };
   }
+  const vacation = ownVacation(ctx, ownerId, itemId);
+  if (vacation) return { kind: "vacation", ...vacation };
   return undefined;
 }
 
@@ -269,6 +284,8 @@ function itemWhat(ctx: CoreContext, kind: ReviewItem["kind"], itemId: string): s
       const name = pactName(ctx, row.pact_id);
       return row.request.kind === "end" ? `request to end ${name}` : `change to ${name}`;
     }
+    case "vacation":
+      return "vacation";
   }
 }
 
@@ -281,7 +298,7 @@ function addComment(ctx: CoreContext, itemId: string, authorId: AccountId, fromO
 
 /**
  * Every item `reviewerId` may decide, waiting on the owner's reply or not:
- * change requests first, then the rest oldest first.
+ * change requests first, then the rest (vacations included) oldest first.
  */
 function reviewItems(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
   // Change requests first: one waiting holds up any other change to its pact.
@@ -293,6 +310,7 @@ function reviewItems(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
       evidenceToReview(ctx, reviewerId),
       excusesToReview(ctx, reviewerId),
       paymentsToReview(ctx, reviewerId),
+      vacationsToReview(ctx, reviewerId),
     ),
   ];
 }
@@ -324,7 +342,8 @@ type ItemToDecide =
   | { kind: "evidence"; row: EvidenceToDecide }
   | { kind: "excuse"; row: ExcuseToDecide }
   | { kind: "payment"; row: PaymentToDecide }
-  | { kind: "change-request"; row: StoredChangeRequest };
+  | { kind: "change-request"; row: StoredChangeRequest }
+  | { kind: "vacation"; row: VacationToDecide };
 
 /** The owner's page for a review item: where a question about it opens. */
 function itemPath(kind: ReviewItem["kind"], itemId: string): string {
@@ -337,6 +356,8 @@ function itemPath(kind: ReviewItem["kind"], itemId: string): string {
       return APP_PATHS.payment(itemId);
     case "change-request":
       return APP_PATHS.changeRequest(itemId);
+    case "vacation":
+      return APP_PATHS.profile;
   }
 }
 
@@ -351,5 +372,7 @@ function reviewItemSince(item: ReviewItem): Date {
       return item.recordedAt;
     case "change-request":
       return item.requestedAt;
+    case "vacation":
+      return item.filedAt;
   }
 }

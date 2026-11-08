@@ -237,7 +237,7 @@ export function decideEvidence(
   const { outcome, reason } = decided;
   const now = ctx.clock.now();
   recordDecision(ctx, "evidence", evidence.id, decided, reviewerId, now);
-  // A day ahead with an approved excuse stays for judging at its due time, which makes it Excused.
+  // A day ahead with an approved excuse or vacation stays for judging at its due time, which makes it Excused.
   const excusedAhead = excuseOn(ctx, evidence.pact_id, evidence.occurrence_date) === "approved";
   const occurrence = occurrencesOf(ctx, evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date);
   if (occurrence === null || dueAfterEnd(ctx, evidence.pact_id, occurrence)) {

@@ -522,7 +522,8 @@ export function newTerms(ctx: CoreContext, pact: PactRow, timezone: string, now:
 
 /**
  * Re-dates a One-time pact's occurrence, not judged yet, from `from` to
- * `to`: its row, its evidence and the excuses that cover it.
+ * `to`: its row, its evidence, the excuses that cover it, and the vacations
+ * whose dates take in `to`. A vacation whose dates don't covers it no more.
  */
 export function moveOneTimeOccurrence(ctx: CoreContext, pactId: string, from: LocalDate, to: LocalDate): void {
   if (from === to) return;
@@ -537,6 +538,13 @@ export function moveOneTimeOccurrence(ctx: CoreContext, pactId: string, from: Lo
     .prepare(`UPDATE evidence SET occurrence_date = ?, day = ? WHERE pact_id = ? AND occurrence_date = ?`)
     .run(to, to, pactId, from);
   ctx.db.prepare(`UPDATE excuse_day SET date = ? WHERE pact_id = ? AND date = ?`).run(to, pactId, from);
+  ctx.db
+    .prepare(
+      `UPDATE vacation_day SET date = ? WHERE pact_id = ? AND date = ?
+         AND vacation_id IN (SELECT id FROM vacation WHERE first_day <= ? AND last_day >= ?)`,
+    )
+    .run(to, pactId, from, to, to);
+  ctx.db.prepare(`DELETE FROM vacation_day WHERE pact_id = ? AND date = ?`).run(pactId, from);
   ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, from);
 }
 

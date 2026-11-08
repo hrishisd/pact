@@ -1,10 +1,15 @@
-// Vacations: what one would cover, filing it, the owner's vacations, and
-// withdrawing one while it waits.
+// Vacations: what one would cover, filing it, the owner's vacations,
+// withdrawing one while it waits, and its review by the reviewers picked.
 
+import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
+import { dateSpan } from "../shared/format.ts";
 import {
   MAX_EXCUSE_SPAN_DAYS,
   type AccountId,
+  type ReviewItem,
+  type VacationCover,
+  type VacationState,
   type FileVacationResult,
   type LocalDate,
   type NewVacation,
@@ -22,17 +27,25 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
+import { excuseApprovedDays } from "./excuses.ts";
 import { dueAfterEnd, excuseOn, occurrenceSpan, vacationOn } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
+import { tellAll } from "./outbox.ts";
 import { isLocalDate } from "./pact-rules.ts";
 import {
+  accountName,
+  decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
   occurrencesOf,
+  recordDecision,
   timezoneOf,
   reviewersOf,
   scheduleOf,
+  thread,
+  type Decided,
   type PactRow,
+  type ReviewOutcome,
 } from "./rows.ts";
 
 export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
@@ -168,6 +181,7 @@ function vacationSkipReason(
   now: Date,
 ): VacationSkipReason | null {
   if (occurrence.opensAt.getTime() <= now.getTime()) return "already-open";
+  // Before excuseOn, which counts an approved vacation as an approved excuse.
   if (vacationOn(ctx, pactId, occurrence.date) !== null) return "on-vacation";
   const excuse = excuseOn(ctx, pactId, occurrence.date);
   if (excuse === "waiting") return "on-waiting-excuse";
@@ -232,47 +246,236 @@ export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: New
         .run(vacationId, pact.pactId, date);
     }
   }
+  tellAll(ctx, reviewerIds, "review-item", {
+    itemKind: "vacation",
+    itemId: vacationId,
+    title: `${accountName(ctx, ownerId)} asked for a vacation`,
+    body: dateSpan(vacation.from, vacation.to),
+    url: APP_PATHS.review,
+  });
   return { ok: true, vacationId };
 }
 
-/** The owner's vacations waiting for approval, soonest first. */
+/** A `vacation` row with what Profile and the review item show of it. */
+interface VacationRow {
+  id: string;
+  owner_account_id: AccountId;
+  first_day: LocalDate;
+  last_day: LocalDate;
+  note: string | null;
+  pacts_summary: VacationPacts["kind"];
+  filed_at: string;
+  decision: ReviewOutcome | null;
+  decided_by_account_id: AccountId | null;
+}
+
+const VACATION_COLUMNS = `vacation.id, vacation.owner_account_id, vacation.first_day, vacation.last_day, vacation.note,
+  vacation.pacts_summary, vacation.filed_at, vacation.decision, vacation.decided_by_account_id`;
+
+/**
+ * The owner's vacations waiting for approval (or on their reply), and those
+ * approved whose last day hasn't passed, soonest first.
+ */
 export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCard[] {
-  const rows = ctx.all<{
-    id: string;
-    first_day: LocalDate;
-    last_day: LocalDate;
-    note: string | null;
-    pacts_summary: VacationPacts["kind"];
-  }>(
-    `SELECT id, first_day, last_day, note, pacts_summary FROM vacation
-     WHERE owner_account_id = ? AND decision IS NULL AND withdrawn_at IS NULL
+  const today = localDateOf(ctx.clock.now(), timezoneOf(ctx, ownerId));
+  const rows = ctx.all<VacationRow>(
+    `SELECT ${VACATION_COLUMNS} FROM vacation
+     WHERE owner_account_id = ? AND withdrawn_at IS NULL
+       AND (decision IS NULL OR (decision = 'approved' AND last_day >= ?))
      ORDER BY first_day, filed_at, id`,
     ownerId,
+    today,
   );
-  return rows.map((row) => {
-    const names = ctx
-      .all<{ name: string }>(
-        `SELECT pact.name FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
-         WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
-        row.id,
-      )
-      .map((pact) => pact.name);
-    const reviewerIds = ctx
-      .all<{ reviewer_account_id: AccountId }>(
-        `SELECT reviewer_account_id FROM vacation_reviewer WHERE vacation_id = ?`,
-        row.id,
-      )
-      .map((reviewer) => reviewer.reviewer_account_id);
-    return {
-      id: row.id,
-      from: row.first_day,
-      to: row.last_day,
-      days: dayCount(row.first_day, row.last_day),
-      note: row.note,
-      pacts: row.pacts_summary === "some" ? { kind: "some", names } : { kind: row.pacts_summary },
-      reviewerNames: friendsSortedByName(ctx, reviewerIds).map((reviewer) => reviewer.name),
-      state: { kind: "waiting" },
-    };
+  return rows.map((row) => ({ ...vacationSummary(ctx, row), state: vacationState(ctx, row) }));
+}
+
+/** What a vacation's Profile card and review item both show: its dates, note, pacts and who it went to. */
+function vacationSummary(
+  ctx: CoreContext,
+  row: VacationRow,
+): Pick<VacationCard, "id" | "from" | "to" | "days" | "note" | "pacts" | "reviewerNames"> {
+  const names = ctx
+    .all<{ name: string }>(
+      `SELECT pact.name FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
+       WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
+      row.id,
+    )
+    .map((pact) => pact.name);
+  return {
+    id: row.id,
+    from: row.first_day,
+    to: row.last_day,
+    days: dayCount(row.first_day, row.last_day),
+    note: row.note,
+    pacts: row.pacts_summary === "some" ? { kind: "some", names } : { kind: row.pacts_summary },
+    reviewerNames: friendsSortedByName(ctx, pickedReviewers(ctx, row.id)).map((reviewer) => reviewer.name),
+  };
+}
+
+/** Where a vacation not withdrawn stands for its owner: waiting, waiting on their reply, or approved. */
+function vacationState(ctx: CoreContext, row: VacationRow): VacationState {
+  if (row.decision === "approved")
+    return { kind: "approved", reviewerName: accountName(ctx, row.decided_by_account_id!) };
+  const { comments, waitingOnReply } = thread(ctx, row.id, row.decision === null);
+  const asked = comments.at(-1);
+  return waitingOnReply && asked
+    ? { kind: "waiting-on-reply", askedBy: asked.authorName, question: asked.text }
+    : { kind: "waiting" };
+}
+
+/** The reviewers the owner picked for the vacation: only they may decide it. */
+export function pickedReviewers(ctx: CoreContext, vacationId: string): AccountId[] {
+  return ctx
+    .all<{ reviewer_account_id: AccountId }>(
+      `SELECT reviewer_account_id FROM vacation_reviewer WHERE vacation_id = ?`,
+      vacationId,
+    )
+    .map((reviewer) => reviewer.reviewer_account_id);
+}
+
+/**
+ * The ticked pacts with something covered, oldest pact first, each with its
+ * covered occurrences as they stand now: a day an approved change took off
+ * the schedule isn't one any more.
+ */
+function vacationCovers(ctx: CoreContext, vacationId: string, timezone: string): VacationCover[] {
+  const pacts = ctx.all<PactRow>(
+    `SELECT pact.* FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
+     WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
+    vacationId,
+  );
+  const days = ctx.all<{ pact_id: string; date: LocalDate }>(
+    `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY date`,
+    vacationId,
+  );
+  return pacts.flatMap((pact): VacationCover[] => {
+    const { covering } = occurrencesOf(ctx, pact.id, timezone);
+    const covered = days
+      .filter((day) => day.pact_id === pact.id)
+      .flatMap(({ date }) => {
+        const occurrence = covering(date);
+        return occurrence ? [occurrenceSpan(ctx, pact.id, occurrence)] : [];
+      });
+    if (covered.length === 0) return [];
+    return [
+      {
+        pactId: pact.id,
+        name: pact.name,
+        evidenceKind: pact.evidence_kind,
+        schedule: scheduleOf(pact.schedule),
+        covered,
+      },
+    ];
+  });
+}
+
+/** Vacations waiting for approval that `reviewerId` was picked for, oldest first. */
+export function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+  const rows = ctx.all<VacationRow & { owner_name: string; timezone: string }>(
+    `SELECT ${VACATION_COLUMNS}, owner.name AS owner_name, owner.timezone
+     FROM vacation
+     JOIN vacation_reviewer ON vacation_reviewer.vacation_id = vacation.id
+                           AND vacation_reviewer.reviewer_account_id = ?
+     JOIN account AS owner ON owner.id = vacation.owner_account_id
+     WHERE vacation.decision IS NULL AND vacation.withdrawn_at IS NULL
+     ORDER BY vacation.filed_at, vacation.id`,
+    reviewerId,
+  );
+  return rows.map((row): ReviewItem => ({
+    kind: "vacation",
+    ...vacationSummary(ctx, row),
+    ownerName: row.owner_name,
+    covers: vacationCovers(ctx, row.id, row.timezone),
+    filedAt: new Date(row.filed_at),
+    thread: thread(ctx, row.id, true),
+  }));
+}
+
+/** A vacation a reviewer is deciding on, as `decide` reads it. */
+export interface VacationToDecide {
+  id: string;
+  decision: ReviewOutcome | null;
+  owner_account_id: AccountId;
+  first_day: LocalDate;
+  last_day: LocalDate;
+}
+
+/**
+ * The owner's vacation `vacationId`, for a reply to a question about it:
+ * whether it still waits for a decision, and its picked reviewers.
+ */
+export function ownVacation(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  vacationId: string,
+): { waiting: boolean; reviewerIds: AccountId[] } | undefined {
+  const vacation = ctx.one<{ decision: ReviewOutcome | null; withdrawn_at: string | null }>(
+    `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
+    vacationId,
+    ownerId,
+  );
+  return (
+    vacation && {
+      waiting: vacation.decision === null && vacation.withdrawn_at === null,
+      reviewerIds: pickedReviewers(ctx, vacationId),
+    }
+  );
+}
+
+/** The vacation `vacationId`, decided or not, if `reviewerId` was picked for it and it wasn't withdrawn. */
+export function vacationToDecide(
+  ctx: CoreContext,
+  reviewerId: AccountId,
+  vacationId: string,
+): VacationToDecide | undefined {
+  return ctx.one<VacationToDecide>(
+    `SELECT vacation.id, vacation.decision, vacation.owner_account_id, vacation.first_day, vacation.last_day
+     FROM vacation
+     JOIN vacation_reviewer ON vacation_reviewer.vacation_id = vacation.id
+                           AND vacation_reviewer.reviewer_account_id = ?
+     WHERE vacation.id = ? AND vacation.withdrawn_at IS NULL`,
+    reviewerId,
+    vacationId,
+  );
+}
+
+/**
+ * Records a picked reviewer's decision on a vacation waiting for approval
+ * and tells the owner. Approved: every covered day of every pact is
+ * excused at once, as an approved excuse's are (`excuseApprovedDays`).
+ * Rejected: its days are judged as usual.
+ */
+export function decideVacation(
+  ctx: CoreContext,
+  vacation: VacationToDecide,
+  decided: Decided,
+  reviewerId: AccountId,
+): void {
+  const now = ctx.clock.now();
+  recordDecision(ctx, "vacation", vacation.id, decided, reviewerId, now);
+  if (decided.outcome === "approved") {
+    const days = ctx.all<{ pact_id: string; date: LocalDate }>(
+      `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
+      vacation.id,
+    );
+    for (const pactId of new Set(days.map((day) => day.pact_id))) {
+      const dates = days.filter((day) => day.pact_id === pactId).map((day) => day.date);
+      excuseApprovedDays(ctx, pactId, dates, now);
+    }
+  }
+  const { first_day: from, last_day: to } = vacation;
+  ctx.enqueue({
+    recipient: vacation.owner_account_id,
+    kind: "vacation-decided",
+    payload: {
+      itemKind: "vacation",
+      itemId: vacation.id,
+      ...decisionDetails(decided),
+      title: `${accountName(ctx, reviewerId)} ${decided.outcome} your vacation`,
+      body: decided.reason === null ? dateSpan(from, to) : `“${decided.reason}”`,
+      // A rejection shows as an alert on Today; an approval on the vacation's Profile card.
+      url: decided.outcome === "approved" ? APP_PATHS.profile : APP_PATHS.today,
+    },
   });
 }
 

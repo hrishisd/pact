@@ -1,24 +1,10 @@
-// How a vacation's dates, pacts and reviewers are written, on Profile and
-// in Plan a vacation.
+// How a vacation's dates, pacts and reviewers are written on Profile, in
+// Plan a vacation and on its review item.
 
 import type { Json } from "../shared/api.ts";
-import type { LocalDate, VacationPacts } from "../shared/types.ts";
+import type { EvidenceKind, LocalDate, Schedule, VacationOccurrence, VacationPacts } from "../shared/types.ts";
 import { listNames } from "./change-terms.tsx";
-import { formatDate } from "./format.ts";
-
-/** "Dec 20", from `formatDate`'s "Sun Dec 20". */
-export function monthDay(date: LocalDate): string {
-  return formatDate(date).slice(4);
-}
-
-/** "Dec 20 – Jan 2", "Dec 20 – 26" within one month, or "Dec 20" for one day. */
-export function dateSpan(from: LocalDate, to: LocalDate): string {
-  if (from === to) return monthDay(from);
-  const [toMonth, toDay] = monthDay(to).split(" ");
-  return monthDay(from).startsWith(`${toMonth} `)
-    ? `${monthDay(from)} – ${toDay}`
-    : `${monthDay(from)} – ${monthDay(to)}`;
-}
+import { dateSpan, formatDate, monthDay } from "./format.ts";
 
 /** "All pacts", "All recurring pacts", or the ticked pacts' names. */
 export function pactsText(pacts: Json<VacationPacts>): string {
@@ -40,4 +26,57 @@ export function plural(n: number, one: string, many: string): string {
 /** "Sam", from "Sam Rivera". */
 export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name;
+}
+
+/** What a pact on vacation gives up: its head line and a line per week that runs past the dates. */
+export function coveredText(
+  pact: { evidenceKind: EvidenceKind; schedule: Json<Schedule> },
+  covered: Json<VacationOccurrence>[],
+  from: LocalDate,
+  to: LocalDate,
+): { head: string; lines: string[] } {
+  const { schedule } = pact;
+  const first = covered[0];
+  const last = covered.at(-1);
+  if (schedule.kind === "one-time") {
+    return first
+      ? { head: `Deadline ${formatDate(schedule.deadline)} excused`, lines: ["The pact ends."] }
+      : { head: `Deadline ${formatDate(schedule.deadline)} isn't in these days`, lines: [] };
+  }
+  if (schedule.kind === "weekly-count") {
+    return {
+      head:
+        first && last
+          ? `${plural(covered.length, "week", "weeks")} off · ${dateSpan(first.date, last.through ?? last.date)}`
+          : "No whole weeks off",
+      lines: covered
+        .filter((week) => week.date < from || (week.through ?? week.date) > to)
+        .map((week) => `${weekOf(week.date)}: whole week off`),
+    };
+  }
+  const [one, many] = occurrenceNames(pact.evidenceKind);
+  return {
+    head:
+      first && last
+        ? `${plural(covered.length, one, many)} off · ${dateSpan(first.date, last.date)}`
+        : `No ${many} in these days`,
+    lines: [],
+  };
+}
+
+/** What a pact's occurrences are called, one and many: nights, Anki days, or days. */
+export function occurrenceNames(kind: EvidenceKind): [string, string] {
+  switch (kind) {
+    case "oura":
+      return ["night", "nights"];
+    case "anki":
+      return ["Anki day", "Anki days"];
+    case "camera":
+      return ["day", "days"];
+  }
+}
+
+/** "Week of Dec 14". */
+export function weekOf(date: LocalDate): string {
+  return `Week of ${monthDay(date)}`;
 }

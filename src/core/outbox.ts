@@ -24,6 +24,7 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "missed-occurrence": "missed-occurrence",
   "excuse-decided": "decision",
   "change-request-decided": "decision",
+  "vacation-decided": "decision",
   "reviewer-question": "comment",
   "owner-replied": "comment",
   "new-bill": "new-bill",

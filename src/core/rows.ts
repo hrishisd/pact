@@ -500,7 +500,7 @@ export function waitingChangeRequests(ctx: CoreContext, ownerId: AccountId, pact
 /** Stores a reviewer's decision on the review item `id` in `table`. */
 export function recordDecision(
   ctx: CoreContext,
-  table: "evidence" | "excuse" | "payment" | "change_request",
+  table: "evidence" | "excuse" | "payment" | "change_request" | "vacation",
   id: string,
   { outcome, reason }: Decided,
   reviewerId: AccountId,

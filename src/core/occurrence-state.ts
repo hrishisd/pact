@@ -49,7 +49,11 @@ export function isJudged(ctx: CoreContext, pactId: string, date: LocalDate): boo
   );
 }
 
-/** Whether an excuse waiting for approval, or else an approved one, covers the occurrence. */
+/**
+ * Whether an excuse waiting for approval, or else an approved excuse or
+ * approved vacation, covers the occurrence. An approved vacation counts
+ * exactly as an approved excuse does everywhere coverage is checked.
+ */
 export function excuseOn(ctx: CoreContext, pactId: string, date: LocalDate): "waiting" | "approved" | null {
   const decisions = ctx
     .all<{ decision: ReviewOutcome | null }>(
@@ -60,7 +64,8 @@ export function excuseOn(ctx: CoreContext, pactId: string, date: LocalDate): "wa
     )
     .map((row) => row.decision);
   if (decisions.includes(null)) return "waiting";
-  return decisions.includes("approved") ? "approved" : null;
+  if (decisions.includes("approved")) return "approved";
+  return vacationOn(ctx, pactId, date) === "approved" ? "approved" : null;
 }
 
 /**
@@ -248,10 +253,15 @@ export const MISSED_THROUGH_REJECTION = `(NOT ${WEEKLY_COUNT_PACT} AND EXISTS (S
     AND evidence.decision = 'rejected'))`;
 
 /**
- * SQL: an excuse matching `condition` (on `excuse`) covers the occurrence of
- * pact `pact` on `date` (SQL expressions).
+ * SQL: an excuse, or an approved vacation, matching `condition` covers the
+ * occurrence of pact `pact` on `date` (SQL expressions). `condition` reads
+ * `excuse.decision`, `excuse.filed_at` and `excuse.decided_at`, which a
+ * vacation has too, so an approved vacation counts as an approved excuse.
  */
 export function excuseCoversSql(pact: string, date: string, condition: string): string {
-  return `EXISTS (SELECT 1 FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
-    WHERE excuse_day.pact_id = ${pact} AND excuse_day.date = ${date} AND ${condition})`;
+  return `(EXISTS (SELECT 1 FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+    WHERE excuse_day.pact_id = ${pact} AND excuse_day.date = ${date} AND ${condition})
+  OR EXISTS (SELECT 1 FROM vacation_day JOIN vacation AS excuse ON excuse.id = vacation_day.vacation_id
+    WHERE vacation_day.pact_id = ${pact} AND vacation_day.date = ${date} AND excuse.decision = 'approved'
+      AND ${condition}))`;
 }

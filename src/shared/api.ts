@@ -127,6 +127,8 @@ export const APP_PATHS = {
   notifications: "/notifications",
   /** Plan a vacation, opened from Profile. */
   newVacation: "/vacation/new",
+  /** Today with the Profile sheet open: where a vacation's decision and questions open. */
+  profile: "/profile",
   /** An invite link. It shows before sign-in, so the app reads it apart from the other pages. */
   invite: (token: string) => `/invite/${encodeURIComponent(token)}`,
 } as const;
@@ -196,7 +198,7 @@ export const API_PATHS = {
   excuse: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}` as const,
   /** POST (no body): Take the L on a rejected excuse. */
   acceptExcuseRejection: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}/accept-rejection` as const,
-  /** GET: the owner's vacations waiting for approval. POST: file a vacation. */
+  /** GET: the owner's vacations waiting for approval or approved, through their last day. POST: file a vacation. */
   vacations: "/api/vacations",
   /** GET: what Plan a vacation offers. */
   vacationOptions: "/api/vacations/options",

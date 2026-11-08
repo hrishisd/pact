@@ -54,6 +54,7 @@ import {
   type DecideRequest,
   type ExcuseOptionsResponse,
   type FileVacationRequest,
+  type FileVacationResponse,
   type VacationOptionsResponse,
   type VacationPreviewRequest,
   type VacationPreviewResponse,
@@ -1395,6 +1396,55 @@ describe("vacations", () => {
     expect(await withdraw()).toEqual({ status: 200, body: { ok: true } });
     expect(await withdraw()).toEqual({ status: 200, body: { ok: false, reason: "not-waiting" } });
     expect((await owner.get<VacationsResponse>(API_PATHS.vacations)).body).toEqual([]);
+  });
+
+  test("the picked reviewer sees it in the Review Queue, asks, the owner replies from Profile, and the reviewer approves", async () => {
+    const { s, owner, friend, friendId, pactId } = await ownerWithPact();
+    const filed = await owner.post<FileVacationResponse>(API_PATHS.vacations, {
+      from: s.date("Mon+1"),
+      to: s.date("Sun+1"),
+      pactIds: [pactId],
+      reviewerIds: [friendId],
+    } satisfies FileVacationRequest);
+    if (!filed.body.ok) throw new Error(filed.body.reason);
+    const { vacationId } = filed.body;
+
+    expect((await friend.get<ReviewQueueResponse>(API_PATHS.reviewQueue)).body).toEqual([
+      expect.objectContaining({
+        kind: "vacation",
+        id: vacationId,
+        from: s.date("Mon+1"),
+        covers: [expect.objectContaining({ pactId, covered: expect.any(Array) })],
+        filedAt: s.clock.now().toISOString(),
+      }),
+    ]);
+    const asked = await friend.post<AskOwnerResponse>(API_PATHS.askOwner(vacationId), {
+      question: "When do you fly?",
+    } satisfies AskOwnerRequest);
+    expect(asked).toEqual({ status: 200, body: { ok: true } });
+    expect((await friend.get<WaitingOnReplyResponse>(API_PATHS.waitingOnReply)).body).toEqual([
+      expect.objectContaining({ kind: "vacation", id: vacationId }),
+    ]);
+    expect((await owner.get<VacationsResponse>(API_PATHS.vacations)).body).toEqual([
+      expect.objectContaining({
+        id: vacationId,
+        state: { kind: "waiting-on-reply", askedBy: "friend", question: "When do you fly?" },
+      }),
+    ]);
+
+    const replied = await owner.post<ReplyResponse>(API_PATHS.reply(vacationId), {
+      reply: "Sunday at 7am",
+    } satisfies ReplyRequest);
+    expect(replied).toEqual({ status: 200, body: { ok: true } });
+    expect(await friend.post(API_PATHS.decide(vacationId), { kind: "approve" } satisfies DecideRequest)).toEqual({
+      status: 200,
+      body: { ok: true },
+    });
+
+    expect((await friend.get(API_PATHS.reviewQueue)).body).toEqual([]);
+    expect((await owner.get<VacationsResponse>(API_PATHS.vacations)).body).toEqual([
+      expect.objectContaining({ id: vacationId, state: { kind: "approved", reviewerName: "friend" } }),
+    ]);
   });
 
   test("the core's refusals are 200s; a body of another shape is a 400", async () => {

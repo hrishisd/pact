@@ -545,7 +545,27 @@ export type ReviewItem =
       /** What the owner would owe the recipient once this payment is approved, never below zero. */
       owedAfterApprovalCents: number;
       thread: QuestionThread;
-    } & PaymentView);
+    } & PaymentView)
+  /**
+   * A vacation: the reviewer decides all of it at once, for every pact it
+   * covers. Only the reviewers the owner picked see it.
+   */
+  | {
+      kind: "vacation";
+      id: string;
+      ownerName: string;
+      from: LocalDate;
+      to: LocalDate;
+      days: number;
+      note: string | null;
+      pacts: VacationPacts;
+      /** Who it was sent to, by name. Any one of them decides it. */
+      reviewerNames: string[];
+      /** Each ticked pact with something covered, in the order the owner's pacts were made. */
+      covers: VacationCover[];
+      filedAt: Date;
+      thread: QuestionThread;
+    };
 
 /** Evidence, as its reviewers and its owner see it. */
 export interface EvidenceView {
@@ -1403,7 +1423,26 @@ export interface VacationCard {
   pacts: VacationPacts;
   /** Who it was sent to, by name. */
   reviewerNames: string[];
-  state: { kind: "waiting" };
+  state: VacationState;
+}
+
+/**
+ * Where a vacation on Profile stands: waiting for approval, waiting on the
+ * owner's reply to a reviewer's question, or approved and not over yet.
+ */
+export type VacationState =
+  | { kind: "waiting" }
+  | { kind: "waiting-on-reply"; askedBy: string; question: string }
+  | { kind: "approved"; reviewerName: string };
+
+/** One pact a vacation covers, as its review item shows it: what the pact gives up, as the days stand now. */
+export interface VacationCover {
+  pactId: string;
+  name: string;
+  evidenceKind: EvidenceKind;
+  schedule: Schedule;
+  /** Oldest first. */
+  covered: VacationOccurrence[];
 }
 
 export interface Health {

@@ -1,13 +1,13 @@
 // Building blocks of review items (evidence, excuses, payments, change
-// requests), shared by their owner's pages, the Review tab, and the rows that
-// list items still waiting.
+// requests, vacations), shared by their owner's pages, the Review tab, and
+// the rows that list items still waiting.
 
 import type { ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ChangeRequestState, QuestionThread, ReviewItem } from "../shared/types.ts";
 import { listNames } from "./change-terms.tsx";
 import { formatDayTime } from "./format.ts";
-import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon } from "./icons.tsx";
+import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon, SuitcaseIcon } from "./icons.tsx";
 import { ReplyBox, Thread } from "./questions.tsx";
 
 type ItemKind = ReviewItem["kind"];
@@ -18,6 +18,7 @@ const ITEM_KINDS: Record<ItemKind, { label: string; className: string; Icon: typ
   excuse: { label: "Excuse", className: "k-excuse", Icon: ExcuseIcon },
   payment: { label: "Payment", className: "k-payment", Icon: DollarIcon },
   "change-request": { label: "Change", className: "k-change", Icon: PencilIcon },
+  vacation: { label: "Vacation", className: "k-vacation", Icon: SuitcaseIcon },
 };
 
 /** The top of an item: its kind's tile, then `children` beside it (where it stands, or whose it is). */
