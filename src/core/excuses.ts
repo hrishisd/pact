@@ -15,6 +15,7 @@ import {
   type ExcuseDetail,
   type ExcuseOptionsResult,
   type ExcusePreview,
+  type ExcusePreviewResult,
   type ExcuseResult,
   type ExcuseView,
   type FileExcuseRefusal,
@@ -208,11 +209,21 @@ export interface ExcuseToDecide {
   owner_account_id: AccountId;
 }
 
+export function previewExcuse(
+  ctx: CoreContext,
+  accountId: AccountId,
+  pactId: string,
+  dates: ExcuseDates,
+): ExcusePreviewResult {
+  const { timezone } = accountRow(ctx, accountId);
+  return excusePreview(ctx, accountId, timezone, pactId, dates, ctx.clock.now());
+}
+
 /**
  * The owner's pact `pactId` and the days an excuse for it with `dates`
  * would cover at `now`, or why the dates are refused.
  */
-export function excusePreview(
+function excusePreview(
   ctx: CoreContext,
   ownerId: AccountId,
   timezone: string | null,

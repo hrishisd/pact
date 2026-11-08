@@ -75,6 +75,11 @@ export function createInvite(ctx: CoreContext, accountId: AccountId): Invite {
   return { token, expiresAt };
 }
 
+export function invitePage(ctx: CoreContext, accountId: AccountId, token: string): InviteLookup {
+  accountRow(ctx, accountId);
+  return inviteLookup(ctx, inviteRow(ctx, token), accountId);
+}
+
 export function acceptInvite(ctx: CoreContext, accountId: AccountId, token: string): AcceptInviteResult {
   accountRow(ctx, accountId);
   const row = inviteRow(ctx, token);
@@ -121,6 +126,11 @@ export function addRecipient(ctx: CoreContext, accountId: AccountId, recipient: 
 export function recipientList(ctx: CoreContext, accountId: AccountId): Recipient[] {
   accountRow(ctx, accountId);
   return selectRecipients(ctx, `owner_account_id = ?`, accountId);
+}
+
+export function notificationSettingList(ctx: CoreContext, accountId: AccountId): NotificationSettingState[] {
+  accountRow(ctx, accountId);
+  return notificationSettings(ctx, accountId);
 }
 
 export function setNotificationSetting(
