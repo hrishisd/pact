@@ -1063,6 +1063,15 @@ describe("after a rejection", () => {
     expect(owner.today().alerts).toEqual([]);
   });
 
+  test("once a new vacation clears the alert, Mon+1 is back on Today's Missed for the rest of its 48 hours", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await rejectedAfterMonday(s);
+
+    await file(owner, vacation(s.date("Fri+1"), s.date("Sun+1"), [gym], [reviewer]));
+
+    expect(cards(owner, "missed")).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon+1") })]);
+  });
+
   test("Take the L clears the alert and Mon+1's Missed card for good, and owed doesn't change", async () => {
     const s = scenario();
     const { owner, reviewer, vacationId } = await rejectedAfterMonday(s);

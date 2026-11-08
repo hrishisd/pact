@@ -127,7 +127,10 @@ export function LedgerPage({
   );
 }
 
-/** The bill a penalty is on or goes on; held, that an excuse holds it and the bill it goes on if that's rejected. */
+/**
+ * The bill a penalty is on or goes on; held, that an excuse or vacation
+ * holds it, and for an excuse the bill it goes on if that's rejected.
+ */
 function billText(bill: Json<LedgerPenalty>["bill"]): string {
   switch (bill.kind) {
     case "on-bill":
@@ -137,7 +140,7 @@ function billText(bill: Json<LedgerPenalty>["bill"]): string {
     case "if-excuse-rejected":
       return `Held while an excuse waits for approval · Goes on the ${formatDate(bill.billedOn)} bill if the excuse is rejected`;
     case "if-vacation-rejected":
-      return `Held while a vacation waits for approval · Goes on the ${formatDate(bill.billedOn)} bill if the vacation is rejected`;
+      return "Held while a vacation waits for approval";
   }
 }
 

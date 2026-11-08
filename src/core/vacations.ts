@@ -531,6 +531,21 @@ export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationI
 }
 
 /**
+ * SQL: no vacation or excuse filed after the vacation `alias` covers any of
+ * its days. A rejected vacation's alert stands only while this holds. For an
+ * excuse row read through the same alias it always holds, since no
+ * vacation_day has an excuse's id.
+ */
+export function noLaterFilingSql(alias: string): string {
+  return `NOT EXISTS (SELECT 1 FROM vacation_day AS mine
+    WHERE mine.vacation_id = ${alias}.id
+      AND (EXISTS (SELECT 1 FROM vacation_day AS other JOIN vacation AS later ON later.id = other.vacation_id
+                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)
+        OR EXISTS (SELECT 1 FROM excuse_day AS other JOIN excuse AS later ON later.id = other.excuse_id
+                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)))`;
+}
+
+/**
  * One alert per rejected vacation of the owner's, newest rejection first,
  * until the owner takes the L on it or files a new vacation or an excuse
  * covering any of its days. With when it was rejected, for ordering among
@@ -554,14 +569,7 @@ export function rejectedVacationAlerts(ctx: CoreContext, ownerId: AccountId): { 
      FROM vacation
      JOIN account AS reviewer ON reviewer.id = vacation.decided_by_account_id
      WHERE vacation.owner_account_id = ? AND vacation.decision = 'rejected' AND vacation.rejection_accepted_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM vacation_day AS mine
-                       JOIN vacation_day AS other ON other.pact_id = mine.pact_id AND other.date = mine.date
-                       JOIN vacation AS later ON later.id = other.vacation_id
-                       WHERE mine.vacation_id = vacation.id AND later.filed_at > vacation.filed_at)
-       AND NOT EXISTS (SELECT 1 FROM vacation_day AS mine
-                       JOIN excuse_day ON excuse_day.pact_id = mine.pact_id AND excuse_day.date = mine.date
-                       JOIN excuse ON excuse.id = excuse_day.excuse_id
-                       WHERE mine.vacation_id = vacation.id AND excuse.filed_at > vacation.filed_at)
+       AND ${noLaterFilingSql("vacation")}
      ORDER BY vacation.decided_at DESC, vacation.id`,
     ownerId,
   );

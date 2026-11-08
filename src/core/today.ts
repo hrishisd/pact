@@ -39,7 +39,7 @@ import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import { activePacts, waitingSince, type ActivePact } from "./pacts.ts";
-import { rejectedVacationAlerts } from "./vacations.ts";
+import { noLaterFilingSql, rejectedVacationAlerts } from "./vacations.ts";
 import {
   accountRow,
   ankiDeckMissing,
@@ -397,7 +397,7 @@ function weekToDo(
 /**
  * The owner's occurrences judged Missed in the 48 hours before `now`,
  * latest first, but not accepted misses, nor those Missed through a
- * rejection or on a rejected excuse or vacation (those are alerts), nor
+ * rejection or on a rejected excuse or vacation while its alert stands, nor
  * those on an excuse or vacation waiting for approval. Today's day of a
  * Camera pact with a due-by time is Closed.
  */
@@ -426,7 +426,8 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
          AND NOT ${excuseCoversSql(
            "occurrence.pact_id",
            "occurrence.date",
-           "(excuse.decision IS NULL OR (excuse.decision = 'rejected' AND excuse.decided_at >= occurrence.judged_at))",
+           `(excuse.decision IS NULL OR (excuse.decision = 'rejected' AND excuse.decided_at >= occurrence.judged_at
+              AND ${noLaterFilingSql("excuse")}))`,
          )}
        ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
     ownerId,
