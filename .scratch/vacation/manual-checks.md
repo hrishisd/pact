@@ -20,3 +20,4 @@ Things that need a real phone and real push notifications. Steps marked **(human
 ## After ticket 03
 
 - [ ] **(human)** A rejection sends "Sam rejected your vacation" with the reason, and tapping it opens Today with the rejected-vacation alert.
+- [ ] **(human)** With a vacation still waiting after its first day, the day's reminder push still arrives on the phone, and no Missed push arrives when that day is judged Missed.

@@ -12,7 +12,7 @@ While an approved vacation is on, Today shows a banner instead of the covered pa
 ### Core
 - **Today:** the owner's approved vacation on today's date (first to last day) as a banner entry: last day, note, the covered pacts' names (or that it covers every pact) and each covered pact's line, as the confirm step words them. Every occurrence an approved vacation covers is left out of every section, whenever it would show: To do, Coming up (a covered One-time deadline from the moment the vacation is approved), Missed and Yesterday. A covered Weekly count week that runs past the last day stays out too. Uncovered pacts show as usual.
 - **History:** `recordedStatus` says when an Excused occurrence was excused by a vacation, with the vacation's dates, so the heat map can draw it. A covered occurrence that ended Satisfied (approved evidence, an on-time bedtime) stays Satisfied.
-- **Profile:** the owner's vacations query reports a vacation on now, and the last approved one that ended.
+- **Profile:** the owner's vacations query reports a vacation on now, and the last approved one that ended. A waiting vacation whose last day has passed stays a Waiting card, with Withdraw, until it's approved, rejected or withdrawn, since it may hold penalties; only an approved one becomes "Last one" (the human's decision, recorded in the spec's Screens section).
 
 ### Client
 - **Today banner:** "On vacation until Sat Jan 2", the note, "Bed by midnight, Gym and Spanish deck are Excused on these days, with no reminders and no penalties." ("Your pacts are Excused on these days, …" when it covers every pact), and **See what's excused** / Hide, listing each covered pact's line.
@@ -28,6 +28,7 @@ While an approved vacation is on, Today shows a banner instead of the covered pa
 - [ ] A waiting vacation shows no banner and hides nothing (ticket 03 covers its Missed cards).
 - [ ] The pact's history on Mon+2 marks Mon+1 to Sun+1 as excused by the vacation with its dates; an ordinary excused day isn't marked; a covered night Oura satisfied is Satisfied.
 - [ ] Profile reports the vacation as on now during it and as the last one after it.
+- [ ] A vacation still waiting after its last day stays on Profile as waiting, with Withdraw, and isn't the last one; once approved, it is.
 
 ## Acceptance criteria (screens)
 
