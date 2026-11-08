@@ -46,28 +46,34 @@ Setup, in order:
 - [ ] Agent: `curl -sS https://pact.hrishisd.com/health` is ok, and `scripts/prod-log.sh tail 100` shows no Oura start-up error.
 - [ ] **(human)** In the app: Profile, connect Oura, approve on Oura's page, land back on Pact connected.
 - [ ] Connect a real ring and record one `sleep` response (scrubbed). Answer ticket 08's open questions: does `bedtime_start` carry a UTC offset, is sleep under about 3 hours ever `long_sleep`, is `end_date` inclusive, and are the authorize and token URLs right? Seed the fake Oura source from the recording.
-- [ ] **(human)** Make a bedtime pact and live through a few nights: Kept, Missed (late), an approved excuse, and an on-time bedtime that syncs in the morning after an excuse was approved (it should be Kept).
+- [ ] **(human)** Make a bedtime pact and live through a few nights: Satisfied, Missed (late), an approved excuse, and an on-time bedtime that syncs in the morning after an excuse was approved (it should be Satisfied).
 - [ ] **(human)** The No Oura data card the morning after, before the ring syncs; "Checking Oura…" when Today opens; the 3pm Connection problem push if it still hasn't synced.
 - [ ] **(human)** Revoke Pact's access in Oura: the connection shows Needs reconnecting, with Reconnect on Today, the pact page and Profile. Reconnect, and the waiting night is judged. Disconnect warns how many Active pacts use Oura.
 - [ ] **(human)** **Open Oura link.** On an iPhone with the Oura app, tap `https://cloud.ouraring.com/app/` from a Pact page (typing it in Safari's address bar doesn't trigger universal links). If it opens the app, add the button to the No Oura data card (ticket 09).
-- [ ] **Oura's clock for nights (ticket 18).** From the recorded `sleep` response: if `bedtime_start` ends in `Z` or has no offset, nights close on the account's timezone and Kept vs late reads the raw wall clock, which is wrong for `Z`. File a ticket if so. On a trip, check that the first night after a flight carries the new offset, and that at home the offset matches the account's timezone.
+- [ ] **Oura's clock for nights (ticket 18).** From the recorded `sleep` response: if `bedtime_start` ends in `Z` or has no offset, nights close on the account's timezone and Satisfied vs late reads the raw wall clock, which is wrong for `Z`. File a ticket if so. On a trip, check that the first night after a flight carries the new offset, and that at home the offset matches the account's timezone.
 - [ ] **Oura refresh tokens (ticket 18).** Confirm Oura refuses a spent refresh token with a 400 or 401, and that 30 s is a sensible wait for its token endpoint. If you can force a refresh to time out after Oura grants it, the account should show Needs reconnecting and `scripts/prod-log.sh grep OPERATOR_ALERT` should find the "lost answer most likely spent it" line.
 - [ ] Then mark tickets 08 and 09 done.
 
 ## Decisions to confirm
 
-Choices made while building where the spec was open. Each is written up in the ticket's Comments or Notes; ticket 18 lists the known gaps.
+Choices made while building where the spec was open. Each is written up in the ticket's Comments or Notes.
+
+- One-time (15): a One-time pact has no start date. Its deadline can be any future date. With Submit anytime off, evidence counts only on the deadline's date. With it on, evidence counts from creation until the deadline. Asked 2026-11-08: should a One-time pact also take a start date, so that with Submit anytime on, evidence counts only from that date? (An end date would be the deadline itself.)
+
+## Confirmed
+
+Confirmed by the human on 2026-11-08:
 
 - Bills (10): one status line on Ledgers in priority order; held penalties show no bill.
 - Change requests (11): earlier terms are kept per occurrence; ending a pact needs approval; when a pact Ends, a waiting change request is withdrawn without a notification.
 - Questions (12): asking notifies only the owner; questions and replies share one "Comment" setting.
 - Reminders (13): a time of day, at most 5 per pact; Camera reminders skip a day with evidence, bedtime reminders always fire; a reminder more than 15 minutes late after downtime is dropped.
 - Weekly count (14): a short week adds one penalty of (days short × penalty); a rejected day can't take more evidence.
-- One-time (15): no start or end dates; approved evidence is Kept at the deadline.
+- One-time (15): approved evidence is Satisfied at the deadline, not when it's approved.
 - Due-by and dates (16): a pact with an end date Ends the day after it (6pm the next day for a bedtime pact).
 - Oura's clock (18): a bedtime night with no sleep yet closes at 18:00 on the UTC offset of the owner's latest Oura sleep (a nap counts), else the account's timezone. The in-bed-by time, reminders and excuse windows stay on the account's timezone. The 15:00 No Oura data push follows Oura's clock.
 - Money (review fixes): an excuse approved after its penalty was paid leaves owed at $0, and the payment pays the next penalty to that recipient.
 
-## Confirmed
+Earlier:
 
 - Overdue spells (18, confirmed 2026-11-04): a spell ends only when approved payments have paid every bill past due. The next spell reminds the owner and tells the reviewers at once. A payment awaiting approval only pauses a spell; if it's rejected, the spell resumes, and the reviewers aren't told again within the week.

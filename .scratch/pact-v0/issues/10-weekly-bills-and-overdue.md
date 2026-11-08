@@ -1,6 +1,6 @@
 # 10 Weekly bills and Overdue
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04, 05, 07
 
 Spec stories: 76–78, 80 (bill status lines and bill markers), 84, 90. Rules: Bills, Overdue, Ledger (Overdue).
@@ -40,3 +40,5 @@ Turn penalties into one bill per recipient every Wednesday at 6pm, due a week la
 ## Comments
 
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/bills.test.ts. The Sunday-bedtime case relies on the boundary (judged Mon 18:00, window closes exactly at Wed 18:00) and has no dedicated test yet. Held penalties show only "Held while an excuse waits for approval", with no bill marker, since their bill isn't known until the excuse is decided. Ledgers show one status line in priority order: overdue, then bill due, then awaiting approval.
+
+- 2026-11-08: The human confirmed the choices listed for this ticket under "Decisions to confirm" in `manual-checks.md`, so the review is done and the Status is `done`. The phone checks in `manual-checks.md` are still open; a bug found there becomes a new ticket.

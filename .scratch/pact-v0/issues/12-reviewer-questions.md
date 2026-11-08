@@ -1,6 +1,6 @@
 # 12 Reviewer questions and owner replies
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec stories: 57, 58. Rules: Review (asking a question).
@@ -27,3 +27,5 @@ A reviewer can ask the owner about any review item instead of deciding it; the i
 **Prototype round 1 (2026-11-03):** `.scratch/pact-v0/prototype/changes.prototype.html`, Ask tab. Option B was chosen: the Today alert's Reply opens the item's page with the thread and a reply box. Replies are text only. See the spec's Screens (Reviewer questions).
 
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/reviewer-questions.test.ts. Evidence and payments had no owner page, so this adds /evidence/:id and /payments/:id for the reply thread. Asking notifies only the owner; other reviewers just see the item leave their queue and appear under "Waiting on {owner}'s reply". A new "Comment" notification setting covers questions and replies.
+
+- 2026-11-08: The human confirmed the choices listed for this ticket under "Decisions to confirm" in `manual-checks.md`, so the review is done and the Status is `done`. The phone checks in `manual-checks.md` are still open; a bug found there becomes a new ticket.

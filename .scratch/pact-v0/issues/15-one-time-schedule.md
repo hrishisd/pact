@@ -49,3 +49,5 @@ A Camera pact with a single occurrence by a deadline, e.g. a dentist appointment
 ## Comments
 
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/one-time.test.ts; the choices made where the spec was open are under Notes above. Start and end dates are refused on One-time. Reminders carry their own date. A change of deadline moves the one occurrence, with its evidence and excuse days.
+
+- 2026-11-08: The human confirmed that approved evidence is Satisfied at the deadline. Still open: whether a One-time pact should have a start date (see `manual-checks.md`, Decisions to confirm). Status stays `ready-for-agent` until that is answered.

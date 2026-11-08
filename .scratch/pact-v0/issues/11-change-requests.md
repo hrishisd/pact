@@ -1,6 +1,6 @@
 # 11 Change requests and adding reviewers
 
-Status: ready-for-agent
+Status: done
 Blocked by: 06
 
 Spec stories: 62–67, 83 (Ended), 95. Rules: Creation and change.
@@ -42,3 +42,5 @@ After the edit window, an owner can change an Active pact: stricter changes appl
 **Prototype round 1 (2026-11-03):** `.scratch/pact-v0/prototype/changes.prototype.html`, Change tab. Option B (open on Check, Change per row) was chosen. Also settled: one waiting change request per pact, withdrawable; no stricter change while one waits (withdraw first); an optional "Why?" note; name, reminders and adding a reviewer apply at once even inside a waiting change; End pact is its own button and sheet, and there's no Delete after the edit window. The spec's Screens (Request change, Waiting change request, End pact, Change request review item) and Rules (Creation and change) hold the details.
 
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/change-requests.test.ts. Earlier terms are kept per pact, so an occurrence judged after a change costs its own day's penalty and goes to its own day's recipient. Ending a pact is a change request and is blocked while another waits. Known gap: while a change request waits, the core allows renaming and adding a reviewer, but the pact page has no button for them yet (the spec screen replaces Request change entirely).
+
+- 2026-11-08: The human confirmed the choices listed for this ticket under "Decisions to confirm" in `manual-checks.md`, so the review is done and the Status is `done`. The phone checks in `manual-checks.md` are still open; a bug found there becomes a new ticket.

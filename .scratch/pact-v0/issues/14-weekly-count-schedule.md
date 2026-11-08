@@ -1,6 +1,6 @@
 # 14 Weekly count schedule
 
-Status: ready-for-agent
+Status: done
 Blocked by: 07, 11, 13
 
 Spec stories: 15, 26 (Weekly count), 32, 50, 69, 86. Rules: Judging pacts with submitted evidence (Weekly count), Excuses, Reminders.
@@ -35,3 +35,5 @@ Camera pacts with a target per Mon–Sun week (e.g. 3× per week), where the own
 ## Comments
 
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/weekly-count.test.ts; the choices made where the spec was open are under Notes above. A short week adds one penalty for the days short times the penalty. Fixed days and Weekly count can't be swapped after the edit window.
+
+- 2026-11-08: The human confirmed the choices listed for this ticket under "Decisions to confirm" in `manual-checks.md`, so the review is done and the Status is `done`. The phone checks in `manual-checks.md` are still open; a bug found there becomes a new ticket.
