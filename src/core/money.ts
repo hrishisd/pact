@@ -52,6 +52,7 @@ import {
   reviewStateColumns,
   reviewStateOf,
   thread,
+  timezoneOf,
   type Decided,
   type ReviewOutcome,
   type ReviewStateRow,
@@ -517,10 +518,6 @@ function overdueNotice(
     ownerRemindedAt: ifThisSpell(row?.owner_reminded_at),
     reviewersToldAt: ifThisSpell(row?.reviewers_told_at),
   };
-}
-
-function timezoneOf(ctx: CoreContext, accountId: AccountId): string {
-  return ownerZone(accountRow(ctx, accountId).timezone, accountId);
 }
 
 /** Today's bill cards and overdue alerts: one of each at most per recipient. */

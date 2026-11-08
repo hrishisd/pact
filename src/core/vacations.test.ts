@@ -427,6 +427,17 @@ describe("the owner's vacations on Profile", () => {
 
     expect(owner.vacations()).toMatchObject([{ pacts: { kind: "all-recurring" } }]);
   });
+
+  test('"All pacts" stays as filed when a pact made later becomes one Plan a vacation offers', async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym, bed, piano, createPact } = await ownerWithThreePacts(s);
+    await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, bed, piano], [reviewer, second]));
+
+    await createPact("Read", MON_WED_FRI);
+    s.setClockTo("Wed 12:20");
+
+    expect(owner.vacations()).toMatchObject([{ pacts: { kind: "all" } }]);
+  });
 });
 
 describe("withdrawing a vacation", () => {

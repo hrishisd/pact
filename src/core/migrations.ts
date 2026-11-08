@@ -721,6 +721,9 @@ export const migrations: readonly Migration[] = [
     first_day TEXT NOT NULL,
     last_day TEXT NOT NULL,
     note TEXT,
+    -- How the Profile card names its pacts, fixed at filing: "all" and
+    -- "all-recurring" are against the pacts offered then; "some" lists vacation_pact.
+    pacts_summary TEXT NOT NULL CHECK (pacts_summary IN ('all', 'all-recurring', 'some')),
     filed_at TEXT NOT NULL,
     decision TEXT CHECK (decision IN ('approved', 'rejected')),
     decided_by_account_id TEXT REFERENCES account (id),

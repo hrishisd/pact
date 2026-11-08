@@ -26,11 +26,10 @@ import { dueAfterEnd, excuseOn, vacationOn } from "./occurrence-state.ts";
 import { lastDayOf, type Occurrence } from "./occurrences.ts";
 import { isLocalDate } from "./pact-rules.ts";
 import {
-  accountRow,
   editWindowCutoff,
   friendsSortedByName,
   occurrencesOf,
-  ownerZone,
+  timezoneOf,
   reviewersOf,
   scheduleOf,
   termsOn,
@@ -39,7 +38,7 @@ import {
 
 export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
   const now = ctx.clock.now();
-  const timezone = ownerZone(accountRow(ctx, ownerId).timezone, ownerId);
+  const timezone = timezoneOf(ctx, ownerId);
   const offered = offeredPacts(ctx, ownerId, timezone, now);
   const inEditWindow =
     ctx.one(
@@ -80,7 +79,7 @@ function offeredPacts(ctx: CoreContext, ownerId: AccountId, timezone: string, no
 }
 
 export function previewVacation(ctx: CoreContext, ownerId: AccountId, request: VacationRequest): VacationPreviewResult {
-  const timezone = ownerZone(accountRow(ctx, ownerId).timezone, ownerId);
+  const timezone = timezoneOf(ctx, ownerId);
   return vacationPreview(ctx, ownerId, timezone, request, ctx.clock.now());
 }
 
@@ -129,8 +128,8 @@ function pactPreview(
   ctx: CoreContext,
   pactId: string,
   timezone: string,
-  from: string,
-  to: string,
+  from: LocalDate,
+  to: LocalDate,
   now: Date,
 ): Pick<VacationPactPreview, "covered" | "skipped" | "notCovered"> {
   const result: Pick<VacationPactPreview, "covered" | "skipped" | "notCovered"> = {
@@ -152,7 +151,7 @@ function pactPreview(
       if (weekly) result.notCovered.push(entry);
       continue;
     }
-    const reason = skipReason(ctx, pactId, occurrence, now);
+    const reason = vacationSkipReason(ctx, pactId, occurrence, now);
     if (reason === null) result.covered.push(entry);
     else result.skipped.push({ ...entry, reason });
   }
@@ -160,7 +159,12 @@ function pactPreview(
 }
 
 /** Why a vacation filed at `now` can't cover the pact's `occurrence`, or null if it can. */
-function skipReason(ctx: CoreContext, pactId: string, occurrence: Occurrence, now: Date): VacationSkipReason | null {
+function vacationSkipReason(
+  ctx: CoreContext,
+  pactId: string,
+  occurrence: Occurrence,
+  now: Date,
+): VacationSkipReason | null {
   if (occurrence.opensAt.getTime() <= now.getTime()) return "already-open";
   if (vacationOn(ctx, pactId, occurrence.date) !== null) return "on-vacation";
   const excuse = excuseOn(ctx, pactId, occurrence.date);
@@ -192,7 +196,7 @@ function summaryOf(
 
 export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: NewVacation): FileVacationResult {
   const now = ctx.clock.now();
-  const timezone = ownerZone(accountRow(ctx, ownerId).timezone, ownerId);
+  const timezone = timezoneOf(ctx, ownerId);
   const pactIds = [...new Set(vacation.pactIds)];
   const reviewerIds = [...new Set(vacation.reviewerIds)];
   if (pactIds.length === 0) return { ok: false, reason: "no-pacts" };
@@ -206,9 +210,10 @@ export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: New
   const vacationId = ctx.newId();
   ctx.db
     .prepare(
-      `INSERT INTO vacation (id, owner_account_id, first_day, last_day, note, filed_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO vacation (id, owner_account_id, first_day, last_day, note, pacts_summary, filed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(vacationId, ownerId, vacation.from, vacation.to, note, now.toISOString());
+    .run(vacationId, ownerId, vacation.from, vacation.to, note, checked.preview.summary.kind, now.toISOString());
   for (const pactId of pactIds) {
     ctx.db.prepare(`INSERT INTO vacation_pact (vacation_id, pact_id) VALUES (?, ?)`).run(vacationId, pactId);
   }
@@ -230,23 +235,26 @@ export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: New
 
 /** The owner's vacations waiting for approval, soonest first. */
 export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCard[] {
-  const now = ctx.clock.now();
-  const timezone = ownerZone(accountRow(ctx, ownerId).timezone, ownerId);
-  const offered = offeredPacts(ctx, ownerId, timezone, now);
-  const rows = ctx.all<{ id: string; first_day: LocalDate; last_day: LocalDate; note: string | null }>(
-    `SELECT id, first_day, last_day, note FROM vacation
+  const rows = ctx.all<{
+    id: string;
+    first_day: LocalDate;
+    last_day: LocalDate;
+    note: string | null;
+    pacts_summary: VacationPacts["kind"];
+  }>(
+    `SELECT id, first_day, last_day, note, pacts_summary FROM vacation
      WHERE owner_account_id = ? AND decision IS NULL AND withdrawn_at IS NULL
      ORDER BY first_day, filed_at, id`,
     ownerId,
   );
   return rows.map((row) => {
-    const ticked = ctx
-      .all<{ id: string; name: string; schedule: string }>(
-        `SELECT pact.id, pact.name, pact.schedule FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
+    const names = ctx
+      .all<{ name: string }>(
+        `SELECT pact.name FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
          WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
         row.id,
       )
-      .map((pact) => ({ ...pact, schedule: scheduleOf(pact.schedule) }));
+      .map((pact) => pact.name);
     const reviewerIds = ctx
       .all<{ reviewer_account_id: AccountId }>(
         `SELECT reviewer_account_id FROM vacation_reviewer WHERE vacation_id = ?`,
@@ -259,7 +267,7 @@ export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCar
       to: row.last_day,
       days: dayCount(row.first_day, row.last_day),
       note: row.note,
-      pacts: summaryOf(offered, ticked),
+      pacts: row.pacts_summary === "some" ? { kind: "some", names } : { kind: row.pacts_summary },
       reviewerNames: friendsSortedByName(ctx, reviewerIds).map((reviewer) => reviewer.name),
       state: { kind: "waiting" },
     };

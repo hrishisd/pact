@@ -138,7 +138,7 @@ function VacationSteps({
     case "pacts": {
       ready = pactIds.length > 0;
       const tickable = offered.filter((pact) => !pact.alreadyOpen);
-      const all = tickable.every((pact) => pactIds.includes(pact.id));
+      const all = tickable.length > 0 && tickable.every((pact) => pactIds.includes(pact.id));
       const row = (pact: PactOption, extra?: ReactNode) => (
         <label key={pact.id} className="opt">
           <input
@@ -244,7 +244,7 @@ function VacationSteps({
               ) : (
                 picked[0] && (
                   <>
-                    <b>{picked[0].name}</b>
+                    <b>{picked[0].name}.</b>
                     <span className="small muted">Only {firstName(picked[0].name)} gets the request.</span>
                   </>
                 )
