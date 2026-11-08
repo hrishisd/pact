@@ -136,12 +136,14 @@ function billText(bill: Json<LedgerPenalty>["bill"]): string {
       return `Goes on the ${formatDate(bill.billedOn)} bill`;
     case "if-excuse-rejected":
       return `Held while an excuse waits for approval · Goes on the ${formatDate(bill.billedOn)} bill if the excuse is rejected`;
+    case "if-vacation-rejected":
+      return `Held while a vacation waits for approval · Goes on the ${formatDate(bill.billedOn)} bill if the vacation is rejected`;
   }
 }
 
 /**
  * A penalty in the history: its pact, the day Missed, the bill it's on or
- * goes on, how much payments have paid (or that an excuse holds it, so it
+ * goes on, how much payments have paid (or that an excuse or vacation holds it, so it
  * isn't owed), and who rejected the evidence.
  */
 function PenaltyRow({

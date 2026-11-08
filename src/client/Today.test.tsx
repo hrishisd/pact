@@ -167,3 +167,47 @@ test("a reload that fails keeps the cards shown, and says what failed above them
   expect(screen.getByRole("heading", { name: "Pay Sam" })).toBeTruthy();
   await waitFor(() => expect(screen.queryByText("Checking AnkiWeb…")).toBeNull());
 });
+
+describe("a rejected vacation's alert", () => {
+  const rejected = (owedAgainCents: number): TodayResponse => ({
+    hasPacts: true,
+    alerts: [
+      {
+        kind: "vacation-rejected",
+        vacationId: "v1",
+        reviewerName: "Sam Rivera",
+        reason: "Not two weeks before the gym challenge ends",
+        firstDate: "2026-12-20",
+        lastDate: "2027-01-02",
+        owedAgainCents,
+      },
+    ],
+    sections: [],
+    waiting: [],
+    yesterday: [],
+  });
+
+  test("names the reviewer, quotes the reason, and says the pacts keep all their days", async () => {
+    stubApi({ today: answers(rejected(0)) });
+    renderToday();
+    const alert = await screen.findByRole("status");
+    expect(within(alert).getByText("Sam rejected your vacation")).toBeTruthy();
+    expect(within(alert).getByText("“Not two weeks before the gym challenge ends”")).toBeTruthy();
+    expect(alert.textContent).toContain("Dec 20 – Jan 2 · your pacts keep all their days");
+  });
+
+  test("with held penalties, says what's owed again; Take the L sends at once and reloads Today", async () => {
+    const spies = stubApi({
+      today: answers(rejected(1500), { ...rejected(0), alerts: [] }),
+      acceptVacationRejection: answers({ ok: true }),
+    });
+    const { user } = renderToday();
+    const alert = await screen.findByRole("status");
+    expect(alert.textContent).toContain("Dec 20 – Jan 2 · $15 is owed again");
+
+    await user.click(within(alert).getByRole("button", { name: "Take the L" }));
+
+    expect(spies.acceptVacationRejection).toHaveBeenCalledWith("v1");
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+});

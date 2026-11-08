@@ -35,7 +35,7 @@ import {
 } from "./bill-math.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { excuseCoversSql, rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
+import { excuseCoversSql, rejection, vacationCoversSql, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
 import { settingIsOff, tellAll } from "./outbox.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
@@ -81,8 +81,14 @@ function paymentReviewersSql(owner: string, recipient: string): string {
 }
 /** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
 const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
-/** SQL: the `penalty` row is held: an excuse waiting for approval covers its occurrence. */
+/** SQL: the `penalty` row is held: an excuse or vacation waiting for approval covers its occurrence. */
 const PENALTY_HELD = excuseCoversSql("penalty.pact_id", "penalty.occurrence_date", "excuse.decision IS NULL");
+/** SQL: what holds the `penalty` row is a vacation waiting for approval. */
+const PENALTY_HELD_BY_VACATION = vacationCoversSql(
+  "penalty.pact_id",
+  "penalty.occurrence_date",
+  "excuse.decision IS NULL",
+);
 
 export async function recordPayment(
   ctx: CoreContext,
@@ -193,11 +199,12 @@ function ledgerPenalties(
     added_at: string;
     bill_id: string | null;
     held: 0 | 1;
+    held_by_vacation: 0 | 1;
     weekly: 0 | 1;
   }>(
     `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
               penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held,
-              ${WEEKLY_COUNT_PACT} AS weekly
+              ${PENALTY_HELD_BY_VACATION} AS held_by_vacation, ${WEEKLY_COUNT_PACT} AS weekly
        FROM penalty JOIN pact ON pact.id = penalty.pact_id
        WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
        ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
@@ -226,8 +233,8 @@ function ledgerPenalties(
       bill: bill
         ? { kind: "on-bill", billedOn: bill.billedOn, dueAt: bill.dueAt }
         : {
-            // A rejected excuse releases it to the next bill it can make, as if it had never been held.
-            kind: held ? "if-excuse-rejected" : "next-bill",
+            // A rejected excuse or vacation releases it to the next bill it can make, as if it had never been held.
+            kind: !held ? "next-bill" : row.held_by_vacation === 1 ? "if-vacation-rejected" : "if-excuse-rejected",
             billedOn: nextBillDay(new Date(row.added_at), ctx.clock.now(), ownerZone(timezone, ownerId)),
           },
     };

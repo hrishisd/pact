@@ -49,6 +49,7 @@ import {
   type CreatePactRequest,
   type CreatePactResponse,
   type AcceptExcuseRejectionResponse,
+  type AcceptVacationRejectionResponse,
   type CheckOuraResponse,
   type DisconnectOuraResponse,
   type DecideRequest,
@@ -1445,6 +1446,26 @@ describe("vacations", () => {
     expect((await owner.get<VacationsResponse>(API_PATHS.vacations)).body).toEqual([
       expect.objectContaining({ id: vacationId, state: { kind: "approved", reviewerName: "friend" } }),
     ]);
+  });
+
+  test("a rejected vacation is an alert; Take the L on it is a 200, and so is its refusal", async () => {
+    const { s, owner, friend, friendId, pactId } = await ownerWithPact();
+    const filed = await owner.post<FileVacationResponse>(API_PATHS.vacations, {
+      from: s.date("Mon+1"),
+      to: s.date("Sun+1"),
+      pactIds: [pactId],
+      reviewerIds: [friendId],
+    } satisfies FileVacationRequest);
+    if (!filed.body.ok) throw new Error(filed.body.reason);
+    const { vacationId } = filed.body;
+    await friend.post(API_PATHS.decide(vacationId), { kind: "reject", reason: "No" } satisfies DecideRequest);
+
+    const today = await owner.get<TodayResponse>(API_PATHS.today);
+    expect(today.body.alerts).toEqual([expect.objectContaining({ kind: "vacation-rejected", vacationId })]);
+    const accept = () => owner.post<AcceptVacationRejectionResponse>(API_PATHS.acceptVacationRejection(vacationId));
+    expect(await accept()).toEqual({ status: 200, body: { ok: true } });
+    expect(await accept()).toEqual({ status: 200, body: { ok: false, reason: "nothing-to-accept" } });
+    expect((await owner.get<TodayResponse>(API_PATHS.today)).body.alerts).toEqual([]);
   });
 
   test("the core's refusals are 200s; a body of another shape is a 400", async () => {

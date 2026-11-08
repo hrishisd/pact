@@ -76,6 +76,7 @@ import type {
   VacationRequest,
   WithdrawChangeRequestResult,
   WithdrawVacationResult,
+  AcceptVacationRejectionResult,
 } from "../shared/types.ts";
 import {
   acceptInvite,
@@ -111,7 +112,14 @@ import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from 
 import { droppedText, remind } from "./reminders.ts";
 import { askOwner, decide, ownerReply, reviewQueue, viewPhoto, waitingOnReply, type PhotoResult } from "./review.ts";
 import { todayPage } from "./today.ts";
-import { fileVacation, previewVacation, vacationCards, vacationOptions, withdrawVacation } from "./vacations.ts";
+import {
+  acceptVacationRejection,
+  fileVacation,
+  previewVacation,
+  vacationCards,
+  vacationOptions,
+  withdrawVacation,
+} from "./vacations.ts";
 
 export interface PactCoreOptions {
   /** SQLite file. Production: on the /data volume. */
@@ -344,6 +352,8 @@ export interface AccountView {
   vacations(): VacationCard[];
   /** The owner withdraws a vacation waiting for approval: it covers nothing any more. */
   withdrawVacation(vacationId: string): Promise<WithdrawVacationResult>;
+  /** The owner takes the L on a rejected vacation: its alert goes, with the Missed occurrences it covered. */
+  acceptVacationRejection(vacationId: string): Promise<AcceptVacationRejectionResult>;
   /**
    * A photo of some evidence or an excuse, for the pact's owner or one of its reviewers;
    * anyone else is told it isn't found. A query: async only because the photo
@@ -557,6 +567,8 @@ class Core implements PactCore {
       fileVacation: (vacation) => this.#command(() => fileVacation(this.#ctx, accountId, vacation)),
       vacations: () => vacationCards(this.#ctx, accountId),
       withdrawVacation: (vacationId) => this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId)),
+      acceptVacationRejection: (vacationId) =>
+        this.#command(() => acceptVacationRejection(this.#ctx, accountId, vacationId)),
       recordPayment: (payment, screenshot) =>
         recordPayment(this.#ctx, accountId, payment, screenshot, this.#photoStore, (change) => this.#command(change)),
       photo: (photoId) => viewPhoto(this.#ctx, accountId, photoId, this.#photoStore),
