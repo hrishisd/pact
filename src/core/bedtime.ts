@@ -164,9 +164,9 @@ export function pushNoOuraData(ctx: CoreContext, t: Date): void {
  * Judges bedtime nights in order, from where judging got to. A night is
  * decided by the first long_sleep Oura reports starting in its window,
  * read on Oura's own clock: Satisfied if it starts before the in-bed-by time,
- * else Missed, as of `t`, when it arrived. With an approved excuse, a late
- * period makes it Excused instead, and so does no period by 18:00 the next
- * day, then. With neither by then, it's Missed then. The first night still
+ * else Missed, as of `t`, when it arrived. With an approved excuse or
+ * vacation, a late period makes it Excused instead, and so does no period by
+ * 18:00 the next day, then. With neither by then, it's Missed then. The first night still
  * waiting stops the cursor.
  */
 export function judgeNights(

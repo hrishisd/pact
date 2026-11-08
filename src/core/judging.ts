@@ -117,9 +117,9 @@ export function endPastEndDate(ctx: CoreContext, t: Date, ankiChecksRunning: Ank
 /**
  * Judges an occurrence as of its due time, unless a decision after that
  * already judged it or its evidence is still waiting for one: Satisfied with
- * approved evidence, else Excused with an approved excuse, else Missed. A
- * Missed day on an excuse waiting for approval has its penalty held, and the
- * owner, who asked for it to be excused, isn't told it's Missed.
+ * approved evidence, else Excused with an approved excuse or vacation, else
+ * Missed. A Missed day on an excuse waiting for approval has its penalty
+ * held, and the owner, who asked for it to be excused, isn't told it's Missed.
  */
 function judgeAtDueTime(ctx: CoreContext, pact: Pick<PactRow, "id" | "schedule">, occurrence: Occurrence): void {
   const pactId = pact.id;
@@ -141,8 +141,8 @@ function judgeAtDueTime(ctx: CoreContext, pact: Pick<PactRow, "id" | "schedule">
 /**
  * Judges a Weekly count week at `at`, unless its evidence still waits for a
  * decision that could change it: Satisfied once enough days have approved
- * evidence, else Excused with an approved excuse, else Missed, with one
- * penalty per day short. `tell` the owner it's Missed, unless a decision
+ * evidence, else Excused with an approved excuse or vacation, else Missed,
+ * with one penalty per day short. `tell` the owner it's Missed, unless a decision
  * judged it (that told them) or they asked for it to be excused.
  */
 export function judgeWeek(ctx: CoreContext, pactId: string, week: Occurrence, at: Date, tell: boolean): void {

@@ -35,7 +35,7 @@ import { pactsToJudge } from "./occurrence-state.ts";
 import { tellAll } from "./outbox.ts";
 import {
   decideVacation,
-  pickedReviewers,
+  ownVacation,
   vacationsToReview,
   vacationToDecide,
   type VacationToDecide,
@@ -258,18 +258,8 @@ function ownItem(
       reviewerIds: reviewersOf(ctx, request.pact_id),
     };
   }
-  const vacation = ctx.one<{ decision: ReviewOutcome | null; withdrawn_at: string | null }>(
-    `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
-    itemId,
-    ownerId,
-  );
-  if (vacation) {
-    return {
-      kind: "vacation",
-      waiting: vacation.decision === null && vacation.withdrawn_at === null,
-      reviewerIds: pickedReviewers(ctx, itemId),
-    };
-  }
+  const vacation = ownVacation(ctx, ownerId, itemId);
+  if (vacation) return { kind: "vacation", ...vacation };
   return undefined;
 }
 

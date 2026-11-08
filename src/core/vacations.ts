@@ -181,6 +181,7 @@ function vacationSkipReason(
   now: Date,
 ): VacationSkipReason | null {
   if (occurrence.opensAt.getTime() <= now.getTime()) return "already-open";
+  // Before excuseOn, which counts an approved vacation as an approved excuse.
   if (vacationOn(ctx, pactId, occurrence.date) !== null) return "on-vacation";
   const excuse = excuseOn(ctx, pactId, occurrence.date);
   if (excuse === "waiting") return "on-waiting-excuse";
@@ -395,6 +396,30 @@ export interface VacationToDecide {
   id: string;
   decision: ReviewOutcome | null;
   owner_account_id: AccountId;
+  first_day: LocalDate;
+  last_day: LocalDate;
+}
+
+/**
+ * The owner's vacation `vacationId`, for a reply to a question about it:
+ * whether it still waits for a decision, and its picked reviewers.
+ */
+export function ownVacation(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  vacationId: string,
+): { waiting: boolean; reviewerIds: AccountId[] } | undefined {
+  const vacation = ctx.one<{ decision: ReviewOutcome | null; withdrawn_at: string | null }>(
+    `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
+    vacationId,
+    ownerId,
+  );
+  return (
+    vacation && {
+      waiting: vacation.decision === null && vacation.withdrawn_at === null,
+      reviewerIds: pickedReviewers(ctx, vacationId),
+    }
+  );
 }
 
 /** The vacation `vacationId`, decided or not, if `reviewerId` was picked for it and it wasn't withdrawn. */
@@ -404,7 +429,8 @@ export function vacationToDecide(
   vacationId: string,
 ): VacationToDecide | undefined {
   return ctx.one<VacationToDecide>(
-    `SELECT vacation.id, vacation.decision, vacation.owner_account_id FROM vacation
+    `SELECT vacation.id, vacation.decision, vacation.owner_account_id, vacation.first_day, vacation.last_day
+     FROM vacation
      JOIN vacation_reviewer ON vacation_reviewer.vacation_id = vacation.id
                            AND vacation_reviewer.reviewer_account_id = ?
      WHERE vacation.id = ? AND vacation.withdrawn_at IS NULL`,
@@ -437,10 +463,7 @@ export function decideVacation(
       excuseApprovedDays(ctx, pactId, dates, now);
     }
   }
-  const { first_day: from, last_day: to } = ctx.one<{ first_day: LocalDate; last_day: LocalDate }>(
-    `SELECT first_day, last_day FROM vacation WHERE id = ?`,
-    vacation.id,
-  )!;
+  const { first_day: from, last_day: to } = vacation;
   ctx.enqueue({
     recipient: vacation.owner_account_id,
     kind: "vacation-decided",
