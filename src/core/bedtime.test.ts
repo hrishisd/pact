@@ -495,6 +495,8 @@ describe("Today", () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithOura(s);
     const pactId = await createPact("00:00");
+    // From creation, in the edit window too, it is under Automatic and never To do.
+    expect(sectionKinds(owner)).toEqual(["automatic"]);
     await s.advanceTo("Mon 20:00");
 
     expect(owner.today().sections).toEqual([
