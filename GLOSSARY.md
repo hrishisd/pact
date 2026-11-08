@@ -90,7 +90,7 @@ The owner's request to have one or more occurrences of one pact treated as excus
 _Avoid_: Appeal, dispute, exemption, pass
 
 **Vacation**:
-The owner's request for a date range off from their pacts, made ahead of time. Once a reviewer approves it, the occurrences it covers are judged Excused, with no reminders and no penalties. It covers only occurrences that haven't opened yet; one already open needs an excuse. It doesn't pause the ledger.
+The owner's request for a date range off from the pacts they pick, made ahead of time. It's one review item, sent to the reviewers they pick, and any one of them approves or rejects it whole. Once approved, the occurrences it covers are judged Excused, with no reminders and no penalties. It covers only occurrences that haven't opened yet; one already open needs an excuse. It doesn't pause the ledger.
 _Avoid_: Vacation mode, pause, break, holiday, time off, suspension
 
 **Reviewer**:
