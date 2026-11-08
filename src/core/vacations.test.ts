@@ -962,6 +962,27 @@ describe("a vacation still waiting when its first day comes", () => {
       s.date("Wed+1"),
     ]);
   });
+
+  test("through its whole week, each day's reminder push goes out and no Missed push does; once rejected, a day Missed after it sends one", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym, vacationId } = await waitingOverGym(s);
+
+    await tickHourly(s, "Tue+1 09:00", "Sat+1 01:00");
+
+    const days = ["Mon+1", "Wed+1", "Fri+1"].map((day) => s.date(day));
+    expect(s.notifier.sentTo(owner, "reminder").map((n) => n.payload.occurrenceDate)).toEqual(days);
+    for (const day of days) expect(statusOn(owner, gym, day)).toBe("missed");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+
+    ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
+    await tickHourly(s, "Sat+1 02:00", "Mon+2 01:00");
+    // Rejecting sends no Missed push for the days it held; Sun+1 isn't a Gym day, so none is judged after it.
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+    await tickHourly(s, "Mon+2 02:00", "Tue+2 01:00");
+    expect(s.notifier.sentTo(owner, "missed-occurrence").map((n) => n.payload.occurrenceDate)).toEqual([
+      s.date("Mon+2"),
+    ]);
+  });
 });
 
 describe("deciding a vacation after its first day", () => {
