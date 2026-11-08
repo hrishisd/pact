@@ -40,15 +40,31 @@ export function Thread({
   );
 }
 
-export const REPLY_REFUSAL_TEXT: Record<Refusal<ReplyResult>, string> = {
+const REPLY_REFUSAL_TEXT: Record<Refusal<ReplyResult>, string> = {
   "item-not-found": "This wasn't found.",
   "not-waiting": "It's been decided already, so there's nothing to reply to.",
   "no-question": "There's no question waiting for your reply.",
   "blank-reply": "Write a reply first.",
 };
 
-/** The owner's reply box, under the thread while a question waits on their reply. */
-export function ReplyBox({ itemId, onReplied }: { itemId: string; onReplied: () => void }) {
+/**
+ * The owner's reply box, under the thread while a question waits on their
+ * reply. With `onCancel` (a vacation's Profile card) it's labelled "Reply",
+ * with Cancel beside `sendLabel`.
+ */
+export function ReplyBox({
+  itemId,
+  onReplied,
+  placeholder = "Your reply",
+  sendLabel = "Send reply",
+  onCancel,
+}: {
+  itemId: string;
+  onReplied: () => void;
+  placeholder?: string;
+  sendLabel?: string;
+  onCancel?: () => void;
+}) {
   const [text, setText] = useState("");
   const {
     busy,
@@ -63,20 +79,40 @@ export function ReplyBox({ itemId, onReplied }: { itemId: string; onReplied: () 
     },
     (failure) => `Couldn't send. ${failureText(failure, "Check your connection and try again.")}`,
   );
+  const box = (
+    <textarea
+      className="inp"
+      rows={3}
+      value={text}
+      placeholder={placeholder}
+      aria-label={onCancel ? undefined : "Your reply"}
+      onChange={(e) => setText(e.target.value)}
+    />
+  );
+  const sendable = !busy && text.trim() !== "";
 
-  return (
+  return onCancel ? (
     <div className="stack">
-      <textarea
-        className="inp"
-        rows={3}
-        value={text}
-        placeholder="Your reply"
-        aria-label="Your reply"
-        onChange={(e) => setText(e.target.value)}
-      />
+      <label className="field">
+        <span>Reply</span>
+        {box}
+      </label>
       {error && <p className="error small">{error}</p>}
-      <button className="btn primary block" disabled={busy || text.trim() === ""} onClick={() => send()}>
-        {busy ? "Sending…" : "Send reply"}
+      <div className="row2">
+        <button className="btn sm" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn sm primary" disabled={!sendable} onClick={() => send()}>
+          {busy ? "Sending…" : sendLabel}
+        </button>
+      </div>
+    </div>
+  ) : (
+    <div className="stack">
+      {box}
+      {error && <p className="error small">{error}</p>}
+      <button className="btn primary block" disabled={!sendable} onClick={() => send()}>
+        {busy ? "Sending…" : sendLabel}
       </button>
     </div>
   );

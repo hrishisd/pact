@@ -180,7 +180,7 @@ const ASK_PLACEHOLDER: Record<ReviewItem["kind"], string> = {
   vacation: "e.g. Can you keep Spanish going on the trip?",
 };
 
-/** What a review item is about, in a row: the pact's name, the payment, or "Vacation". */
+/** What a review item is about, in a row: the pact's name, the payment, or a vacation's dates. */
 function itemTitle(item: Json<ReviewItem>): string {
   switch (item.kind) {
     case "evidence":
@@ -191,15 +191,8 @@ function itemTitle(item: Json<ReviewItem>): string {
     case "payment":
       return `${money(item.amountCents)} to ${item.recipientName}`;
     case "vacation":
-      return "Vacation";
+      return dateSpan(item.from, item.to);
   }
-}
-
-/** What a row waiting on the owner's reply says after the kind: when it was asked, or a vacation's dates and owner. */
-function waitingDetail(item: Json<ReviewItem>, timezone: string): string | undefined {
-  if (item.kind === "vacation") return `${dateSpan(item.from, item.to)} · from ${item.ownerName}`;
-  const asked = item.thread.comments.at(-1);
-  return asked && `asked ${formatDayTime(asked.sentAt, timezone)}`;
 }
 
 /**
@@ -224,15 +217,18 @@ function WaitingOnReply({
           <div className="cards">
             {items
               .filter((item) => item.ownerName === owner)
-              .map((item) => (
-                <WaitingRow
-                  key={item.id}
-                  kind={item.kind}
-                  title={itemTitle(item)}
-                  detail={waitingDetail(item, timezone)}
-                  onOpen={() => onOpen(item.id)}
-                />
-              ))}
+              .map((item) => {
+                const asked = item.thread.comments.at(-1);
+                return (
+                  <WaitingRow
+                    key={item.id}
+                    kind={item.kind}
+                    title={itemTitle(item)}
+                    detail={asked && `asked ${formatDayTime(asked.sentAt, timezone)}`}
+                    onOpen={() => onOpen(item.id)}
+                  />
+                );
+              })}
           </div>
         </section>
       ))}

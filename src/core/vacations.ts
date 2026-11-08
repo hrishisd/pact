@@ -344,16 +344,16 @@ function vacationCovers(ctx: CoreContext, vacationId: string, timezone: string):
      WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
     vacationId,
   );
+  const days = ctx.all<{ pact_id: string; date: LocalDate }>(
+    `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY date`,
+    vacationId,
+  );
   return pacts.flatMap((pact): VacationCover[] => {
-    const { between } = occurrencesOf(ctx, pact.id, timezone);
-    const covered = ctx
-      .all<{ date: LocalDate }>(
-        `SELECT date FROM vacation_day WHERE vacation_id = ? AND pact_id = ? ORDER BY date`,
-        vacationId,
-        pact.id,
-      )
+    const { covering } = occurrencesOf(ctx, pact.id, timezone);
+    const covered = days
+      .filter((day) => day.pact_id === pact.id)
       .flatMap(({ date }) => {
-        const [occurrence] = between(date, date);
+        const occurrence = covering(date);
         return occurrence ? [occurrenceSpan(ctx, pact.id, occurrence)] : [];
       });
     if (covered.length === 0) return [];

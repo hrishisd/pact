@@ -86,7 +86,7 @@ test("rejecting a vacation needs a reason and says Jordan's pacts keep every day
   expect(await screen.findByText("Nothing to review")).toBeTruthy();
 });
 
-test("a vacation waiting on Jordan's reply is listed by its dates and owner", async () => {
+test("a vacation waiting on Jordan's reply is listed by its dates, under Jordan's name", async () => {
   stubApi({
     reviewQueue: answers<ReviewQueueResponse>([]),
     waitingOnReply: answers<ReviewQueueResponse>([
@@ -104,7 +104,7 @@ test("a vacation waiting on Jordan's reply is listed by its dates and owner", as
   const { user } = renderWithUser(<Review timezone="America/New_York" onQueue={vi.fn()} />);
 
   expect(await screen.findByText("Waiting on Jordan Lee's reply")).toBeTruthy();
-  const row = screen.getByRole("button", { name: /Dec 20 – Jan 2 · from Jordan Lee/ });
+  const row = screen.getByRole("button", { name: /^Dec 20 – Jan 2Vacation · asked / });
   await user.click(row);
   expect(screen.getByText("Spanish?")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();

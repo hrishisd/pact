@@ -8,7 +8,7 @@ import type { VacationCard } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { dateSpan } from "./format.ts";
-import { REPLY_REFUSAL_TEXT } from "./questions.tsx";
+import { ReplyBox } from "./questions.tsx";
 import { loadedData, loadFailure, useLoad, useSend } from "./ui.tsx";
 import { firstName, pactsText, plural } from "./vacation-text.ts";
 
@@ -140,9 +140,10 @@ function WaitingActions({
           </div>
         </div>
       ) : open === "reply" && state.kind === "waiting-on-reply" ? (
-        <VacationReply
+        <ReplyBox
           itemId={vacation.id}
-          askedBy={state.askedBy}
+          placeholder="e.g. My flight leaves Sun Dec 20 at 7am"
+          sendLabel={`Send to ${firstName(state.askedBy)}`}
           onCancel={() => setOpen(null)}
           onReplied={onReplied}
         />
@@ -160,51 +161,5 @@ function WaitingActions({
       )}
       {withdraw.error && <p className="error small">{withdraw.error}</p>}
     </>
-  );
-}
-
-/** The reply to a reviewer's question about a vacation: a text box, Cancel, and "Send to Sam". */
-function VacationReply({
-  itemId,
-  askedBy,
-  onCancel,
-  onReplied,
-}: {
-  itemId: string;
-  askedBy: string;
-  onCancel: () => void;
-  onReplied: () => void;
-}) {
-  const [text, setText] = useState("");
-  const { busy, error, run } = useSend(
-    async () => {
-      const result = await api.reply(itemId, text);
-      if (!result.ok) return REPLY_REFUSAL_TEXT[result.reason];
-      onReplied();
-    },
-    (failure) => `Couldn't send. ${failureText(failure, "Check your connection and try again.")}`,
-  );
-  return (
-    <div className="stack">
-      <label className="field">
-        <span>Reply</span>
-        <textarea
-          className="inp"
-          rows={3}
-          value={text}
-          placeholder="e.g. My flight leaves Sun Dec 20 at 7am"
-          onChange={(e) => setText(e.target.value)}
-        />
-      </label>
-      {error && <p className="error small">{error}</p>}
-      <div className="row2">
-        <button className="btn sm" disabled={busy} onClick={onCancel}>
-          Cancel
-        </button>
-        <button className="btn sm primary" disabled={busy || text.trim() === ""} onClick={() => run()}>
-          {busy ? "Sending…" : `Send to ${firstName(askedBy)}`}
-        </button>
-      </div>
-    </div>
   );
 }
