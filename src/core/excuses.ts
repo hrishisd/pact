@@ -30,8 +30,15 @@ import {
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { judge } from "./judging.ts";
-import { dueAfterEnd, judgingReached, occurrenceStatus, skipReason, vacationOn } from "./occurrence-state.ts";
-import { lastDayOf, type Occurrence } from "./occurrences.ts";
+import {
+  dueAfterEnd,
+  judgingReached,
+  occurrenceSpan,
+  occurrenceStatus,
+  skipReason,
+  vacationOn,
+} from "./occurrence-state.ts";
+import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { editWindowClosesAt, EXCUSE_WINDOW_MS, isLocalDate } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
@@ -48,8 +55,6 @@ import {
   reviewersOf,
   reviewStateColumns,
   reviewStateOf,
-  scheduleOf,
-  termsOn,
   thread,
   type Decided,
   type PactRow,
@@ -283,12 +288,7 @@ export function excuseDays(ctx: CoreContext, excuseId: string, pactId: string, t
 
 /** The pact's `occurrence` as an excuse's day: a Weekly count week runs through its Sunday. */
 export function excuseDay(ctx: CoreContext, pactId: string, occurrence: Occurrence): ExcuseDay {
-  const schedule = scheduleOf(termsOn(ctx, pactId, occurrence.date).schedule);
-  return {
-    date: occurrence.date,
-    ...(schedule.kind === "weekly-count" && { through: lastDayOf(schedule, occurrence.date) }),
-    status: occurrenceStatus(ctx, pactId, occurrence),
-  };
+  return { ...occurrenceSpan(ctx, pactId, occurrence), status: occurrenceStatus(ctx, pactId, occurrence) };
 }
 
 /** The photos of an excuse, in the order added. */

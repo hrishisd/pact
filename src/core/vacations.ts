@@ -22,8 +22,8 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { dueAfterEnd, excuseOn, vacationOn } from "./occurrence-state.ts";
-import { lastDayOf, type Occurrence } from "./occurrences.ts";
+import { dueAfterEnd, excuseOn, occurrenceSpan, vacationOn } from "./occurrence-state.ts";
+import type { Occurrence } from "./occurrences.ts";
 import { isLocalDate } from "./pact-rules.ts";
 import {
   editWindowCutoff,
@@ -32,14 +32,16 @@ import {
   timezoneOf,
   reviewersOf,
   scheduleOf,
-  termsOn,
   type PactRow,
 } from "./rows.ts";
 
 export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
   const now = ctx.clock.now();
   const timezone = timezoneOf(ctx, ownerId);
-  const offered = offeredPacts(ctx, ownerId, timezone, now);
+  const offered = offeredPacts(ctx, ownerId, timezone, now).map((pact): VacationPactOption => ({
+    ...pact,
+    reviewers: friendsSortedByName(ctx, reviewersOf(ctx, pact.id)),
+  }));
   const inEditWindow =
     ctx.one(
       `SELECT 1 FROM pact WHERE owner_account_id = ? AND stage = 'active' AND created_at > ?`,
@@ -55,14 +57,19 @@ export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationO
 }
 
 /** The owner's Active pacts whose edit window has closed at `now`: recurring ones first, then One-time, each oldest first. */
-function offeredPacts(ctx: CoreContext, ownerId: AccountId, timezone: string, now: Date): VacationPactOption[] {
+function offeredPacts(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  timezone: string,
+  now: Date,
+): Omit<VacationPactOption, "reviewers">[] {
   const rows = ctx.all<PactRow>(
     `SELECT * FROM pact WHERE owner_account_id = ? AND stage = 'active' AND created_at <= ?
      ORDER BY created_at, id`,
     ownerId,
     editWindowCutoff(ctx, now),
   );
-  const offered = rows.map((row): VacationPactOption => {
+  const offered = rows.map((row): Omit<VacationPactOption, "reviewers"> => {
     const schedule = scheduleOf(row.schedule);
     return {
       id: row.id,
@@ -70,7 +77,6 @@ function offeredPacts(ctx: CoreContext, ownerId: AccountId, timezone: string, no
       evidenceKind: row.evidence_kind,
       schedule,
       penaltyCents: row.penalty_cents,
-      reviewers: friendsSortedByName(ctx, reviewersOf(ctx, row.id)),
       alreadyOpen:
         schedule.kind === "one-time" && occurrencesOf(ctx, row.id, timezone).first.opensAt.getTime() <= now.getTime(),
     };
@@ -139,15 +145,11 @@ function pactPreview(
   };
   for (const occurrence of occurrencesOf(ctx, pactId, timezone).overlapping(from, to)) {
     if (dueAfterEnd(ctx, pactId, occurrence)) continue;
-    const schedule = scheduleOf(termsOn(ctx, pactId, occurrence.date).schedule);
-    const weekly = schedule.kind === "weekly-count";
-    const entry: VacationOccurrence = {
-      date: occurrence.date,
-      ...(weekly && { through: lastDayOf(schedule, occurrence.date) }),
-    };
+    const entry: VacationOccurrence = occurrenceSpan(ctx, pactId, occurrence);
+    const weekly = entry.through !== undefined;
     // A week is covered by its Thursday, the middle of its Mon–Sun, so a vacation starting on a Sunday doesn't take the week before.
-    const day = weekly ? addDays(occurrence.date, 3) : occurrence.date;
-    if (day < from || day > to) {
+    const coveringDay = weekly ? addDays(occurrence.date, 3) : occurrence.date;
+    if (coveringDay < from || coveringDay > to) {
       if (weekly) result.notCovered.push(entry);
       continue;
     }

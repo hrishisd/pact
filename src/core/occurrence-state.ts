@@ -10,7 +10,7 @@ import type {
   WeekProgress,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
-import type { Occurrence } from "./occurrences.ts";
+import { lastDayOf, type Occurrence } from "./occurrences.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import { occurrencesOf, ownerZone, scheduleOf, termsOn, type PactRow, type ReviewOutcome } from "./rows.ts";
 
@@ -26,6 +26,19 @@ export type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence" |
   timezone: string | null;
   owner_account_id: AccountId;
 };
+
+/** The pact's `occurrence` by its dates: a Weekly count week runs `through` its Sunday. */
+export function occurrenceSpan(
+  ctx: CoreContext,
+  pactId: string,
+  occurrence: Occurrence,
+): { date: LocalDate; through?: LocalDate } {
+  const schedule = scheduleOf(termsOn(ctx, pactId, occurrence.date).schedule);
+  return {
+    date: occurrence.date,
+    ...(schedule.kind === "weekly-count" && { through: lastDayOf(schedule, occurrence.date) }),
+  };
+}
 
 /** Whether the occurrence already has an outcome: Satisfied, Missed or Excused. */
 export function isJudged(ctx: CoreContext, pactId: string, date: LocalDate): boolean {
