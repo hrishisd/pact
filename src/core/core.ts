@@ -5,31 +5,28 @@
 // transaction and delivered only after it commits. Queries are synchronous
 // reads. The core reads time only from the Clock port.
 
-import { createECDH, randomBytes, randomUUID } from "node:crypto";
-import { addDays, parseClockTime, parseDatedReminder } from "../shared/calendar.ts";
+import { randomBytes, randomUUID } from "node:crypto";
+import { addDays } from "../shared/calendar.ts";
+import { earlierDate, laterDate, localDateOf, mondayOf, startOfDay, weekdayOf, zoneOffsetAt } from "./calendar.ts";
 import {
-  earlierDate,
-  laterDate,
-  localDateOf,
-  mondayOf,
-  startOfDay,
-  wallTime,
-  weekdayOf,
-  zoneOffsetAt,
-} from "./calendar.ts";
+  BILL_CLOCK,
+  BILL_TERM_DAYS,
+  billDays,
+  billDueOf,
+  billInstant,
+  nextBillDay,
+  overdueOf,
+  type BillState,
+} from "./bill-math.ts";
+import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
   ankiDueByFits,
-  ankiDueByOrder,
-  dayStartHour,
   dueSoonEnough,
-  firstWeekFrom,
   hasSchedule,
   lastDayOf,
-  minutesFrom,
   newOccurrenceTerms,
-  NIGHT_STARTS_HOUR,
   oneTimeReminderAt,
   nightStartsAt,
   noOuraDataPushAt,
@@ -39,7 +36,6 @@ import {
   utcOffsetMs,
   type DayClock,
   type EarlierTerms,
-  type NewTerms,
   type Occurrence,
   type Occurrences,
   type OccurrenceTerms,
@@ -47,6 +43,26 @@ import {
   type OuraOffset,
   type RecurringTerms,
 } from "./occurrences.ts";
+import { deadlineWallClock, nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
+import {
+  checkedTerms,
+  dayClockOf,
+  EDIT_WINDOW_MS,
+  editWindowClosesAt,
+  editWindowEnd,
+  EXCUSE_WINDOW_MS,
+  firstDayNotOpen,
+  firstOccurrenceAfterChange,
+  isClockTime,
+  isDueBy,
+  isLocalDate,
+  newTermsOf,
+  remindersGoOffInTime,
+  storedTerms,
+  TERM_LABELS,
+  type CheckedTerms,
+} from "./pact-rules.ts";
+import { isPushDevice } from "./push-devices.ts";
 import type {
   AnkiCountsResult,
   AnkiSource,
@@ -66,8 +82,6 @@ import {
   MAX_EVIDENCE_PHOTOS,
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
-  MAX_REMINDERS,
-  MAX_WEEKLY_TARGET,
   NOTIFICATION_SETTINGS,
   RECONNECT_TEXT,
   WEEKDAYS,
@@ -526,35 +540,15 @@ const RECONNECT_PUSH: Record<ConnectionService, { title: string; body: string }>
   oura: { title: "Oura needs reconnecting", body: RECONNECT_TEXT.oura },
   anki: { title: "AnkiWeb needs reconnecting", body: RECONNECT_TEXT.anki },
 };
-/** The push services browsers use, as domains; a saved endpoint must be on one of them. */
-const PUSH_SERVICE_DOMAINS = [
-  "push.apple.com",
-  "fcm.googleapis.com",
-  "push.services.mozilla.com",
-  "notify.windows.com",
-];
-const P256DH_BYTES = 65;
-const AUTH_BYTES = 16;
 /** /health fails when the last scheduler tick is older than this. */
 const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
-/**
- * How long after it's judged Missed (a rejection judges it then) an
- * occurrence can be excused. A Missed card stays on Today that long.
- */
-const EXCUSE_WINDOW_MS = 48 * 60 * 60 * 1000;
-/** How long after its Wednesday a bill is due. */
-const BILL_TERM_DAYS = 7;
-/** Bills are made on Wednesdays at this time, in the owner's timezone, and fall due at it. */
-const BILL_TIME = { hour: 18, minute: 0 } as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How often an Overdue owner is reminded, and how often their reviewers are told. */
 const OVERDUE_REMINDER_MS = DAY_MS;
 const OVERDUE_REVIEWER_NOTICE_MS = 7 * DAY_MS;
 /** A reminder the scheduler reaches later than this after its time, as after downtime, is dropped, not sent. */
 const REMINDER_LATE_MS = 15 * 60 * 1000;
-/** How long after creation the owner can edit or delete a pact freely. */
-const EDIT_WINDOW_MS = 10 * 60 * 1000;
 /**
  * SQL: who reviews payments from `owner` to `recipient` (SQL expressions):
  * the reviewers of any of the owner's pacts with that recipient, now or in
@@ -599,15 +593,12 @@ function excuseCoversSql(pact: string, date: string, condition: string): string 
 const PENALTY_HELD = excuseCoversSql("penalty.pact_id", "penalty.occurrence_date", "excuse.decision IS NULL");
 
 class Core implements PactCore {
-  readonly #db: Db;
-  readonly #clock: Clock;
+  readonly #ctx: CoreContext;
   readonly #notifier: Notifier;
   readonly #photoStore: PhotoStore;
   readonly #ouraSource: OuraSource;
   readonly #ankiSource: AnkiSource;
   readonly #operatorEmailKey: string;
-  readonly #log: (line: string) => void;
-  readonly #newId: () => string;
   /** Outbox deliveries run one at a time, in this chain. */
   #delivery: Promise<void> = Promise.resolve();
   /**
@@ -631,15 +622,18 @@ class Core implements PactCore {
   readonly #ankiChecksRunning = new Map<AccountId, Set<{ startedAt: number }>>();
 
   constructor(db: Db, options: PactCoreOptions) {
-    this.#db = db;
-    this.#clock = options.clock;
+    this.#ctx = createContext({
+      db,
+      clock: options.clock,
+      newId: options.newId ?? randomUUID,
+      log: options.log ?? ((line) => console.log(line)),
+      enqueue: (notification) => this.#enqueue(notification),
+    });
     this.#notifier = options.notifier;
     this.#photoStore = options.photoStore;
     this.#ouraSource = options.ouraSource;
     this.#ankiSource = options.ankiSource;
     this.#operatorEmailKey = emailKey(options.operatorEmail);
-    this.#log = options.log ?? ((line) => console.log(line));
-    this.#newId = options.newId ?? randomUUID;
   }
 
   /**
@@ -649,7 +643,7 @@ class Core implements PactCore {
    * doesn't fail the command; the notification waits for the next attempt.
    */
   async #command<T>(change: () => T, afterCommit?: (result: T) => void): Promise<T> {
-    const result = this.#db.transaction(change).immediate();
+    const result = this.#ctx.db.transaction(change).immediate();
     afterCommit?.(result);
     void this.#deliverOutbox();
     return result;
@@ -657,11 +651,11 @@ class Core implements PactCore {
 
   /** Queues a notification in the current command's transaction. */
   #enqueue<K extends NotificationKind>(notification: NotificationOf<K>): void {
-    if (!this.#db.inTransaction) throw new Error("notifications are enqueued only inside a command");
+    if (!this.#ctx.db.inTransaction) throw new Error("notifications are enqueued only inside a command");
     const setting = SETTING_OF_KIND[notification.kind];
     if (setting !== null && this.#settingIsOff(notification.recipient, setting)) return;
     // Push is the only channel; the column stays from the first migration.
-    this.#db
+    this.#ctx.db
       .prepare(
         `INSERT INTO outbox (recipient_account_id, kind, channel, payload, created_at)
          VALUES (?, ?, 'push', ?, ?)`,
@@ -670,7 +664,7 @@ class Core implements PactCore {
         notification.recipient,
         notification.kind,
         JSON.stringify(notification.payload),
-        this.#clock.now().toISOString(),
+        this.#ctx.clock.now().toISOString(),
       );
   }
 
@@ -685,7 +679,7 @@ class Core implements PactCore {
 
   #settingIsOff(accountId: AccountId, setting: NotificationSetting): boolean {
     return (
-      this.#db
+      this.#ctx.db
         .prepare(`SELECT 1 FROM notification_setting_off WHERE account_id = ? AND setting = ?`)
         .get(accountId, setting) !== undefined
     );
@@ -698,17 +692,13 @@ class Core implements PactCore {
   #deliverOutbox(): Promise<void> {
     this.#delivery = this.#delivery
       .then(() => this.#deliverPending())
-      .catch((error: unknown) => this.#log(`outbox delivery stopped, will retry: ${String(error)}`));
+      .catch((error: unknown) => this.#ctx.log(`outbox delivery stopped, will retry: ${String(error)}`));
     return this.#delivery;
   }
 
   async #deliverPending(): Promise<void> {
-    const rows = this.#db
-      .prepare(
-        `SELECT id, recipient_account_id, kind, payload, sent_to
-         FROM outbox WHERE delivered_at IS NULL ORDER BY id`,
-      )
-      .all() as OutboxRow[];
+    const rows = this.#ctx.all<OutboxRow>(`SELECT id, recipient_account_id, kind, payload, sent_to
+         FROM outbox WHERE delivered_at IS NULL ORDER BY id`);
     for (const row of rows) {
       // Stored by `#enqueue`, so the kind and its payload match.
       const notification = {
@@ -717,30 +707,33 @@ class Core implements PactCore {
         payload: JSON.parse(row.payload) as unknown,
       } as Notification;
       try {
-        const devices = this.#db
-          .prepare(`SELECT endpoint, p256dh, auth FROM push_subscription WHERE account_id = ? ORDER BY endpoint`)
-          .all(row.recipient_account_id) as PushDevice[];
+        const devices = this.#ctx.all<PushDevice>(
+          `SELECT endpoint, p256dh, auth FROM push_subscription WHERE account_id = ? ORDER BY endpoint`,
+          row.recipient_account_id,
+        );
         const sentTo = JSON.parse(row.sent_to) as string[];
         const toSend = devices.filter((device) => !sentTo.includes(device.endpoint));
         const { expired, failed } = await this.#notifier.deliver(notification, toSend);
         for (const endpoint of expired) {
-          this.#db.prepare(`DELETE FROM push_subscription WHERE endpoint = ?`).run(endpoint);
+          this.#ctx.db.prepare(`DELETE FROM push_subscription WHERE endpoint = ?`).run(endpoint);
         }
         if (failed.length > 0) {
           const unreached = new Set([...expired, ...failed.map((f) => f.endpoint)]);
           const reached = toSend.map((device) => device.endpoint).filter((endpoint) => !unreached.has(endpoint));
-          this.#db
+          this.#ctx.db
             .prepare(`UPDATE outbox SET sent_to = ? WHERE id = ?`)
             .run(JSON.stringify([...sentTo, ...reached]), row.id);
           throw new Error(failed.map((f) => f.error).join("; "));
         }
-        this.#db
+        this.#ctx.db
           .prepare(`UPDATE outbox SET delivered_at = ?, attempts = attempts + 1 WHERE id = ?`)
-          .run(this.#clock.now().toISOString(), row.id);
+          .run(this.#ctx.clock.now().toISOString(), row.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.#db.prepare(`UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?`).run(message, row.id);
-        this.#log(
+        this.#ctx.db
+          .prepare(`UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?`)
+          .run(message, row.id);
+        this.#ctx.log(
           `notification ${row.id} (${row.kind} to ${row.recipient_account_id}) not delivered, will retry: ${message}`,
         );
       }
@@ -754,20 +747,20 @@ class Core implements PactCore {
 
       const key = emailKey(identity.email);
       const isOperator =
-        key === this.#operatorEmailKey && !this.#db.prepare(`SELECT 1 FROM account WHERE is_operator = 1`).get();
+        key === this.#operatorEmailKey && !this.#ctx.db.prepare(`SELECT 1 FROM account WHERE is_operator = 1`).get();
       const invite = options.inviteToken === undefined ? undefined : this.#inviteRow(options.inviteToken);
       const invited = invite !== undefined && this.#inviteLookup(invite, null).ok;
       if (!isOperator && !invited) return { ok: false, reason: "invite-required" };
 
-      const id = this.#newId();
-      this.#db
+      const id = this.#ctx.newId();
+      this.#ctx.db
         .prepare(
           `INSERT INTO account (id, email, email_key, name, is_operator, created_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(id, identity.email, key, identity.name, isOperator ? 1 : 0, this.#clock.now().toISOString());
+        .run(id, identity.email, key, identity.name, isOperator ? 1 : 0, this.#ctx.clock.now().toISOString());
       if (invited) {
-        this.#db.prepare(`UPDATE invite SET claimed_by_account_id = ? WHERE token = ?`).run(id, invite.token);
+        this.#ctx.db.prepare(`UPDATE invite SET claimed_by_account_id = ? WHERE token = ?`).run(id, invite.token);
       }
       return { ok: true, accountId: id };
     });
@@ -785,41 +778,42 @@ class Core implements PactCore {
     if (!row) return { ok: false, reason: "invite-not-found" };
     if (row.used_at !== null) return { ok: false, reason: "invite-used" };
     const expiresAt = new Date(row.expires_at);
-    if (this.#clock.now().getTime() >= expiresAt.getTime()) return { ok: false, reason: "invite-expired" };
+    if (this.#ctx.clock.now().getTime() >= expiresAt.getTime()) return { ok: false, reason: "invite-expired" };
     const claimedBy = row.claimed_by_account_id;
     if (claimedBy !== null && claimedBy !== viewerId) return { ok: false, reason: "invite-used" };
     return { ok: true, inviterName: row.inviter_name, expiresAt };
   }
 
   #inviteRow(token: string): InviteRow | undefined {
-    return this.#db
-      .prepare(
-        `SELECT invite.token, invite.inviter_account_id, account.name AS inviter_name, invite.expires_at,
+    return this.#ctx.one<InviteRow>(
+      `SELECT invite.token, invite.inviter_account_id, account.name AS inviter_name, invite.expires_at,
                 invite.used_at, invite.claimed_by_account_id
          FROM invite JOIN account ON account.id = invite.inviter_account_id
          WHERE invite.token = ?`,
-      )
-      .get(token) as InviteRow | undefined;
+      token,
+    );
   }
 
   #areFriends(a: AccountId, b: AccountId): boolean {
     const [first, second] = friendshipPair(a, b);
     return (
-      this.#db.prepare(`SELECT 1 FROM friendship WHERE account_a_id = ? AND account_b_id = ?`).get(first, second) !==
-      undefined
+      this.#ctx.db
+        .prepare(`SELECT 1 FROM friendship WHERE account_a_id = ? AND account_b_id = ?`)
+        .get(first, second) !== undefined
     );
   }
 
   accountIdForEmail(email: string): AccountId | null {
-    const row = this.#db.prepare(`SELECT id FROM account WHERE email_key = ?`).get(emailKey(email)) as
-      { id: string } | undefined;
+    const row = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE email_key = ?`, emailKey(email));
     return row?.id ?? null;
   }
 
   as(accountId: AccountId): AccountView {
     const account = () => {
-      const row = this.#db.prepare(`SELECT email, name, timezone FROM account WHERE id = ?`).get(accountId) as
-        { email: string; name: string; timezone: string | null } | undefined;
+      const row = this.#ctx.one<{ email: string; name: string; timezone: string | null }>(
+        `SELECT email, name, timezone FROM account WHERE id = ?`,
+        accountId,
+      );
       if (!row) throw new UnknownAccountError(accountId);
       return row;
     };
@@ -829,16 +823,16 @@ class Core implements PactCore {
           account();
           const zone = canonicalTimezone(timezone);
           if (zone === null) return { ok: false, reason: "invalid-timezone" };
-          this.#db.prepare(`UPDATE account SET timezone = ? WHERE id = ?`).run(zone, accountId);
+          this.#ctx.db.prepare(`UPDATE account SET timezone = ? WHERE id = ?`).run(zone, accountId);
           return { ok: true, timezone: zone };
         }),
       createInvite: () =>
         this.#command((): Invite => {
           account();
           const token = randomBytes(24).toString("base64url");
-          const now = this.#clock.now();
+          const now = this.#ctx.clock.now();
           const expiresAt = new Date(now.getTime() + INVITE_LIFETIME_MS);
-          this.#db
+          this.#ctx.db
             .prepare(`INSERT INTO invite (token, inviter_account_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
             .run(token, accountId, now.toISOString(), expiresAt.toISOString());
           return { token, expiresAt };
@@ -858,25 +852,26 @@ class Core implements PactCore {
           if (inviterId === accountId) return { ok: false, reason: "own-invite" };
           if (this.#areFriends(accountId, inviterId)) return { ok: false, reason: "already-friends" };
 
-          const now = this.#clock.now().toISOString();
-          this.#db
+          const now = this.#ctx.clock.now().toISOString();
+          this.#ctx.db
             .prepare(`UPDATE invite SET used_at = ?, used_by_account_id = ? WHERE token = ?`)
             .run(now, accountId, token);
-          this.#db
+          this.#ctx.db
             .prepare(`INSERT INTO friendship (account_a_id, account_b_id, created_at) VALUES (?, ?, ?)`)
             .run(...friendshipPair(accountId, inviterId), now);
           return { ok: true, friend: { id: inviterId, name: lookup.inviterName } };
         }),
       friends: () => {
         account();
-        const friends = this.#db
-          .prepare(
-            `SELECT account.id, account.name FROM friendship
+        const friends = this.#ctx.all<Friend>(
+          `SELECT account.id, account.name FROM friendship
              JOIN account ON account.id =
                CASE WHEN friendship.account_a_id = ? THEN friendship.account_b_id ELSE friendship.account_a_id END
              WHERE friendship.account_a_id = ? OR friendship.account_b_id = ?`,
-          )
-          .all(accountId, accountId, accountId) as Friend[];
+          accountId,
+          accountId,
+          accountId,
+        );
         return friends.sort(byName);
       },
       addRecipient: (recipient) =>
@@ -884,10 +879,10 @@ class Core implements PactCore {
           account();
           const name = recipient.name.trim();
           if (name === "") return { ok: false, reason: "blank-name" };
-          const id = this.#newId();
-          this.#db
+          const id = this.#ctx.newId();
+          this.#ctx.db
             .prepare(`INSERT INTO recipient (id, owner_account_id, name, created_at) VALUES (?, ?, ?, ?)`)
-            .run(id, accountId, name, this.#clock.now().toISOString());
+            .run(id, accountId, name, this.#ctx.clock.now().toISOString());
           return { ok: true, recipient: { id, name } };
         }),
       recipients: () => {
@@ -897,13 +892,13 @@ class Core implements PactCore {
       createPact: (pact) =>
         this.#command((): CreatePactResult => {
           const { timezone } = account();
-          const now = this.#clock.now();
+          const now = this.#ctx.clock.now();
           const checked = this.#checkedPact(accountId, timezone, pact, now);
           if (!checked.ok) return checked;
 
-          const id = this.#newId();
+          const id = this.#ctx.newId();
           const times = timesOf(checked.terms);
-          this.#db
+          this.#ctx.db
             .prepare(
               `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, in_bed_by,
                                  due_by, start_date, end_date, penalty_cents, recipient_id, stage,
@@ -939,13 +934,14 @@ class Core implements PactCore {
           const { timezone } = account();
           const row = this.#ownPact(accountId, pactId);
           if (!row) return { ok: false, reason: "pact-not-found" };
-          if (editWindowClosesAt(row, this.#clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
+          if (editWindowClosesAt(row, this.#ctx.clock.now()) === null)
+            return { ok: false, reason: "edit-window-closed" };
           if (pact.evidenceKind !== row.evidence_kind) return { ok: false, reason: "evidence-kind-fixed" };
           const checked = this.#checkedPact(accountId, timezone, pact, new Date(row.created_at), row);
           if (!checked.ok) return checked;
 
           const times = timesOf(checked.terms);
-          this.#db
+          this.#ctx.db
             .prepare(
               `UPDATE pact SET name = ?, description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?,
                                end_date = ?, penalty_cents = ?, recipient_id = ?, first_occurrence = ?, reminders = ?,
@@ -967,7 +963,7 @@ class Core implements PactCore {
               checked.ankiDeckId,
               pactId,
             );
-          this.#db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
+          this.#ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
           this.#setReviewers(pactId, checked.reviewerIds);
           // A One-time pact's evidence is for its one occurrence, wherever its deadline goes.
           if (scheduleOf(row.schedule).kind === "one-time" && checked.terms.schedule.kind === "one-time") {
@@ -983,11 +979,12 @@ class Core implements PactCore {
           account();
           const row = this.#ownPact(accountId, pactId);
           if (!row) return { ok: false, reason: "pact-not-found" };
-          if (editWindowClosesAt(row, this.#clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
+          if (editWindowClosesAt(row, this.#ctx.clock.now()) === null)
+            return { ok: false, reason: "edit-window-closed" };
           // In its window a pact has nothing judged, so no penalties: evidence is all it can have.
           this.#removeEvidence(pactId, () => true);
-          this.#db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
-          this.#db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);
+          this.#ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
+          this.#ctx.db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);
           return { ok: true };
         }),
       firstOccurrence: ({ schedule, evidenceKind, inBedBy, dueBy, startDate }, editing) => {
@@ -1012,7 +1009,7 @@ class Core implements PactCore {
         };
         const timing = newOccurrenceTerms(
           newTermsOf(schedule, formDayClock(times), times.dueBy),
-          pact ? new Date(pact.created_at) : this.#clock.now(),
+          pact ? new Date(pact.created_at) : this.#ctx.clock.now(),
           timezone,
           startDate !== undefined && isLocalDate(startDate) ? startDate : null,
         );
@@ -1031,22 +1028,21 @@ class Core implements PactCore {
             editWindowClosesAt,
           }),
         );
-        const ended = (
-          this.#db
-            .prepare(
-              `SELECT id, name, schedule, penalty_cents FROM pact
+        const ended = this.#ctx
+          .all<Pick<PactRow, "id" | "name" | "schedule" | "penalty_cents">>(
+            `SELECT id, name, schedule, penalty_cents FROM pact
                WHERE owner_account_id = ? AND stage = 'ended'
                ORDER BY name, created_at, id`,
-            )
-            .all(accountId) as Pick<PactRow, "id" | "name" | "schedule" | "penalty_cents">[]
-        ).map((row): PactSummary => ({
-          id: row.id,
-          name: row.name,
-          schedule: scheduleOf(row.schedule),
-          penaltyCents: row.penalty_cents,
-          stage: "ended",
-          editWindowClosesAt: null,
-        }));
+            accountId,
+          )
+          .map((row): PactSummary => ({
+            id: row.id,
+            name: row.name,
+            schedule: scheduleOf(row.schedule),
+            penaltyCents: row.penalty_cents,
+            stage: "ended",
+            editWindowClosesAt: null,
+          }));
         return [
           ...pacts.filter((pact) => pact.editWindowClosesAt),
           ...pacts.filter((pact) => !pact.editWindowClosesAt),
@@ -1057,7 +1053,7 @@ class Core implements PactCore {
         const { timezone } = account();
         const row = this.#ownPact(accountId, pactId);
         if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
-        const now = this.#clock.now();
+        const now = this.#ctx.clock.now();
         const { first } = this.#occurrencesOf(pactId, timezone);
         const service = SERVICE_OF_KIND[row.evidence_kind];
         const pact: PactTerms = {
@@ -1082,7 +1078,7 @@ class Core implements PactCore {
       },
       changePreview: (pactId, change) => {
         const { timezone } = account();
-        const checked = this.#checkedChange(accountId, timezone, pactId, change, this.#clock.now());
+        const checked = this.#checkedChange(accountId, timezone, pactId, change, this.#ctx.clock.now());
         if (!checked.ok) return checked;
         const { before, after, diffs, outcome } = checked;
         const preview: ChangePreview = { changes: this.#termChanges(accountId, before, after, diffs), outcome };
@@ -1091,15 +1087,17 @@ class Core implements PactCore {
       changePact: (pactId, change) =>
         this.#command((): ChangePactResult => {
           const { timezone, name: ownerName } = account();
-          const now = this.#clock.now();
+          const now = this.#ctx.clock.now();
           const checked = this.#checkedChange(accountId, timezone, pactId, change, now);
           if (!checked.ok) return checked;
           const { pact, before, after, outcome } = checked;
           if (outcome.kind === "nothing") return { ok: false, reason: "nothing-changed" };
           // The name, the reminders and added reviewers apply at once, even inside a change that waits.
           if (after.name !== before.name)
-            this.#db.prepare(`UPDATE pact SET name = ? WHERE id = ?`).run(after.name, pactId);
-          this.#db.prepare(`UPDATE pact SET reminders = ? WHERE id = ?`).run(JSON.stringify(after.reminders), pactId);
+            this.#ctx.db.prepare(`UPDATE pact SET name = ? WHERE id = ?`).run(after.name, pactId);
+          this.#ctx.db
+            .prepare(`UPDATE pact SET reminders = ? WHERE id = ?`)
+            .run(JSON.stringify(after.reminders), pactId);
           const added = after.reviewerIds.filter((id) => !before.reviewerIds.includes(id));
           this.#setReviewers(pactId, added);
           this.#tellPickedAsReviewer(added, `${ownerName} added you as a reviewer`, {
@@ -1127,7 +1125,8 @@ class Core implements PactCore {
           const pact = this.#ownPact(accountId, pactId);
           if (!pact) return { ok: false, reason: "pact-not-found" };
           if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
-          if (editWindowClosesAt(pact, this.#clock.now()) !== null) return { ok: false, reason: "edit-window-open" };
+          if (editWindowClosesAt(pact, this.#ctx.clock.now()) !== null)
+            return { ok: false, reason: "edit-window-open" };
           if (this.#waitingChangeRequestId(pactId) !== null) return { ok: false, reason: "change-request-waiting" };
           const id = this.#sendChangeRequest(pact, ownerName, this.#changeableTerms(pact), null, note);
           return { ok: true, changeRequestId: id };
@@ -1155,28 +1154,29 @@ class Core implements PactCore {
           const row = this.#changeRequestRow(changeRequestId);
           if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
           if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
-          this.#db
+          this.#ctx.db
             .prepare(`UPDATE change_request SET withdrawn_at = ? WHERE id = ?`)
-            .run(this.#clock.now().toISOString(), changeRequestId);
+            .run(this.#ctx.clock.now().toISOString(), changeRequestId);
           return { ok: true };
         }),
       profile: () => {
         const { email, name, timezone } = account();
-        const connections = (
-          this.#db
-            .prepare(`SELECT service, status, connected_at FROM connection WHERE account_id = ? ORDER BY service`)
-            .all(accountId) as { service: ConnectionService; status: Connection["status"]; connected_at: string }[]
-        ).map((row): Connection => ({
-          service: row.service,
-          status: row.status,
-          connectedAt: new Date(row.connected_at),
-          activePacts: this.#activePactsUsing(accountId, row.service),
-        }));
+        const connections = this.#ctx
+          .all<{ service: ConnectionService; status: Connection["status"]; connected_at: string }>(
+            `SELECT service, status, connected_at FROM connection WHERE account_id = ? ORDER BY service`,
+            accountId,
+          )
+          .map((row): Connection => ({
+            service: row.service,
+            status: row.status,
+            connectedAt: new Date(row.connected_at),
+            activePacts: this.#activePactsUsing(accountId, row.service),
+          }));
         return { email, name, timezone, connections };
       },
       checkOura: async () => {
         account();
-        const now = this.#clock.now();
+        const now = this.#ctx.clock.now();
         if (checkedWithin(this.#ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS)) return;
         this.#ouraChecks.set(accountId, now.getTime());
         const fetched = await this.#fetchSleep(now, accountId);
@@ -1201,12 +1201,12 @@ class Core implements PactCore {
       ankiDecks: async () => {
         account();
         if (!this.#hasConnection(accountId, "anki")) return { ok: false, reason: "not-connected" };
-        const askedAt = this.#clock.now();
+        const askedAt = this.#ctx.clock.now();
         let result;
         try {
           result = await this.#ankiSource.decks(accountId);
         } catch (error) {
-          this.#log(`AnkiWeb deck list for account ${accountId} failed: ${errorText(error)}`);
+          this.#ctx.log(`AnkiWeb deck list for account ${accountId} failed: ${errorText(error)}`);
           return { ok: false, reason: "unreachable" };
         }
         if (!result.ok) {
@@ -1215,19 +1215,19 @@ class Core implements PactCore {
         }
         const { decks, rolloverHour } = result;
         await this.#command(() => {
-          this.#db
+          this.#ctx.db
             .prepare(
               `INSERT INTO anki_deck_list (account_id, decks, rollover_hour, fetched_at) VALUES (?, ?, ?, ?)
                ON CONFLICT (account_id) DO UPDATE SET decks = excluded.decks, rollover_hour = excluded.rollover_hour,
                  fetched_at = excluded.fetched_at`,
             )
-            .run(accountId, JSON.stringify(decks), rolloverHour, this.#clock.now().toISOString());
+            .run(accountId, JSON.stringify(decks), rolloverHour, this.#ctx.clock.now().toISOString());
         });
         return { ok: true, decks, rolloverHour };
       },
       checkAnki: async () => {
         account();
-        const now = this.#clock.now();
+        const now = this.#ctx.clock.now();
         if (checkedWithin(this.#ankiChecks, accountId, now, ANKI_CHECK_INTERVAL_MS)) return;
         if (this.#ankiDaysWaiting(now, accountId).length === 0) return;
         this.#ankiChecks.set(accountId, now.getTime());
@@ -1249,7 +1249,8 @@ class Core implements PactCore {
         // Every pact's owner has a timezone: creating one needs it.
         const { alerts, sections } =
           timezone === null ? { alerts: [], sections: [] } : this.#todayCards(accountId, timezone);
-        const hasPacts = this.#db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
+        const hasPacts =
+          this.#ctx.db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
         const yesterday = timezone === null ? [] : this.#yesterday(accountId, timezone);
         return { hasPacts, alerts, sections, waiting: this.#waiting(accountId), yesterday };
       },
@@ -1261,11 +1262,11 @@ class Core implements PactCore {
         this.#command(() => {
           account();
           if (enabled) {
-            this.#db
+            this.#ctx.db
               .prepare(`DELETE FROM notification_setting_off WHERE account_id = ? AND setting = ?`)
               .run(accountId, setting);
           } else {
-            this.#db
+            this.#ctx.db
               .prepare(
                 `INSERT INTO notification_setting_off (account_id, setting) VALUES (?, ?) ON CONFLICT DO NOTHING`,
               )
@@ -1277,19 +1278,19 @@ class Core implements PactCore {
         this.#command((): SavePushSubscriptionResult => {
           account();
           if (!isPushDevice(device)) return { ok: false, reason: "invalid-subscription" };
-          this.#db
+          this.#ctx.db
             .prepare(
               `INSERT INTO push_subscription (endpoint, account_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
                ON CONFLICT (endpoint) DO UPDATE
                SET account_id = excluded.account_id, p256dh = excluded.p256dh, auth = excluded.auth`,
             )
-            .run(device.endpoint, accountId, device.p256dh, device.auth, this.#clock.now().toISOString());
+            .run(device.endpoint, accountId, device.p256dh, device.auth, this.#ctx.clock.now().toISOString());
           return { ok: true };
         }),
       removePushSubscription: (endpoint) =>
         this.#command(() => {
           account();
-          this.#db
+          this.#ctx.db
             .prepare(`DELETE FROM push_subscription WHERE endpoint = ? AND account_id = ?`)
             .run(endpoint, accountId);
         }),
@@ -1297,7 +1298,7 @@ class Core implements PactCore {
         const { timezone, name: ownerName } = account();
         // Refuse cheaply before storing anything, then check again at the time
         // the server received the photos, in the transaction that writes.
-        const early = this.#evidenceAcceptance(accountId, timezone, pactId, photos.length, this.#clock.now());
+        const early = this.#evidenceAcceptance(accountId, timezone, pactId, photos.length, this.#ctx.clock.now());
         if (!early.ok) return early;
         const stored = await Promise.all(photos.map((photo) => this.#photoStore.store(photo)));
         const submittedAt = new Date(Math.max(...stored.map((p) => p.receivedAt.getTime())));
@@ -1305,15 +1306,15 @@ class Core implements PactCore {
           const acceptance = this.#evidenceAcceptance(accountId, timezone, pactId, photos.length, submittedAt);
           if (!acceptance.ok) return acceptance;
           const { occurrence, day } = acceptance;
-          this.#db
+          this.#ctx.db
             .prepare(`INSERT INTO occurrence (pact_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
             .run(pactId, occurrence.date);
-          const evidenceId = this.#newId();
-          this.#db
+          const evidenceId = this.#ctx.newId();
+          this.#ctx.db
             .prepare(`INSERT INTO evidence (id, pact_id, occurrence_date, day, submitted_at) VALUES (?, ?, ?, ?, ?)`)
             .run(evidenceId, pactId, occurrence.date, day, submittedAt.toISOString());
           stored.forEach(({ photoId, receivedAt }, position) => {
-            this.#db
+            this.#ctx.db
               .prepare(`INSERT INTO evidence_photo (evidence_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
               .run(evidenceId, position, photoId, receivedAt.toISOString());
           });
@@ -1329,12 +1330,12 @@ class Core implements PactCore {
       acceptMiss: (pactId, occurrenceDate) =>
         this.#command((): AcceptMissResult => {
           account();
-          const isOwn = this.#db
+          const isOwn = this.#ctx.db
             .prepare(`SELECT 1 FROM pact WHERE id = ? AND owner_account_id = ?`)
             .get(pactId, accountId);
           if (!isOwn) return { ok: false, reason: "pact-not-found" };
-          const now = this.#clock.now().toISOString();
-          const accepted = this.#db
+          const now = this.#ctx.clock.now().toISOString();
+          const accepted = this.#ctx.db
             .prepare(
               `UPDATE occurrence SET miss_accepted_at = ?
                WHERE pact_id = ? AND date = ? AND outcome = 'missed' AND miss_accepted_at IS NULL`,
@@ -1342,7 +1343,7 @@ class Core implements PactCore {
             .run(now, pactId, occurrenceDate);
           if (accepted.changes === 1) return { ok: true };
           // On Weekly count, a rejected day isn't a miss, but its alert goes the same way.
-          const rejected = this.#db
+          const rejected = this.#ctx.db
             .prepare(
               `UPDATE evidence SET rejection_accepted_at = ?
                WHERE pact_id = ? AND day = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL
@@ -1353,11 +1354,11 @@ class Core implements PactCore {
         }),
       excusePreview: (pactId, dates) => {
         const { timezone } = account();
-        return this.#excusePreview(accountId, timezone, pactId, dates, this.#clock.now());
+        return this.#excusePreview(accountId, timezone, pactId, dates, this.#ctx.clock.now());
       },
       excuseOptions: (pactId) => {
         const { timezone } = account();
-        const now = this.#clock.now();
+        const now = this.#ctx.clock.now();
         const pact = this.#ownPact(accountId, pactId);
         if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
         if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
@@ -1365,7 +1366,7 @@ class Core implements PactCore {
         // Days before today an excuse could cover: Missed in the last 48 hours, or still waiting on evidence.
         const since = new Date(now.getTime() - EXCUSE_WINDOW_MS).toISOString();
         const earliest = (
-          this.#db
+          this.#ctx.db
             .prepare(
               `SELECT MIN(date) AS date FROM occurrence
                WHERE pact_id = ? AND date < ? AND (outcome IS NULL OR (outcome = 'missed' AND judged_at > ?))`,
@@ -1395,26 +1396,26 @@ class Core implements PactCore {
           if (checked.preview.covered.length === 0) return { ok: false, reason: "nothing-to-excuse" };
           return checked;
         };
-        const early = acceptance(this.#clock.now());
+        const early = acceptance(this.#ctx.clock.now());
         if (!early.ok) return early;
         const stored = await Promise.all(photos.map((photo) => this.#photoStore.store(photo)));
         // With no photos, the server received the excuse when it writes it.
         const lastReceived = stored.length === 0 ? null : Math.max(...stored.map((p) => p.receivedAt.getTime()));
         return this.#command((): FileExcuseResult => {
-          const filedAt = lastReceived === null ? this.#clock.now() : new Date(lastReceived);
+          const filedAt = lastReceived === null ? this.#ctx.clock.now() : new Date(lastReceived);
           const checked = acceptance(filedAt);
           if (!checked.ok) return checked;
-          const excuseId = this.#newId();
-          this.#db
+          const excuseId = this.#ctx.newId();
+          this.#ctx.db
             .prepare(`INSERT INTO excuse (id, pact_id, reason, filed_at) VALUES (?, ?, ?, ?)`)
             .run(excuseId, pactId, reason, filedAt.toISOString());
           for (const { date } of checked.preview.covered) {
-            this.#db
+            this.#ctx.db
               .prepare(`INSERT INTO excuse_day (excuse_id, pact_id, date) VALUES (?, ?, ?)`)
               .run(excuseId, pactId, date);
           }
           stored.forEach(({ photoId, receivedAt }, position) => {
-            this.#db
+            this.#ctx.db
               .prepare(`INSERT INTO excuse_photo (excuse_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
               .run(excuseId, position, photoId, receivedAt.toISOString());
           });
@@ -1435,7 +1436,7 @@ class Core implements PactCore {
         account();
         const pact = this.#excusePact(excuseId);
         if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
-        const row = this.#db
+        const row = this.#ctx.db
           .prepare(
             `SELECT excuse.reason, excuse.filed_at, ${reviewStateColumns("excuse")}
              FROM excuse LEFT JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
@@ -1462,15 +1463,15 @@ class Core implements PactCore {
           account();
           const pact = this.#excusePact(excuseId);
           if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
-          const now = this.#clock.now().toISOString();
-          const accepted = this.#db
+          const now = this.#ctx.clock.now().toISOString();
+          const accepted = this.#ctx.db
             .prepare(
               `UPDATE excuse SET rejection_accepted_at = ?
                WHERE id = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL`,
             )
             .run(now, excuseId);
           if (accepted.changes !== 1) return { ok: false, reason: "nothing-to-accept" };
-          this.#db
+          this.#ctx.db
             .prepare(
               `UPDATE occurrence SET miss_accepted_at = ?
                WHERE outcome = 'missed' AND miss_accepted_at IS NULL
@@ -1491,8 +1492,8 @@ class Core implements PactCore {
           const acceptance = this.#paymentAcceptance(accountId, payment);
           if (!acceptance.ok) return acceptance;
           const note = payment.note?.trim() ?? "";
-          const paymentId = this.#newId();
-          this.#db
+          const paymentId = this.#ctx.newId();
+          this.#ctx.db
             .prepare(
               `INSERT INTO payment (id, owner_account_id, recipient_id, amount_cents, note, photo_id, recorded_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -1504,7 +1505,7 @@ class Core implements PactCore {
               payment.amountCents,
               note === "" ? null : note,
               photoId,
-              this.#clock.now().toISOString(),
+              this.#ctx.clock.now().toISOString(),
             );
           this.#tellAll(this.#paymentReviewers(accountId, payment.recipientId), "review-item", {
             itemKind: "payment",
@@ -1536,16 +1537,16 @@ class Core implements PactCore {
       },
       evidence: (evidenceId) => {
         account();
-        const row = this.#db
-          .prepare(
-            `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date, evidence.day,
+        const row = this.#ctx.one<ReviewStateRow & EvidenceViewRow>(
+          `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date, evidence.day,
                     evidence.submitted_at, ${reviewStateColumns("evidence")}
              FROM evidence
              JOIN pact ON pact.id = evidence.pact_id
              LEFT JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
              WHERE evidence.id = ? AND pact.owner_account_id = ?`,
-          )
-          .get(evidenceId, accountId) as (ReviewStateRow & EvidenceViewRow) | undefined;
+          evidenceId,
+          accountId,
+        );
         if (!row) return { ok: false, reason: "evidence-not-found" };
         return {
           ok: true,
@@ -1559,16 +1560,16 @@ class Core implements PactCore {
       },
       payment: (paymentId) => {
         account();
-        const row = this.#db
-          .prepare(
-            `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
+        const row = this.#ctx.one<ReviewStateRow & PaymentViewRow & { recipient_id: string }>(
+          `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
                     payment.note, payment.photo_id, payment.recorded_at, ${reviewStateColumns("payment")}
              FROM payment
              JOIN recipient ON recipient.id = payment.recipient_id
              LEFT JOIN account AS reviewer ON reviewer.id = payment.decided_by_account_id
              WHERE payment.id = ? AND payment.owner_account_id = ?`,
-          )
-          .get(paymentId, accountId) as (ReviewStateRow & PaymentViewRow & { recipient_id: string }) | undefined;
+          paymentId,
+          accountId,
+        );
         if (!row) return { ok: false, reason: "payment-not-found" };
         return {
           ok: true,
@@ -1649,7 +1650,7 @@ class Core implements PactCore {
                 // Judging catches up on the pact first, as the scheduler would have: a change never
                 // rescues an occurrence already due. Judging may End it, which withdraws the request.
                 const [pact] = this.#pactsToJudge(item.row.pact_id);
-                this.#judgePactDueBy(pact!, this.#clock.now());
+                this.#judgePactDueBy(pact!, this.#ctx.clock.now());
                 if (this.#waitingChangeRequestId(item.row.pact_id) !== item.row.id) {
                   return { ok: false, reason: "item-not-found" };
                 }
@@ -1690,32 +1691,33 @@ class Core implements PactCore {
    * pacts they review, or a change request not withdrawn, for an Active pact.
    */
   #itemToDecide(reviewerId: AccountId, itemId: string): ItemToDecide | undefined {
-    const evidence = this.#db
-      .prepare(
-        `SELECT evidence.id, evidence.pact_id, evidence.occurrence_date, evidence.day, evidence.decision,
+    const evidence = this.#ctx.one<EvidenceToDecide>(
+      `SELECT evidence.id, evidence.pact_id, evidence.occurrence_date, evidence.day, evidence.decision,
                   pact.owner_account_id, owner.timezone
            FROM evidence
            JOIN pact ON pact.id = evidence.pact_id
            JOIN account AS owner ON owner.id = pact.owner_account_id
            JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
            WHERE evidence.id = ? AND pact.created_at <= ?`,
-      )
-      .get(reviewerId, itemId, this.#editWindowCutoff()) as EvidenceToDecide | undefined;
+      reviewerId,
+      itemId,
+      this.#editWindowCutoff(),
+    );
     if (evidence) return { kind: "evidence", row: evidence };
-    const excuse = this.#db
-      .prepare(
-        `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
+    const excuse = this.#ctx.one<ExcuseToDecide>(
+      `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
          FROM excuse
          JOIN pact ON pact.id = excuse.pact_id
          JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
          WHERE excuse.id = ?`,
-      )
-      .get(reviewerId, itemId) as ExcuseToDecide | undefined;
+      reviewerId,
+      itemId,
+    );
     if (excuse) return { kind: "excuse", row: excuse };
     const payment = this.#paymentToDecide(reviewerId, itemId);
     if (payment) return { kind: "payment", row: payment };
     const mayDecideRequest =
-      this.#db
+      this.#ctx.db
         .prepare(
           `SELECT 1 FROM change_request
            JOIN pact ON pact.id = change_request.pact_id
@@ -1738,20 +1740,22 @@ class Core implements PactCore {
     itemId: string,
   ): { kind: ReviewItem["kind"]; waiting: boolean; reviewerIds: AccountId[] } | undefined {
     const ofPact = (table: "evidence" | "excuse") =>
-      this.#db
-        .prepare(
-          `SELECT ${table}.pact_id, ${table}.decision FROM ${table}
+      this.#ctx.one<{ pact_id: string; decision: ReviewOutcome | null }>(
+        `SELECT ${table}.pact_id, ${table}.decision FROM ${table}
            JOIN pact ON pact.id = ${table}.pact_id
            WHERE ${table}.id = ? AND pact.owner_account_id = ?`,
-        )
-        .get(itemId, ownerId) as { pact_id: string; decision: ReviewOutcome | null } | undefined;
+        itemId,
+        ownerId,
+      );
     for (const kind of ["evidence", "excuse"] as const) {
       const row = ofPact(kind);
       if (row) return { kind, waiting: row.decision === null, reviewerIds: this.#reviewersOf(row.pact_id) };
     }
-    const payment = this.#db
-      .prepare(`SELECT recipient_id, decision FROM payment WHERE id = ? AND owner_account_id = ?`)
-      .get(itemId, ownerId) as { recipient_id: string; decision: ReviewOutcome | null } | undefined;
+    const payment = this.#ctx.one<{ recipient_id: string; decision: ReviewOutcome | null }>(
+      `SELECT recipient_id, decision FROM payment WHERE id = ? AND owner_account_id = ?`,
+      itemId,
+      ownerId,
+    );
     if (payment) {
       return {
         kind: "payment",
@@ -1775,13 +1779,13 @@ class Core implements PactCore {
     switch (kind) {
       case "evidence":
       case "excuse": {
-        const { name } = this.#db
+        const { name } = this.#ctx.db
           .prepare(`SELECT pact.name FROM ${kind} JOIN pact ON pact.id = ${kind}.pact_id WHERE ${kind}.id = ?`)
           .get(itemId) as { name: string };
         return `${kind} for ${name}`;
       }
       case "payment": {
-        const { amount_cents, recipient_id } = this.#db
+        const { amount_cents, recipient_id } = this.#ctx.db
           .prepare(`SELECT amount_cents, recipient_id FROM payment WHERE id = ?`)
           .get(itemId) as { amount_cents: number; recipient_id: string };
         return `${money(amount_cents)} payment to ${this.#recipientName(recipient_id)}`;
@@ -1796,9 +1800,9 @@ class Core implements PactCore {
 
   /** Adds a question (a reviewer's) or a reply (the owner's) to an item's thread. */
   #addComment(itemId: string, authorId: AccountId, fromOwner: boolean, text: string): void {
-    this.#db
+    this.#ctx.db
       .prepare(`INSERT INTO comment (item_id, author_account_id, from_owner, text, sent_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(itemId, authorId, fromOwner ? 1 : 0, text, this.#clock.now().toISOString());
+      .run(itemId, authorId, fromOwner ? 1 : 0, text, this.#ctx.clock.now().toISOString());
   }
 
   /**
@@ -1806,20 +1810,19 @@ class Core implements PactCore {
    * still waiting for a decision; only then can it be waiting on a reply.
    */
   #thread(itemId: string, waiting: boolean): QuestionThread {
-    const comments = (
-      this.#db
-        .prepare(
-          `SELECT comment.from_owner, account.name, comment.text, comment.sent_at
+    const comments = this.#ctx
+      .all<{ from_owner: 0 | 1; name: string; text: string; sent_at: string }>(
+        `SELECT comment.from_owner, account.name, comment.text, comment.sent_at
            FROM comment JOIN account ON account.id = comment.author_account_id
            WHERE comment.item_id = ? ORDER BY comment.id`,
-        )
-        .all(itemId) as { from_owner: 0 | 1; name: string; text: string; sent_at: string }[]
-    ).map((row) => ({
-      fromOwner: row.from_owner === 1,
-      authorName: row.name,
-      text: row.text,
-      sentAt: new Date(row.sent_at),
-    }));
+        itemId,
+      )
+      .map((row) => ({
+        fromOwner: row.from_owner === 1,
+        authorName: row.name,
+        text: row.text,
+        sentAt: new Date(row.sent_at),
+      }));
     return { comments, waitingOnReply: waiting && comments.at(-1)?.fromOwner === false };
   }
 
@@ -1893,9 +1896,8 @@ class Core implements PactCore {
 
   /** Evidence waiting for approval that `reviewerId` may decide: for pacts they review, past the edit window. */
   #evidenceToReview(reviewerId: AccountId): ReviewItem[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
+    const rows = this.#ctx.all<EvidenceViewRow & { owner_name: string; weekly: 0 | 1 }>(
+      `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
                 evidence.submitted_at, evidence.occurrence_date, evidence.day, ${WEEKLY_COUNT_PACT} AS weekly
          FROM evidence
          JOIN pact ON pact.id = evidence.pact_id
@@ -1903,8 +1905,9 @@ class Core implements PactCore {
          JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
          WHERE evidence.decision IS NULL AND pact.created_at <= ?
          ORDER BY evidence.submitted_at, evidence.id`,
-      )
-      .all(reviewerId, this.#editWindowCutoff()) as (EvidenceViewRow & { owner_name: string; weekly: 0 | 1 })[];
+      reviewerId,
+      this.#editWindowCutoff(),
+    );
     return rows.map((row): ReviewItem => {
       // What counts, and what rejecting costs: the terms of the occurrence's day.
       const terms = this.#termsOn(row.pact_id, row.occurrence_date);
@@ -1922,16 +1925,7 @@ class Core implements PactCore {
 
   /** The owner's penalties for `recipientId`, newest first, each with what's paid and the bill it's on or will make. */
   #ledgerPenalties(ownerId: AccountId, recipientId: string, timezone: string | null): LedgerPenalty[] {
-    const penaltyRows = this.#db
-      .prepare(
-        `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
-                penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held,
-                ${WEEKLY_COUNT_PACT} AS weekly
-         FROM penalty JOIN pact ON pact.id = penalty.pact_id
-         WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
-         ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
-      )
-      .all(ownerId, recipientId) as {
+    const penaltyRows = this.#ctx.all<{
       id: string;
       pact_id: string;
       pact_name: string;
@@ -1941,7 +1935,16 @@ class Core implements PactCore {
       bill_id: string | null;
       held: 0 | 1;
       weekly: 0 | 1;
-    }[];
+    }>(
+      `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
+                penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held,
+                ${WEEKLY_COUNT_PACT} AS weekly
+         FROM penalty JOIN pact ON pact.id = penalty.pact_id
+         WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
+         ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
+      ownerId,
+      recipientId,
+    );
     const allocation = this.#allocate(ownerId, recipientId);
     const bills = this.#billsOf(ownerId, recipientId);
     return penaltyRows.map((row): LedgerPenalty => {
@@ -1966,7 +1969,7 @@ class Core implements PactCore {
           : {
               // A rejected excuse releases it to the next bill it can make, as if it had never been held.
               kind: held ? "if-excuse-rejected" : "next-bill",
-              billedOn: nextBillDay(new Date(row.added_at), this.#clock.now(), ownerZone(timezone, ownerId)),
+              billedOn: nextBillDay(new Date(row.added_at), this.#ctx.clock.now(), ownerZone(timezone, ownerId)),
             },
       };
     });
@@ -1977,9 +1980,15 @@ class Core implements PactCore {
    * penalty went to. Just the one for `recipientId`, if given.
    */
   #ledgerSummaries(ownerId: AccountId, recipientId?: string): LedgerSummary[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT recipient.id, recipient.name,
+    const rows = this.#ctx.all<{
+      id: string;
+      name: string;
+      penalty_cents: number;
+      paid_cents: number;
+      awaiting_cents: number;
+      awaiting_count: number;
+    }>(
+      `SELECT recipient.id, recipient.name,
                 (SELECT COALESCE(SUM(amount_cents), 0) FROM penalty
                  WHERE penalty.owner_account_id = recipient.owner_account_id
                    AND penalty.recipient_id = recipient.id AND NOT ${PENALTY_HELD}) AS penalty_cents,
@@ -1994,16 +2003,11 @@ class Core implements PactCore {
            AND (EXISTS (SELECT 1 FROM pact WHERE pact.recipient_id = recipient.id)
                 OR EXISTS (SELECT 1 FROM penalty WHERE penalty.recipient_id = recipient.id))
          GROUP BY recipient.id`,
-      )
-      .all(ownerId, recipientId ?? null, recipientId ?? null) as {
-      id: string;
-      name: string;
-      penalty_cents: number;
-      paid_cents: number;
-      awaiting_cents: number;
-      awaiting_count: number;
-    }[];
-    const now = this.#clock.now();
+      ownerId,
+      recipientId ?? null,
+      recipientId ?? null,
+    );
+    const now = this.#ctx.clock.now();
     return rows.sort(byName).map((row) => {
       // An excuse approved after its penalty was paid leaves more paid than
       // owed. The surplus pays the next penalties (#allocate), and owed is $0
@@ -2038,22 +2042,22 @@ class Core implements PactCore {
    * penalties aren't owed, so payments skip them.
    */
   #allocate(ownerId: AccountId, recipientId: string): Map<string, { paidCents: number; coveredCents: number }> {
-    const totals = this.#db
+    const totals = this.#ctx.db
       .prepare(
         `SELECT COALESCE(SUM(amount_cents) FILTER (WHERE decision = 'approved'), 0) AS approved,
                 COALESCE(SUM(amount_cents) FILTER (WHERE decision IS NULL), 0) AS awaiting
          FROM payment WHERE owner_account_id = ? AND recipient_id = ?`,
       )
       .get(ownerId, recipientId) as { approved: number; awaiting: number };
-    const rows = this.#db
-      .prepare(
-        `SELECT penalty.id, penalty.amount_cents FROM penalty JOIN pact ON pact.id = penalty.pact_id
+    const rows = this.#ctx.all<{ id: string; amount_cents: number }>(
+      `SELECT penalty.id, penalty.amount_cents FROM penalty JOIN pact ON pact.id = penalty.pact_id
          LEFT JOIN bill ON bill.id = penalty.bill_id
          WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ? AND NOT ${PENALTY_HELD}
          ORDER BY bill.id IS NULL, bill.created_at, bill.id,
                   penalty.added_at, penalty.occurrence_date, pact.name DESC, penalty.id DESC`,
-      )
-      .all(ownerId, recipientId) as { id: string; amount_cents: number }[];
+      ownerId,
+      recipientId,
+    );
     let approved = totals.approved;
     let awaiting = totals.awaiting;
     const allocation = new Map<string, { paidCents: number; coveredCents: number }>();
@@ -2070,17 +2074,17 @@ class Core implements PactCore {
   /** The owner's bills to `recipientId`, oldest first, with what's unpaid and what payments awaiting approval don't cover. */
   #billsOf(ownerId: AccountId, recipientId: string): BillState[] {
     const allocation = this.#allocate(ownerId, recipientId);
-    const bills = this.#db
-      .prepare(
-        `SELECT id, billed_on, due_at FROM bill WHERE owner_account_id = ? AND recipient_id = ?
+    const bills = this.#ctx.all<{ id: string; billed_on: LocalDate; due_at: string }>(
+      `SELECT id, billed_on, due_at FROM bill WHERE owner_account_id = ? AND recipient_id = ?
          ORDER BY created_at, id`,
-      )
-      .all(ownerId, recipientId) as { id: string; billed_on: LocalDate; due_at: string }[];
+      ownerId,
+      recipientId,
+    );
     return bills.map((bill) => {
-      const penalties = this.#db.prepare(`SELECT id, amount_cents FROM penalty WHERE bill_id = ?`).all(bill.id) as {
+      const penalties = this.#ctx.all<{
         id: string;
         amount_cents: number;
-      }[];
+      }>(`SELECT id, amount_cents FROM penalty WHERE bill_id = ?`, bill.id);
       let unpaidCents = 0;
       let uncoveredCents = 0;
       for (const penalty of penalties) {
@@ -2100,19 +2104,20 @@ class Core implements PactCore {
    * bill. The owner is told of each bill with something left to pay.
    */
   #makeBills(t: Date): void {
-    const accounts = this.#db
-      .prepare(
-        `SELECT id, timezone, created_at, billed_through FROM account WHERE timezone IS NOT NULL
-                ORDER BY created_at, id`,
-      )
-      .all() as { id: AccountId; timezone: string; created_at: string; billed_through: string | null }[];
+    const accounts = this.#ctx.all<{
+      id: AccountId;
+      timezone: string;
+      created_at: string;
+      billed_through: string | null;
+    }>(`SELECT id, timezone, created_at, billed_through FROM account WHERE timezone IS NOT NULL
+                ORDER BY created_at, id`);
     for (const account of accounts) {
       const from = new Date(account.billed_through ?? account.created_at);
       if (from.getTime() >= t.getTime()) continue;
       for (const wednesday of billDays(from, t, account.timezone)) {
         this.#billOwner(account.id, wednesday, account.timezone);
       }
-      this.#db.prepare(`UPDATE account SET billed_through = ? WHERE id = ?`).run(t.toISOString(), account.id);
+      this.#ctx.db.prepare(`UPDATE account SET billed_through = ? WHERE id = ?`).run(t.toISOString(), account.id);
     }
   }
 
@@ -2120,23 +2125,23 @@ class Core implements PactCore {
     const createdAt = billInstant(wednesday, timezone);
     const dueAt = billInstant(addDays(wednesday, BILL_TERM_DAYS), timezone);
     const excusableAfter = new Date(createdAt.getTime() - EXCUSE_WINDOW_MS).toISOString();
-    const recipients = this.#db
-      .prepare(
-        `SELECT DISTINCT penalty.recipient_id FROM penalty
+    const recipients = this.#ctx.all<{ recipient_id: string }>(
+      `SELECT DISTINCT penalty.recipient_id FROM penalty
          WHERE penalty.owner_account_id = ? AND penalty.bill_id IS NULL AND penalty.added_at <= ?
            AND NOT ${PENALTY_HELD}
          ORDER BY penalty.recipient_id`,
-      )
-      .all(ownerId, excusableAfter) as { recipient_id: string }[];
+      ownerId,
+      excusableAfter,
+    );
     for (const { recipient_id: recipientId } of recipients) {
-      const billId = this.#newId();
-      this.#db
+      const billId = this.#ctx.newId();
+      this.#ctx.db
         .prepare(
           `INSERT INTO bill (id, owner_account_id, recipient_id, billed_on, created_at, due_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
         .run(billId, ownerId, recipientId, wednesday, createdAt.toISOString(), dueAt.toISOString());
-      this.#db
+      this.#ctx.db
         .prepare(
           `UPDATE penalty SET bill_id = ?
            WHERE owner_account_id = ? AND recipient_id = ? AND bill_id IS NULL AND added_at <= ?
@@ -2167,14 +2172,13 @@ class Core implements PactCore {
    * payment awaiting approval just pauses it, so a rejected one resumes it.
    */
   #remindOverdue(t: Date): void {
-    const ledgers = this.#db
-      .prepare(
-        `SELECT DISTINCT bill.owner_account_id, bill.recipient_id, account.name AS owner_name
+    const ledgers = this.#ctx.all<{ owner_account_id: AccountId; recipient_id: string; owner_name: string }>(
+      `SELECT DISTINCT bill.owner_account_id, bill.recipient_id, account.name AS owner_name
          FROM bill JOIN account ON account.id = bill.owner_account_id
          WHERE bill.due_at <= ?
          ORDER BY bill.owner_account_id, bill.recipient_id`,
-      )
-      .all(t.toISOString()) as { owner_account_id: AccountId; recipient_id: string; owner_name: string }[];
+      t.toISOString(),
+    );
     for (const { owner_account_id: ownerId, recipient_id: recipientId, owner_name: ownerName } of ledgers) {
       const overdue = overdueOf(this.#billsOf(ownerId, recipientId), t);
       if (overdue === null) continue;
@@ -2210,7 +2214,7 @@ class Core implements PactCore {
         }
       }
       if (remind || tell) {
-        this.#db
+        this.#ctx.db
           .prepare(
             `INSERT INTO overdue_notice (owner_account_id, recipient_id, owner_reminded_at, reviewers_told_at)
              VALUES (?, ?, ?, ?)
@@ -2238,12 +2242,12 @@ class Core implements PactCore {
     recipientId: string,
     spellStartedAt: Date,
   ): { ownerRemindedAt: Date | null; reviewersToldAt: Date | null } {
-    const row = this.#db
-      .prepare(
-        `SELECT owner_reminded_at, reviewers_told_at FROM overdue_notice
+    const row = this.#ctx.one<{ owner_reminded_at: string | null; reviewers_told_at: string | null }>(
+      `SELECT owner_reminded_at, reviewers_told_at FROM overdue_notice
          WHERE owner_account_id = ? AND recipient_id = ?`,
-      )
-      .get(ownerId, recipientId) as { owner_reminded_at: string | null; reviewers_told_at: string | null } | undefined;
+      ownerId,
+      recipientId,
+    );
     const ifThisSpell = (at: string | null | undefined) =>
       at === null || at === undefined || new Date(at).getTime() < spellStartedAt.getTime() ? null : new Date(at);
     return {
@@ -2253,7 +2257,7 @@ class Core implements PactCore {
   }
 
   #timezoneOf(accountId: AccountId): string {
-    const row = this.#db.prepare(`SELECT timezone FROM account WHERE id = ?`).get(accountId) as {
+    const row = this.#ctx.db.prepare(`SELECT timezone FROM account WHERE id = ?`).get(accountId) as {
       timezone: string | null;
     };
     return ownerZone(row.timezone, accountId);
@@ -2263,13 +2267,12 @@ class Core implements PactCore {
   #billsForToday(ownerId: AccountId, now: Date): { cards: TodayBillCard[]; alerts: TodayAlert[] } {
     const cards: TodayBillCard[] = [];
     const alerts: TodayAlert[] = [];
-    const recipients = this.#db
-      .prepare(
-        `SELECT DISTINCT recipient.id, recipient.name FROM bill
+    const recipients = this.#ctx.all<Recipient>(
+      `SELECT DISTINCT recipient.id, recipient.name FROM bill
          JOIN recipient ON recipient.id = bill.recipient_id
          WHERE bill.owner_account_id = ?`,
-      )
-      .all(ownerId) as Recipient[];
+      ownerId,
+    );
     for (const { id: recipientId, name } of recipients.sort(byName)) {
       const bills = this.#billsOf(ownerId, recipientId);
       const overdue = overdueOf(bills, now);
@@ -2299,19 +2302,21 @@ class Core implements PactCore {
 
   /** The owner's payments to `recipientId` and where each one's review stands, newest recorded first. */
   #ledgerPayments(ownerId: AccountId, recipientId: string): LedgerPayment[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT payment.id, payment.amount_cents, payment.note, payment.recorded_at, ${reviewStateColumns("payment")}
+    const rows = this.#ctx.all<
+      ReviewStateRow & {
+        id: string;
+        amount_cents: number;
+        note: string | null;
+        recorded_at: string;
+      }
+    >(
+      `SELECT payment.id, payment.amount_cents, payment.note, payment.recorded_at, ${reviewStateColumns("payment")}
          FROM payment LEFT JOIN account AS reviewer ON reviewer.id = payment.decided_by_account_id
          WHERE payment.owner_account_id = ? AND payment.recipient_id = ?
          ORDER BY payment.recorded_at DESC, payment.id`,
-      )
-      .all(ownerId, recipientId) as (ReviewStateRow & {
-      id: string;
-      amount_cents: number;
-      note: string | null;
-      recorded_at: string;
-    })[];
+      ownerId,
+      recipientId,
+    );
     return rows.map((row) => ({
       kind: "payment",
       paymentId: row.id,
@@ -2331,7 +2336,7 @@ class Core implements PactCore {
     ownerId: AccountId,
     payment: NewPayment,
   ): { ok: true } | { ok: false; reason: RecordPaymentRefusal } {
-    const isOwnRecipient = this.#db
+    const isOwnRecipient = this.#ctx.db
       .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
       .get(payment.recipientId, ownerId);
     if (!isOwnRecipient) return { ok: false, reason: "recipient-not-found" };
@@ -2353,7 +2358,7 @@ class Core implements PactCore {
    */
   #decideEvidence(evidence: EvidenceToDecide, decided: Decided, reviewerId: AccountId): void {
     const { outcome, reason } = decided;
-    const now = this.#clock.now();
+    const now = this.#ctx.clock.now();
     this.#recordDecision("evidence", evidence.id, decided, reviewerId, now);
     // A day ahead with an approved excuse stays for judging at its due time, which makes it Excused.
     const excusedAhead = this.#excuseOn(evidence.pact_id, evidence.occurrence_date) === "approved";
@@ -2398,16 +2403,18 @@ class Core implements PactCore {
    */
   #occurrenceStatus(pactId: string, occurrence: Occurrence): OccurrenceStatus {
     const { date } = occurrence;
-    const row = this.#db
-      .prepare(
-        `SELECT occurrence.outcome, occurrence.judged_at, penalty.amount_cents
+    const row = this.#ctx.one<{
+      outcome: "satisfied" | "missed" | "excused" | null;
+      judged_at: string | null;
+      amount_cents: number | null;
+    }>(
+      `SELECT occurrence.outcome, occurrence.judged_at, penalty.amount_cents
          FROM occurrence
          LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
          WHERE occurrence.pact_id = ? AND occurrence.date = ?`,
-      )
-      .get(pactId, date) as
-      | { outcome: "satisfied" | "missed" | "excused" | null; judged_at: string | null; amount_cents: number | null }
-      | undefined;
+      pactId,
+      date,
+    );
     const excuse = this.#excuseOn(pactId, date);
     if (row?.outcome === "satisfied") return { kind: "satisfied" };
     if (row?.outcome === "excused") return { kind: "excused" };
@@ -2475,13 +2482,12 @@ class Core implements PactCore {
 
   /** The owner's pacts due yesterday, by name, each with how its occurrence went. */
   #yesterday(ownerId: AccountId, timezone: string): TodayYesterdayEntry[] {
-    const yesterday = addDays(localDateOf(this.#clock.now(), timezone), -1);
+    const yesterday = addDays(localDateOf(this.#ctx.clock.now(), timezone), -1);
     // A Weekly count week isn't due on any one day.
-    const pacts = this.#db
-      .prepare(
-        `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${WEEKLY_COUNT_PACT} ORDER BY name, created_at, id`,
-      )
-      .all(ownerId) as PactRow[];
+    const pacts = this.#ctx.all<PactRow>(
+      `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${WEEKLY_COUNT_PACT} ORDER BY name, created_at, id`,
+      ownerId,
+    );
     return pacts.flatMap((pact) =>
       this.#occurrenceRecords(pact, timezone, yesterday, yesterday).flatMap(({ date, occurrence }) =>
         occurrence
@@ -2519,23 +2525,21 @@ class Core implements PactCore {
     occurrence: Occurrence,
   ): OccurrenceRecord {
     const status = this.#occurrenceStatus(pact.id, occurrence);
-    const row = this.#db
-      .prepare(
-        `SELECT occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at,
+    const row = this.#ctx.one<{
+      bedtime_start: string | null;
+      anki_cards_left: number | null;
+      anki_checked_at: string | null;
+      recipient_name: string | null;
+    }>(
+      `SELECT occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at,
                 recipient.name AS recipient_name
          FROM occurrence
          LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
          LEFT JOIN recipient ON recipient.id = penalty.recipient_id
          WHERE occurrence.pact_id = ? AND occurrence.date = ?`,
-      )
-      .get(pact.id, occurrence.date) as
-      | {
-          bedtime_start: string | null;
-          anki_cards_left: number | null;
-          anki_checked_at: string | null;
-          recipient_name: string | null;
-        }
-      | undefined;
+      pact.id,
+      occurrence.date,
+    );
     const judged = status.kind === "satisfied" || status.kind === "missed";
     let detail: OccurrenceDetail | null = null;
     if (pact.evidence_kind === "oura" && judged) {
@@ -2565,12 +2569,12 @@ class Core implements PactCore {
       case "satisfied": {
         const row = weekly
           ? undefined
-          : (this.#db
-              .prepare(
-                `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
+          : this.#ctx.one<{ name: string }>(
+              `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
                  WHERE evidence.pact_id = ? AND evidence.occurrence_date = ? AND evidence.decision = 'approved'`,
-              )
-              .get(pactId, date) as { name: string } | undefined);
+              pactId,
+              date,
+            );
         return { ...status, approvedBy: row?.name ?? null };
       }
       case "missed":
@@ -2579,15 +2583,15 @@ class Core implements PactCore {
       case "not-judged": {
         const covered = status.kind === "excused" || status.excuse === "approved";
         const row = covered
-          ? (this.#db
-              .prepare(
-                `SELECT account.name, excuse.reason FROM excuse_day
+          ? this.#ctx.one<{ name: string; reason: string }>(
+              `SELECT account.name, excuse.reason FROM excuse_day
                  JOIN excuse ON excuse.id = excuse_day.excuse_id
                  JOIN account ON account.id = excuse.decided_by_account_id
                  WHERE excuse_day.pact_id = ? AND excuse_day.date = ? AND excuse.decision = 'approved'
                  ORDER BY excuse.decided_at DESC LIMIT 1`,
-              )
-              .get(pactId, date) as { name: string; reason: string } | undefined)
+              pactId,
+              date,
+            )
           : undefined;
         return { ...status, excuseApproval: row ? { reviewerName: row.name, reason: row.reason } : null };
       }
@@ -2596,14 +2600,14 @@ class Core implements PactCore {
 
   /** Whether an excuse waiting for approval, or else an approved one, covers the occurrence. */
   #excuseOn(pactId: string, date: LocalDate): "waiting" | "approved" | null {
-    const decisions = (
-      this.#db
-        .prepare(
-          `SELECT excuse.decision FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+    const decisions = this.#ctx
+      .all<{ decision: ReviewOutcome | null }>(
+        `SELECT excuse.decision FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
            WHERE excuse_day.pact_id = ? AND excuse_day.date = ?`,
-        )
-        .all(pactId, date) as { decision: ReviewOutcome | null }[]
-    ).map((row) => row.decision);
+        pactId,
+        date,
+      )
+      .map((row) => row.decision);
     if (decisions.includes(null)) return "waiting";
     return decisions.includes("approved") ? "approved" : null;
   }
@@ -2663,11 +2667,11 @@ class Core implements PactCore {
    */
   #excuseDays(excuseId: string, pactId: string, timezone: string): ExcuseDay[] {
     const { between } = this.#occurrencesOf(pactId, timezone);
-    const dates = (
-      this.#db.prepare(`SELECT date FROM excuse_day WHERE excuse_id = ? ORDER BY date`).all(excuseId) as {
+    const dates = this.#ctx
+      .all<{
         date: LocalDate;
-      }[]
-    ).map((row) => row.date);
+      }>(`SELECT date FROM excuse_day WHERE excuse_id = ? ORDER BY date`, excuseId)
+      .map((row) => row.date);
     return dates.flatMap((date) => {
       const [occurrence] = between(date, date);
       return occurrence ? [this.#excuseDay(pactId, occurrence)] : [];
@@ -2686,23 +2690,22 @@ class Core implements PactCore {
 
   /** The photos of an excuse, in the order added. */
   #excusePhotoIds(excuseId: string): string[] {
-    return (
-      this.#db.prepare(`SELECT photo_id FROM excuse_photo WHERE excuse_id = ? ORDER BY position`).all(excuseId) as {
+    return this.#ctx
+      .all<{
         photo_id: string;
-      }[]
-    ).map((row) => row.photo_id);
+      }>(`SELECT photo_id FROM excuse_photo WHERE excuse_id = ? ORDER BY position`, excuseId)
+      .map((row) => row.photo_id);
   }
 
   /** The owner's timezone and the pact's terms, for an excuse's pact. */
   #excusePact(excuseId: string): (PactRow & { timezone: string }) | undefined {
-    return this.#db
-      .prepare(
-        `SELECT pact.*, account.timezone FROM excuse
+    return this.#ctx.one<PactRow & { timezone: string }>(
+      `SELECT pact.*, account.timezone FROM excuse
          JOIN pact ON pact.id = excuse.pact_id
          JOIN account ON account.id = pact.owner_account_id
          WHERE excuse.id = ?`,
-      )
-      .get(excuseId) as (PactRow & { timezone: string }) | undefined;
+      excuseId,
+    );
   }
 
   /** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days; "Week of Mon Jan 5" for a Weekly count week. */
@@ -2711,7 +2714,7 @@ class Core implements PactCore {
       first,
       last,
       pact_id: pactId,
-    } = this.#db
+    } = this.#ctx.db
       .prepare(`SELECT MIN(date) AS first, MAX(date) AS last, pact_id FROM excuse_day WHERE excuse_id = ?`)
       .get(excuseId) as { first: LocalDate; last: LocalDate; pact_id: string };
     const text = first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
@@ -2730,24 +2733,28 @@ class Core implements PactCore {
    */
   #decideExcuse(excuse: ExcuseToDecide, decided: Decided, reviewerId: AccountId): void {
     const { outcome, reason } = decided;
-    const now = this.#clock.now();
+    const now = this.#ctx.clock.now();
     this.#recordDecision("excuse", excuse.id, decided, reviewerId, now);
     if (outcome === "approved") {
-      const dates = this.#db.prepare(`SELECT date FROM excuse_day WHERE excuse_id = ?`).all(excuse.id) as {
+      const dates = this.#ctx.all<{
         date: LocalDate;
-      }[];
+      }>(`SELECT date FROM excuse_day WHERE excuse_id = ?`, excuse.id);
       const { timezone, evidence_kind: evidenceKind } = this.#excusePact(excuse.id)!;
       const { covering } = this.#occurrencesOf(excuse.pact_id, timezone);
       for (const { date } of dates) {
         const occurrence = covering(date);
         // The pact Ended before the day fell due: it's never judged.
         if (occurrence === null || this.#dueAfterEnd(excuse.pact_id, occurrence)) continue;
-        const row = this.#db
-          .prepare(`SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`)
-          .get(excuse.pact_id, date) as { outcome: string | null } | undefined;
+        const row = this.#ctx.one<{ outcome: string | null }>(
+          `SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`,
+          excuse.pact_id,
+          date,
+        );
         if (row?.outcome === "missed") {
-          this.#db.prepare(`DELETE FROM penalty WHERE pact_id = ? AND occurrence_date = ?`).run(excuse.pact_id, date);
-          this.#db
+          this.#ctx.db
+            .prepare(`DELETE FROM penalty WHERE pact_id = ? AND occurrence_date = ?`)
+            .run(excuse.pact_id, date);
+          this.#ctx.db
             .prepare(`UPDATE occurrence SET outcome = 'excused', judged_at = ? WHERE pact_id = ? AND date = ?`)
             .run(now.toISOString(), excuse.pact_id, date);
         } else if (
@@ -2779,9 +2786,8 @@ class Core implements PactCore {
 
   /** Excuses waiting for approval that `reviewerId` may decide: those for pacts they review. */
   #excusesToReview(reviewerId: AccountId): ReviewItem[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT excuse.id, excuse.reason, excuse.filed_at, pact.id AS pact_id, pact.name AS pact_name,
+    const rows = this.#ctx.all<ExcuseViewRow & { owner_name: string; recipient_name: string }>(
+      `SELECT excuse.id, excuse.reason, excuse.filed_at, pact.id AS pact_id, pact.name AS pact_name,
                 owner.name AS owner_name, owner.timezone, recipient.name AS recipient_name
          FROM excuse
          JOIN pact ON pact.id = excuse.pact_id
@@ -2790,8 +2796,8 @@ class Core implements PactCore {
          JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
          WHERE excuse.decision IS NULL
          ORDER BY excuse.filed_at, excuse.id`,
-      )
-      .all(reviewerId) as (ExcuseViewRow & { owner_name: string; recipient_name: string })[];
+      reviewerId,
+    );
     return rows.map((row): ReviewItem => {
       const excuse = this.#excuseView(row);
       return {
@@ -2810,23 +2816,24 @@ class Core implements PactCore {
 
   /** The owner's excuses waiting for a decision (or just those for `pactId`), newest first. */
   #waitingExcuses(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT excuse.id, excuse.pact_id, pact.name, excuse.filed_at,
-                (SELECT MIN(date) FROM excuse_day WHERE excuse_id = excuse.id) AS first_date,
-                (SELECT MAX(date) FROM excuse_day WHERE excuse_id = excuse.id) AS last_date
-         FROM excuse JOIN pact ON pact.id = excuse.pact_id
-         WHERE pact.owner_account_id = ? AND excuse.decision IS NULL AND (? IS NULL OR pact.id = ?)
-         ORDER BY excuse.filed_at DESC, excuse.id`,
-      )
-      .all(ownerId, pactId ?? null, pactId ?? null) as {
+    const rows = this.#ctx.all<{
       id: string;
       pact_id: string;
       name: string;
       filed_at: string;
       first_date: string;
       last_date: string;
-    }[];
+    }>(
+      `SELECT excuse.id, excuse.pact_id, pact.name, excuse.filed_at,
+                (SELECT MIN(date) FROM excuse_day WHERE excuse_id = excuse.id) AS first_date,
+                (SELECT MAX(date) FROM excuse_day WHERE excuse_id = excuse.id) AS last_date
+         FROM excuse JOIN pact ON pact.id = excuse.pact_id
+         WHERE pact.owner_account_id = ? AND excuse.decision IS NULL AND (? IS NULL OR pact.id = ?)
+         ORDER BY excuse.filed_at DESC, excuse.id`,
+      ownerId,
+      pactId ?? null,
+      pactId ?? null,
+    );
     return rows.map((row) => ({
       kind: "excuse",
       id: row.id,
@@ -2845,9 +2852,16 @@ class Core implements PactCore {
    * rejected, for ordering among the alerts.
    */
   #rejectedExcuseAlerts(ownerId: AccountId, now: Date): { at: Date; alert: TodayAlert }[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT excuse.id, excuse.pact_id, excuse.reject_reason, excuse.decided_at, pact.name, owner.timezone,
+    const rows = this.#ctx.all<{
+      id: string;
+      pact_id: string;
+      reject_reason: string;
+      decided_at: string;
+      name: string;
+      timezone: string;
+      reviewer_name: string;
+    }>(
+      `SELECT excuse.id, excuse.pact_id, excuse.reject_reason, excuse.decided_at, pact.name, owner.timezone,
                 reviewer.name AS reviewer_name
          FROM excuse
          JOIN pact ON pact.id = excuse.pact_id
@@ -2859,21 +2873,13 @@ class Core implements PactCore {
                            JOIN excuse AS later ON later.id = other.excuse_id
                            WHERE mine.excuse_id = excuse.id AND later.filed_at > excuse.filed_at)
          ORDER BY excuse.decided_at DESC, excuse.id`,
-      )
-      .all(ownerId) as {
-      id: string;
-      pact_id: string;
-      reject_reason: string;
-      decided_at: string;
-      name: string;
-      timezone: string;
-      reviewer_name: string;
-    }[];
+      ownerId,
+    );
     return rows.flatMap((row) => {
       const days = this.#excuseDays(row.id, row.pact_id, row.timezone);
       // An approved change took all its days off the schedule: nothing is owed and nothing is left to do.
       if (days.length === 0) return [];
-      const { owed } = this.#db
+      const { owed } = this.#ctx.db
         .prepare(
           `SELECT COALESCE(SUM(penalty.amount_cents), 0) AS owed FROM excuse_day
            JOIN penalty ON penalty.pact_id = excuse_day.pact_id AND penalty.occurrence_date = excuse_day.date
@@ -2909,9 +2915,10 @@ class Core implements PactCore {
    * change applies to its one occurrence, so it has none that count.
    */
   #earlierTermsOf(pact: PactClock & Pick<PactRow, "id">): EarlierTerms[] {
-    const rows = this.#db
-      .prepare(`SELECT until, schedule, in_bed_by, due_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`)
-      .all(pact.id) as { until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }[];
+    const rows = this.#ctx.all<{ until: LocalDate; schedule: string; in_bed_by: string | null; due_by: string | null }>(
+      `SELECT until, schedule, in_bed_by, due_by FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until`,
+      pact.id,
+    );
     return rows.flatMap((row) => {
       const terms = scheduleTermsOf(pact, scheduleOf(row.schedule), row.in_bed_by, row.due_by);
       return hasSchedule(terms, "one-time") ? [] : [{ ...terms, until: row.until }];
@@ -2924,27 +2931,26 @@ class Core implements PactCore {
    * owner is (`#ouraOffset`).
    */
   #occurrencesOf(pactId: string, timezone: string): Occurrences {
-    const pact = this.#db
-      .prepare(
-        `SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id,
+    const pact = this.#ctx.one<
+      Pick<
+        PactRow,
+        | "id"
+        | "schedule"
+        | "first_occurrence"
+        | "in_bed_by"
+        | "due_by"
+        | "end_date"
+        | "created_at"
+        | "evidence_kind"
+        | "owner_account_id"
+        | "anki_rollover_hour"
+      >
+    >(
+      `SELECT id, schedule, first_occurrence, in_bed_by, due_by, end_date, created_at, owner_account_id,
                 evidence_kind, anki_rollover_hour
          FROM pact WHERE id = ?`,
-      )
-      .get(pactId) as
-      | Pick<
-          PactRow,
-          | "id"
-          | "schedule"
-          | "first_occurrence"
-          | "in_bed_by"
-          | "due_by"
-          | "end_date"
-          | "created_at"
-          | "evidence_kind"
-          | "owner_account_id"
-          | "anki_rollover_hour"
-        >
-      | undefined;
+      pactId,
+    );
     if (!pact) throw new Error(`no pact ${pactId}`);
     const ouraOffset = pact.evidence_kind === "oura" ? this.#ouraOffset(pact.owner_account_id, timezone) : null;
     return occurrencesOverTime(occurrenceTermsOf(pact), this.#earlierTermsOf(pact), timezone, ouraOffset);
@@ -2958,8 +2964,10 @@ class Core implements PactCore {
    * the timezone also knows when its clocks change.
    */
   #ouraOffset(account: AccountId, timezone: string): OuraOffset {
-    const row = this.#db.prepare(`SELECT oura_latest_bedtime_start FROM account WHERE id = ?`).get(account) as
-      { oura_latest_bedtime_start: string | null } | undefined;
+    const row = this.#ctx.one<{ oura_latest_bedtime_start: string | null }>(
+      `SELECT oura_latest_bedtime_start FROM account WHERE id = ?`,
+      account,
+    );
     const latest = row?.oura_latest_bedtime_start ?? null;
     const offset = latest === null ? null : utcOffsetOf(latest);
     if (latest === null || offset === null) return null;
@@ -2973,25 +2981,29 @@ class Core implements PactCore {
    */
   #noteOuraClock(sleep: Map<AccountId, OuraSleepPeriod[]>): void {
     for (const [account, periods] of sleep) {
-      const row = this.#db.prepare(`SELECT oura_latest_bedtime_start FROM account WHERE id = ?`).get(account) as
-        { oura_latest_bedtime_start: string | null } | undefined;
+      const row = this.#ctx.one<{ oura_latest_bedtime_start: string | null }>(
+        `SELECT oura_latest_bedtime_start FROM account WHERE id = ?`,
+        account,
+      );
       let latest = row?.oura_latest_bedtime_start ?? null;
       for (const { type, bedtime_start: start } of periods) {
         if (type === "deleted" || utcOffsetOf(start) === null) continue;
         if (latest === null || Date.parse(start) > Date.parse(latest)) latest = start;
       }
       if (latest === null || latest === row?.oura_latest_bedtime_start) continue;
-      this.#db.prepare(`UPDATE account SET oura_latest_bedtime_start = ? WHERE id = ?`).run(latest, account);
+      this.#ctx.db.prepare(`UPDATE account SET oura_latest_bedtime_start = ? WHERE id = ?`).run(latest, account);
     }
   }
 
   /** The terms the pact's occurrence dated `date` follows: those in force when it opened. */
   #termsOn(pactId: string, date: LocalDate): DatedTerms {
     const columns = `description, schedule, in_bed_by, due_by, penalty_cents, recipient_id, anki_deck_id`;
-    const earlier = this.#db
-      .prepare(`SELECT ${columns} FROM pact_earlier_terms WHERE pact_id = ? AND until > ? ORDER BY until LIMIT 1`)
-      .get(pactId, date) as DatedTerms | undefined;
-    return earlier ?? (this.#db.prepare(`SELECT ${columns} FROM pact WHERE id = ?`).get(pactId) as DatedTerms);
+    const earlier = this.#ctx.one<DatedTerms>(
+      `SELECT ${columns} FROM pact_earlier_terms WHERE pact_id = ? AND until > ? ORDER BY until LIMIT 1`,
+      pactId,
+      date,
+    );
+    return earlier ?? (this.#ctx.db.prepare(`SELECT ${columns} FROM pact WHERE id = ?`).get(pactId) as DatedTerms);
   }
 
   /** The pact's terms an owner can change, as they stand. */
@@ -3050,9 +3062,10 @@ class Core implements PactCore {
 
   /** The id of the pact's change request waiting for a decision, or null. */
   #waitingChangeRequestId(pactId: string): string | null {
-    const row = this.#db
-      .prepare(`SELECT id FROM change_request WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`)
-      .get(pactId) as { id: string } | undefined;
+    const row = this.#ctx.one<{ id: string }>(
+      `SELECT id FROM change_request WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`,
+      pactId,
+    );
     return row?.id ?? null;
   }
 
@@ -3214,7 +3227,7 @@ class Core implements PactCore {
     const today = localDateOf(at, timezone);
     const from = firstDayNotOpen(after.schedule, today);
     // A change already made today put the terms today keeps there first.
-    this.#db
+    this.#ctx.db
       .prepare(
         `INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, in_bed_by, due_by, penalty_cents,
                                          recipient_id, anki_deck_id)
@@ -3228,7 +3241,7 @@ class Core implements PactCore {
     const started = pact.first_occurrence < from;
     const lastOpen = addDays(from, -1);
     const endDate = after.endDate === null ? null : laterDate(after.endDate, lastOpen);
-    this.#db
+    this.#ctx.db
       .prepare(
         `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?, end_date = ?,
                          penalty_cents = ?, recipient_id = ?, first_occurrence = ?,
@@ -3257,7 +3270,7 @@ class Core implements PactCore {
    */
   #applyOneTimeTerms(pact: PactRow, after: ChangeableTerms): void {
     if (after.schedule.kind !== "one-time" || pact.stage === "ended") return;
-    this.#db
+    this.#ctx.db
       .prepare(
         `UPDATE pact SET description = ?, schedule = ?, due_by = ?, penalty_cents = ?, recipient_id = ?,
                          first_occurrence = ?
@@ -3281,18 +3294,18 @@ class Core implements PactCore {
    */
   #moveOneTimeOccurrence(pactId: string, from: LocalDate, to: LocalDate): void {
     if (from === to) return;
-    this.#db
+    this.#ctx.db
       .prepare(
         `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, miss_accepted_at)
          SELECT pact_id, ?, outcome, judged_at, bedtime_start, miss_accepted_at FROM occurrence
          WHERE pact_id = ? AND date = ?`,
       )
       .run(to, pactId, from);
-    this.#db
+    this.#ctx.db
       .prepare(`UPDATE evidence SET occurrence_date = ?, day = ? WHERE pact_id = ? AND occurrence_date = ?`)
       .run(to, to, pactId, from);
-    this.#db.prepare(`UPDATE excuse_day SET date = ? WHERE pact_id = ? AND date = ?`).run(to, pactId, from);
-    this.#db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, from);
+    this.#ctx.db.prepare(`UPDATE excuse_day SET date = ? WHERE pact_id = ? AND date = ?`).run(to, pactId, from);
+    this.#ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, from);
   }
 
   /**
@@ -3368,9 +3381,9 @@ class Core implements PactCore {
     after: ChangeableTerms | null,
     note: string | undefined,
   ): string {
-    const id = this.#newId();
+    const id = this.#ctx.newId();
     const trimmed = note?.trim() ?? "";
-    this.#db
+    this.#ctx.db
       .prepare(
         `INSERT INTO change_request (id, pact_id, ends_pact, before_terms, after_terms, note, requested_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -3382,7 +3395,7 @@ class Core implements PactCore {
         JSON.stringify(before),
         after === null ? null : JSON.stringify(after),
         trimmed === "" ? null : trimmed,
-        this.#clock.now().toISOString(),
+        this.#ctx.clock.now().toISOString(),
       );
     const what =
       after === null
@@ -3404,22 +3417,21 @@ class Core implements PactCore {
 
   /** A change request with its pact's owner and their timezone, and the reviewer who decided it. */
   #changeRequestRow(id: string): StoredChangeRequest | undefined {
-    const row = this.#db
-      .prepare(
-        `SELECT change_request.*, pact.owner_account_id, owner.name AS owner_name, owner.timezone,
+    const row = this.#ctx.one<ChangeRequestRow>(
+      `SELECT change_request.*, pact.owner_account_id, owner.name AS owner_name, owner.timezone,
                 reviewer.name AS reviewer_name
          FROM change_request
          JOIN pact ON pact.id = change_request.pact_id
          JOIN account AS owner ON owner.id = pact.owner_account_id
          LEFT JOIN account AS reviewer ON reviewer.id = change_request.decided_by_account_id
          WHERE change_request.id = ?`,
-      )
-      .get(id) as ChangeRequestRow | undefined;
+      id,
+    );
     return row && storedChangeRequestOf(row);
   }
 
   #changeRequestView(row: StoredChangeRequest): ChangeRequestView {
-    const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
+    const pact = this.#ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
     const { request } = row;
     const waiting = row.decision === null && row.withdrawn_at === null;
     const base = {
@@ -3442,22 +3454,26 @@ class Core implements PactCore {
         termDiffs(request.before, request.after, dayClockOf(pact, pact.in_bed_by, pact.due_by)),
       ),
       start: waiting
-        ? this.#startOfNewTerms(pact, ownerZone(row.timezone, row.owner_account_id), request.after, this.#clock.now())
+        ? this.#startOfNewTerms(
+            pact,
+            ownerZone(row.timezone, row.owner_account_id),
+            request.after,
+            this.#ctx.clock.now(),
+          )
         : null,
     };
   }
 
   /** Change requests waiting for a decision that `reviewerId` may make: those for pacts they review, oldest first. */
   #changeRequestsToReview(reviewerId: AccountId): ReviewItem[] {
-    const ids = this.#db
-      .prepare(
-        `SELECT change_request.id FROM change_request
+    const ids = this.#ctx.all<{ id: string }>(
+      `SELECT change_request.id FROM change_request
          JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
                            AND pact_reviewer.reviewer_account_id = ?
          WHERE change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
          ORDER BY change_request.requested_at, change_request.id`,
-      )
-      .all(reviewerId) as { id: string }[];
+      reviewerId,
+    );
     return ids.map(({ id }) => {
       const row = this.#changeRequestRow(id)!;
       return {
@@ -3471,22 +3487,23 @@ class Core implements PactCore {
 
   /** The owner's change requests waiting for a decision (or just that for `pactId`), newest first. */
   #waitingChangeRequests(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT change_request.id, change_request.pact_id, pact.name, change_request.ends_pact,
-                change_request.requested_at
-         FROM change_request JOIN pact ON pact.id = change_request.pact_id
-         WHERE pact.owner_account_id = ? AND change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
-           AND (? IS NULL OR pact.id = ?)
-         ORDER BY change_request.requested_at DESC, change_request.id`,
-      )
-      .all(ownerId, pactId ?? null, pactId ?? null) as {
+    const rows = this.#ctx.all<{
       id: string;
       pact_id: string;
       name: string;
       ends_pact: 0 | 1;
       requested_at: string;
-    }[];
+    }>(
+      `SELECT change_request.id, change_request.pact_id, pact.name, change_request.ends_pact,
+                change_request.requested_at
+         FROM change_request JOIN pact ON pact.id = change_request.pact_id
+         WHERE pact.owner_account_id = ? AND change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
+           AND (? IS NULL OR pact.id = ?)
+         ORDER BY change_request.requested_at DESC, change_request.id`,
+      ownerId,
+      pactId ?? null,
+      pactId ?? null,
+    );
     return rows.map((row) => ({
       kind: "change-request",
       id: row.id,
@@ -3505,10 +3522,10 @@ class Core implements PactCore {
    */
   #decideChangeRequest(row: StoredChangeRequest, decided: Decided, reviewerId: AccountId): void {
     const { outcome } = decided;
-    const now = this.#clock.now();
+    const now = this.#ctx.clock.now();
     this.#recordDecision("change_request", row.id, decided, reviewerId, now);
     const { request } = row;
-    const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
+    const pact = this.#ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
     const reviewerName = this.#accountName(reviewerId);
     const title = `${reviewerName} ${outcome} ${request.kind === "end" ? `ending ${pact.name}` : "your change"}`;
     let body: string;
@@ -3520,7 +3537,7 @@ class Core implements PactCore {
     } else {
       const { before, after } = request;
       for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
-        this.#db
+        this.#ctx.db
           .prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`)
           .run(pact.id, removed);
       }
@@ -3552,22 +3569,23 @@ class Core implements PactCore {
   #approvableNow(row: StoredChangeRequest): boolean {
     const { request } = row;
     if (request.kind === "end" || request.after.schedule.kind !== "one-time") return true;
-    const pact = this.#db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
+    const pact = this.#ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
     if (pact.stage === "ended") return true;
     return this.#deadlineFarEnough(
       pact,
       ownerZone(row.timezone, row.owner_account_id),
       request.after,
-      this.#clock.now(),
+      this.#ctx.clock.now(),
     );
   }
 
   /** As the pact page puts it: when the newest terms start, while their first occurrence hasn't opened. */
   #newTerms(pact: PactRow, timezone: string, now: Date): PactTerms["newTerms"] {
     if (pact.stage === "ended") return null;
-    const latest = this.#db
-      .prepare(`SELECT until FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until DESC LIMIT 1`)
-      .get(pact.id) as { until: LocalDate } | undefined;
+    const latest = this.#ctx.one<{ until: LocalDate }>(
+      `SELECT until FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until DESC LIMIT 1`,
+      pact.id,
+    );
     if (!latest) return null;
     const occurrences = this.#occurrencesOf(pact.id, timezone);
     // A start date may put the first occurrence further off than a week.
@@ -3581,8 +3599,7 @@ class Core implements PactCore {
 
   /** `ownerId`'s pact `pactId`, if it is one. */
   #ownPact(ownerId: AccountId, pactId: string): PactRow | undefined {
-    return this.#db.prepare(`SELECT * FROM pact WHERE id = ? AND owner_account_id = ?`).get(pactId, ownerId) as
-      PactRow | undefined;
+    return this.#ctx.one<PactRow>(`SELECT * FROM pact WHERE id = ? AND owner_account_id = ?`, pactId, ownerId);
   }
 
   /**
@@ -3641,7 +3658,7 @@ class Core implements PactCore {
     ownerId: AccountId,
     pact: NewPact,
   ): { ok: true; reviewerIds: AccountId[] } | { ok: false; reason: CreatePactRefusal } {
-    const isOwnRecipient = this.#db
+    const isOwnRecipient = this.#ctx.db
       .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
       .get(pact.recipientId, ownerId);
     if (!isOwnRecipient) return { ok: false, reason: "unknown-recipient" };
@@ -3653,16 +3670,17 @@ class Core implements PactCore {
 
   #hasConnection(accountId: AccountId, service: ConnectionService): boolean {
     return (
-      this.#db.prepare(`SELECT 1 FROM connection WHERE account_id = ? AND service = ?`).get(accountId, service) !==
+      this.#ctx.db.prepare(`SELECT 1 FROM connection WHERE account_id = ? AND service = ?`).get(accountId, service) !==
       undefined
     );
   }
 
   /** The account's deck list as AnkiWeb last gave it, or null before the first. */
   #ankiDeckList(accountId: AccountId): { decks: AnkiDeck[]; rolloverHour: number } | null {
-    const row = this.#db
-      .prepare(`SELECT decks, rollover_hour FROM anki_deck_list WHERE account_id = ?`)
-      .get(accountId) as { decks: string; rollover_hour: number } | undefined;
+    const row = this.#ctx.one<{ decks: string; rollover_hour: number }>(
+      `SELECT decks, rollover_hour FROM anki_deck_list WHERE account_id = ?`,
+      accountId,
+    );
     return row ? { decks: JSON.parse(row.decks) as AnkiDeck[], rolloverHour: row.rollover_hour } : null;
   }
 
@@ -3684,9 +3702,11 @@ class Core implements PactCore {
     accountId: AccountId,
     deckId: string,
   ): { name: string | null; missing_since: string | null } | undefined {
-    return this.#db
-      .prepare(`SELECT name, missing_since FROM anki_pact_deck WHERE account_id = ? AND deck_id = ?`)
-      .get(accountId, deckId) as { name: string | null; missing_since: string | null } | undefined;
+    return this.#ctx.one<{ name: string | null; missing_since: string | null }>(
+      `SELECT name, missing_since FROM anki_pact_deck WHERE account_id = ? AND deck_id = ?`,
+      accountId,
+      deckId,
+    );
   }
 
   /** Whether the last check found the deck gone from the account's collection. */
@@ -3708,7 +3728,7 @@ class Core implements PactCore {
   /** How many of the account's Active pacts are judged from `service`. */
   #activePactsUsing(accountId: AccountId, service: ConnectionService): number {
     // Each service supplies the evidence kind of the same name (SERVICE_OF_KIND).
-    const row = this.#db
+    const row = this.#ctx.db
       .prepare(`SELECT COUNT(*) AS n FROM pact WHERE owner_account_id = ? AND stage = 'active' AND evidence_kind = ?`)
       .get(accountId, service) as { n: number };
     return row.n;
@@ -3716,59 +3736,62 @@ class Core implements PactCore {
 
   /** Connects the account to `service`, or marks a connection that needs reconnecting connected again. */
   #connect(accountId: AccountId, service: ConnectionService): void {
-    this.#db
+    this.#ctx.db
       .prepare(
         `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, ?, 'connected', ?)
          ON CONFLICT (account_id, service) DO UPDATE SET status = 'connected', connected_at = excluded.connected_at`,
       )
-      .run(accountId, service, this.#clock.now().toISOString());
+      .run(accountId, service, this.#ctx.clock.now().toISOString());
   }
 
   #disconnect(accountId: AccountId, service: ConnectionService): void {
-    this.#db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = ?`).run(accountId, service);
+    this.#ctx.db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = ?`).run(accountId, service);
   }
 
   /** Why the service can't be read for the account, or null when its connection works. */
   #connectionProblem(accountId: AccountId, service: ConnectionService): ConnectionProblem | null {
-    const row = this.#db
-      .prepare(`SELECT status FROM connection WHERE account_id = ? AND service = ?`)
-      .get(accountId, service) as { status: Connection["status"] } | undefined;
+    const row = this.#ctx.one<{ status: Connection["status"] }>(
+      `SELECT status FROM connection WHERE account_id = ? AND service = ?`,
+      accountId,
+      service,
+    );
     if (!row) return "not-connected";
     return row.status === "connected" ? null : row.status;
   }
 
   #setReviewers(pactId: string, reviewerIds: AccountId[]): void {
     for (const reviewerId of reviewerIds) {
-      this.#db
+      this.#ctx.db
         .prepare(`INSERT INTO pact_reviewer (pact_id, reviewer_account_id) VALUES (?, ?)`)
         .run(pactId, reviewerId);
     }
   }
 
   /** Pacts created by this time, as an ISO string, are past their edit window: for comparing in SQL. */
-  #editWindowCutoff(at = this.#clock.now()): string {
+  #editWindowCutoff(at = this.#ctx.clock.now()): string {
     return new Date(at.getTime() - EDIT_WINDOW_MS).toISOString();
   }
 
   /** Removes the pact's evidence on the dates `removed` picks, and those occurrences, none of them judged. */
   #removeEvidence(pactId: string, removed: (date: LocalDate) => boolean): void {
-    const rows = this.#db.prepare(`SELECT id, occurrence_date FROM evidence WHERE pact_id = ?`).all(pactId) as {
+    const rows = this.#ctx.all<{
       id: string;
       occurrence_date: LocalDate;
-    }[];
+    }>(`SELECT id, occurrence_date FROM evidence WHERE pact_id = ?`, pactId);
     for (const { id, occurrence_date } of rows.filter((row) => removed(row.occurrence_date))) {
-      this.#db.prepare(`DELETE FROM evidence_photo WHERE evidence_id = ?`).run(id);
-      this.#db.prepare(`DELETE FROM evidence WHERE id = ?`).run(id);
-      this.#db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, occurrence_date);
+      this.#ctx.db.prepare(`DELETE FROM evidence_photo WHERE evidence_id = ?`).run(id);
+      this.#ctx.db.prepare(`DELETE FROM evidence WHERE id = ?`).run(id);
+      this.#ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, occurrence_date);
     }
   }
 
   #reviewersOf(pactId: string): AccountId[] {
-    return (
-      this.#db
-        .prepare(`SELECT reviewer_account_id FROM pact_reviewer WHERE pact_id = ? ORDER BY reviewer_account_id`)
-        .all(pactId) as { reviewer_account_id: AccountId }[]
-    ).map((row) => row.reviewer_account_id);
+    return this.#ctx
+      .all<{ reviewer_account_id: AccountId }>(
+        `SELECT reviewer_account_id FROM pact_reviewer WHERE pact_id = ? ORDER BY reviewer_account_id`,
+        pactId,
+      )
+      .map((row) => row.reviewer_account_id);
   }
 
   #enqueueEvidenceReviewItems(pactId: string, evidenceId: string, date: LocalDate, ownerName: string): void {
@@ -3802,9 +3825,10 @@ class Core implements PactCore {
    * evidence submitted in the window.
    */
   #closeEditWindows(t: Date): void {
-    const pacts = this.#db
-      .prepare(`SELECT * FROM pact WHERE reviewers_notified_at IS NULL AND created_at <= ? ORDER BY created_at, id`)
-      .all(this.#editWindowCutoff(t)) as PactRow[];
+    const pacts = this.#ctx.all<PactRow>(
+      `SELECT * FROM pact WHERE reviewers_notified_at IS NULL AND created_at <= ? ORDER BY created_at, id`,
+      this.#editWindowCutoff(t),
+    );
     for (const pact of pacts) {
       const ownerName = this.#accountName(pact.owner_account_id);
       this.#tellPickedAsReviewer(this.#reviewersOf(pact.id), `${ownerName} picked you as a reviewer`, {
@@ -3814,37 +3838,42 @@ class Core implements PactCore {
         penaltyCents: pact.penalty_cents,
       });
       const closedAt = editWindowEnd(pact).toISOString();
-      const held = this.#db
-        .prepare(
-          `SELECT id, day FROM evidence
+      const held = this.#ctx.all<{ id: string; day: LocalDate }>(
+        `SELECT id, day FROM evidence
            WHERE pact_id = ? AND decision IS NULL AND submitted_at < ?
            ORDER BY submitted_at, id`,
-        )
-        .all(pact.id, closedAt) as { id: string; day: LocalDate }[];
+        pact.id,
+        closedAt,
+      );
       for (const { id, day } of held) {
         this.#enqueueEvidenceReviewItems(pact.id, id, day, ownerName);
       }
-      this.#db.prepare(`UPDATE pact SET reviewers_notified_at = ? WHERE id = ?`).run(t.toISOString(), pact.id);
+      this.#ctx.db.prepare(`UPDATE pact SET reviewers_notified_at = ? WHERE id = ?`).run(t.toISOString(), pact.id);
     }
   }
 
   #accountName(accountId: AccountId): string {
-    return (this.#db.prepare(`SELECT name FROM account WHERE id = ?`).get(accountId) as { name: string }).name;
+    return (this.#ctx.db.prepare(`SELECT name FROM account WHERE id = ?`).get(accountId) as { name: string }).name;
   }
 
   #pactName(pactId: string): string {
-    return (this.#db.prepare(`SELECT name FROM pact WHERE id = ?`).get(pactId) as { name: string }).name;
+    return (this.#ctx.db.prepare(`SELECT name FROM pact WHERE id = ?`).get(pactId) as { name: string }).name;
   }
 
   #recipientName(recipientId: string): string {
-    return (this.#db.prepare(`SELECT name FROM recipient WHERE id = ?`).get(recipientId) as { name: string }).name;
+    return (this.#ctx.db.prepare(`SELECT name FROM recipient WHERE id = ?`).get(recipientId) as { name: string }).name;
   }
 
   /** Payments awaiting approval that `reviewerId` may decide, oldest recorded first. */
   #paymentsToReview(reviewerId: AccountId): ReviewItem[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT payment.id, payment.owner_account_id, payment.recipient_id, owner.name AS owner_name,
+    const rows = this.#ctx.all<
+      PaymentViewRow & {
+        owner_account_id: AccountId;
+        recipient_id: string;
+        owner_name: string;
+      }
+    >(
+      `SELECT payment.id, payment.owner_account_id, payment.recipient_id, owner.name AS owner_name,
                 recipient.name AS recipient_name, payment.amount_cents, payment.note, payment.photo_id,
                 payment.recorded_at
          FROM payment
@@ -3852,12 +3881,8 @@ class Core implements PactCore {
          JOIN recipient ON recipient.id = payment.recipient_id
          WHERE payment.decision IS NULL AND ${MAY_DECIDE_PAYMENT}
          ORDER BY payment.recorded_at, payment.id`,
-      )
-      .all(reviewerId) as (PaymentViewRow & {
-      owner_account_id: AccountId;
-      recipient_id: string;
-      owner_name: string;
-    })[];
+      reviewerId,
+    );
     return rows.map((row): ReviewItem => {
       const owedCents = this.#ledgerSummaries(row.owner_account_id, row.recipient_id)[0]?.owedCents ?? 0;
       return {
@@ -3873,14 +3898,13 @@ class Core implements PactCore {
 
   /** Who reviews payments from `ownerId` to `recipientId`, each once. */
   #paymentReviewers(ownerId: AccountId, recipientId: string): AccountId[] {
-    return (
-      this.#db
-        .prepare(
-          `SELECT DISTINCT reviewer_account_id FROM (${paymentReviewersSql("@owner", "@recipient")})
+    return this.#ctx
+      .all<{ reviewer_account_id: AccountId }>(
+        `SELECT DISTINCT reviewer_account_id FROM (${paymentReviewersSql("@owner", "@recipient")})
            ORDER BY reviewer_account_id`,
-        )
-        .all({ owner: ownerId, recipient: recipientId }) as { reviewer_account_id: AccountId }[]
-    ).map((row) => row.reviewer_account_id);
+        { owner: ownerId, recipient: recipientId },
+      )
+      .map((row) => row.reviewer_account_id);
   }
 
   /**
@@ -3888,13 +3912,13 @@ class Core implements PactCore {
    * the owner's pacts with its recipient.
    */
   #paymentToDecide(reviewerId: AccountId, itemId: string): PaymentToDecide | undefined {
-    return this.#db
-      .prepare(
-        `SELECT payment.id, payment.owner_account_id, payment.recipient_id, payment.decision
+    return this.#ctx.one<PaymentToDecide>(
+      `SELECT payment.id, payment.owner_account_id, payment.recipient_id, payment.decision
          FROM payment
          WHERE payment.id = ? AND ${MAY_DECIDE_PAYMENT}`,
-      )
-      .get(itemId, reviewerId) as PaymentToDecide | undefined;
+      itemId,
+      reviewerId,
+    );
   }
 
   /**
@@ -3903,8 +3927,8 @@ class Core implements PactCore {
    */
   #decidePayment(payment: PaymentToDecide, decided: Decided, reviewerId: AccountId): void {
     const { outcome, reason } = decided;
-    this.#recordDecision("payment", payment.id, decided, reviewerId, this.#clock.now());
-    const { amount_cents } = this.#db.prepare(`SELECT amount_cents FROM payment WHERE id = ?`).get(payment.id) as {
+    this.#recordDecision("payment", payment.id, decided, reviewerId, this.#ctx.clock.now());
+    const { amount_cents } = this.#ctx.db.prepare(`SELECT amount_cents FROM payment WHERE id = ?`).get(payment.id) as {
       amount_cents: number;
     };
     const paid = `${money(amount_cents)} to ${this.#recipientName(payment.recipient_id)}`;
@@ -3931,7 +3955,7 @@ class Core implements PactCore {
     reviewerId: AccountId,
     at: Date,
   ): void {
-    this.#db
+    this.#ctx.db
       .prepare(
         `UPDATE ${table} SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
          WHERE id = ?`,
@@ -3944,7 +3968,7 @@ class Core implements PactCore {
    * it's no longer one of the pact's, so it's never judged or excused.
    */
   #dueAfterEnd(pactId: string, occurrence: Occurrence): boolean {
-    const { ended_at: endedAt } = this.#db.prepare(`SELECT ended_at FROM pact WHERE id = ?`).get(pactId) as {
+    const { ended_at: endedAt } = this.#ctx.db.prepare(`SELECT ended_at FROM pact WHERE id = ?`).get(pactId) as {
       ended_at: string | null;
     };
     if (endedAt === null || occurrence.dueAt.getTime() <= new Date(endedAt).getTime()) return false;
@@ -3969,7 +3993,7 @@ class Core implements PactCore {
   /** Whether `photoId` is a photo of some evidence or excuse (`table`) and `accountId` owns or reviews its pact. */
   #mayViewPactItemPhoto(table: "evidence" | "excuse", photoId: string, accountId: AccountId): boolean {
     return (
-      this.#db
+      this.#ctx.db
         .prepare(
           `SELECT 1 FROM ${table}_photo
            JOIN ${table} ON ${table}.id = ${table}_photo.${table}_id
@@ -3990,7 +4014,7 @@ class Core implements PactCore {
    */
   #mayViewPaymentPhoto(photoId: string, accountId: AccountId): boolean {
     return (
-      this.#db
+      this.#ctx.db
         .prepare(
           `SELECT 1 FROM payment
            WHERE payment.photo_id = ?
@@ -4002,11 +4026,12 @@ class Core implements PactCore {
 
   /** The photos of some evidence, in the order taken. */
   #evidencePhotoIds(evidenceId: string): string[] {
-    return (
-      this.#db
-        .prepare(`SELECT photo_id FROM evidence_photo WHERE evidence_id = ? ORDER BY position`)
-        .all(evidenceId) as { photo_id: string }[]
-    ).map((row) => row.photo_id);
+    return this.#ctx
+      .all<{ photo_id: string }>(
+        `SELECT photo_id FROM evidence_photo WHERE evidence_id = ? ORDER BY position`,
+        evidenceId,
+      )
+      .map((row) => row.photo_id);
   }
 
   /**
@@ -4024,11 +4049,11 @@ class Core implements PactCore {
     photoCount: number,
     at: Date,
   ): { ok: true; occurrence: Occurrence; day: LocalDate } | { ok: false; reason: SubmitEvidenceRefusal } {
-    const row = this.#db
-      .prepare(
-        `SELECT schedule, first_occurrence, evidence_kind, stage FROM pact WHERE id = ? AND owner_account_id = ?`,
-      )
-      .get(pactId, ownerId) as Pick<PactRow, "schedule" | "first_occurrence" | "evidence_kind" | "stage"> | undefined;
+    const row = this.#ctx.one<Pick<PactRow, "schedule" | "first_occurrence" | "evidence_kind" | "stage">>(
+      `SELECT schedule, first_occurrence, evidence_kind, stage FROM pact WHERE id = ? AND owner_account_id = ?`,
+      pactId,
+      ownerId,
+    );
     if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
     // Oura reports a bedtime night; there's never a photo to submit.
     if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
@@ -4063,11 +4088,11 @@ class Core implements PactCore {
     date: LocalDate,
     by: "occurrence_date" | "day" = "occurrence_date",
   ): ReviewOutcome | "waiting" | "none" {
-    const decisions = (
-      this.#db.prepare(`SELECT decision FROM evidence WHERE pact_id = ? AND ${by} = ?`).all(pactId, date) as {
+    const decisions = this.#ctx
+      .all<{
         decision: ReviewOutcome | null;
-      }[]
-    ).map((row) => row.decision ?? "waiting");
+      }>(`SELECT decision FROM evidence WHERE pact_id = ? AND ${by} = ?`, pactId, date)
+      .map((row) => row.decision ?? "waiting");
     if (decisions.includes("waiting")) return "waiting";
     if (decisions.includes("approved")) return "approved";
     return decisions.length > 0 ? "rejected" : "none";
@@ -4087,48 +4112,48 @@ class Core implements PactCore {
 
   /** The owner's payments still waiting for a decision, newest first. */
   #waitingPayments(ownerId: AccountId): TodayWaitingItem[] {
-    return (
-      this.#db
-        .prepare(
-          `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
-                  payment.recorded_at
-           FROM payment JOIN recipient ON recipient.id = payment.recipient_id
-           WHERE payment.owner_account_id = ? AND payment.decision IS NULL
-           ORDER BY payment.recorded_at DESC, payment.id`,
-        )
-        .all(ownerId) as {
+    return this.#ctx
+      .all<{
         id: string;
         recipient_id: string;
         recipient_name: string;
         amount_cents: number;
         recorded_at: string;
-      }[]
-    ).map((row): TodayWaitingItem => ({
-      kind: "payment",
-      id: row.id,
-      recipientId: row.recipient_id,
-      recipientName: row.recipient_name,
-      amountCents: row.amount_cents,
-      recordedAt: new Date(row.recorded_at),
-    }));
+      }>(
+        `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
+                  payment.recorded_at
+           FROM payment JOIN recipient ON recipient.id = payment.recipient_id
+           WHERE payment.owner_account_id = ? AND payment.decision IS NULL
+           ORDER BY payment.recorded_at DESC, payment.id`,
+        ownerId,
+      )
+      .map((row): TodayWaitingItem => ({
+        kind: "payment",
+        id: row.id,
+        recipientId: row.recipient_id,
+        recipientName: row.recipient_name,
+        amountCents: row.amount_cents,
+        recordedAt: new Date(row.recorded_at),
+      }));
   }
 
   /** The owner's evidence still waiting for a decision (or just that for `pactId`), newest first. */
   #waitingEvidence(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT evidence.id, evidence.pact_id, pact.name, evidence.day AS occurrence_date, evidence.submitted_at
-         FROM evidence JOIN pact ON pact.id = evidence.pact_id
-         WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND (? IS NULL OR pact.id = ?)
-         ORDER BY evidence.submitted_at DESC, evidence.id`,
-      )
-      .all(ownerId, pactId ?? null, pactId ?? null) as {
+    const rows = this.#ctx.all<{
       id: string;
       pact_id: string;
       name: string;
       occurrence_date: string;
       submitted_at: string;
-    }[];
+    }>(
+      `SELECT evidence.id, evidence.pact_id, pact.name, evidence.day AS occurrence_date, evidence.submitted_at
+         FROM evidence JOIN pact ON pact.id = evidence.pact_id
+         WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND (? IS NULL OR pact.id = ?)
+         ORDER BY evidence.submitted_at DESC, evidence.id`,
+      ownerId,
+      pactId ?? null,
+      pactId ?? null,
+    );
     return rows.map((row) => ({
       kind: "evidence",
       id: row.id,
@@ -4141,7 +4166,7 @@ class Core implements PactCore {
 
   /** Today's alerts and sections for the owner, as `#todayAlerts` and `#todaySections` put them. */
   #todayCards(ownerId: AccountId, timezone: string): { alerts: TodayAlert[]; sections: TodaySection[] } {
-    const now = this.#clock.now();
+    const now = this.#ctx.clock.now();
     const bills = this.#billsForToday(ownerId, now);
     return {
       alerts: this.#todayAlerts(ownerId, now, bills.alerts),
@@ -4411,9 +4436,15 @@ class Core implements PactCore {
    * excuse's own alert takes over then.
    */
   #rejectedEvidenceAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at, penalty.amount_cents,
+    const rows = this.#ctx.all<{
+      id: string;
+      name: string;
+      date: LocalDate;
+      judged_at: string;
+      amount_cents: number;
+      recipient_name: string;
+    }>(
+      `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at, penalty.amount_cents,
                 recipient.name AS recipient_name
          FROM occurrence
          JOIN pact ON pact.id = occurrence.pact_id
@@ -4427,15 +4458,8 @@ class Core implements PactCore {
              "(excuse.decision IS NULL OR excuse.filed_at >= occurrence.judged_at)",
            )}
          ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
-      )
-      .all(ownerId) as {
-      id: string;
-      name: string;
-      date: LocalDate;
-      judged_at: string;
-      amount_cents: number;
-      recipient_name: string;
-    }[];
+      ownerId,
+    );
     return rows.map((row) => {
       const rejection = this.#rejection(row.id, row.date);
       if (!rejection) throw new Error(`no rejected evidence for pact ${row.id} on ${row.date}`);
@@ -4465,9 +4489,16 @@ class Core implements PactCore {
    * rejection has its own alert), or the week is judged.
    */
   #rejectedDayAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
-    const rows = this.#db
-      .prepare(
-        `SELECT pact.id, pact.name, evidence.occurrence_date, evidence.day, evidence.decided_at,
+    const rows = this.#ctx.all<{
+      id: string;
+      name: string;
+      occurrence_date: LocalDate;
+      day: LocalDate;
+      decided_at: string;
+      reject_reason: string;
+      reviewer_name: string;
+    }>(
+      `SELECT pact.id, pact.name, evidence.occurrence_date, evidence.day, evidence.decided_at,
                 evidence.reject_reason, reviewer.name AS reviewer_name
          FROM evidence
          JOIN pact ON pact.id = evidence.pact_id
@@ -4483,16 +4514,8 @@ class Core implements PactCore {
              "(excuse.decision IS NULL OR excuse.decision = 'approved' OR excuse.filed_at >= evidence.decided_at)",
            )}
          ORDER BY evidence.decided_at DESC, pact.name, pact.id`,
-      )
-      .all(ownerId) as {
-      id: string;
-      name: string;
-      occurrence_date: LocalDate;
-      day: LocalDate;
-      decided_at: string;
-      reject_reason: string;
-      reviewer_name: string;
-    }[];
+      ownerId,
+    );
     return rows.map((row) => {
       const terms = this.#termsOn(row.id, row.occurrence_date);
       return {
@@ -4523,9 +4546,19 @@ class Core implements PactCore {
   #recentlyMissed(ownerId: AccountId, timezone: string, now: Date): TodayMissedCard[] {
     const today = localDateOf(now, timezone);
     const since = new Date(now.getTime() - EXCUSE_WINDOW_MS);
-    const rows = this.#db
-      .prepare(
-        `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, penalty.amount_cents, occurrence.date,
+    const rows = this.#ctx.all<{
+      id: string;
+      name: string;
+      evidence_kind: EvidenceKind;
+      schedule: string;
+      amount_cents: number;
+      date: LocalDate;
+      judged_at: string;
+      bedtime_start: string | null;
+      anki_cards_left: number | null;
+      anki_checked_at: string | null;
+    }>(
+      `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, penalty.amount_cents, occurrence.date,
                 occurrence.judged_at, occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at
          FROM occurrence
          JOIN pact ON pact.id = occurrence.pact_id
@@ -4538,19 +4571,9 @@ class Core implements PactCore {
              "(excuse.decision IS NULL OR (excuse.decision = 'rejected' AND excuse.decided_at >= occurrence.judged_at))",
            )}
          ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
-      )
-      .all(ownerId, since.toISOString()) as {
-      id: string;
-      name: string;
-      evidence_kind: EvidenceKind;
-      schedule: string;
-      amount_cents: number;
-      date: LocalDate;
-      judged_at: string;
-      bedtime_start: string | null;
-      anki_cards_left: number | null;
-      anki_checked_at: string | null;
-    }[];
+      ownerId,
+      since.toISOString(),
+    );
     return rows.map((row) => {
       const weekly = scheduleOf(row.schedule).kind === "weekly-count";
       const dueBy = row.date === today && !weekly ? this.#termsOn(row.id, row.date).due_by : null;
@@ -4594,45 +4617,46 @@ class Core implements PactCore {
 
   /** Who rejected the latest rejected evidence for an occurrence, and why; null if none was rejected. */
   #rejection(pactId: string, date: LocalDate): EvidenceRejection | null {
-    const row = this.#db
-      .prepare(
-        `SELECT account.name, evidence.reject_reason FROM evidence
+    const row = this.#ctx.one<{ name: string; reject_reason: string }>(
+      `SELECT account.name, evidence.reject_reason FROM evidence
          JOIN account ON account.id = evidence.decided_by_account_id
          WHERE evidence.pact_id = ? AND evidence.occurrence_date = ? AND evidence.decision = 'rejected'
          ORDER BY evidence.decided_at DESC, evidence.submitted_at DESC
          LIMIT 1`,
-      )
-      .get(pactId, date) as { name: string; reject_reason: string } | undefined;
+      pactId,
+      date,
+    );
     return row ? { reviewerName: row.name, reason: row.reject_reason } : null;
   }
 
   /** `ownerId`'s Active pacts, sorted by name. */
   #activePacts(ownerId: AccountId): ActivePact[] {
-    const now = this.#clock.now();
-    const rows = this.#db
-      .prepare(
-        `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.due_by, pact.start_date, pact.end_date,
+    const now = this.#ctx.clock.now();
+    const rows = this.#ctx.all<
+      Pick<
+        PactRow,
+        | "id"
+        | "name"
+        | "schedule"
+        | "in_bed_by"
+        | "due_by"
+        | "start_date"
+        | "end_date"
+        | "penalty_cents"
+        | "first_occurrence"
+        | "created_at"
+        | "evidence_kind"
+        | "anki_rollover_hour"
+      >
+    >(
+      `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.due_by, pact.start_date, pact.end_date,
                 pact.penalty_cents, pact.first_occurrence, pact.created_at, pact.evidence_kind,
                 pact.anki_rollover_hour
          FROM pact
          WHERE pact.owner_account_id = ? AND pact.stage = 'active'
          ORDER BY pact.name, pact.created_at, pact.id`,
-      )
-      .all(ownerId) as Pick<
-      PactRow,
-      | "id"
-      | "name"
-      | "schedule"
-      | "in_bed_by"
-      | "due_by"
-      | "start_date"
-      | "end_date"
-      | "penalty_cents"
-      | "first_occurrence"
-      | "created_at"
-      | "evidence_kind"
-      | "anki_rollover_hour"
-    >[];
+      ownerId,
+    );
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -4646,7 +4670,7 @@ class Core implements PactCore {
 
   /** The recipients matching the SQL `condition` on `recipient`, sorted by name. */
   #selectRecipients(condition: string, ...params: string[]): Recipient[] {
-    const recipients = this.#db.prepare(`SELECT id, name FROM recipient WHERE ${condition}`).all(...params);
+    const recipients = this.#ctx.db.prepare(`SELECT id, name FROM recipient WHERE ${condition}`).all(...params);
     return (recipients as Recipient[]).sort(byName);
   }
 
@@ -4669,7 +4693,7 @@ class Core implements PactCore {
         this.#endPastEndDate(t);
         this.#makeBills(t);
         this.#remindOverdue(t);
-        this.#db
+        this.#ctx.db
           .prepare(
             `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)
              ON CONFLICT (id) DO UPDATE SET last_tick_at = excluded.last_tick_at`,
@@ -4680,12 +4704,12 @@ class Core implements PactCore {
       // Logged once committed, like any operator alert: the log line never depends on delivery.
       (dropped) => {
         for (const drop of dropped) {
-          this.#log(
+          this.#ctx.log(
             `reminder dropped: pact ${drop.pactId}, ${drop.time} for ${drop.date}, ` +
               `${Math.floor(drop.lateMs / 60_000)} min late at ${t.toISOString()}`,
           );
         }
-        if (dropped.length > 0) this.#log(`OPERATOR_ALERT ${droppedText(dropped.length)} after downtime`);
+        if (dropped.length > 0) this.#ctx.log(`OPERATOR_ALERT ${droppedText(dropped.length)} after downtime`);
       },
     );
     await this.#delivery;
@@ -4702,36 +4726,34 @@ class Core implements PactCore {
    * the ring syncs), an Anki day not judged yet, never one an approved excuse covers.
    */
   #remind(t: Date): DroppedReminder[] {
-    const pacts = this.#db
-      .prepare(
-        `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
+    const pacts = this.#ctx.all<
+      Pick<
+        PactRow,
+        | "id"
+        | "name"
+        | "evidence_kind"
+        | "schedule"
+        | "reminders"
+        | "reminded_through"
+        | "anki_rollover_hour"
+        | "in_bed_by"
+        | "due_by"
+        | "created_at"
+      > & {
+        owner_account_id: AccountId;
+        timezone: string | null;
+      }
+    >(`SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
                 pact.anki_rollover_hour, pact.in_bed_by, pact.due_by, pact.created_at, pact.owner_account_id,
                 account.timezone
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.stage = 'active'
-         ORDER BY pact.created_at, pact.id`,
-      )
-      .all() as (Pick<
-      PactRow,
-      | "id"
-      | "name"
-      | "evidence_kind"
-      | "schedule"
-      | "reminders"
-      | "reminded_through"
-      | "anki_rollover_hour"
-      | "in_bed_by"
-      | "due_by"
-      | "created_at"
-    > & {
-      owner_account_id: AccountId;
-      timezone: string | null;
-    })[];
+         ORDER BY pact.created_at, pact.id`);
     const dropped: DroppedReminder[] = [];
     for (const pact of pacts) {
       const from = pact.reminded_through === null ? t : new Date(pact.reminded_through);
       if (from.getTime() >= t.getTime()) continue;
-      this.#db.prepare(`UPDATE pact SET reminded_through = ? WHERE id = ?`).run(t.toISOString(), pact.id);
+      this.#ctx.db.prepare(`UPDATE pact SET reminded_through = ? WHERE id = ?`).run(t.toISOString(), pact.id);
       const times = remindersOf(pact.reminders);
       if (times.length === 0) continue;
       const timezone = ownerZone(pact.timezone, pact.owner_account_id);
@@ -4746,7 +4768,9 @@ class Core implements PactCore {
         timezone,
       );
       // A reminder sent before the owner moved west comes round again: it went off already.
-      this.#db.prepare(`DELETE FROM reminder_sent WHERE pact_id = ? AND date < ?`).run(pact.id, addDays(fromDate, -1));
+      this.#ctx.db
+        .prepare(`DELETE FROM reminder_sent WHERE pact_id = ? AND date < ?`)
+        .run(pact.id, addDays(fromDate, -1));
       for (const { date, dueAt, time, at } of due) {
         if (at.getTime() <= from.getTime() || at.getTime() > t.getTime()) continue;
         if (at.getTime() >= dueAt.getTime() || !this.#worthReminding(pact, date)) continue;
@@ -4755,14 +4779,13 @@ class Core implements PactCore {
           dropped.push({ pactId: pact.id, date, time, lateMs });
           continue;
         }
-        const sent = this.#db
+        const sent = this.#ctx.db
           .prepare(`INSERT INTO reminder_sent (pact_id, date, time) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`)
           .run(pact.id, date, time);
         if (sent.changes === 1) this.#enqueueReminder(pact, date);
       }
     }
-    const operator = this.#db.prepare(`SELECT id FROM account WHERE is_operator = 1`).get() as
-      { id: AccountId } | undefined;
+    const operator = this.#ctx.one<{ id: AccountId }>(`SELECT id FROM account WHERE is_operator = 1`);
     if (dropped.length > 0 && operator) {
       this.#enqueue({
         recipient: operator.id,
@@ -4792,7 +4815,7 @@ class Core implements PactCore {
     if (pact.evidence_kind === "oura") return true;
     // Pact doesn't see the deck finished until a check does: an Anki day is worth reminding until it's judged.
     if (pact.evidence_kind === "anki") return !this.#isJudged(pact.id, date);
-    const submitted = this.#db.prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND day = ?`).get(pact.id, day);
+    const submitted = this.#ctx.db.prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND day = ?`).get(pact.id, day);
     if (submitted !== undefined || this.#isJudged(pact.id, date)) return false;
     if (!weekly) return true;
     const { sessions, waiting, target } = this.#weekProgress(pact.id, date);
@@ -4856,7 +4879,7 @@ class Core implements PactCore {
       if (pact.evidence_kind === "anki" && !judged) this.#noteAnkiMiss(pact, occurrence);
       through = occurrence.date;
     }
-    if (through !== null) this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(through, pact.id);
+    if (through !== null) this.#ctx.db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(through, pact.id);
   }
 
   /**
@@ -4878,20 +4901,16 @@ class Core implements PactCore {
    * check holds (`#ankiCheckHolds`) ends on a later tick, once it's judged.
    */
   #endPastEndDate(t: Date): void {
-    const rows = this.#db
-      .prepare(
-        `SELECT pact.id, pact.end_date, pact.evidence_kind, pact.owner_account_id, account.timezone
-         FROM pact JOIN account ON account.id = pact.owner_account_id
-         WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL
-         ORDER BY pact.created_at, pact.id`,
-      )
-      .all() as {
+    const rows = this.#ctx.all<{
       id: string;
       end_date: LocalDate;
       evidence_kind: PactRow["evidence_kind"];
       owner_account_id: AccountId;
       timezone: string | null;
-    }[];
+    }>(`SELECT pact.id, pact.end_date, pact.evidence_kind, pact.owner_account_id, account.timezone
+         FROM pact JOIN account ON account.id = pact.owner_account_id
+         WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL
+         ORDER BY pact.created_at, pact.id`);
     for (const { id, end_date: endDate, evidence_kind: kind, owner_account_id: owner, timezone: zone } of rows) {
       const timezone = ownerZone(zone, owner);
       const dayAfter = startOfDay(addDays(endDate, 1), timezone);
@@ -4939,7 +4958,7 @@ class Core implements PactCore {
    * anyone else's tick.
    */
   async #fetchSleep(t: Date, owner?: AccountId): Promise<FetchedSleep> {
-    const askedAt = this.#clock.now();
+    const askedAt = this.#ctx.clock.now();
     const ranges = new Map<AccountId, { startDate: LocalDate; endDate: LocalDate }>();
     for (const { pact, night } of this.#nightsWaiting(t, owner)) {
       if (this.#connectionProblem(pact.owner_account_id, "oura") !== null) continue;
@@ -4960,7 +4979,7 @@ class Core implements PactCore {
         if (result.ok) sleep.set(account, result.periods);
         else disconnected.push(account);
       } catch (error) {
-        this.#log(`Oura sleep for account ${account} failed, no data this tick: ${errorText(error)}`);
+        this.#ctx.log(`Oura sleep for account ${account} failed, no data this tick: ${errorText(error)}`);
       }
     }
     return { sleep, disconnected, askedAt };
@@ -4974,7 +4993,7 @@ class Core implements PactCore {
    * was asked (`askedAt`) is left alone: its new tokens weren't the ones refused.
    */
   #markDisconnected(service: ConnectionService, account: AccountId, askedAt: Date): void {
-    const marked = this.#db
+    const marked = this.#ctx.db
       .prepare(
         `UPDATE connection SET status = 'needs-reconnecting'
          WHERE account_id = ? AND service = ? AND status = 'connected' AND connected_at <= ?`,
@@ -5000,7 +5019,7 @@ class Core implements PactCore {
       if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone, ouraOffset).getTime()) continue;
       if (t.getTime() >= night.closesAt.getTime() || this.#isJudged(pact.id, night.date)) continue;
       if (this.#excuseOn(pact.id, night.date) !== null) continue;
-      const sent = this.#db
+      const sent = this.#ctx.db
         .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
         .run(pact.owner_account_id, night.date);
       if (sent.changes === 0) continue;
@@ -5044,7 +5063,7 @@ class Core implements PactCore {
         this.#judge(pact.id, night.date, "excused", period ? t : night.closesAt);
       } else if (period) {
         this.#judge(pact.id, night.date, satisfied ? "satisfied" : "missed", t);
-        this.#db
+        this.#ctx.db
           .prepare(`UPDATE occurrence SET bedtime_start = ? WHERE pact_id = ? AND date = ?`)
           .run(period.bedtime_start, pact.id, night.date);
         if (!satisfied && excuse === null) this.#enqueueMissed(pact.id, night.date);
@@ -5055,7 +5074,7 @@ class Core implements PactCore {
         stopped.add(pact.id);
         continue;
       }
-      this.#db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(night.date, pact.id);
+      this.#ctx.db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(night.date, pact.id);
     }
   }
 
@@ -5065,17 +5084,17 @@ class Core implements PactCore {
    * excuse, with a working AnkiWeb connection: what a check is for.
    */
   #ankiDaysWaiting(t: Date, owner?: AccountId): { pactId: string; account: AccountId; deckId: string }[] {
-    const pacts = this.#db
-      .prepare(
-        `SELECT pact.id, pact.owner_account_id, account.timezone
+    const pacts = this.#ctx.all<{ id: string; owner_account_id: AccountId; timezone: string | null }>(
+      `SELECT pact.id, pact.owner_account_id, account.timezone
          FROM pact
          JOIN account ON account.id = pact.owner_account_id
          JOIN connection ON connection.account_id = pact.owner_account_id AND connection.service = 'anki'
          WHERE pact.stage = 'active' AND pact.evidence_kind = 'anki' AND connection.status = 'connected'
            AND (? IS NULL OR pact.owner_account_id = ?)
          ORDER BY pact.created_at, pact.id`,
-      )
-      .all(owner ?? null, owner ?? null) as { id: string; owner_account_id: AccountId; timezone: string | null }[];
+      owner ?? null,
+      owner ?? null,
+    );
     return pacts.flatMap((pact) => {
       const open = this.#occurrencesOf(pact.id, ownerZone(pact.timezone, pact.owner_account_id)).openAt(t);
       if (!open || t.getTime() >= open.dueAt.getTime() || this.#isJudged(pact.id, open.date)) return [];
@@ -5115,7 +5134,7 @@ class Core implements PactCore {
         return { account, result, checkedAt: t };
       } catch (error) {
         this.#ankiPolls.delete(account);
-        this.#log(`AnkiWeb check for account ${account} failed, nothing checked: ${errorText(error)}`);
+        this.#ctx.log(`AnkiWeb check for account ${account} failed, nothing checked: ${errorText(error)}`);
         return null;
       } finally {
         checks.delete(running);
@@ -5144,7 +5163,7 @@ class Core implements PactCore {
       for (const [deckId, counts] of Object.entries(result.decks)) {
         this.#notePactDeck(account, deckId, counts === null ? null : (result.names[deckId] ?? null), checkedAt);
         if (counts === null) continue;
-        this.#db
+        this.#ctx.db
           .prepare(
             `INSERT INTO anki_check (account_id, deck_id, new_count, learn_count, review_count, anki_date, as_of,
                                      checked_at)
@@ -5161,13 +5180,12 @@ class Core implements PactCore {
             checkedAt.toISOString(),
           );
       }
-      const pacts = this.#db
-        .prepare(
-          `SELECT pact.id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
+      const pacts = this.#ctx.all<{ id: string; timezone: string | null }>(
+        `SELECT pact.id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
            WHERE pact.owner_account_id = ? AND pact.stage = 'active' AND pact.evidence_kind = 'anki'
            ORDER BY pact.created_at, pact.id`,
-        )
-        .all(account) as { id: string; timezone: string | null }[];
+        account,
+      );
       for (const pact of pacts) {
         const { includes, covering } = this.#occurrencesOf(pact.id, ownerZone(pact.timezone, account));
         const day = includes(ankiDate) ? covering(ankiDate) : null;
@@ -5198,7 +5216,9 @@ class Core implements PactCore {
       return { ...deck, name };
     });
     if (!renamed) return;
-    this.#db.prepare(`UPDATE anki_deck_list SET decks = ? WHERE account_id = ?`).run(JSON.stringify(decks), accountId);
+    this.#ctx.db
+      .prepare(`UPDATE anki_deck_list SET decks = ? WHERE account_id = ?`)
+      .run(JSON.stringify(decks), accountId);
   }
 
   /**
@@ -5208,7 +5228,7 @@ class Core implements PactCore {
    */
   #notePactDeck(account: AccountId, deckId: string, name: string | null, checkedAt: Date): void {
     if (name !== null) {
-      this.#db
+      this.#ctx.db
         .prepare(
           `INSERT INTO anki_pact_deck (account_id, deck_id, name, missing_since) VALUES (?, ?, ?, NULL)
            ON CONFLICT (account_id, deck_id) DO UPDATE SET name = excluded.name, missing_since = NULL`,
@@ -5216,7 +5236,7 @@ class Core implements PactCore {
         .run(account, deckId, name);
       return;
     }
-    this.#db
+    this.#ctx.db
       .prepare(
         `INSERT INTO anki_pact_deck (account_id, deck_id, name, missing_since) VALUES (?, ?, ?, ?)
          ON CONFLICT (account_id, deck_id) DO UPDATE SET name = COALESCE(anki_pact_deck.name, excluded.name),
@@ -5227,9 +5247,11 @@ class Core implements PactCore {
 
   /** On an Anki day just judged Missed at its due time: why, from the last check that counted for it. */
   #noteAnkiMiss(pact: PactToJudge, day: Occurrence): void {
-    const row = this.#db
-      .prepare(`SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`)
-      .get(pact.id, day.date) as { outcome: string | null } | undefined;
+    const row = this.#ctx.one<{ outcome: string | null }>(
+      `SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`,
+      pact.id,
+      day.date,
+    );
     if (row?.outcome !== "missed") return;
     const check = this.#lastAnkiCheck(pact.id, day.date, day.dueAt);
     this.#noteAnkiResult(pact.id, day.date, check);
@@ -5242,24 +5264,26 @@ class Core implements PactCore {
    */
   #lastAnkiCheck(pactId: string, date: LocalDate, before?: Date): AnkiCheck | null {
     const until = before?.toISOString() ?? "9999-12-31T23:59:59.999Z";
-    const row = this.#db
-      .prepare(
-        `SELECT anki_check.new_count + anki_check.learn_count + anki_check.review_count AS cards_left,
+    const row = this.#ctx.one<{ cards_left: number; checked_at: string }>(
+      `SELECT anki_check.new_count + anki_check.learn_count + anki_check.review_count AS cards_left,
                 anki_check.checked_at
          FROM anki_check JOIN pact ON pact.owner_account_id = anki_check.account_id
          WHERE pact.id = ? AND anki_check.deck_id = ? AND anki_check.anki_date = ? AND anki_check.as_of < ?
            AND anki_check.checked_at < ?
          ORDER BY anki_check.checked_at DESC, anki_check.id DESC
          LIMIT 1`,
-      )
-      .get(pactId, this.#ankiDeckOn(pactId, date), date, until, until) as
-      { cards_left: number; checked_at: string } | undefined;
+      pactId,
+      this.#ankiDeckOn(pactId, date),
+      date,
+      until,
+      until,
+    );
     return row ? { cardsLeft: row.cards_left, checkedAt: new Date(row.checked_at) } : null;
   }
 
   /** Stores the check that decided an Anki day; null when none reached AnkiWeb. */
   #noteAnkiResult(pactId: string, date: LocalDate, check: AnkiCheck | null): void {
-    this.#db
+    this.#ctx.db
       .prepare(`UPDATE occurrence SET anki_cards_left = ?, anki_checked_at = ? WHERE pact_id = ? AND date = ?`)
       .run(check?.cardsLeft ?? null, check?.checkedAt.toISOString() ?? null, pactId, date);
   }
@@ -5270,27 +5294,23 @@ class Core implements PactCore {
    * no more occurrences, but a decision can still judge one it had.
    */
   #pactsToJudge(pactId?: string): PactToJudge[] {
-    return this.#db
-      .prepare(
-        `SELECT ${PACT_TO_JUDGE_COLUMNS}
+    return this.#ctx.all<PactToJudge>(
+      `SELECT ${PACT_TO_JUDGE_COLUMNS}
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE (? IS NULL AND pact.stage = 'active') OR pact.id = ?
          ORDER BY pact.created_at, pact.id`,
-      )
-      .all(pactId ?? null, pactId ?? null) as PactToJudge[];
+      pactId ?? null,
+      pactId ?? null,
+    );
   }
 
   /** Ended bedtime pacts with a night not judged that fell due before they Ended, as `#pactsToJudge` reads them. */
   #endedBedtimePacts(): PactToJudge[] {
-    return this.#db
-      .prepare(
-        `SELECT ${PACT_TO_JUDGE_COLUMNS}
+    return this.#ctx.all<PactToJudge>(`SELECT ${PACT_TO_JUDGE_COLUMNS}
          FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.stage = 'ended' AND pact.evidence_kind = 'oura' AND pact.ended_at IS NOT NULL
            AND (pact.judged_through IS NULL OR pact.judged_through < date(pact.ended_at, '+1 day'))
-         ORDER BY pact.created_at, pact.id`,
-      )
-      .all() as PactToJudge[];
+         ORDER BY pact.created_at, pact.id`);
   }
 
   /**
@@ -5337,7 +5357,7 @@ class Core implements PactCore {
   /** How far the pact's Weekly count week starting `monday` has got: see `WeekProgress`. */
   #weekProgress(pactId: string, monday: LocalDate): WeekProgress {
     const schedule = scheduleOf(this.#termsOn(pactId, monday).schedule);
-    const counts = this.#db
+    const counts = this.#ctx.db
       .prepare(
         `SELECT COUNT(DISTINCT CASE WHEN decision = 'approved' THEN day END) AS sessions,
                 COUNT(DISTINCT CASE WHEN decision IS NULL THEN day END) AS waiting
@@ -5349,14 +5369,14 @@ class Core implements PactCore {
 
   /** Whether the pact's schedule is Weekly count. It keeps its kind once its edit window has closed. */
   #isWeekly(pactId: string): boolean {
-    const row = this.#db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
+    const row = this.#ctx.db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
     return scheduleOf(row.schedule).kind === "weekly-count";
   }
 
   /** Only for judging at the due time: a rejection already told the owner, with the reason. */
   #enqueueMissed(pactId: string, date: LocalDate): void {
     const pact = {
-      ...(this.#db.prepare(`SELECT owner_account_id, name FROM pact WHERE id = ?`).get(pactId) as {
+      ...(this.#ctx.db.prepare(`SELECT owner_account_id, name FROM pact WHERE id = ?`).get(pactId) as {
         owner_account_id: AccountId;
         name: string;
       }),
@@ -5380,7 +5400,7 @@ class Core implements PactCore {
   /** Whether the occurrence already has an outcome: Satisfied, Missed or Excused. */
   #isJudged(pactId: string, date: LocalDate): boolean {
     return (
-      this.#db
+      this.#ctx.db
         .prepare(`SELECT 1 FROM occurrence WHERE pact_id = ? AND date = ? AND outcome IS NOT NULL`)
         .get(pactId, date) !== undefined
     );
@@ -5394,12 +5414,12 @@ class Core implements PactCore {
    */
   #judge(pactId: string, date: LocalDate, outcome: "satisfied" | "missed" | "excused", at: Date): void {
     const pact = {
-      ...(this.#db.prepare(`SELECT owner_account_id FROM pact WHERE id = ?`).get(pactId) as {
+      ...(this.#ctx.db.prepare(`SELECT owner_account_id FROM pact WHERE id = ?`).get(pactId) as {
         owner_account_id: AccountId;
       }),
       ...this.#termsOn(pactId, date),
     };
-    this.#db
+    this.#ctx.db
       .prepare(
         `INSERT INTO occurrence (pact_id, date, outcome, judged_at) VALUES (?, ?, ?, ?)
          ON CONFLICT (pact_id, date) DO UPDATE SET outcome = excluded.outcome, judged_at = excluded.judged_at`,
@@ -5410,13 +5430,13 @@ class Core implements PactCore {
     if (schedule.kind === "one-time") this.#endPact(pactId, at);
     if (outcome === "missed") {
       const short = schedule.kind === "weekly-count" ? schedule.target - this.#weekProgress(pactId, date).sessions : 1;
-      this.#db
+      this.#ctx.db
         .prepare(
           `INSERT INTO penalty (id, owner_account_id, recipient_id, pact_id, occurrence_date, amount_cents, added_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
-          this.#newId(),
+          this.#ctx.newId(),
           pact.owner_account_id,
           pact.recipient_id,
           pactId,
@@ -5432,10 +5452,10 @@ class Core implements PactCore {
    * for it is withdrawn: there's nothing left for it to change.
    */
   #endPact(pactId: string, at: Date): void {
-    this.#db
+    this.#ctx.db
       .prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ? AND stage = 'active'`)
       .run(at.toISOString(), pactId);
-    this.#db
+    this.#ctx.db
       .prepare(
         `UPDATE change_request SET withdrawn_at = ? WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`,
       )
@@ -5443,27 +5463,25 @@ class Core implements PactCore {
   }
 
   lastTick(): Date | null {
-    const row = this.#db.prepare(`SELECT last_tick_at FROM scheduler_state WHERE id = 1`).get() as
-      { last_tick_at: string } | undefined;
+    const row = this.#ctx.one<{ last_tick_at: string }>(`SELECT last_tick_at FROM scheduler_state WHERE id = 1`);
     return row ? new Date(row.last_tick_at) : null;
   }
 
   health(): Health {
     const lastTick = this.lastTick();
-    const ok = lastTick !== null && this.#clock.now().getTime() - lastTick.getTime() <= HEALTHY_TICK_AGE_MS;
+    const ok = lastTick !== null && this.#ctx.clock.now().getTime() - lastTick.getTime() <= HEALTHY_TICK_AGE_MS;
     return { ok, lastTick };
   }
 
   schemaVersion(): number {
-    return this.#db.pragma("user_version", { simple: true }) as number;
+    return this.#ctx.db.pragma("user_version", { simple: true }) as number;
   }
 
   async raiseRestoreAlert(): Promise<void> {
     await this.#command(
       () => {
         const lastTick = this.lastTick()?.toISOString() ?? null;
-        const operator = this.#db.prepare(`SELECT id FROM account WHERE is_operator = 1`).get() as
-          { id: string } | undefined;
+        const operator = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE is_operator = 1`);
         if (operator) {
           this.#enqueue({
             recipient: operator.id,
@@ -5481,7 +5499,7 @@ class Core implements PactCore {
       },
       // The log line is the alert's channel that never depends on delivery.
       (lastTick) =>
-        this.#log(
+        this.#ctx.log(
           `OPERATOR_ALERT database restored from backup; last scheduler tick before the restore: ${lastTick ?? "none"}`,
         ),
     );
@@ -5494,36 +5512,8 @@ class Core implements PactCore {
 
   async close(): Promise<void> {
     await this.#delivery;
-    this.#db.close();
+    this.#ctx.db.close();
   }
-}
-
-function isPushDevice({ endpoint, p256dh, auth }: PushDevice): boolean {
-  if (!URL.canParse(endpoint)) return false;
-  const { protocol, hostname } = new URL(endpoint);
-  return (
-    protocol === "https:" &&
-    PUSH_SERVICE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`)) &&
-    isBase64UrlOfLength(p256dh, P256DH_BYTES) &&
-    isBase64UrlOfLength(auth, AUTH_BYTES) &&
-    isPointOnCurve(p256dh)
-  );
-}
-
-/** Encrypting for a key that isn't a real P-256 point throws, for every notification to it. */
-function isPointOnCurve(publicKey: string): boolean {
-  const ecdh = createECDH("prime256v1");
-  ecdh.generateKeys();
-  try {
-    ecdh.computeSecret(Buffer.from(publicKey, "base64url"));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isBase64UrlOfLength(text: string, bytes: number): boolean {
-  return /^[A-Za-z0-9_-]+={0,2}$/.test(text) && Buffer.from(text, "base64url").length === bytes;
 }
 
 interface InviteRow {
@@ -5566,16 +5556,6 @@ type TodayPlacement =
   | { section: "no-oura-data"; card: TodayNoOuraDataCard }
   | { section: "coming-up"; card: TodayComingUpCard };
 
-function editWindowEnd({ created_at }: Pick<PactRow, "created_at">): Date {
-  return new Date(new Date(created_at).getTime() + EDIT_WINDOW_MS);
-}
-
-/** When a pact's edit window closes; null once it has, as of `now`. */
-function editWindowClosesAt(pact: Pick<PactRow, "created_at">, now: Date): Date | null {
-  const closesAt = editWindowEnd(pact);
-  return now.getTime() < closesAt.getTime() ? closesAt : null;
-}
-
 /** What a pact's day clock and One-time occurrence follow from, besides its times. */
 type PactClock = Pick<PactRow, "evidence_kind" | "anki_rollover_hour" | "created_at">;
 
@@ -5601,40 +5581,6 @@ function scheduleTermsOf(
       return { schedule, dueBy };
     case "one-time":
       return { schedule, dueBy, createdAt: new Date(pact.created_at) };
-  }
-}
-
-/**
- * The day clock of `pact` with the times `inBedBy` and `dueBy`: a Camera
- * pact's days, an Oura Ring pact's nights, an Anki pact's Anki days. The
- * schema keeps the rollover hour set on Anki pacts, and only on them.
- */
-function dayClockOf(
-  pact: Pick<PactRow, "evidence_kind" | "anki_rollover_hour">,
-  inBedBy: ClockTime | null,
-  dueBy: ClockTime | null,
-): DayClock {
-  switch (pact.evidence_kind) {
-    case "camera":
-      return { kind: "day", dueBy };
-    case "oura":
-      if (inBedBy === null) throw new Error("an Oura Ring pact has no in-bed-by time");
-      return { kind: "night", inBedBy };
-    case "anki":
-      if (pact.anki_rollover_hour === null) throw new Error("an Anki pact has no rollover hour");
-      return { kind: "anki", rollover: pact.anki_rollover_hour, dueBy };
-  }
-}
-
-/** `schedule`'s terms for a new pact: Fixed days due on the day clock `day`, any other schedule by `dueBy`. */
-function newTermsOf(schedule: Schedule, day: DayClock, dueBy: ClockTime | null): NewTerms {
-  switch (schedule.kind) {
-    case "fixed-days":
-      return { schedule, day };
-    case "weekly-count":
-      return { schedule, dueBy };
-    case "one-time":
-      return { schedule, dueBy };
   }
 }
 
@@ -5714,172 +5660,10 @@ function ankiCheckOf(row: { anki_cards_left: number | null; anki_checked_at: str
   return { cardsLeft: row.anki_cards_left, checkedAt: new Date(row.anki_checked_at) };
 }
 
-/**
- * A timestamp as Oura wrote it, read on Oura's own clock: "YYYY-MM-DDTHH:MM".
- * Oura's timestamps carry the UTC offset where the ring was, so their wall
- * time is the time there.
- */
-function wallClock(timestamp: string): string {
-  return timestamp.slice(0, 16);
-}
-
-/**
- * The UTC offset `timestamp` carries, "+HH:MM" or "-HH:MM" ("Z" is "+00:00"),
- * or null for a timestamp written without one.
- */
-function utcOffsetOf(timestamp: string): string | null {
-  if (timestamp.endsWith("Z")) return "+00:00";
-  return /T.*([+-]\d{2}:\d{2})$/.exec(timestamp)?.[1] ?? null;
-}
-
-/** The night a sleep starting at `timestamp` counts for: its day from 18:00, else the day before. */
-function nightOf(timestamp: string): LocalDate {
-  const date = timestamp.slice(0, 10);
-  return Number(timestamp.slice(11, 13)) >= NIGHT_STARTS_HOUR ? date : addDays(date, -1);
-}
-
-/** The night of `date`'s in-bed-by deadline as a wall-clock "YYYY-MM-DDTHH:MM". */
-function deadlineWallClock(date: LocalDate, inBedBy: ClockTime): string {
-  return `${parseClockTime(inBedBy).hour >= NIGHT_STARTS_HOUR ? date : addDays(date, 1)}T${inBedBy}`;
-}
-
-/** A pact's terms as `#checkedPact` checks them. */
-interface CheckedTerms {
-  ok: true;
-  /** The owner's: a pact needs one. */
-  timezone: string;
-  name: string;
-  description: string;
-  terms: OccurrenceTerms;
-  startDate: LocalDate | null;
-  reminders: string[];
-}
-
 /** A pact checked for creating or editing. */
 interface CheckedPact extends CheckedTerms {
   reviewerIds: AccountId[];
   ankiDeckId: string | null;
-}
-
-/**
- * `pact`'s terms checked as a pact made at `createdAt` by an owner in
- * `timezone`, or why they're refused. An Anki pact's day turns at
- * `ankiRollover` (null for other pacts).
- */
-function checkedTerms(
-  pact: NewPact,
-  ankiRollover: number | null,
-  timezone: string | null,
-  createdAt: Date,
-): CheckedTerms | { ok: false; reason: CreatePactRefusal } {
-  const oura = pact.evidenceKind === "oura";
-  const anki = pact.evidenceKind === "anki";
-  if (oura && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
-    return { ok: false, reason: "invalid-in-bed-by" };
-  }
-  // A ring's nights are Fixed days only, and at most one day of evidence counts a day.
-  if (pact.schedule.kind === "weekly-count") {
-    const { target } = pact.schedule;
-    if (oura || anki || !Number.isSafeInteger(target) || target < 1 || target > MAX_WEEKLY_TARGET) {
-      return { ok: false, reason: "invalid-schedule" };
-    }
-  }
-  const oneTime = pact.schedule.kind === "one-time";
-  if (pact.schedule.kind === "one-time" && (oura || anki || !isLocalDate(pact.schedule.deadline))) {
-    return { ok: false, reason: "invalid-schedule" };
-  }
-  // A due-by time is for evidence the owner submits; a ring's night has its in-bed-by time.
-  if (
-    pact.dueBy !== undefined &&
-    (oura || !isDueBy(pact.dueBy) || (ankiRollover !== null && !ankiDueByFits(pact.dueBy, ankiRollover)))
-  ) {
-    return { ok: false, reason: "invalid-due-by" };
-  }
-  // A One-time pact has just its deadline: Submit anytime sets when it opens.
-  if (pact.startDate !== undefined && (oneTime || !isLocalDate(pact.startDate))) {
-    return { ok: false, reason: "invalid-start-date" };
-  }
-  if (pact.endDate !== undefined && (oneTime || !isLocalDate(pact.endDate))) {
-    return { ok: false, reason: "invalid-end-date" };
-  }
-  const unique = [...new Set(pact.reminders ?? [])];
-  if (unique.length > MAX_REMINDERS || !unique.every(oneTime ? isDatedReminder : isClockTime)) {
-    return { ok: false, reason: "invalid-reminders" };
-  }
-  const name = pact.name.trim();
-  // Oura Ring and Anki pacts have no photo to describe.
-  const description = oura || anki ? "" : pact.description.trim();
-  if (name === "") return { ok: false, reason: "blank-name" };
-  if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
-  const dueBy = pact.dueBy ?? null;
-  // The day clock is for Fixed days: Oura Ring and Anki pacts were refused any other schedule above.
-  const day = dayClockOf(
-    { evidence_kind: pact.evidenceKind, anki_rollover_hour: ankiRollover },
-    pact.inBedBy ?? null,
-    dueBy,
-  );
-  const terms = newTermsOf(pact.schedule, day, dueBy);
-  const timing = newOccurrenceTerms(terms, createdAt, timezone, pact.startDate ?? null);
-  if (!timing.ok) return timing;
-  const reminders = sortedReminders(unique, timing.terms);
-  if (!remindersGoOffInTime(reminders, timing.terms, timing.first.dueAt, timezone)) {
-    return { ok: false, reason: "reminder-after-due-time" };
-  }
-  const endDate = pact.endDate ?? null;
-  // The first occurrence has to end by the end date: a whole week, for Weekly count.
-  if (endDate !== null && endDate < lastDayOf(timing.terms.schedule, timing.terms.firstOccurrence)) {
-    return { ok: false, reason: "end-date-too-early" };
-  }
-  if (!Number.isSafeInteger(pact.penaltyCents) || pact.penaltyCents <= 0) {
-    return { ok: false, reason: "invalid-penalty" };
-  }
-  return {
-    ok: true,
-    timezone,
-    name,
-    description,
-    terms: { ...timing.terms, endDate },
-    startDate: pact.startDate ?? null,
-    reminders,
-  };
-}
-
-/**
- * `reminders` in the order they go off on a pact with `terms`: a One-time
- * pact's by date and time, any other's from the hour its day starts
- * (`dayStartHour`): a night's from 18:00 to the morning after, an Anki
- * day's from its rollover hour, any other day's from midnight.
- */
-function sortedReminders(reminders: string[], terms: OccurrenceTerms): string[] {
-  // "YYYY-MM-DDTHH:MM" sorts as text.
-  if (hasSchedule(terms, "one-time")) return [...reminders].sort((a, b) => a.localeCompare(b, "en-US"));
-  const dayStarts = dayStartHour(terms);
-  return [...reminders].sort((a, b) => minutesFrom(a, dayStarts) - minutesFrom(b, dayStarts));
-}
-
-/**
- * Whether every reminder goes off before the due time a pact with `terms`
- * has: a One-time pact's deadline (its occurrence's `dueAt`), a bedtime's
- * in-bed-by time (a night running from 18:00), an Anki day's due-by time
- * (from its rollover hour; midnight with none), or else the due-by time, if
- * there is one.
- */
-function remindersGoOffInTime(reminders: string[], terms: OccurrenceTerms, dueAt: Date, timezone: string): boolean {
-  return reminders.every((time) => {
-    if (hasSchedule(terms, "one-time")) return oneTimeReminderAt(time, timezone).getTime() < dueAt.getTime();
-    if (hasSchedule(terms, "weekly-count")) return terms.dueBy === null || time < terms.dueBy;
-    const { day } = terms;
-    switch (day.kind) {
-      case "day":
-        return day.dueBy === null || time < day.dueBy;
-      case "night":
-        return minutesFrom(time, NIGHT_STARTS_HOUR) < minutesFrom(day.inBedBy, NIGHT_STARTS_HOUR);
-      case "anki":
-        // A due-by time that can't fit is refused before this.
-        return minutesFrom(time, day.rollover) < ankiDueByOrder(day.dueBy, day.rollover);
-    }
-  });
 }
 
 /**
@@ -5896,22 +5680,6 @@ function withoutReminders({
   ...terms
 }: CurrentTerms & Pick<PactTerms, "reminders">): CurrentTerms {
   return terms;
-}
-
-/** Whether `text` is a clock time, "HH:MM" on a 24-hour clock. */
-function isClockTime(text: string): boolean {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(text);
-}
-
-/** Whether `text` is a One-time pact's reminder, "YYYY-MM-DDTHH:MM". */
-function isDatedReminder(text: string): boolean {
-  const { date, time } = parseDatedReminder(text);
-  return text.length === 16 && isLocalDate(date) && isClockTime(time);
-}
-
-/** A due-by time: a clock time after the day starts. Midnight ending the day is the due time without one. */
-function isDueBy(text: string): boolean {
-  return isClockTime(text) && text !== "00:00";
 }
 
 interface PactRow {
@@ -6027,22 +5795,6 @@ function itemPath(kind: ReviewItem["kind"], itemId: string): string {
   }
 }
 
-/** How a review item's push names each changed term. */
-const TERM_LABELS: Record<TermDiff["term"], string> = {
-  name: "Name",
-  description: "Photo shows",
-  deck: "Deck",
-  "in-bed-by": "In bed by",
-  schedule: "Days",
-  "due-by": "Due by",
-  "start-date": "Starts",
-  "end-date": "Ends",
-  penalty: "Penalty",
-  recipient: "Recipient",
-  reviewers: "Reviewers",
-  reminders: "Reminders",
-};
-
 /** The terms a change would give a pact: `checked`, from `change`, with the penalty and recipient it names. */
 function changeableTermsOf(checked: CheckedPact, change: PactChange): ChangeableTerms {
   const { inBedBy, dueBy } = timesOf(checked.terms);
@@ -6083,53 +5835,6 @@ function openOccurrencesRefusal(
     }
   }
   return null;
-}
-
-/**
- * A pact's first occurrence once a change to `schedule` and `startDate` takes
- * effect `from` a date: as it was if that's before `from`; otherwise, as the
- * change came before the pact started, the first day of the new schedule
- * from `from`, or from the start date if that's later.
- */
-function firstOccurrenceAfterChange(
-  firstOccurrence: LocalDate,
-  schedule: Schedule,
-  from: LocalDate,
-  startDate: LocalDate | null,
-): LocalDate {
-  if (schedule.kind === "one-time") return schedule.deadline;
-  if (firstOccurrence < from) return firstOccurrence;
-  if (schedule.kind === "weekly-count") return firstWeekFrom(from, startDate);
-  const start = startDate === null ? from : laterDate(startDate, from);
-  for (let date = start, i = 0; i < 7; date = addDays(date, 1), i++) {
-    if (schedule.days.includes(weekdayOf(date))) return date;
-  }
-  throw new Error("unreachable: a schedule has at least one day");
-}
-
-/**
- * The first day not open on `today` for a pact with `schedule`, from which a
- * change applies: tomorrow, or for Weekly count, whose week is open until its
- * Sunday, next Monday.
- */
-function firstDayNotOpen(schedule: Schedule, today: LocalDate): LocalDate {
-  return schedule.kind === "weekly-count" ? addDays(mondayOf(today), WEEKDAYS.length) : addDays(today, 1);
-}
-
-/**
- * A change request's stored terms. Those sent before due-by times, dates and
- * reminders existed have none. Reminders apply at once, so a request's before
- * and after always have the same ones.
- */
-function storedTerms(json: string): ChangeableTerms {
-  return {
-    dueBy: null,
-    startDate: null,
-    endDate: null,
-    reminders: [],
-    ankiDeckId: null,
-    ...(JSON.parse(json) as Partial<ChangeableTerms>),
-  } as ChangeableTerms;
 }
 
 /** A reminder the scheduler reached too late to send. */
@@ -6271,94 +5976,6 @@ function waitingSince(item: TodayWaitingItem): Date {
     case "change-request":
       return item.requestedAt;
   }
-}
-
-/** A bill as the ledger, Today and overdue reminders read it. */
-interface BillState {
-  id: string;
-  /** The Wednesday it was made, "YYYY-MM-DD" in the owner's timezone. */
-  billedOn: LocalDate;
-  dueAt: Date;
-  /** Its penalties less what approved payments have paid of them. */
-  unpaidCents: number;
-  /** `unpaidCents` less what payments awaiting approval cover. */
-  uncoveredCents: number;
-}
-
-/**
- * What's Overdue at `now`: the uncovered part of bills past due, and the
- * oldest such bill. `spellStartedAt` is when the current spell of being
- * Overdue began: the due time of the oldest bill past due that approved
- * payments haven't paid, covered or not. Null when nothing is Overdue.
- * Bills are oldest first.
- */
-function overdueOf(
-  bills: BillState[],
-  now: Date,
-): { cents: number; billedOn: LocalDate; dueAt: Date; spellStartedAt: Date } | null {
-  const pastDue = bills.filter((bill) => bill.dueAt.getTime() <= now.getTime());
-  const overdue = pastDue.filter((bill) => bill.uncoveredCents > 0);
-  const [oldest] = overdue;
-  if (!oldest) return null;
-  // An uncovered bill is unpaid too, so there's always one.
-  const spellStart = pastDue.find((bill) => bill.unpaidCents > 0)!;
-  return {
-    cents: sum(overdue.map((bill) => bill.uncoveredCents)),
-    billedOn: oldest.billedOn,
-    dueAt: oldest.dueAt,
-    spellStartedAt: spellStart.dueAt,
-  };
-}
-
-/**
- * What's billed and not due yet at `now`, less payments awaiting approval:
- * that part, and the soonest due bill's due time and Wednesday. Null when
- * there's none. Bills are oldest first.
- */
-function billDueOf(bills: BillState[], now: Date): { amountCents: number; dueAt: Date; billedOn: LocalDate } | null {
-  const due = bills.filter((bill) => bill.dueAt.getTime() > now.getTime() && bill.uncoveredCents > 0);
-  const [soonest] = due;
-  if (!soonest) return null;
-  return { amountCents: sum(due.map((bill) => bill.uncoveredCents)), dueAt: soonest.dueAt, billedOn: soonest.billedOn };
-}
-
-function sum(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0);
-}
-
-const BILL_CLOCK = `${String(BILL_TIME.hour).padStart(2, "0")}:${String(BILL_TIME.minute).padStart(2, "0")}`;
-
-/** Wednesday `date` (or any day) at the bill time, in `timezone`. */
-function billInstant(date: LocalDate, timezone: string): Date {
-  return wallTime(date, BILL_TIME.hour, BILL_TIME.minute, timezone);
-}
-
-/** The Wednesdays whose bill time falls after `from` and by `to`, in `timezone`. */
-function billDays(from: Date, to: Date, timezone: string): LocalDate[] {
-  const days: LocalDate[] = [];
-  const last = localDateOf(to, timezone);
-  for (let date = localDateOf(from, timezone); date <= last; date = addDays(date, 1)) {
-    if (weekdayOf(date) !== "wed") continue;
-    const at = billInstant(date, timezone).getTime();
-    if (at > from.getTime() && at <= to.getTime()) days.push(date);
-  }
-  return days;
-}
-
-/**
- * The Wednesday whose bill a penalty added at `addedAt` goes on, if nothing
- * excuses it: the first bill time after both its 48-hour window and `now`.
- */
-function nextBillDay(addedAt: Date, now: Date, timezone: string): LocalDate {
-  const after = Math.max(addedAt.getTime() + EXCUSE_WINDOW_MS - 1, now.getTime());
-  let date = localDateOf(new Date(after), timezone);
-  while (weekdayOf(date) !== "wed" || billInstant(date, timezone).getTime() <= after) date = addDays(date, 1);
-  return date;
-}
-
-/** Whether `text` is a real calendar day written "YYYY-MM-DD". */
-function isLocalDate(text: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(text) && addDays(text, 0) === text;
 }
 
 /** The evidence columns `#evidenceView` reads. `day` is the day it was for; `occurrence_date` its occurrence's. */
