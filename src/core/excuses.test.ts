@@ -176,6 +176,16 @@ describe("the 48 hours after a miss", () => {
     });
     expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", filedAt: s.at("Wed 23:59") })]);
   });
+
+  test("when storing a photo fails: filing fails and writes nothing", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Tue 10:00");
+    s.photoStore.store = () => Promise.reject(new Error("upload failed"));
+
+    await expect(owner.fileExcuse(gym, sick(s.date("Mon")), [photo()])).rejects.toThrow("upload failed");
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(s.notifier.sentTo(reviewer).filter((n) => n.kind === "review-item")).toEqual([]);
+  });
 });
 
 describe("days ahead", () => {

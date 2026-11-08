@@ -112,6 +112,18 @@ describe("evidence is refused", () => {
     expect(s.notifier.sentTo(reviewer)).toEqual([]);
   });
 
+  test("when storing a photo fails: the submit fails and writes nothing", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    s.photoStore.store = () => Promise.reject(new Error("upload failed"));
+
+    await expect(owner.submitEvidence(gym, [photo()])).rejects.toThrow("upload failed");
+    expect(owner.today().waiting).toEqual([]);
+    expect(s.notifier.sentTo(reviewer)).toEqual([]);
+  });
+
   test("before the pact's first occurrence", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
