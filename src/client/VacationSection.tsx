@@ -104,9 +104,10 @@ function VacationCardView({
       <small className="muted">
         {pactsText(vacation.pacts)} · {plural(vacation.days, "day", "days")}
       </small>
-      {state.kind === "approved" ? (
+      {state.kind === "approved" && (
         <small className="muted">Approved by {state.reviewerName}. It can't be changed now.</small>
-      ) : state.kind === "on-now" ? null : (
+      )}
+      {(state.kind === "waiting" || state.kind === "waiting-on-reply") && (
         <WaitingActions vacation={vacation} onWithdrawn={onWithdrawn} onReplied={onReplied} />
       )}
     </div>

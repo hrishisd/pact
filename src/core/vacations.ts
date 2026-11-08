@@ -326,10 +326,7 @@ export function vacationsOnNow(
     today,
     today,
   );
-  return rows.map((row) => {
-    const { id, from, to, note, pacts } = vacationSummary(ctx, row);
-    return { id, from, to, note, pacts, covers: vacationCovers(ctx, row.id, timezone, []) };
-  });
+  return rows.map((row) => ({ ...vacationBasics(ctx, row), covers: vacationCovers(ctx, row.id, timezone, []) }));
 }
 
 /** What a vacation's Profile card and review item both show: its dates, note, pacts and who it went to. */
@@ -337,6 +334,18 @@ function vacationSummary(
   ctx: CoreContext,
   row: VacationRow,
 ): Pick<VacationCard, "id" | "from" | "to" | "days" | "note" | "pacts" | "reviewerNames"> {
+  return {
+    ...vacationBasics(ctx, row),
+    days: dayCount(row.first_day, row.last_day),
+    reviewerNames: friendsSortedByName(ctx, pickedReviewers(ctx, row.id)).map((reviewer) => reviewer.name),
+  };
+}
+
+/** A vacation's dates, note and pacts, as Today's banner and its Profile card show them. */
+function vacationBasics(
+  ctx: CoreContext,
+  row: VacationRow,
+): Pick<VacationCard, "id" | "from" | "to" | "note" | "pacts"> {
   const names = ctx
     .all<{ name: string }>(
       `SELECT pact.name FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
@@ -348,10 +357,8 @@ function vacationSummary(
     id: row.id,
     from: row.first_day,
     to: row.last_day,
-    days: dayCount(row.first_day, row.last_day),
     note: row.note,
     pacts: row.pacts_summary === "some" ? { kind: "some", names } : { kind: row.pacts_summary },
-    reviewerNames: friendsSortedByName(ctx, pickedReviewers(ctx, row.id)).map((reviewer) => reviewer.name),
   };
 }
 
