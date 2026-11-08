@@ -1,6 +1,6 @@
 # 03 Rejected vacations, and vacations still waiting when they start
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: `../spec.md` stories 15 to 17 and 25, Rules ("Withdrawing"), Reviewing ("Rejecting"), Judging and money ("Waiting when it starts", "Held penalties"), and Screens (the rejected-vacation alert, the review item's held lines and copy, the withdraw confirm with held penalties). These follow the excuse rules in `.scratch/pact-v0/spec.md` (Excuses) and ticket `.scratch/pact-v0/issues/07-excuses.md`, which this reuses.
