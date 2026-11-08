@@ -1,20 +1,29 @@
 // Reads the other parts of the core share: pact rows and the terms an
-// occurrence follows, names, reviewers and recipients, and each pact's
-// occurrences.
+// occurrence follows, accounts, names, friends, reviewers and recipients, each
+// pact's occurrences, connections and Anki decks, and question threads. Also
+// the one write every review decision makes, `recordDecision`.
 
 import type {
   AccountId,
   AnkiCheck,
+  AnkiDeck,
+  AnkiTerms,
   ClockTime,
+  Connection,
+  ConnectionProblem,
+  ConnectionService,
   EvidenceKind,
   Friend,
   LocalDate,
   PactTerms,
+  QuestionThread,
   Recipient,
   ReviewState,
   Schedule,
+  TodayWaitingItem,
 } from "../shared/types.ts";
 import { zoneOffsetAt } from "./calendar.ts";
+import type { ChangeableTerms } from "./changes.ts";
 import type { CoreContext } from "./context.ts";
 import {
   hasSchedule,
@@ -28,7 +37,7 @@ import {
   type RecurringTerms,
 } from "./occurrences.ts";
 import { utcOffsetOf } from "./oura-clock.ts";
-import { dayClockOf } from "./pact-rules.ts";
+import { dayClockOf, EDIT_WINDOW_MS } from "./pact-rules.ts";
 
 export interface PactRow {
   id: string;
@@ -280,4 +289,222 @@ export function lastAnkiCheck(ctx: CoreContext, pactId: string, date: LocalDate,
     until,
   );
   return row ? { cardsLeft: row.cards_left, checkedAt: new Date(row.checked_at) } : null;
+}
+
+/** The account's email, name and timezone; throws `UnknownAccountError` when there's no such account. */
+export function accountRow(
+  ctx: CoreContext,
+  accountId: AccountId,
+): { email: string; name: string; timezone: string | null } {
+  const row = ctx.one<{ email: string; name: string; timezone: string | null }>(
+    `SELECT email, name, timezone FROM account WHERE id = ?`,
+    accountId,
+  );
+  if (!row) throw new UnknownAccountError(accountId);
+  return row;
+}
+
+/** A friendship row's two account ids, in the order the table stores them. */
+export function friendshipPair(a: AccountId, b: AccountId): [AccountId, AccountId] {
+  return a < b ? [a, b] : [b, a];
+}
+
+/** A checked review decision, as `decide` hands it on: a rejection's reason is trimmed and never blank. */
+export type Decided = { outcome: "approved"; reason: null } | { outcome: "rejected"; reason: string };
+
+/** A decision as its notification's details carry it: a rejection with its reason. */
+export function decisionDetails(decided: Decided): { decision: "approved" } | { decision: "rejected"; reason: string } {
+  return decided.outcome === "approved" ? { decision: "approved" } : { decision: "rejected", reason: decided.reason };
+}
+
+/**
+ * `lists` merged into one sorted by `at`, oldest or newest first. Ties keep
+ * the order they have in `lists`, as the sort is stable.
+ */
+export function mergeByTime<T>(
+  at: (item: T) => Date,
+  direction: "oldest-first" | "newest-first",
+  ...lists: T[][]
+): T[] {
+  const sign = direction === "oldest-first" ? 1 : -1;
+  return lists.flat().sort((a, b) => sign * (at(a).getTime() - at(b).getTime()));
+}
+
+export class UnknownAccountError extends Error {
+  constructor(accountId: AccountId) {
+    super(`no account ${accountId}`);
+    this.name = "UnknownAccountError";
+  }
+}
+
+export function areFriends(ctx: CoreContext, a: AccountId, b: AccountId): boolean {
+  const [first, second] = friendshipPair(a, b);
+  return (
+    ctx.db.prepare(`SELECT 1 FROM friendship WHERE account_a_id = ? AND account_b_id = ?`).get(first, second) !==
+    undefined
+  );
+}
+
+export function hasConnection(ctx: CoreContext, accountId: AccountId, service: ConnectionService): boolean {
+  return (
+    ctx.db.prepare(`SELECT 1 FROM connection WHERE account_id = ? AND service = ?`).get(accountId, service) !==
+    undefined
+  );
+}
+
+/** Why the service can't be read for the account, or null when its connection works. */
+export function connectionProblem(
+  ctx: CoreContext,
+  accountId: AccountId,
+  service: ConnectionService,
+): ConnectionProblem | null {
+  const row = ctx.one<{ status: Connection["status"] }>(
+    `SELECT status FROM connection WHERE account_id = ? AND service = ?`,
+    accountId,
+    service,
+  );
+  if (!row) return "not-connected";
+  return row.status === "connected" ? null : row.status;
+}
+
+/** The account's deck list as AnkiWeb last gave it, or null before the first. */
+export function ankiDeckList(
+  ctx: CoreContext,
+  accountId: AccountId,
+): { decks: AnkiDeck[]; rolloverHour: number } | null {
+  const row = ctx.one<{ decks: string; rollover_hour: number }>(
+    `SELECT decks, rollover_hour FROM anki_deck_list WHERE account_id = ?`,
+    accountId,
+  );
+  return row ? { decks: JSON.parse(row.decks) as AnkiDeck[], rolloverHour: row.rollover_hour } : null;
+}
+
+/** The deck's name as the last deck list or check found it, or null once it's gone from the list. */
+export function ankiDeckName(ctx: CoreContext, accountId: AccountId, deckId: string): string | null {
+  const listed = ankiDeckList(ctx, accountId)?.decks.find((deck) => deck.id === deckId)?.name;
+  return listed ?? ankiPactDeck(ctx, accountId, deckId)?.name ?? null;
+}
+
+/** A deck an Anki pact is on, as checks last found it; undefined before the first check. */
+export function ankiPactDeck(
+  ctx: CoreContext,
+  accountId: AccountId,
+  deckId: string,
+): { name: string | null; missing_since: string | null } | undefined {
+  return ctx.one<{ name: string | null; missing_since: string | null }>(
+    `SELECT name, missing_since FROM anki_pact_deck WHERE account_id = ? AND deck_id = ?`,
+    accountId,
+    deckId,
+  );
+}
+
+/** Whether the last check found the deck gone from the account's collection. */
+export function ankiDeckMissing(ctx: CoreContext, accountId: AccountId, deckId: string): boolean {
+  return (ankiPactDeck(ctx, accountId, deckId)?.missing_since ?? null) !== null;
+}
+
+/** An Anki pact's deck and rollover hour; null for any other pact. */
+export function ankiTerms(
+  ctx: CoreContext,
+  pact: Pick<PactRow, "owner_account_id" | "anki_deck_id" | "anki_rollover_hour">,
+): AnkiTerms | null {
+  if (pact.anki_deck_id === null || pact.anki_rollover_hour === null) return null;
+  return {
+    deckId: pact.anki_deck_id,
+    deckName: ankiDeckName(ctx, pact.owner_account_id, pact.anki_deck_id),
+    deckMissing: ankiDeckMissing(ctx, pact.owner_account_id, pact.anki_deck_id),
+    rolloverHour: pact.anki_rollover_hour,
+  };
+}
+
+/**
+ * An item's questions and replies, oldest first. `waiting` says the item is
+ * still waiting for a decision; only then can it be waiting on a reply.
+ */
+export function thread(ctx: CoreContext, itemId: string, waiting: boolean): QuestionThread {
+  const comments = ctx
+    .all<{ from_owner: 0 | 1; name: string; text: string; sent_at: string }>(
+      `SELECT comment.from_owner, account.name, comment.text, comment.sent_at
+         FROM comment JOIN account ON account.id = comment.author_account_id
+         WHERE comment.item_id = ? ORDER BY comment.id`,
+      itemId,
+    )
+    .map((row) => ({
+      fromOwner: row.from_owner === 1,
+      authorName: row.name,
+      text: row.text,
+      sentAt: new Date(row.sent_at),
+    }));
+  return { comments, waitingOnReply: waiting && comments.at(-1)?.fromOwner === false };
+}
+
+/** Whether the pact's schedule is Weekly count. It keeps its kind once its edit window has closed. */
+export function isWeekly(ctx: CoreContext, pactId: string): boolean {
+  const row = ctx.db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
+  return scheduleOf(row.schedule).kind === "weekly-count";
+}
+
+/** Pacts created by this time, as an ISO string, are past their edit window: for comparing in SQL. */
+export function editWindowCutoff(ctx: CoreContext, at = ctx.clock.now()): string {
+  return new Date(at.getTime() - EDIT_WINDOW_MS).toISOString();
+}
+
+/** The penalty the occurrence of `occurrences` open `today` keeps, when it differs from `after`'s; else null. */
+export function todayKeeps(
+  ctx: CoreContext,
+  pactId: string,
+  occurrences: Occurrences,
+  today: LocalDate,
+  after: Pick<ChangeableTerms, "penaltyCents">,
+): number | null {
+  const open = occurrences.covering(today);
+  if (!open) return null;
+  const { penalty_cents: penalty } = termsOn(ctx, pactId, open.date);
+  return penalty !== after.penaltyCents ? penalty : null;
+}
+
+/** The owner's change requests waiting for a decision (or just that for `pactId`), newest first. */
+export function waitingChangeRequests(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+  const rows = ctx.all<{
+    id: string;
+    pact_id: string;
+    name: string;
+    ends_pact: 0 | 1;
+    requested_at: string;
+  }>(
+    `SELECT change_request.id, change_request.pact_id, pact.name, change_request.ends_pact,
+              change_request.requested_at
+       FROM change_request JOIN pact ON pact.id = change_request.pact_id
+       WHERE pact.owner_account_id = ? AND change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
+         AND (? IS NULL OR pact.id = ?)
+       ORDER BY change_request.requested_at DESC, change_request.id`,
+    ownerId,
+    pactId ?? null,
+    pactId ?? null,
+  );
+  return rows.map((row) => ({
+    kind: "change-request",
+    id: row.id,
+    pactId: row.pact_id,
+    name: row.name,
+    endsPact: row.ends_pact === 1,
+    requestedAt: new Date(row.requested_at),
+  }));
+}
+
+/** Stores a reviewer's decision on the review item `id` in `table`. */
+export function recordDecision(
+  ctx: CoreContext,
+  table: "evidence" | "excuse" | "payment" | "change_request",
+  id: string,
+  { outcome, reason }: Decided,
+  reviewerId: AccountId,
+  at: Date,
+): void {
+  ctx.db
+    .prepare(
+      `UPDATE ${table} SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
+       WHERE id = ?`,
+    )
+    .run(outcome, reviewerId, at.toISOString(), reason, id);
 }

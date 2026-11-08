@@ -26,3 +26,6 @@ export function createContext(parts: Pick<CoreContext, "db" | "clock" | "newId" 
     all: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).all(...params) as T[],
   };
 }
+
+/** Runs `change` as one command: one transaction, then the outbox is delivered. */
+export type Command = <T>(change: () => T) => Promise<T>;

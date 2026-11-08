@@ -5,9 +5,9 @@
 // transaction and delivered only after it commits. Queries are synchronous
 // reads. The core reads time only from the Clock port.
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { addDays } from "../shared/calendar.ts";
-import { earlierDate, laterDate, localDateOf, mondayOf, weekdayOf } from "./calendar.ts";
+import { earlierDate, laterDate, localDateOf, mondayOf } from "./calendar.ts";
 import {
   BILL_CLOCK,
   BILL_TERM_DAYS,
@@ -20,96 +20,68 @@ import {
 } from "./bill-math.ts";
 import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
-import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import {
-  ankiDueByFits,
-  dueSoonEnough,
   hasSchedule,
-  lastDayOf,
-  newOccurrenceTerms,
-  oneTimeReminderAt,
   nightStartsAt,
   noOuraDataPushAt,
-  occurrences,
-  occurrencesOverTime,
+  oneTimeReminderAt,
   reminderAt,
-  type DayClock,
   type Occurrence,
   type Occurrences,
-  type OccurrenceTerms,
 } from "./occurrences.ts";
 import { deadlineWallClock, nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
+import { endPastEndDate, enqueueMissed, judge, judgeDueBy, judgePactDueBy, noteAnkiResult } from "./judging.ts";
 import {
-  endPact,
-  endPastEndDate,
-  enqueueMissed,
-  judge,
-  judgeDueBy,
-  judgePactDueBy,
-  judgeWeek,
-  noteAnkiResult,
-} from "./judging.ts";
-import {
-  dueAfterEnd,
   endedBedtimePacts,
   evidenceDecision,
+  excuseCoversSql,
   excuseOn,
   isJudged,
-  judgingReached,
-  occurrenceStatus,
+  MISSED_THROUGH_REJECTION,
   pactsToJudge,
-  type PactToJudge,
   rejection,
-  skipReason,
+  WEEKLY_COUNT_PACT,
   weekProgress,
+  type PactToJudge,
 } from "./occurrence-state.ts";
 import { deliverPending, enqueue, notificationSettings, settingIsOff, tellAll } from "./outbox.ts";
 import {
   accountName,
+  accountRow,
+  ankiDeckList,
+  ankiDeckMissing,
+  ankiDeckName,
   ankiDeckOn,
   byName,
-  earlierTermsOf,
+  connectionProblem,
+  decisionDetails,
+  editWindowCutoff,
   friendsSortedByName,
+  hasConnection,
   lastAnkiCheck,
+  mergeByTime,
   occurrencesOf,
-  occurrenceTermsOf,
   ouraOffset,
   ownerZone,
-  ownPact,
-  type PactClock,
   pactName,
-  type PactRow,
   recipientName,
+  recordDecision,
   remindersOf,
   reviewersOf,
-  type ReviewOutcome,
   reviewStateColumns,
   reviewStateOf,
-  type ReviewStateRow,
   scheduleOf,
   scheduleTermsOf,
-  selectRecipients,
   termsOn,
+  thread,
+  waitingChangeRequests,
+  type Decided,
+  type PactClock,
+  type PactRow,
+  type ReviewOutcome,
+  type ReviewStateRow,
 } from "./rows.ts";
-import {
-  checkedTerms,
-  dayClockOf,
-  EDIT_WINDOW_MS,
-  editWindowClosesAt,
-  editWindowEnd,
-  EXCUSE_WINDOW_MS,
-  firstDayNotOpen,
-  firstOccurrenceAfterChange,
-  isClockTime,
-  isDueBy,
-  isLocalDate,
-  newTermsOf,
-  remindersGoOffInTime,
-  storedTerms,
-  TERM_LABELS,
-  type CheckedTerms,
-} from "./pact-rules.ts";
-import { isPushDevice } from "./push-devices.ts";
+import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import type {
   AnkiCountsResult,
   AnkiSource,
@@ -121,60 +93,33 @@ import type {
   PhotoStore,
 } from "./ports.ts";
 import { APP_PATHS } from "../shared/api.ts";
-import { clockText, formatDate, money, scheduleText } from "../shared/format.ts";
+import { clockText, formatDate, money } from "../shared/format.ts";
 import {
-  MAX_EVIDENCE_PHOTOS,
-  MAX_EXCUSE_PHOTOS,
-  MAX_EXCUSE_SPAN_DAYS,
   RECONNECT_TEXT,
-  WEEKDAYS,
   type AcceptExcuseRejectionResult,
   type AcceptInviteResult,
   type AcceptMissResult,
   type AccountId,
-  type AnkiDeck,
-  type AnkiDecksResult,
-  type AnkiCheck,
-  type AnkiTerms,
-  type AskOwnerResult,
   type AddRecipientResult,
-  type ChangeOutcome,
-  type ClockTime,
-  type ChangePactRefusal,
+  type AnkiDecksResult,
+  type AskOwnerResult,
   type ChangePactResult,
-  type ChangePreview,
   type ChangePreviewResult,
   type ChangeRequestResult,
-  type ChangeRequestState,
-  type ChangeRequestView,
-  type ChangeStart,
-  type CurrentTerms,
-  type PactChange,
-  type RequestEndResult,
-  type TermChange,
-  type WithdrawChangeRequestResult,
-  type CreatePactRefusal,
+  type Connection,
+  type ConnectionService,
   type CreatePactResult,
   type DecideResult,
   type DeletePactResult,
   type EditPactResult,
+  type EvidenceKind,
   type EvidenceResult,
-  type EvidenceView,
   type ExcuseDates,
-  type ExcuseDatesRefusal,
-  type ExcuseDay,
-  type ExcuseDetail,
   type ExcuseOptionsResult,
-  type ExcusePreview,
   type ExcusePreviewResult,
   type ExcuseResult,
-  type ExcuseView,
-  type FileExcuseRefusal,
   type FileExcuseResult,
   type FirstOccurrenceResult,
-  type HeatMapDay,
-  type HeatMapWeek,
-  type PactHistory,
   type Friend,
   type Health,
   type Invite,
@@ -185,43 +130,31 @@ import {
   type LedgerResult,
   type LedgerSummary,
   type LocalDate,
+  type MissedDetail,
   type NewExcuse,
   type NewPact,
+  type NewPayment,
   type NewRecipient,
   type NotificationSetting,
   type NotificationSettingState,
-  type MissedDetail,
-  type OccurrenceDetail,
-  type OccurrenceRecord,
-  type OccurrenceStatus,
-  type Connection,
-  type ConnectionProblem,
-  type ConnectionService,
-  type EvidenceKind,
+  type PactChange,
+  type PactResult,
+  type PactSummary,
   type PactTiming,
   type PaymentResult,
   type PaymentView,
-  type QuestionThread,
-  type ReplyResult,
-  type PactWaitingItem,
-  type PactSummary,
-  type PactResult,
-  type PactTerms,
-  type TermsByKind,
-  type Recipient,
-  type RecordedStatus,
-  type NewPayment,
   type Profile,
   type PushDevice,
+  type Recipient,
   type RecordPaymentRefusal,
   type RecordPaymentResult,
+  type ReplyResult,
+  type RequestEndResult,
   type ReviewDecision,
   type ReviewItem,
   type SavePushSubscriptionResult,
-  type Schedule,
   type SetTimezoneResult,
   type SignInResult,
-  type SubmitEvidenceRefusal,
   type SubmitEvidenceResult,
   type Today,
   type TodayAlert,
@@ -234,8 +167,73 @@ import {
   type TodaySection,
   type TodayToDoCard,
   type TodayWaitingItem,
-  type TodayYesterdayEntry,
+  type WithdrawChangeRequestResult,
 } from "../shared/types.ts";
+import {
+  acceptInvite,
+  accountIdForEmail,
+  addRecipient,
+  createInvite,
+  emailKey,
+  friendList,
+  inviteLookup,
+  inviteRow,
+  recipientList,
+  removePushSubscription,
+  savePushSubscription,
+  setNotificationSetting,
+  setTimezone,
+  signIn,
+} from "./accounts.ts";
+import {
+  activePacts,
+  closeEditWindows,
+  createPact,
+  deletePact,
+  editPact,
+  firstOccurrence,
+  pactList,
+  pactPage,
+  waitingSince,
+  type ActivePact,
+} from "./pacts.ts";
+import {
+  approvableNow,
+  changePact,
+  changePreview,
+  changeRequestPage,
+  changeRequestRow,
+  changeRequestsToReview,
+  decideChangeRequest,
+  requestEnd,
+  waitingChangeRequestId,
+  withdrawChangeRequest,
+  type StoredChangeRequest,
+} from "./change-requests.ts";
+import {
+  acceptMiss,
+  decideEvidence,
+  evidencePage,
+  evidenceToReview,
+  rejectedDayAlerts,
+  rejectedEvidenceAlerts,
+  submitEvidence,
+  waitingEvidence,
+  type EvidenceToDecide,
+} from "./evidence.ts";
+import {
+  acceptExcuseRejection,
+  decideExcuse,
+  excuseOptions,
+  excusePage,
+  excusePreview,
+  excusesToReview,
+  fileExcuse,
+  rejectedExcuseAlerts,
+  waitingExcuses,
+  type ExcuseToDecide,
+} from "./excuses.ts";
+import { ankiCheckOf, yesterdayEntries } from "./history.ts";
 
 export interface PactCoreOptions {
   /** SQLite file. Production: on the /data volume. */
@@ -542,12 +540,6 @@ const OURA_CHECK_INTERVAL_MS = 15_000;
 const ANKI_CHECK_INTERVAL_MS = 15_000;
 /** While an account has an Anki day open and not judged, the scheduler checks AnkiWeb this often. */
 const ANKI_POLL_INTERVAL_MS = 10 * 60 * 1000;
-/** The service a pact of each evidence kind is judged from; Camera has none. */
-const SERVICE_OF_KIND: Record<EvidenceKind, ConnectionService | null> = {
-  camera: null,
-  oura: "oura",
-  anki: "anki",
-};
 /** The push when a connection needs reconnecting, by service. */
 const RECONNECT_PUSH: Record<ConnectionService, { title: string; body: string }> = {
   oura: { title: "Oura needs reconnecting", body: RECONNECT_TEXT.oura },
@@ -555,7 +547,6 @@ const RECONNECT_PUSH: Record<ConnectionService, { title: string; body: string }>
 };
 /** /health fails when the last scheduler tick is older than this. */
 const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
-const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How often an Overdue owner is reminded, and how often their reviewers are told. */
 const OVERDUE_REMINDER_MS = DAY_MS;
@@ -580,25 +571,6 @@ function paymentReviewersSql(owner: string, recipient: string): string {
 }
 /** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
 const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
-/** SQL: the `pact` row's schedule is Weekly count. */
-const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
-/**
- * SQL: the Missed `occurrence` row (of the `pact` row) was judged through a
- * rejection. Any rejected evidence will do: on Fixed days and One-time a
- * rejection judges the occurrence at once. A Weekly count week's rejected
- * evidence just doesn't count, so a short week is never Missed through it.
- */
-const MISSED_THROUGH_REJECTION = `(NOT ${WEEKLY_COUNT_PACT} AND EXISTS (SELECT 1 FROM evidence
-  WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
-    AND evidence.decision = 'rejected'))`;
-/**
- * SQL: an excuse matching `condition` (on `excuse`) covers the occurrence of
- * pact `pact` on `date` (SQL expressions).
- */
-function excuseCoversSql(pact: string, date: string, condition: string): string {
-  return `EXISTS (SELECT 1 FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
-    WHERE excuse_day.pact_id = ${pact} AND excuse_day.date = ${date} AND ${condition})`;
-}
 /** SQL: the `penalty` row is held: an excuse waiting for approval covers its occurrence. */
 const PENALTY_HELD = excuseCoversSql("penalty.pact_id", "penalty.occurrence_date", "excuse.decision IS NULL");
 
@@ -667,426 +639,42 @@ class Core implements PactCore {
   }
 
   signIn(identity: { email: string; name: string }, options: { inviteToken?: string } = {}): Promise<SignInResult> {
-    return this.#command((): SignInResult => {
-      const existing = this.accountIdForEmail(identity.email);
-      if (existing !== null) return { ok: true, accountId: existing };
-
-      const key = emailKey(identity.email);
-      const isOperator =
-        key === this.#operatorEmailKey && !this.#ctx.db.prepare(`SELECT 1 FROM account WHERE is_operator = 1`).get();
-      const invite = options.inviteToken === undefined ? undefined : this.#inviteRow(options.inviteToken);
-      const invited = invite !== undefined && this.#inviteLookup(invite, null).ok;
-      if (!isOperator && !invited) return { ok: false, reason: "invite-required" };
-
-      const id = this.#ctx.newId();
-      this.#ctx.db
-        .prepare(
-          `INSERT INTO account (id, email, email_key, name, is_operator, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .run(id, identity.email, key, identity.name, isOperator ? 1 : 0, this.#ctx.clock.now().toISOString());
-      if (invited) {
-        this.#ctx.db.prepare(`UPDATE invite SET claimed_by_account_id = ? WHERE token = ?`).run(id, invite.token);
-      }
-      return { ok: true, accountId: id };
-    });
+    return this.#command(() => signIn(this.#ctx, this.#operatorEmailKey, identity, options));
   }
 
   invite(token: string): InviteLookup {
-    return this.#inviteLookup(this.#inviteRow(token), null);
-  }
-
-  /**
-   * Whether `viewerId` (null: a signed-out visitor) may use the invite `row`.
-   * One claimed by another account is as good as used.
-   */
-  #inviteLookup(row: InviteRow | undefined, viewerId: AccountId | null): InviteLookup {
-    if (!row) return { ok: false, reason: "invite-not-found" };
-    if (row.used_at !== null) return { ok: false, reason: "invite-used" };
-    const expiresAt = new Date(row.expires_at);
-    if (this.#ctx.clock.now().getTime() >= expiresAt.getTime()) return { ok: false, reason: "invite-expired" };
-    const claimedBy = row.claimed_by_account_id;
-    if (claimedBy !== null && claimedBy !== viewerId) return { ok: false, reason: "invite-used" };
-    return { ok: true, inviterName: row.inviter_name, expiresAt };
-  }
-
-  #inviteRow(token: string): InviteRow | undefined {
-    return this.#ctx.one<InviteRow>(
-      `SELECT invite.token, invite.inviter_account_id, account.name AS inviter_name, invite.expires_at,
-                invite.used_at, invite.claimed_by_account_id
-         FROM invite JOIN account ON account.id = invite.inviter_account_id
-         WHERE invite.token = ?`,
-      token,
-    );
-  }
-
-  #areFriends(a: AccountId, b: AccountId): boolean {
-    const [first, second] = friendshipPair(a, b);
-    return (
-      this.#ctx.db
-        .prepare(`SELECT 1 FROM friendship WHERE account_a_id = ? AND account_b_id = ?`)
-        .get(first, second) !== undefined
-    );
+    return inviteLookup(this.#ctx, inviteRow(this.#ctx, token), null);
   }
 
   accountIdForEmail(email: string): AccountId | null {
-    const row = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE email_key = ?`, emailKey(email));
-    return row?.id ?? null;
+    return accountIdForEmail(this.#ctx, email);
   }
 
   as(accountId: AccountId): AccountView {
-    const account = () => {
-      const row = this.#ctx.one<{ email: string; name: string; timezone: string | null }>(
-        `SELECT email, name, timezone FROM account WHERE id = ?`,
-        accountId,
-      );
-      if (!row) throw new UnknownAccountError(accountId);
-      return row;
-    };
+    const account = () => accountRow(this.#ctx, accountId);
     return {
-      setTimezone: (timezone) =>
-        this.#command((): SetTimezoneResult => {
-          account();
-          const zone = canonicalTimezone(timezone);
-          if (zone === null) return { ok: false, reason: "invalid-timezone" };
-          this.#ctx.db.prepare(`UPDATE account SET timezone = ? WHERE id = ?`).run(zone, accountId);
-          return { ok: true, timezone: zone };
-        }),
-      createInvite: () =>
-        this.#command((): Invite => {
-          account();
-          const token = randomBytes(24).toString("base64url");
-          const now = this.#ctx.clock.now();
-          const expiresAt = new Date(now.getTime() + INVITE_LIFETIME_MS);
-          this.#ctx.db
-            .prepare(`INSERT INTO invite (token, inviter_account_id, created_at, expires_at) VALUES (?, ?, ?, ?)`)
-            .run(token, accountId, now.toISOString(), expiresAt.toISOString());
-          return { token, expiresAt };
-        }),
+      setTimezone: (timezone) => this.#command(() => setTimezone(this.#ctx, accountId, timezone)),
+      createInvite: () => this.#command(() => createInvite(this.#ctx, accountId)),
       invite: (token) => {
         account();
-        return this.#inviteLookup(this.#inviteRow(token), accountId);
+        return inviteLookup(this.#ctx, inviteRow(this.#ctx, token), accountId);
       },
-      acceptInvite: (token) =>
-        this.#command((): AcceptInviteResult => {
-          account();
-          const row = this.#inviteRow(token);
-          if (!row) return { ok: false, reason: "invite-not-found" };
-          const lookup = this.#inviteLookup(row, accountId);
-          if (!lookup.ok) return lookup;
-          const inviterId = row.inviter_account_id;
-          if (inviterId === accountId) return { ok: false, reason: "own-invite" };
-          if (this.#areFriends(accountId, inviterId)) return { ok: false, reason: "already-friends" };
-
-          const now = this.#ctx.clock.now().toISOString();
-          this.#ctx.db
-            .prepare(`UPDATE invite SET used_at = ?, used_by_account_id = ? WHERE token = ?`)
-            .run(now, accountId, token);
-          this.#ctx.db
-            .prepare(`INSERT INTO friendship (account_a_id, account_b_id, created_at) VALUES (?, ?, ?)`)
-            .run(...friendshipPair(accountId, inviterId), now);
-          return { ok: true, friend: { id: inviterId, name: lookup.inviterName } };
-        }),
-      friends: () => {
-        account();
-        const friends = this.#ctx.all<Friend>(
-          `SELECT account.id, account.name FROM friendship
-             JOIN account ON account.id =
-               CASE WHEN friendship.account_a_id = ? THEN friendship.account_b_id ELSE friendship.account_a_id END
-             WHERE friendship.account_a_id = ? OR friendship.account_b_id = ?`,
-          accountId,
-          accountId,
-          accountId,
-        );
-        return friends.sort(byName);
-      },
-      addRecipient: (recipient) =>
-        this.#command((): AddRecipientResult => {
-          account();
-          const name = recipient.name.trim();
-          if (name === "") return { ok: false, reason: "blank-name" };
-          const id = this.#ctx.newId();
-          this.#ctx.db
-            .prepare(`INSERT INTO recipient (id, owner_account_id, name, created_at) VALUES (?, ?, ?, ?)`)
-            .run(id, accountId, name, this.#ctx.clock.now().toISOString());
-          return { ok: true, recipient: { id, name } };
-        }),
-      recipients: () => {
-        account();
-        return selectRecipients(this.#ctx, `owner_account_id = ?`, accountId);
-      },
-      createPact: (pact) =>
-        this.#command((): CreatePactResult => {
-          const { timezone } = account();
-          const now = this.#ctx.clock.now();
-          const checked = this.#checkedPact(accountId, timezone, pact, now);
-          if (!checked.ok) return checked;
-
-          const id = this.#ctx.newId();
-          const times = timesOf(checked.terms);
-          this.#ctx.db
-            .prepare(
-              `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, in_bed_by,
-                                 due_by, start_date, end_date, penalty_cents, recipient_id, stage,
-                                 first_occurrence, created_at, reminders, reminded_through, anki_deck_id,
-                                 anki_rollover_hour)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(
-              id,
-              accountId,
-              checked.name,
-              checked.description,
-              pact.evidenceKind,
-              JSON.stringify(checked.terms.schedule),
-              times.inBedBy,
-              times.dueBy,
-              checked.startDate,
-              checked.terms.endDate,
-              pact.penaltyCents,
-              pact.recipientId,
-              checked.terms.firstOccurrence,
-              now.toISOString(),
-              JSON.stringify(checked.reminders),
-              now.toISOString(),
-              checked.ankiDeckId,
-              times.ankiRollover,
-            );
-          this.#setReviewers(id, checked.reviewerIds);
-          return { ok: true, pactId: id };
-        }),
-      editPact: (pactId, pact) =>
-        this.#command((): EditPactResult => {
-          const { timezone } = account();
-          const row = ownPact(this.#ctx, accountId, pactId);
-          if (!row) return { ok: false, reason: "pact-not-found" };
-          if (editWindowClosesAt(row, this.#ctx.clock.now()) === null)
-            return { ok: false, reason: "edit-window-closed" };
-          if (pact.evidenceKind !== row.evidence_kind) return { ok: false, reason: "evidence-kind-fixed" };
-          const checked = this.#checkedPact(accountId, timezone, pact, new Date(row.created_at), row);
-          if (!checked.ok) return checked;
-
-          const times = timesOf(checked.terms);
-          this.#ctx.db
-            .prepare(
-              `UPDATE pact SET name = ?, description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?,
-                               end_date = ?, penalty_cents = ?, recipient_id = ?, first_occurrence = ?, reminders = ?,
-                               anki_deck_id = ?
-               WHERE id = ?`,
-            )
-            .run(
-              checked.name,
-              checked.description,
-              JSON.stringify(checked.terms.schedule),
-              times.inBedBy,
-              times.dueBy,
-              checked.startDate,
-              checked.terms.endDate,
-              pact.penaltyCents,
-              pact.recipientId,
-              checked.terms.firstOccurrence,
-              JSON.stringify(checked.reminders),
-              checked.ankiDeckId,
-              pactId,
-            );
-          this.#ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
-          this.#setReviewers(pactId, checked.reviewerIds);
-          // A One-time pact's evidence is for its one occurrence, wherever its deadline goes.
-          if (scheduleOf(row.schedule).kind === "one-time" && checked.terms.schedule.kind === "one-time") {
-            this.#moveOneTimeOccurrence(pactId, row.first_occurrence, checked.terms.firstOccurrence);
-            return { ok: true };
-          }
-          const { includes } = occurrences(checked.terms, checked.timezone);
-          this.#removeEvidence(pactId, (date) => !includes(date));
-          return { ok: true };
-        }),
-      deletePact: (pactId) =>
-        this.#command((): DeletePactResult => {
-          account();
-          const row = ownPact(this.#ctx, accountId, pactId);
-          if (!row) return { ok: false, reason: "pact-not-found" };
-          if (editWindowClosesAt(row, this.#ctx.clock.now()) === null)
-            return { ok: false, reason: "edit-window-closed" };
-          // In its window a pact has nothing judged, so no penalties: evidence is all it can have.
-          this.#removeEvidence(pactId, () => true);
-          this.#ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
-          this.#ctx.db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);
-          return { ok: true };
-        }),
-      firstOccurrence: ({ schedule, evidenceKind, inBedBy, dueBy, startDate }, editing) => {
-        const { timezone } = account();
-        const pact = editing === undefined ? undefined : ownPact(this.#ctx, accountId, editing);
-        if (editing !== undefined && !pact) return { ok: false, reason: "pact-not-found" };
-        if (timezone === null) return { ok: false, reason: "no-timezone" };
-        // An Anki pact keeps the rollover hour it was made with; a new one takes the deck list's.
-        const ankiRollover = pact
-          ? pact.anki_rollover_hour
-          : evidenceKind === "anki"
-            ? (this.#ankiDeckList(accountId)?.rolloverHour ?? null)
-            : null;
-        // The form may not have a valid time or date yet: those count as not set. So does a
-        // due-by time the Anki day can't be due by, which creating the pact refuses.
-        const validDueBy =
-          dueBy !== undefined && isDueBy(dueBy) && (ankiRollover === null || ankiDueByFits(dueBy, ankiRollover));
-        const times = {
-          inBedBy: inBedBy !== undefined && isClockTime(inBedBy) ? inBedBy : null,
-          dueBy: validDueBy ? dueBy : null,
-          ankiRollover,
-        };
-        const timing = newOccurrenceTerms(
-          newTermsOf(schedule, formDayClock(times), times.dueBy),
-          pact ? new Date(pact.created_at) : this.#ctx.clock.now(),
-          timezone,
-          startDate !== undefined && isLocalDate(startDate) ? startDate : null,
-        );
-        if (!timing.ok) return timing;
-        return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
-      },
-      pacts: () => {
-        account();
-        const pacts = this.#activePacts(accountId).map(
-          ({ id, name, terms, penaltyCents, editWindowClosesAt }): PactSummary => ({
-            id,
-            name,
-            schedule: terms.schedule,
-            penaltyCents,
-            stage: "active",
-            editWindowClosesAt,
-          }),
-        );
-        const ended = this.#ctx
-          .all<Pick<PactRow, "id" | "name" | "schedule" | "penalty_cents">>(
-            `SELECT id, name, schedule, penalty_cents FROM pact
-               WHERE owner_account_id = ? AND stage = 'ended'
-               ORDER BY name, created_at, id`,
-            accountId,
-          )
-          .map((row): PactSummary => ({
-            id: row.id,
-            name: row.name,
-            schedule: scheduleOf(row.schedule),
-            penaltyCents: row.penalty_cents,
-            stage: "ended",
-            editWindowClosesAt: null,
-          }));
-        return [
-          ...pacts.filter((pact) => pact.editWindowClosesAt),
-          ...pacts.filter((pact) => !pact.editWindowClosesAt),
-          ...ended,
-        ];
-      },
-      pact: (pactId) => {
-        const { timezone } = account();
-        const row = ownPact(this.#ctx, accountId, pactId);
-        if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
-        const now = this.#ctx.clock.now();
-        const { first } = occurrencesOf(this.#ctx, pactId, timezone);
-        const service = SERVICE_OF_KIND[row.evidence_kind];
-        const pact: PactTerms = {
-          id: row.id,
-          ...this.#currentTerms(row),
-          ...stageOf(row),
-          firstOccurrence: { date: first.date, dueAt: first.dueAt },
-          editWindowClosesAt: editWindowClosesAt(row, now),
-          newTerms: this.#newTerms(row, timezone, now),
-          waiting: mergeByTime(
-            waitingSince,
-            "newest-first",
-            this.#waitingChangeRequests(accountId, pactId),
-            this.#waitingEvidence(accountId, pactId),
-            this.#waitingExcuses(accountId, pactId),
-          ) as PactWaitingItem[],
-          history: this.#pactHistory(row, timezone, first, now),
-          connectionProblem:
-            row.stage === "active" && service !== null ? this.#connectionProblem(accountId, service) : null,
-        };
-        return { ok: true, pact };
-      },
-      changePreview: (pactId, change) => {
-        const { timezone } = account();
-        const checked = this.#checkedChange(accountId, timezone, pactId, change, this.#ctx.clock.now());
-        if (!checked.ok) return checked;
-        const { before, after, diffs, outcome } = checked;
-        const preview: ChangePreview = { changes: this.#termChanges(accountId, before, after, diffs), outcome };
-        return { ok: true, preview } satisfies ChangePreviewResult;
-      },
-      changePact: (pactId, change) =>
-        this.#command((): ChangePactResult => {
-          const { timezone, name: ownerName } = account();
-          const now = this.#ctx.clock.now();
-          const checked = this.#checkedChange(accountId, timezone, pactId, change, now);
-          if (!checked.ok) return checked;
-          const { pact, before, after, outcome } = checked;
-          if (outcome.kind === "nothing") return { ok: false, reason: "nothing-changed" };
-          // The name, the reminders and added reviewers apply at once, even inside a change that waits.
-          if (after.name !== before.name)
-            this.#ctx.db.prepare(`UPDATE pact SET name = ? WHERE id = ?`).run(after.name, pactId);
-          this.#ctx.db
-            .prepare(`UPDATE pact SET reminders = ? WHERE id = ?`)
-            .run(JSON.stringify(after.reminders), pactId);
-          const added = after.reviewerIds.filter((id) => !before.reviewerIds.includes(id));
-          this.#setReviewers(pactId, added);
-          this.#tellPickedAsReviewer(added, `${ownerName} added you as a reviewer`, {
-            id: pactId,
-            name: after.name,
-            schedule: before.schedule,
-            penaltyCents: before.penaltyCents,
-          });
-          if (outcome.kind === "needs-approval") {
-            const sent = {
-              ...before,
-              name: after.name,
-              reviewerIds: [...before.reviewerIds, ...added].sort(),
-              reminders: after.reminders,
-            };
-            const id = this.#sendChangeRequest({ ...pact, name: after.name }, ownerName, sent, after, change.note);
-            return { ok: true, outcome: { ...outcome, changeRequestId: id } };
-          }
-          if (outcome.kind === "stricter") this.#applyTerms(pact, after, now, checked.timezone);
-          return { ok: true, outcome };
-        }),
-      requestEnd: (pactId, note) =>
-        this.#command((): RequestEndResult => {
-          const { name: ownerName } = account();
-          const pact = ownPact(this.#ctx, accountId, pactId);
-          if (!pact) return { ok: false, reason: "pact-not-found" };
-          if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
-          if (editWindowClosesAt(pact, this.#ctx.clock.now()) !== null)
-            return { ok: false, reason: "edit-window-open" };
-          if (this.#waitingChangeRequestId(pactId) !== null) return { ok: false, reason: "change-request-waiting" };
-          const id = this.#sendChangeRequest(pact, ownerName, this.#changeableTerms(pact), null, note);
-          return { ok: true, changeRequestId: id };
-        }),
-      changeRequest: (changeRequestId) => {
-        account();
-        const row = this.#changeRequestRow(changeRequestId);
-        if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
-        // A decision outranks a withdrawal.
-        const state: ChangeRequestState =
-          row.withdrawn_at !== null && row.decision === null
-            ? { kind: "withdrawn", withdrawnAt: new Date(row.withdrawn_at) }
-            : reviewStateOf(row);
-        const changeRequest = {
-          ...this.#changeRequestView(row),
-          state,
-          reviewerNames: friendsSortedByName(this.#ctx, reviewersOf(this.#ctx, row.pact_id)).map(
-            (friend) => friend.name,
-          ),
-          thread: this.#thread(row.id, state.kind === "waiting"),
-        };
-        return { ok: true, changeRequest } satisfies ChangeRequestResult;
-      },
+      acceptInvite: (token) => this.#command(() => acceptInvite(this.#ctx, accountId, token)),
+      friends: () => friendList(this.#ctx, accountId),
+      addRecipient: (recipient) => this.#command(() => addRecipient(this.#ctx, accountId, recipient)),
+      recipients: () => recipientList(this.#ctx, accountId),
+      createPact: (pact) => this.#command(() => createPact(this.#ctx, accountId, pact)),
+      editPact: (pactId, pact) => this.#command(() => editPact(this.#ctx, accountId, pactId, pact)),
+      deletePact: (pactId) => this.#command(() => deletePact(this.#ctx, accountId, pactId)),
+      firstOccurrence: (timing, editing) => firstOccurrence(this.#ctx, accountId, timing, editing),
+      pacts: () => pactList(this.#ctx, accountId),
+      pact: (pactId) => pactPage(this.#ctx, accountId, pactId),
+      changePreview: (pactId, change) => changePreview(this.#ctx, accountId, pactId, change),
+      changePact: (pactId, change) => this.#command(() => changePact(this.#ctx, accountId, pactId, change)),
+      requestEnd: (pactId, note) => this.#command(() => requestEnd(this.#ctx, accountId, pactId, note)),
+      changeRequest: (changeRequestId) => changeRequestPage(this.#ctx, accountId, changeRequestId),
       withdrawChangeRequest: (changeRequestId) =>
-        this.#command((): WithdrawChangeRequestResult => {
-          account();
-          const row = this.#changeRequestRow(changeRequestId);
-          if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
-          if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
-          this.#ctx.db
-            .prepare(`UPDATE change_request SET withdrawn_at = ? WHERE id = ?`)
-            .run(this.#ctx.clock.now().toISOString(), changeRequestId);
-          return { ok: true };
-        }),
+        this.#command(() => withdrawChangeRequest(this.#ctx, accountId, changeRequestId)),
       profile: () => {
         const { email, name, timezone } = account();
         const connections = this.#ctx
@@ -1128,7 +716,7 @@ class Core implements PactCore {
         }),
       ankiDecks: async () => {
         account();
-        if (!this.#hasConnection(accountId, "anki")) return { ok: false, reason: "not-connected" };
+        if (!hasConnection(this.#ctx, accountId, "anki")) return { ok: false, reason: "not-connected" };
         const askedAt = this.#ctx.clock.now();
         let result;
         try {
@@ -1179,7 +767,7 @@ class Core implements PactCore {
           timezone === null ? { alerts: [], sections: [] } : this.#todayCards(accountId, timezone);
         const hasPacts =
           this.#ctx.db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
-        const yesterday = timezone === null ? [] : this.#yesterday(accountId, timezone);
+        const yesterday = timezone === null ? [] : yesterdayEntries(this.#ctx, accountId, timezone);
         return { hasPacts, alerts, sections, waiting: this.#waiting(accountId), yesterday };
       },
       notificationSettings: () => {
@@ -1187,229 +775,22 @@ class Core implements PactCore {
         return notificationSettings(this.#ctx, accountId);
       },
       setNotificationSetting: (setting, enabled) =>
-        this.#command(() => {
-          account();
-          if (enabled) {
-            this.#ctx.db
-              .prepare(`DELETE FROM notification_setting_off WHERE account_id = ? AND setting = ?`)
-              .run(accountId, setting);
-          } else {
-            this.#ctx.db
-              .prepare(
-                `INSERT INTO notification_setting_off (account_id, setting) VALUES (?, ?) ON CONFLICT DO NOTHING`,
-              )
-              .run(accountId, setting);
-          }
-          return notificationSettings(this.#ctx, accountId);
-        }),
-      savePushSubscription: (device) =>
-        this.#command((): SavePushSubscriptionResult => {
-          account();
-          if (!isPushDevice(device)) return { ok: false, reason: "invalid-subscription" };
-          this.#ctx.db
-            .prepare(
-              `INSERT INTO push_subscription (endpoint, account_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT (endpoint) DO UPDATE
-               SET account_id = excluded.account_id, p256dh = excluded.p256dh, auth = excluded.auth`,
-            )
-            .run(device.endpoint, accountId, device.p256dh, device.auth, this.#ctx.clock.now().toISOString());
-          return { ok: true };
-        }),
-      removePushSubscription: (endpoint) =>
-        this.#command(() => {
-          account();
-          this.#ctx.db
-            .prepare(`DELETE FROM push_subscription WHERE endpoint = ? AND account_id = ?`)
-            .run(endpoint, accountId);
-        }),
-      submitEvidence: async (pactId, photos) => {
-        const { timezone, name: ownerName } = account();
-        // Refuse cheaply before storing anything, then check again at the time
-        // the server received the photos, in the transaction that writes.
-        const early = this.#evidenceAcceptance(accountId, timezone, pactId, photos.length, this.#ctx.clock.now());
-        if (!early.ok) return early;
-        const stored = await Promise.all(photos.map((photo) => this.#photoStore.store(photo)));
-        const submittedAt = new Date(Math.max(...stored.map((p) => p.receivedAt.getTime())));
-        return this.#command((): SubmitEvidenceResult => {
-          const acceptance = this.#evidenceAcceptance(accountId, timezone, pactId, photos.length, submittedAt);
-          if (!acceptance.ok) return acceptance;
-          const { occurrence, day } = acceptance;
-          this.#ctx.db
-            .prepare(`INSERT INTO occurrence (pact_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
-            .run(pactId, occurrence.date);
-          const evidenceId = this.#ctx.newId();
-          this.#ctx.db
-            .prepare(`INSERT INTO evidence (id, pact_id, occurrence_date, day, submitted_at) VALUES (?, ?, ?, ?, ?)`)
-            .run(evidenceId, pactId, occurrence.date, day, submittedAt.toISOString());
-          stored.forEach(({ photoId, receivedAt }, position) => {
-            this.#ctx.db
-              .prepare(`INSERT INTO evidence_photo (evidence_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
-              .run(evidenceId, position, photoId, receivedAt.toISOString());
-          });
-          // Evidence from inside the edit window waits for #closeEditWindows to
-          // tell its reviewers; if they were told already, it missed that and goes now.
-          const pact = ownPact(this.#ctx, accountId, pactId);
-          if (pact && (pact.reviewers_notified_at !== null || editWindowClosesAt(pact, submittedAt) === null)) {
-            this.#enqueueEvidenceReviewItems(pactId, evidenceId, day, ownerName);
-          }
-          return { ok: true, evidenceId };
-        });
-      },
+        this.#command(() => setNotificationSetting(this.#ctx, accountId, setting, enabled)),
+      savePushSubscription: (device) => this.#command(() => savePushSubscription(this.#ctx, accountId, device)),
+      removePushSubscription: (endpoint) => this.#command(() => removePushSubscription(this.#ctx, accountId, endpoint)),
+      submitEvidence: (pactId, photos) =>
+        submitEvidence(this.#ctx, accountId, pactId, photos, this.#photoStore, (change) => this.#command(change)),
       acceptMiss: (pactId, occurrenceDate) =>
-        this.#command((): AcceptMissResult => {
-          account();
-          const isOwn = this.#ctx.db
-            .prepare(`SELECT 1 FROM pact WHERE id = ? AND owner_account_id = ?`)
-            .get(pactId, accountId);
-          if (!isOwn) return { ok: false, reason: "pact-not-found" };
-          const now = this.#ctx.clock.now().toISOString();
-          const accepted = this.#ctx.db
-            .prepare(
-              `UPDATE occurrence SET miss_accepted_at = ?
-               WHERE pact_id = ? AND date = ? AND outcome = 'missed' AND miss_accepted_at IS NULL`,
-            )
-            .run(now, pactId, occurrenceDate);
-          if (accepted.changes === 1) return { ok: true };
-          // On Weekly count, a rejected day isn't a miss, but its alert goes the same way.
-          const rejected = this.#ctx.db
-            .prepare(
-              `UPDATE evidence SET rejection_accepted_at = ?
-               WHERE pact_id = ? AND day = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL
-                 AND (SELECT json_extract(schedule, '$.kind') FROM pact WHERE id = ?) = 'weekly-count'`,
-            )
-            .run(now, pactId, occurrenceDate, pactId);
-          return rejected.changes > 0 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
-        }),
+        this.#command(() => acceptMiss(this.#ctx, accountId, pactId, occurrenceDate)),
       excusePreview: (pactId, dates) => {
         const { timezone } = account();
-        return this.#excusePreview(accountId, timezone, pactId, dates, this.#ctx.clock.now());
+        return excusePreview(this.#ctx, accountId, timezone, pactId, dates, this.#ctx.clock.now());
       },
-      excuseOptions: (pactId) => {
-        const { timezone } = account();
-        const now = this.#ctx.clock.now();
-        const pact = ownPact(this.#ctx, accountId, pactId);
-        if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
-        if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
-        const today = localDateOf(now, timezone);
-        // Days before today an excuse could cover: Missed in the last 48 hours, or still waiting on evidence.
-        const since = new Date(now.getTime() - EXCUSE_WINDOW_MS).toISOString();
-        const earliest = (
-          this.#ctx.db
-            .prepare(
-              `SELECT MIN(date) AS date FROM occurrence
-               WHERE pact_id = ? AND date < ? AND (outcome IS NULL OR (outcome = 'missed' AND judged_at > ?))`,
-            )
-            .get(pactId, today, since) as { date: LocalDate | null }
-        ).date;
-        const { overlapping } = occurrencesOf(this.#ctx, pactId, timezone);
-        const recentDays = overlapping(earliest ?? today, today)
-          .filter((occurrence) => !dueAfterEnd(this.#ctx, pactId, occurrence))
-          .map((occurrence) => this.#excuseDay(pactId, occurrence))
-          .filter(({ status }) => skipReason(status, now) === null)
-          .toReversed();
-        return { ok: true, options: { today, recentDays } };
-      },
-      fileExcuse: async (pactId, excuse, photos) => {
-        const { timezone, name: ownerName } = account();
-        const reason = excuse.reason.trim();
-        // Refuse cheaply before storing anything, then check again at the time
-        // the server received the photos, in the transaction that writes.
-        const acceptance = (
-          at: Date,
-        ): { ok: true; preview: ExcusePreview } | { ok: false; reason: FileExcuseRefusal } => {
-          const checked = this.#excusePreview(accountId, timezone, pactId, excuse, at);
-          if (!checked.ok) return checked;
-          if (reason === "") return { ok: false, reason: "blank-reason" };
-          if (photos.length > MAX_EXCUSE_PHOTOS) return { ok: false, reason: "too-many-photos" };
-          if (checked.preview.covered.length === 0) return { ok: false, reason: "nothing-to-excuse" };
-          return checked;
-        };
-        const early = acceptance(this.#ctx.clock.now());
-        if (!early.ok) return early;
-        const stored = await Promise.all(photos.map((photo) => this.#photoStore.store(photo)));
-        // With no photos, the server received the excuse when it writes it.
-        const lastReceived = stored.length === 0 ? null : Math.max(...stored.map((p) => p.receivedAt.getTime()));
-        return this.#command((): FileExcuseResult => {
-          const filedAt = lastReceived === null ? this.#ctx.clock.now() : new Date(lastReceived);
-          const checked = acceptance(filedAt);
-          if (!checked.ok) return checked;
-          const excuseId = this.#ctx.newId();
-          this.#ctx.db
-            .prepare(`INSERT INTO excuse (id, pact_id, reason, filed_at) VALUES (?, ?, ?, ?)`)
-            .run(excuseId, pactId, reason, filedAt.toISOString());
-          for (const { date } of checked.preview.covered) {
-            this.#ctx.db
-              .prepare(`INSERT INTO excuse_day (excuse_id, pact_id, date) VALUES (?, ?, ?)`)
-              .run(excuseId, pactId, date);
-          }
-          stored.forEach(({ photoId, receivedAt }, position) => {
-            this.#ctx.db
-              .prepare(`INSERT INTO excuse_photo (excuse_id, position, photo_id, received_at) VALUES (?, ?, ?, ?)`)
-              .run(excuseId, position, photoId, receivedAt.toISOString());
-          });
-          const name = pactName(this.#ctx, pactId);
-          const dates = this.#excuseDatesText(excuseId);
-          tellAll(this.#ctx, reviewersOf(this.#ctx, pactId), "review-item", {
-            itemKind: "excuse",
-            itemId: excuseId,
-            pactId,
-            title: `${ownerName} filed an excuse`,
-            body: `${name} · ${dates}`,
-            url: APP_PATHS.review,
-          });
-          return { ok: true, excuseId };
-        });
-      },
-      excuse: (excuseId) => {
-        account();
-        const pact = this.#excusePact(excuseId);
-        if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
-        const row = this.#ctx.db
-          .prepare(
-            `SELECT excuse.reason, excuse.filed_at, ${reviewStateColumns("excuse")}
-             FROM excuse LEFT JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
-             WHERE excuse.id = ?`,
-          )
-          .get(excuseId) as ReviewStateRow & { reason: string; filed_at: string };
-        const reviewerNames = friendsSortedByName(this.#ctx, reviewersOf(this.#ctx, pact.id)).map(
-          (friend) => friend.name,
-        );
-        const excuse: ExcuseDetail = {
-          ...this.#excuseView({
-            ...row,
-            id: excuseId,
-            pact_id: pact.id,
-            pact_name: pact.name,
-            timezone: pact.timezone,
-          }),
-          state: reviewStateOf(row),
-          reviewerNames,
-          thread: this.#thread(excuseId, row.decision === null),
-        };
-        return { ok: true, excuse };
-      },
-      acceptExcuseRejection: (excuseId) =>
-        this.#command((): AcceptExcuseRejectionResult => {
-          account();
-          const pact = this.#excusePact(excuseId);
-          if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
-          const now = this.#ctx.clock.now().toISOString();
-          const accepted = this.#ctx.db
-            .prepare(
-              `UPDATE excuse SET rejection_accepted_at = ?
-               WHERE id = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL`,
-            )
-            .run(now, excuseId);
-          if (accepted.changes !== 1) return { ok: false, reason: "nothing-to-accept" };
-          this.#ctx.db
-            .prepare(
-              `UPDATE occurrence SET miss_accepted_at = ?
-               WHERE outcome = 'missed' AND miss_accepted_at IS NULL
-                 AND (pact_id, date) IN (SELECT pact_id, date FROM excuse_day WHERE excuse_id = ?)`,
-            )
-            .run(now, excuseId);
-          return { ok: true };
-        }),
+      excuseOptions: (pactId) => excuseOptions(this.#ctx, accountId, pactId),
+      fileExcuse: (pactId, excuse, photos) =>
+        fileExcuse(this.#ctx, accountId, pactId, excuse, photos, this.#photoStore, (change) => this.#command(change)),
+      excuse: (excuseId) => excusePage(this.#ctx, accountId, excuseId),
+      acceptExcuseRejection: (excuseId) => this.#command(() => acceptExcuseRejection(this.#ctx, accountId, excuseId)),
       recordPayment: async (payment, screenshot) => {
         const { name: ownerName } = account();
         // Refuse cheaply before storing anything, then check again in the
@@ -1465,31 +846,7 @@ class Core implements PactCore {
         account();
         return this.#reviewItems(accountId).filter((item) => item.thread.waitingOnReply);
       },
-      evidence: (evidenceId) => {
-        account();
-        const row = this.#ctx.one<ReviewStateRow & EvidenceViewRow>(
-          `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date, evidence.day,
-                    evidence.submitted_at, ${reviewStateColumns("evidence")}
-             FROM evidence
-             JOIN pact ON pact.id = evidence.pact_id
-             LEFT JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
-             WHERE evidence.id = ? AND pact.owner_account_id = ?`,
-          evidenceId,
-          accountId,
-        );
-        if (!row) return { ok: false, reason: "evidence-not-found" };
-        return {
-          ok: true,
-          evidence: {
-            ...this.#evidenceView(row),
-            state: reviewStateOf(row),
-            reviewerNames: friendsSortedByName(this.#ctx, reviewersOf(this.#ctx, row.pact_id)).map(
-              (friend) => friend.name,
-            ),
-            thread: this.#thread(row.id, row.decision === null),
-          },
-        };
-      },
+      evidence: (evidenceId) => evidencePage(this.#ctx, accountId, evidenceId),
       payment: (paymentId) => {
         account();
         const row = this.#ctx.one<ReviewStateRow & PaymentViewRow & { recipient_id: string }>(
@@ -1512,7 +869,7 @@ class Core implements PactCore {
             reviewerNames: friendsSortedByName(this.#ctx, this.#paymentReviewers(accountId, row.recipient_id)).map(
               (friend) => friend.name,
             ),
-            thread: this.#thread(row.id, row.decision === null),
+            thread: thread(this.#ctx, row.id, row.decision === null),
           },
         };
       },
@@ -1544,7 +901,7 @@ class Core implements PactCore {
           const item = this.#ownItem(accountId, itemId);
           if (!item) return { ok: false, reason: "item-not-found" };
           if (!item.waiting) return { ok: false, reason: "not-waiting" };
-          if (!this.#thread(itemId, true).waitingOnReply) return { ok: false, reason: "no-question" };
+          if (!thread(this.#ctx, itemId, true).waitingOnReply) return { ok: false, reason: "no-question" };
           const text = reply.trim();
           if (text === "") return { ok: false, reason: "blank-reply" };
           this.#addComment(itemId, accountId, true, text);
@@ -1569,10 +926,10 @@ class Core implements PactCore {
             reason === null ? { outcome: "approved", reason: null } : { outcome: "rejected", reason };
           switch (item.kind) {
             case "evidence":
-              this.#decideEvidence(item.row, decided, accountId);
+              decideEvidence(this.#ctx, item.row, decided, accountId);
               break;
             case "excuse":
-              this.#decideExcuse(item.row, decided, accountId);
+              decideExcuse(this.#ctx, item.row, decided, accountId);
               break;
             case "payment":
               this.#decidePayment(item.row, decided, accountId);
@@ -1583,14 +940,14 @@ class Core implements PactCore {
                 // rescues an occurrence already due. Judging may End it, which withdraws the request.
                 const [pact] = pactsToJudge(this.#ctx, item.row.pact_id);
                 judgePactDueBy(this.#ctx, pact!, this.#ctx.clock.now(), this.#ankiChecksRunning);
-                if (this.#waitingChangeRequestId(item.row.pact_id) !== item.row.id) {
+                if (waitingChangeRequestId(this.#ctx, item.row.pact_id) !== item.row.id) {
                   return { ok: false, reason: "item-not-found" };
                 }
               }
-              if (decided.outcome === "approved" && !this.#approvableNow(item.row)) {
+              if (decided.outcome === "approved" && !approvableNow(this.#ctx, item.row)) {
                 return { ok: false, reason: "deadline-too-soon" };
               }
-              this.#decideChangeRequest(item.row, decided, accountId);
+              decideChangeRequest(this.#ctx, item.row, decided, accountId);
               break;
           }
           return { ok: true };
@@ -1633,7 +990,7 @@ class Core implements PactCore {
            WHERE evidence.id = ? AND pact.created_at <= ?`,
       reviewerId,
       itemId,
-      this.#editWindowCutoff(),
+      editWindowCutoff(this.#ctx),
     );
     if (evidence) return { kind: "evidence", row: evidence };
     const excuse = this.#ctx.one<ExcuseToDecide>(
@@ -1658,7 +1015,7 @@ class Core implements PactCore {
            WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL AND pact.stage = 'active'`,
         )
         .get(reviewerId, itemId) !== undefined;
-    const changeRequest = mayDecideRequest ? this.#changeRequestRow(itemId) : undefined;
+    const changeRequest = mayDecideRequest ? changeRequestRow(this.#ctx, itemId) : undefined;
     return changeRequest && { kind: "change-request", row: changeRequest };
   }
 
@@ -1695,7 +1052,7 @@ class Core implements PactCore {
         reviewerIds: this.#paymentReviewers(ownerId, payment.recipient_id),
       };
     }
-    const request = this.#changeRequestRow(itemId);
+    const request = changeRequestRow(this.#ctx, itemId);
     if (request && request.owner_account_id === ownerId) {
       return {
         kind: "change-request",
@@ -1723,7 +1080,7 @@ class Core implements PactCore {
         return `${money(amount_cents)} payment to ${recipientName(this.#ctx, recipient_id)}`;
       }
       case "change-request": {
-        const row = this.#changeRequestRow(itemId)!;
+        const row = changeRequestRow(this.#ctx, itemId)!;
         const name = pactName(this.#ctx, row.pact_id);
         return row.request.kind === "end" ? `request to end ${name}` : `change to ${name}`;
       }
@@ -1738,33 +1095,12 @@ class Core implements PactCore {
   }
 
   /**
-   * An item's questions and replies, oldest first. `waiting` says the item is
-   * still waiting for a decision; only then can it be waiting on a reply.
-   */
-  #thread(itemId: string, waiting: boolean): QuestionThread {
-    const comments = this.#ctx
-      .all<{ from_owner: 0 | 1; name: string; text: string; sent_at: string }>(
-        `SELECT comment.from_owner, account.name, comment.text, comment.sent_at
-           FROM comment JOIN account ON account.id = comment.author_account_id
-           WHERE comment.item_id = ? ORDER BY comment.id`,
-        itemId,
-      )
-      .map((row) => ({
-        fromOwner: row.from_owner === 1,
-        authorName: row.name,
-        text: row.text,
-        sentAt: new Date(row.sent_at),
-      }));
-    return { comments, waitingOnReply: waiting && comments.at(-1)?.fromOwner === false };
-  }
-
-  /**
    * Alerts for the owner's items still waiting for a decision whose latest
    * comment is a reviewer's question, with when it was asked.
    */
   #questionAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
     return this.#waiting(ownerId).flatMap((item) => {
-      const { comments, waitingOnReply } = this.#thread(item.id, true);
+      const { comments, waitingOnReply } = thread(this.#ctx, item.id, true);
       const question = comments.at(-1);
       if (!waitingOnReply || !question) return [];
       return [
@@ -1782,32 +1118,6 @@ class Core implements PactCore {
     });
   }
 
-  /** Evidence as its reviewers and its owner see it, with what counts from `terms`: the occurrence's day's. */
-  #evidenceView(row: EvidenceViewRow, terms = termsOn(this.#ctx, row.pact_id, row.occurrence_date)): EvidenceView {
-    return {
-      id: row.id,
-      pactId: row.pact_id,
-      pactName: row.pact_name,
-      occurrenceDate: row.day,
-      description: terms.description,
-      photoIds: this.#evidencePhotoIds(row.id),
-      submittedAt: new Date(row.submitted_at),
-    };
-  }
-
-  /** An excuse as its reviewers and its owner see it, its days as they stand now. */
-  #excuseView(row: ExcuseViewRow): ExcuseView {
-    return {
-      id: row.id,
-      pactId: row.pact_id,
-      pactName: row.pact_name,
-      reason: row.reason,
-      photoIds: this.#excusePhotoIds(row.id),
-      filedAt: new Date(row.filed_at),
-      days: this.#excuseDays(row.id, row.pact_id, row.timezone),
-    };
-  }
-
   /**
    * Every item `reviewerId` may decide, waiting on the owner's reply or not:
    * change requests first, then the rest oldest first.
@@ -1815,44 +1125,15 @@ class Core implements PactCore {
   #reviewItems(reviewerId: AccountId): ReviewItem[] {
     // Change requests first: one waiting holds up any other change to its pact.
     return [
-      ...this.#changeRequestsToReview(reviewerId),
+      ...changeRequestsToReview(this.#ctx, reviewerId),
       ...mergeByTime(
         reviewItemSince,
         "oldest-first",
-        this.#evidenceToReview(reviewerId),
-        this.#excusesToReview(reviewerId),
+        evidenceToReview(this.#ctx, reviewerId),
+        excusesToReview(this.#ctx, reviewerId),
         this.#paymentsToReview(reviewerId),
       ),
     ];
-  }
-
-  /** Evidence waiting for approval that `reviewerId` may decide: for pacts they review, past the edit window. */
-  #evidenceToReview(reviewerId: AccountId): ReviewItem[] {
-    const rows = this.#ctx.all<EvidenceViewRow & { owner_name: string; weekly: 0 | 1 }>(
-      `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
-                evidence.submitted_at, evidence.occurrence_date, evidence.day, ${WEEKLY_COUNT_PACT} AS weekly
-         FROM evidence
-         JOIN pact ON pact.id = evidence.pact_id
-         JOIN account AS owner ON owner.id = pact.owner_account_id
-         JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-         WHERE evidence.decision IS NULL AND pact.created_at <= ?
-         ORDER BY evidence.submitted_at, evidence.id`,
-      reviewerId,
-      this.#editWindowCutoff(),
-    );
-    return rows.map((row): ReviewItem => {
-      // What counts, and what rejecting costs: the terms of the occurrence's day.
-      const terms = termsOn(this.#ctx, row.pact_id, row.occurrence_date);
-      return {
-        kind: "evidence",
-        ...this.#evidenceView(row, terms),
-        ownerName: row.owner_name,
-        penaltyCents: terms.penalty_cents,
-        recipientName: recipientName(this.#ctx, terms.recipient_id),
-        ...(row.weekly === 1 && { week: weekProgress(this.#ctx, row.pact_id, row.occurrence_date) }),
-        thread: this.#thread(row.id, true),
-      };
-    });
   }
 
   /** The owner's penalties for `recipientId`, newest first, each with what's paid and the bill it's on or will make. */
@@ -2285,499 +1566,6 @@ class Core implements PactCore {
   }
 
   /**
-   * Records a reviewer's decision on waiting evidence and tells the owner.
-   * A rejection is final: it judges the occurrence Missed as of now, open or
-   * not. An approval judges it Satisfied as of now once judging has reached it,
-   * since it was waiting on this decision; before that, judging at the due
-   * time will.
-   */
-  #decideEvidence(evidence: EvidenceToDecide, decided: Decided, reviewerId: AccountId): void {
-    const { outcome, reason } = decided;
-    const now = this.#ctx.clock.now();
-    this.#recordDecision("evidence", evidence.id, decided, reviewerId, now);
-    // A day ahead with an approved excuse stays for judging at its due time, which makes it Excused.
-    const excusedAhead = excuseOn(this.#ctx, evidence.pact_id, evidence.occurrence_date) === "approved";
-    const occurrence = occurrencesOf(this.#ctx, evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date);
-    if (occurrence === null || dueAfterEnd(this.#ctx, evidence.pact_id, occurrence)) {
-      // The pact Ended before the day fell due: it's never judged.
-    } else if (this.#isWeekly(evidence.pact_id)) {
-      // A week waiting on this decision past its due time is judged now; the decision told the owner.
-      if (
-        !isJudged(this.#ctx, evidence.pact_id, evidence.occurrence_date) &&
-        judgingReached(this.#ctx, evidence.pact_id, evidence.occurrence_date, now)
-      ) {
-        judgeWeek(this.#ctx, evidence.pact_id, occurrence, now, false);
-      }
-    } else if (
-      !isJudged(this.#ctx, evidence.pact_id, evidence.occurrence_date) &&
-      ((outcome === "rejected" && !excusedAhead) ||
-        judgingReached(this.#ctx, evidence.pact_id, evidence.occurrence_date, now))
-    ) {
-      const judged = outcome === "approved" ? "satisfied" : excusedAhead ? "excused" : "missed";
-      judge(this.#ctx, evidence.pact_id, evidence.occurrence_date, judged, now);
-    }
-    this.#ctx.enqueue({
-      recipient: evidence.owner_account_id,
-      kind: "evidence-decided",
-      payload: {
-        itemKind: "evidence",
-        itemId: evidence.id,
-        pactId: evidence.pact_id,
-        ...decisionDetails(decided),
-        title: `${accountName(this.#ctx, reviewerId)} ${outcome} your evidence`,
-        body: `${pactName(this.#ctx, evidence.pact_id)} · ${reason === null ? formatDate(evidence.day) : `“${reason}”`}`,
-        // A rejection shows as an alert on Today, where the owner can respond to it.
-        url: outcome === "approved" ? APP_PATHS.pact(evidence.pact_id) : APP_PATHS.today,
-      },
-    });
-  }
-
-  /** The pact page's history: its one occurrence, its weeks, or its days, from the first occurrence `first`. */
-  #pactHistory(row: PactRow, timezone: string, first: Occurrence, now: Date): PactHistory {
-    switch (scheduleOf(row.schedule).kind) {
-      case "one-time":
-        return { kind: "one-time", day: { date: first.date, occurrence: this.#occurrenceRecord(row, first) } };
-      case "weekly-count":
-        return { kind: "weekly-count", weeks: this.#heatMapWeeks(row, timezone, first.date, now) };
-      case "fixed-days":
-        return { kind: "fixed-days", days: this.#heatMapDays(row, timezone, first.date, now) };
-    }
-  }
-
-  /**
-   * The pact's heat map as of `now`: every day from its first occurrence
-   * through the Sunday ending this week, or the week it Ended, or its first
-   * occurrence's week while that's ahead.
-   */
-  #heatMapDays(pact: PactRow, timezone: string, first: LocalDate, now: Date): HeatMapDay[] {
-    const endedOn = endedOnOf(pact, timezone);
-    const last = laterDate(first, endedOn ?? localDateOf(now, timezone));
-    const sunday = addDays(last, WEEKDAYS.length - 1 - WEEKDAYS.indexOf(weekdayOf(last)));
-    return this.#occurrenceRecords(pact, timezone, first, sunday);
-  }
-
-  /**
-   * A Weekly count pact's heat map as of `now`: every week from its first
-   * through this one, or the one it Ended, or its first while that's ahead;
-   * none from the week it Ended that was never judged.
-   */
-  #heatMapWeeks(pact: PactRow, timezone: string, first: LocalDate, now: Date): HeatMapWeek[] {
-    const endedOn = endedOnOf(pact, timezone);
-    const last = laterDate(first, endedOn ?? localDateOf(now, timezone));
-    return occurrencesOf(this.#ctx, pact.id, timezone)
-      .between(first, last)
-      .map((week) => {
-        const record = this.#occurrenceRecord(pact, week);
-        const afterEnd = endedOn !== null && week.date >= mondayOf(endedOn) && record.status.kind === "not-judged";
-        return {
-          date: week.date,
-          occurrence: afterEnd ? null : record,
-          progress: weekProgress(this.#ctx, pact.id, week.date),
-        };
-      });
-  }
-
-  /** The owner's pacts due yesterday, by name, each with how its occurrence went. */
-  #yesterday(ownerId: AccountId, timezone: string): TodayYesterdayEntry[] {
-    const yesterday = addDays(localDateOf(this.#ctx.clock.now(), timezone), -1);
-    // A Weekly count week isn't due on any one day.
-    const pacts = this.#ctx.all<PactRow>(
-      `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${WEEKLY_COUNT_PACT} ORDER BY name, created_at, id`,
-      ownerId,
-    );
-    return pacts.flatMap((pact) =>
-      this.#occurrenceRecords(pact, timezone, yesterday, yesterday).flatMap(({ date, occurrence }) =>
-        occurrence
-          ? [{ pactId: pact.id, name: pact.name, evidenceKind: pact.evidence_kind, occurrenceDate: date, occurrence }]
-          : [],
-      ),
-    );
-  }
-
-  /**
-   * How each of the pact's days from `from` to `to` went, oldest first: null
-   * on a day it has no occurrence. An Ended pact has none from the day it
-   * Ended, except one a decision has judged since.
-   */
-  #occurrenceRecords(pact: PactRow, timezone: string, from: LocalDate, to: LocalDate): HeatMapDay[] {
-    const endedOn = endedOnOf(pact, timezone);
-    const found = new Map(
-      occurrencesOf(this.#ctx, pact.id, timezone)
-        .between(from, to)
-        .map((occurrence) => [occurrence.date, occurrence]),
-    );
-    const days: HeatMapDay[] = [];
-    for (let date = from; date <= to; date = addDays(date, 1)) {
-      const occurrence = found.get(date);
-      const record = occurrence ? this.#occurrenceRecord(pact, occurrence) : null;
-      const afterEnd = endedOn !== null && date >= endedOn && record?.status.kind === "not-judged";
-      days.push({ date, occurrence: afterEnd ? null : record });
-    }
-    return days;
-  }
-
-  /** How the pact's `occurrence` went, as of now: where it stands, who settled it, and a bedtime night's sleep. */
-  #occurrenceRecord(
-    pact: Pick<PactRow, "id" | "evidence_kind" | "schedule">,
-    occurrence: Occurrence,
-  ): OccurrenceRecord {
-    const status = occurrenceStatus(this.#ctx, pact.id, occurrence);
-    const row = this.#ctx.one<{
-      bedtime_start: string | null;
-      anki_cards_left: number | null;
-      anki_checked_at: string | null;
-      recipient_name: string | null;
-    }>(
-      `SELECT occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at,
-                recipient.name AS recipient_name
-         FROM occurrence
-         LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
-         LEFT JOIN recipient ON recipient.id = penalty.recipient_id
-         WHERE occurrence.pact_id = ? AND occurrence.date = ?`,
-      pact.id,
-      occurrence.date,
-    );
-    const judged = status.kind === "satisfied" || status.kind === "missed";
-    let detail: OccurrenceDetail | null = null;
-    if (pact.evidence_kind === "oura" && judged) {
-      const bedtimeStart = row?.bedtime_start ?? null;
-      detail = { kind: "night", inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
-    }
-    if (pact.evidence_kind === "anki" && row && judged) detail = { kind: "anki", lastCheck: ankiCheckOf(row) };
-    return { status: this.#recordedStatus(pact, occurrence.date, status, row?.recipient_name ?? null), detail };
-  }
-
-  /**
-   * `status` with the decision that settled it: its approved evidence
-   * (Satisfied), its rejected evidence and where the penalty went (Missed), or
-   * the approved excuse that covers it (Excused, or a day not judged yet it
-   * already excuses).
-   */
-  #recordedStatus(
-    pact: Pick<PactRow, "id" | "schedule">,
-    date: LocalDate,
-    status: OccurrenceStatus,
-    recipientName: string | null,
-  ): RecordedStatus {
-    const pactId = pact.id;
-    // A Weekly count week is Satisfied or Missed by its days, not by any one decision.
-    const weekly = scheduleOf(pact.schedule).kind === "weekly-count";
-    switch (status.kind) {
-      case "satisfied": {
-        const row = weekly
-          ? undefined
-          : this.#ctx.one<{ name: string }>(
-              `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
-                 WHERE evidence.pact_id = ? AND evidence.occurrence_date = ? AND evidence.decision = 'approved'`,
-              pactId,
-              date,
-            );
-        return { ...status, approvedBy: row?.name ?? null };
-      }
-      case "missed":
-        return { ...status, recipientName, rejection: weekly ? null : rejection(this.#ctx, pactId, date) };
-      case "excused":
-      case "not-judged": {
-        const covered = status.kind === "excused" || status.excuse === "approved";
-        const row = covered
-          ? this.#ctx.one<{ name: string; reason: string }>(
-              `SELECT account.name, excuse.reason FROM excuse_day
-                 JOIN excuse ON excuse.id = excuse_day.excuse_id
-                 JOIN account ON account.id = excuse.decided_by_account_id
-                 WHERE excuse_day.pact_id = ? AND excuse_day.date = ? AND excuse.decision = 'approved'
-                 ORDER BY excuse.decided_at DESC LIMIT 1`,
-              pactId,
-              date,
-            )
-          : undefined;
-        return { ...status, excuseApproval: row ? { reviewerName: row.name, reason: row.reason } : null };
-      }
-    }
-  }
-
-  /**
-   * The owner's pact `pactId` and the days an excuse for it with `dates`
-   * would cover at `now`, or why the dates are refused.
-   */
-  #excusePreview(
-    ownerId: AccountId,
-    timezone: string | null,
-    pactId: string,
-    dates: ExcuseDates,
-    now: Date,
-  ): { ok: true; preview: ExcusePreview } | { ok: false; reason: ExcuseDatesRefusal } {
-    const pact = ownPact(this.#ctx, ownerId, pactId);
-    if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
-    if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
-    const { from, to } = dates;
-    if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };
-    if (to > addDays(from, MAX_EXCUSE_SPAN_DAYS - 1)) return { ok: false, reason: "too-many-days" };
-    const preview: ExcusePreview = { covered: [], skipped: [], heldCents: 0 };
-    // On Weekly count, a day of a week covers the whole week. An Ended pact has no days after its end.
-    for (const occurrence of occurrencesOf(this.#ctx, pactId, timezone).overlapping(from, to)) {
-      if (dueAfterEnd(this.#ctx, pactId, occurrence)) continue;
-      const day = this.#excuseDay(pactId, occurrence);
-      const skipped = skipReason(day.status, now);
-      if (skipped !== null) {
-        preview.skipped.push({ date: occurrence.date, reason: skipped });
-        continue;
-      }
-      preview.covered.push(day);
-      if (day.status.kind === "missed") preview.heldCents += day.status.penaltyCents;
-    }
-    return { ok: true, preview };
-  }
-
-  /**
-   * The days an excuse covers, oldest first, as they stand now. A day ahead
-   * that an approved change took off the schedule isn't one any more.
-   */
-  #excuseDays(excuseId: string, pactId: string, timezone: string): ExcuseDay[] {
-    const { between } = occurrencesOf(this.#ctx, pactId, timezone);
-    const dates = this.#ctx
-      .all<{
-        date: LocalDate;
-      }>(`SELECT date FROM excuse_day WHERE excuse_id = ? ORDER BY date`, excuseId)
-      .map((row) => row.date);
-    return dates.flatMap((date) => {
-      const [occurrence] = between(date, date);
-      return occurrence ? [this.#excuseDay(pactId, occurrence)] : [];
-    });
-  }
-
-  /** The pact's `occurrence` as an excuse's day: a Weekly count week runs through its Sunday. */
-  #excuseDay(pactId: string, occurrence: Occurrence): ExcuseDay {
-    const schedule = scheduleOf(termsOn(this.#ctx, pactId, occurrence.date).schedule);
-    return {
-      date: occurrence.date,
-      ...(schedule.kind === "weekly-count" && { through: lastDayOf(schedule, occurrence.date) }),
-      status: occurrenceStatus(this.#ctx, pactId, occurrence),
-    };
-  }
-
-  /** The photos of an excuse, in the order added. */
-  #excusePhotoIds(excuseId: string): string[] {
-    return this.#ctx
-      .all<{
-        photo_id: string;
-      }>(`SELECT photo_id FROM excuse_photo WHERE excuse_id = ? ORDER BY position`, excuseId)
-      .map((row) => row.photo_id);
-  }
-
-  /** The owner's timezone and the pact's terms, for an excuse's pact. */
-  #excusePact(excuseId: string): (PactRow & { timezone: string }) | undefined {
-    return this.#ctx.one<PactRow & { timezone: string }>(
-      `SELECT pact.*, account.timezone FROM excuse
-         JOIN pact ON pact.id = excuse.pact_id
-         JOIN account ON account.id = pact.owner_account_id
-         WHERE excuse.id = ?`,
-      excuseId,
-    );
-  }
-
-  /** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days; "Week of Mon Jan 5" for a Weekly count week. */
-  #excuseDatesText(excuseId: string): string {
-    const {
-      first,
-      last,
-      pact_id: pactId,
-    } = this.#ctx.db
-      .prepare(`SELECT MIN(date) AS first, MAX(date) AS last, pact_id FROM excuse_day WHERE excuse_id = ?`)
-      .get(excuseId) as { first: LocalDate; last: LocalDate; pact_id: string };
-    const text = first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
-    return this.#isWeekly(pactId) ? `Week of ${text}` : text;
-  }
-
-  /**
-   * Records a reviewer's decision on an excuse waiting for approval and tells
-   * the owner. Approved: its Missed days become Excused as of now, without
-   * their penalties, and its days not judged yet that judging has reached
-   * (their evidence was waiting) are judged Excused now; the rest are judged
-   * Excused at their due time. A bedtime night not judged yet is left to
-   * judging, which waits for Oura until it closes. Days the pact no longer
-   * has after it Ended are left alone. Rejected: nothing to change, as its
-   * holds are released by no longer waiting and its days are judged as usual.
-   */
-  #decideExcuse(excuse: ExcuseToDecide, decided: Decided, reviewerId: AccountId): void {
-    const { outcome, reason } = decided;
-    const now = this.#ctx.clock.now();
-    this.#recordDecision("excuse", excuse.id, decided, reviewerId, now);
-    if (outcome === "approved") {
-      const dates = this.#ctx.all<{
-        date: LocalDate;
-      }>(`SELECT date FROM excuse_day WHERE excuse_id = ?`, excuse.id);
-      const { timezone, evidence_kind: evidenceKind } = this.#excusePact(excuse.id)!;
-      const { covering } = occurrencesOf(this.#ctx, excuse.pact_id, timezone);
-      for (const { date } of dates) {
-        const occurrence = covering(date);
-        // The pact Ended before the day fell due: it's never judged.
-        if (occurrence === null || dueAfterEnd(this.#ctx, excuse.pact_id, occurrence)) continue;
-        const row = this.#ctx.one<{ outcome: string | null }>(
-          `SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`,
-          excuse.pact_id,
-          date,
-        );
-        if (row?.outcome === "missed") {
-          this.#ctx.db
-            .prepare(`DELETE FROM penalty WHERE pact_id = ? AND occurrence_date = ?`)
-            .run(excuse.pact_id, date);
-          this.#ctx.db
-            .prepare(`UPDATE occurrence SET outcome = 'excused', judged_at = ? WHERE pact_id = ? AND date = ?`)
-            .run(now.toISOString(), excuse.pact_id, date);
-        } else if (
-          (row?.outcome ?? null) === null &&
-          // A bedtime night waits for Oura until it closes: an on-time bedtime beats the excuse.
-          evidenceKind !== "oura" &&
-          judgingReached(this.#ctx, excuse.pact_id, date, now)
-        ) {
-          judge(this.#ctx, excuse.pact_id, date, "excused", now);
-        }
-      }
-    }
-    const dates = this.#excuseDatesText(excuse.id);
-    this.#ctx.enqueue({
-      recipient: excuse.owner_account_id,
-      kind: "excuse-decided",
-      payload: {
-        itemKind: "excuse",
-        itemId: excuse.id,
-        pactId: excuse.pact_id,
-        ...decisionDetails(decided),
-        title: `${accountName(this.#ctx, reviewerId)} ${outcome} your excuse`,
-        body: `${pactName(this.#ctx, excuse.pact_id)} · ${reason === null ? dates : `“${reason}”`}`,
-        // A rejection shows as an alert on Today, where the owner can respond to it.
-        url: outcome === "approved" ? APP_PATHS.excuse(excuse.id) : APP_PATHS.today,
-      },
-    });
-  }
-
-  /** Excuses waiting for approval that `reviewerId` may decide: those for pacts they review. */
-  #excusesToReview(reviewerId: AccountId): ReviewItem[] {
-    const rows = this.#ctx.all<ExcuseViewRow & { owner_name: string; recipient_name: string }>(
-      `SELECT excuse.id, excuse.reason, excuse.filed_at, pact.id AS pact_id, pact.name AS pact_name,
-                owner.name AS owner_name, owner.timezone, recipient.name AS recipient_name
-         FROM excuse
-         JOIN pact ON pact.id = excuse.pact_id
-         JOIN account AS owner ON owner.id = pact.owner_account_id
-         JOIN recipient ON recipient.id = pact.recipient_id
-         JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-         WHERE excuse.decision IS NULL
-         ORDER BY excuse.filed_at, excuse.id`,
-      reviewerId,
-    );
-    return rows.map((row): ReviewItem => {
-      const excuse = this.#excuseView(row);
-      return {
-        kind: "excuse",
-        ...excuse,
-        ownerName: row.owner_name,
-        heldCents: excuse.days.reduce(
-          (sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0),
-          0,
-        ),
-        recipientName: row.recipient_name,
-        thread: this.#thread(row.id, true),
-      };
-    });
-  }
-
-  /** The owner's excuses waiting for a decision (or just those for `pactId`), newest first. */
-  #waitingExcuses(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
-    const rows = this.#ctx.all<{
-      id: string;
-      pact_id: string;
-      name: string;
-      filed_at: string;
-      first_date: string;
-      last_date: string;
-    }>(
-      `SELECT excuse.id, excuse.pact_id, pact.name, excuse.filed_at,
-                (SELECT MIN(date) FROM excuse_day WHERE excuse_id = excuse.id) AS first_date,
-                (SELECT MAX(date) FROM excuse_day WHERE excuse_id = excuse.id) AS last_date
-         FROM excuse JOIN pact ON pact.id = excuse.pact_id
-         WHERE pact.owner_account_id = ? AND excuse.decision IS NULL AND (? IS NULL OR pact.id = ?)
-         ORDER BY excuse.filed_at DESC, excuse.id`,
-      ownerId,
-      pactId ?? null,
-      pactId ?? null,
-    );
-    return rows.map((row) => ({
-      kind: "excuse",
-      id: row.id,
-      pactId: row.pact_id,
-      name: row.name,
-      firstDate: row.first_date,
-      lastDate: row.last_date,
-      filedAt: new Date(row.filed_at),
-    }));
-  }
-
-  /**
-   * One alert per rejected excuse of the owner's, newest rejection first,
-   * until the owner takes the L on it or files a new excuse for any of its
-   * days, and while it still covers a day on the schedule. With when it was
-   * rejected, for ordering among the alerts.
-   */
-  #rejectedExcuseAlerts(ownerId: AccountId, now: Date): { at: Date; alert: TodayAlert }[] {
-    const rows = this.#ctx.all<{
-      id: string;
-      pact_id: string;
-      reject_reason: string;
-      decided_at: string;
-      name: string;
-      timezone: string;
-      reviewer_name: string;
-    }>(
-      `SELECT excuse.id, excuse.pact_id, excuse.reject_reason, excuse.decided_at, pact.name, owner.timezone,
-                reviewer.name AS reviewer_name
-         FROM excuse
-         JOIN pact ON pact.id = excuse.pact_id
-         JOIN account AS owner ON owner.id = pact.owner_account_id
-         JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
-         WHERE pact.owner_account_id = ? AND excuse.decision = 'rejected' AND excuse.rejection_accepted_at IS NULL
-           AND NOT EXISTS (SELECT 1 FROM excuse_day AS mine
-                           JOIN excuse_day AS other ON other.pact_id = mine.pact_id AND other.date = mine.date
-                           JOIN excuse AS later ON later.id = other.excuse_id
-                           WHERE mine.excuse_id = excuse.id AND later.filed_at > excuse.filed_at)
-         ORDER BY excuse.decided_at DESC, excuse.id`,
-      ownerId,
-    );
-    return rows.flatMap((row) => {
-      const days = this.#excuseDays(row.id, row.pact_id, row.timezone);
-      // An approved change took all its days off the schedule: nothing is owed and nothing is left to do.
-      if (days.length === 0) return [];
-      const { owed } = this.#ctx.db
-        .prepare(
-          `SELECT COALESCE(SUM(penalty.amount_cents), 0) AS owed FROM excuse_day
-           JOIN penalty ON penalty.pact_id = excuse_day.pact_id AND penalty.occurrence_date = excuse_day.date
-           WHERE excuse_day.excuse_id = ? AND penalty.added_at <= ?`,
-        )
-        .get(row.id, row.decided_at) as { owed: number };
-      const excusable = days.filter(({ status }) => skipReason(status, now) === null);
-      const closing = excusable.flatMap(({ status }) => (status.kind === "missed" ? [status.excusableUntil] : []));
-      const closesAt = closing.length === 0 ? null : new Date(Math.min(...closing.map((d) => d.getTime())));
-      return [
-        {
-          at: new Date(row.decided_at),
-          alert: {
-            kind: "excuse-rejected",
-            excuseId: row.id,
-            pactId: row.pact_id,
-            name: row.name,
-            reviewerName: row.reviewer_name,
-            reason: row.reject_reason,
-            firstDate: days[0]!.date,
-            lastDate: days.at(-1)!.date,
-            owedAgainCents: owed,
-            hasDaysNotJudged: days.some(({ status }) => status.kind === "not-judged"),
-            refile: excusable.length === 0 ? null : { closesAt },
-          },
-        },
-      ];
-    });
-  }
-
-  /**
    * Keeps, for each account in `sleep`, the latest bedtime_start Oura has
    * reported with a UTC offset, by when it happened: Oura's clock where the
    * owner is now, for `ouraOffset`. Deleted periods don't count.
@@ -2796,714 +1584,6 @@ class Core implements PactCore {
       if (latest === null || latest === row?.oura_latest_bedtime_start) continue;
       this.#ctx.db.prepare(`UPDATE account SET oura_latest_bedtime_start = ? WHERE id = ?`).run(latest, account);
     }
-  }
-
-  /** The pact's terms an owner can change, as they stand. */
-  #changeableTerms(pact: PactRow): ChangeableTerms {
-    return {
-      name: pact.name,
-      description: pact.description,
-      inBedBy: pact.in_bed_by,
-      dueBy: pact.due_by,
-      startDate: pact.start_date,
-      endDate: pact.end_date,
-      schedule: scheduleOf(pact.schedule),
-      penaltyCents: pact.penalty_cents,
-      recipientId: pact.recipient_id,
-      reviewerIds: reviewersOf(this.#ctx, pact.id),
-      reminders: remindersOf(pact.reminders),
-      ankiDeckId: pact.anki_deck_id,
-    };
-  }
-
-  /** The pact's terms as the pact page and a change request show them. */
-  #currentTerms(pact: PactRow): CurrentTerms & Pick<PactTerms, "reminders"> {
-    const [recipient] = selectRecipients(this.#ctx, `id = ?`, pact.recipient_id);
-    if (!recipient) throw new Error(`pact ${pact.id} has no recipient ${pact.recipient_id}`);
-    return {
-      ...this.#termsByKind(pact),
-      name: pact.name,
-      description: pact.description,
-      startDate: pact.start_date,
-      endDate: pact.end_date,
-      penaltyCents: pact.penalty_cents,
-      recipient,
-      reviewers: friendsSortedByName(this.#ctx, reviewersOf(this.#ctx, pact.id)),
-      reminders: remindersOf(pact.reminders),
-    };
-  }
-
-  /** The terms that depend on the pact's evidence kind. */
-  #termsByKind(pact: PactRow): TermsByKind {
-    const schedule = scheduleOf(pact.schedule);
-    if (pact.evidence_kind === "camera") return { evidenceKind: "camera", schedule, dueBy: pact.due_by };
-    if (schedule.kind !== "fixed-days") throw new Error(`${pact.evidence_kind} pact ${pact.id} isn't on Fixed days`);
-    if (pact.evidence_kind === "oura") {
-      if (pact.in_bed_by === null) throw new Error(`Oura Ring pact ${pact.id} has no in-bed-by time`);
-      return { evidenceKind: "oura", schedule, inBedBy: pact.in_bed_by };
-    }
-    const anki = this.#ankiTerms(pact);
-    if (!anki) throw new Error(`Anki pact ${pact.id} has no deck`);
-    return { evidenceKind: "anki", schedule, dueBy: pact.due_by, anki };
-  }
-
-  /** The id of the pact's change request waiting for a decision, or null. */
-  #waitingChangeRequestId(pactId: string): string | null {
-    const row = this.#ctx.one<{ id: string }>(
-      `SELECT id FROM change_request WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`,
-      pactId,
-    );
-    return row?.id ?? null;
-  }
-
-  /**
-   * What sending `change` to the owner's pact would do at `now`: the pact,
-   * its terms before and after, what each changed term does, and the whole
-   * change's outcome; or why it's refused.
-   */
-  #checkedChange(
-    ownerId: AccountId,
-    timezone: string | null,
-    pactId: string,
-    change: PactChange,
-    now: Date,
-  ):
-    | {
-        ok: true;
-        pact: PactRow;
-        timezone: string;
-        before: ChangeableTerms;
-        after: ChangeableTerms;
-        diffs: TermDiff[];
-        outcome: ChangeOutcome;
-      }
-    | { ok: false; reason: ChangePactRefusal } {
-    const pact = ownPact(this.#ctx, ownerId, pactId);
-    if (!pact) return { ok: false, reason: "pact-not-found" };
-    if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
-    if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
-    const { note: _note, ankiDeckId: newDeckId, ...terms } = change;
-    // An Anki pact keeps its deck unless the change names another.
-    const ankiDeckId = pact.anki_deck_id === null ? undefined : (newDeckId ?? pact.anki_deck_id);
-    const checked = this.#checkedPact(
-      ownerId,
-      timezone,
-      { ...terms, evidenceKind: pact.evidence_kind, ...(ankiDeckId !== undefined && { ankiDeckId }) },
-      new Date(pact.created_at),
-      pact,
-    );
-    if (!checked.ok) return checked;
-    const zone = checked.timezone;
-    const before = this.#changeableTerms(pact);
-    // Only a new pact can swap a week's count for its days, or back.
-    if (checked.terms.schedule.kind !== before.schedule.kind) return { ok: false, reason: "schedule-kind-fixed" };
-    const after = changeableTermsOf(checked, change);
-    // Reminders apply at once, so they go off before the due time in force now as well as the new one.
-    const currentDueAt = occurrencesOf(this.#ctx, pact.id, zone).first.dueAt;
-    if (!remindersGoOffInTime(after.reminders, occurrenceTermsOf(pact), currentDueAt, zone)) {
-      return { ok: false, reason: "reminder-after-due-time" };
-    }
-    const diffs = termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by));
-    if (this.#waitingChangeRequestId(pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
-      return { ok: false, reason: "change-request-waiting" };
-    }
-    // A One-time change applies to its occurrence even once it's open, given an hour to the new deadline.
-    if (checked.terms.schedule.kind === "one-time" && !this.#deadlineFarEnough(pact, zone, after, now)) {
-      return { ok: false, reason: "deadline-too-soon" };
-    }
-    const reason = openOccurrencesRefusal(pact.first_occurrence, before, after, localDateOf(now, zone));
-    if (reason !== null) return { ok: false, reason };
-    return {
-      ok: true,
-      pact,
-      timezone: zone,
-      before,
-      after,
-      diffs,
-      outcome: this.#changeOutcome(pact, zone, before, after, diffs, now),
-    };
-  }
-
-  #changeOutcome(
-    pact: PactRow,
-    timezone: string,
-    before: ChangeableTerms,
-    after: ChangeableTerms,
-    diffs: TermDiff[],
-    now: Date,
-  ): ChangeOutcome {
-    if (diffs.length === 0) return { kind: "nothing" };
-    if (diffs.some((diff) => diff.effect === "needs-approval")) {
-      // Added reviewers join at once; removed ones review until it's approved.
-      const deciders = [...new Set([...before.reviewerIds, ...after.reviewerIds])];
-      return {
-        kind: "needs-approval",
-        reviewerNames: friendsSortedByName(this.#ctx, deciders).map((friend) => friend.name),
-        bundlesStricter: diffs.some((diff) => diff.effect === "stricter"),
-        appliesNow: appliesNow(before, after, diffs),
-      };
-    }
-    if (diffs.some((diff) => diff.effect === "stricter")) {
-      return {
-        kind: "stricter",
-        ...this.#startOfNewTerms(pact, timezone, after, now),
-        appliesNow: appliesNow(before, after, diffs),
-      };
-    }
-    return { kind: "at-once" };
-  }
-
-  /**
-   * If `after` took effect at `at`: the first occurrence it would apply to,
-   * the first not open yet, and today's penalty when today is an occurrence
-   * whose penalty it changes.
-   */
-  #startOfNewTerms(
-    pact: PactRow,
-    timezone: string,
-    after: Pick<ChangeableTerms, "schedule" | "inBedBy" | "dueBy" | "startDate" | "endDate" | "penaltyCents">,
-    at: Date,
-  ): ChangeStart {
-    // One-time: the change applies to its one occurrence, open or not.
-    if (after.schedule.kind === "one-time") return { appliesFrom: after.schedule.deadline, todayKeepsCents: null };
-    const today = localDateOf(at, timezone);
-    const from = firstDayNotOpen(after.schedule, today);
-    const current = occurrenceTermsOf(pact);
-    const earlier = earlierTermsOf(this.#ctx, pact);
-    const firstOccurrence = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
-    // A schedule keeps its kind once its edit window has closed, so the terms in force now are on a recurring schedule too.
-    if (hasSchedule(current, "one-time")) throw new Error(`pact ${pact.id} is One-time, but its change isn't`);
-    // The terms in force now stay with the occurrences dated before `from`, unless a change made today put them there.
-    const planned = earlier.some((terms) => terms.until === from) ? earlier : [...earlier, { ...current, until: from }];
-    const start = laterDate(firstOccurrence, from);
-    const changed = scheduleTermsOf(pact, after.schedule, after.inBedBy, after.dueBy);
-    // With no day left before its end date, the change still starts tomorrow (or next week).
-    const [first] = occurrencesOverTime(
-      { ...changed, firstOccurrence, endDate: after.endDate },
-      planned,
-      timezone,
-    ).between(from, addDays(start, 7));
-    return {
-      appliesFrom: first?.date ?? from,
-      todayKeepsCents: this.#todayKeeps(pact.id, occurrencesOverTime(current, earlier, timezone), today, after),
-    };
-  }
-
-  /** The penalty the occurrence of `occurrences` open `today` keeps, when it differs from `after`'s; else null. */
-  #todayKeeps(
-    pactId: string,
-    occurrences: Occurrences,
-    today: LocalDate,
-    after: Pick<ChangeableTerms, "penaltyCents">,
-  ): number | null {
-    const open = occurrences.covering(today);
-    if (!open) return null;
-    const { penalty_cents: penalty } = termsOn(this.#ctx, pactId, open.date);
-    return penalty !== after.penaltyCents ? penalty : null;
-  }
-
-  /**
-   * Puts `after` in force for the pact's occurrences not open at `at`, those
-   * dated from tomorrow (for Weekly count, next Monday) in the owner's
-   * timezone; the terms it had stay with those dated before. A pact whose first occurrence hasn't come gets the
-   * first day of the new schedule from tomorrow. The name and reviewers are
-   * left as they are.
-   */
-  #applyTerms(pact: PactRow, after: ChangeableTerms, at: Date, timezone: string): void {
-    if (after.schedule.kind === "one-time") return this.#applyOneTimeTerms(pact, after);
-    const today = localDateOf(at, timezone);
-    const from = firstDayNotOpen(after.schedule, today);
-    // A change already made today put the terms today keeps there first.
-    this.#ctx.db
-      .prepare(
-        `INSERT INTO pact_earlier_terms (pact_id, until, description, schedule, in_bed_by, due_by, penalty_cents,
-                                         recipient_id, anki_deck_id)
-         SELECT id, ?, description, schedule, in_bed_by, due_by, penalty_cents, recipient_id, anki_deck_id
-         FROM pact WHERE id = ?
-         ON CONFLICT (pact_id, until) DO NOTHING`,
-      )
-      .run(from, pact.id);
-    // Approved after the pact started, a new start date is moot; approved after
-    // the end date it asked for, the pact still keeps today (or this week), which is open.
-    const started = pact.first_occurrence < from;
-    const lastOpen = addDays(from, -1);
-    const endDate = after.endDate === null ? null : laterDate(after.endDate, lastOpen);
-    this.#ctx.db
-      .prepare(
-        `UPDATE pact SET description = ?, schedule = ?, in_bed_by = ?, due_by = ?, start_date = ?, end_date = ?,
-                         penalty_cents = ?, recipient_id = ?, first_occurrence = ?,
-                         anki_deck_id = COALESCE(?, anki_deck_id)
-         WHERE id = ?`,
-      )
-      .run(
-        after.description,
-        JSON.stringify(after.schedule),
-        after.inBedBy,
-        after.dueBy,
-        started ? pact.start_date : after.startDate,
-        endDate,
-        after.penaltyCents,
-        after.recipientId,
-        firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate),
-        after.ankiDeckId,
-        pact.id,
-      );
-  }
-
-  /**
-   * Puts `after` in force for a One-time pact's one occurrence, open or not:
-   * its evidence and any excuse for it move with the deadline's date. An
-   * occurrence already judged has Ended the pact, and keeps its terms.
-   */
-  #applyOneTimeTerms(pact: PactRow, after: ChangeableTerms): void {
-    if (after.schedule.kind !== "one-time" || pact.stage === "ended") return;
-    this.#ctx.db
-      .prepare(
-        `UPDATE pact SET description = ?, schedule = ?, due_by = ?, penalty_cents = ?, recipient_id = ?,
-                         first_occurrence = ?
-         WHERE id = ?`,
-      )
-      .run(
-        after.description,
-        JSON.stringify(after.schedule),
-        after.dueBy,
-        after.penaltyCents,
-        after.recipientId,
-        after.schedule.deadline,
-        pact.id,
-      );
-    this.#moveOneTimeOccurrence(pact.id, pact.first_occurrence, after.schedule.deadline);
-  }
-
-  /**
-   * Re-dates a One-time pact's occurrence, not judged yet, from `from` to
-   * `to`: its row, its evidence and the excuses that cover it.
-   */
-  #moveOneTimeOccurrence(pactId: string, from: LocalDate, to: LocalDate): void {
-    if (from === to) return;
-    this.#ctx.db
-      .prepare(
-        `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, miss_accepted_at)
-         SELECT pact_id, ?, outcome, judged_at, bedtime_start, miss_accepted_at FROM occurrence
-         WHERE pact_id = ? AND date = ?`,
-      )
-      .run(to, pactId, from);
-    this.#ctx.db
-      .prepare(`UPDATE evidence SET occurrence_date = ?, day = ? WHERE pact_id = ? AND occurrence_date = ?`)
-      .run(to, to, pactId, from);
-    this.#ctx.db.prepare(`UPDATE excuse_day SET date = ? WHERE pact_id = ? AND date = ?`).run(to, pactId, from);
-    this.#ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, from);
-  }
-
-  /**
-   * Whether a One-time pact changed to `after` at `at` is due at least an
-   * hour later, or keeps the deadline it has.
-   */
-  #deadlineFarEnough(
-    pact: PactRow,
-    timezone: string,
-    after: Pick<ChangeableTerms, "schedule" | "dueBy">,
-    at: Date,
-  ): boolean {
-    const current = occurrencesOf(this.#ctx, pact.id, timezone).first;
-    const terms = scheduleTermsOf(pact, after.schedule, pact.in_bed_by, after.dueBy);
-    const changed = occurrences(
-      { ...terms, firstOccurrence: pact.first_occurrence, endDate: pact.end_date },
-      timezone,
-    ).first;
-    return changed.dueAt.getTime() === current.dueAt.getTime() || dueSoonEnough(changed, at);
-  }
-
-  /** The changed terms, old and new, with names for the recipient and reviewers. */
-  #termChanges(ownerId: AccountId, before: ChangeableTerms, after: ChangeableTerms, diffs: TermDiff[]): TermChange[] {
-    const deck = (id: string) => ({ id, name: this.#ankiDeckName(ownerId, id) });
-    return diffs.map((diff): TermChange => {
-      const effect = effectOf(diff);
-      switch (diff.term) {
-        case "deck":
-          return { term: diff.term, before: deck(diff.before), after: deck(diff.after), ...effect };
-        case "name":
-          return { term: diff.term, before: before.name, after: after.name, ...effect };
-        case "description":
-          return { term: diff.term, before: before.description, after: after.description, ...effect };
-        case "in-bed-by":
-          return { term: diff.term, before: diff.before, after: diff.after, ...effect };
-        case "due-by":
-          return { term: diff.term, before: before.dueBy, after: after.dueBy, ...effect };
-        case "start-date":
-          return { term: diff.term, before: before.startDate, after: after.startDate, ...effect };
-        case "end-date":
-          return { term: diff.term, before: before.endDate, after: after.endDate, ...effect };
-        case "schedule":
-          return { term: diff.term, before: before.schedule, after: after.schedule, ...effect };
-        case "penalty":
-          return { term: diff.term, before: before.penaltyCents, after: after.penaltyCents, ...effect };
-        case "recipient":
-          return {
-            term: diff.term,
-            before: { id: before.recipientId, name: recipientName(this.#ctx, before.recipientId) },
-            after: { id: after.recipientId, name: recipientName(this.#ctx, after.recipientId) },
-            ...effect,
-          };
-        case "reviewers":
-          return {
-            term: diff.term,
-            before: friendsSortedByName(this.#ctx, before.reviewerIds),
-            after: friendsSortedByName(this.#ctx, after.reviewerIds),
-            added: friendsSortedByName(
-              this.#ctx,
-              after.reviewerIds.filter((id) => !before.reviewerIds.includes(id)),
-            ),
-            removed: friendsSortedByName(
-              this.#ctx,
-              before.reviewerIds.filter((id) => !after.reviewerIds.includes(id)),
-            ),
-            ...effect,
-          };
-        case "reminders":
-          return { term: diff.term, before: before.reminders, after: after.reminders, ...effect };
-      }
-    });
-  }
-
-  /** Records a change request for the pact, and gives its reviewers a review item. */
-  #sendChangeRequest(
-    pact: PactRow,
-    ownerName: string,
-    before: ChangeableTerms,
-    after: ChangeableTerms | null,
-    note: string | undefined,
-  ): string {
-    const id = this.#ctx.newId();
-    const trimmed = note?.trim() ?? "";
-    this.#ctx.db
-      .prepare(
-        `INSERT INTO change_request (id, pact_id, ends_pact, before_terms, after_terms, note, requested_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        pact.id,
-        after === null ? 1 : 0,
-        JSON.stringify(before),
-        after === null ? null : JSON.stringify(after),
-        trimmed === "" ? null : trimmed,
-        this.#ctx.clock.now().toISOString(),
-      );
-    const what =
-      after === null
-        ? []
-        : termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by)).map(({ term }) =>
-            term === "schedule" && after.schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term],
-          );
-    const body = [...what, ...(trimmed === "" ? [] : [`“${trimmed}”`])].join(" · ");
-    tellAll(this.#ctx, reviewersOf(this.#ctx, pact.id), "review-item", {
-      itemKind: "change-request",
-      itemId: id,
-      pactId: pact.id,
-      title: `${ownerName} asked to ${after === null ? "end" : "change"} ${pact.name}`,
-      body: body === "" ? "It needs your approval" : body,
-      url: APP_PATHS.review,
-    });
-    return id;
-  }
-
-  /** A change request with its pact's owner and their timezone, and the reviewer who decided it. */
-  #changeRequestRow(id: string): StoredChangeRequest | undefined {
-    const row = this.#ctx.one<ChangeRequestRow>(
-      `SELECT change_request.*, pact.owner_account_id, owner.name AS owner_name, owner.timezone,
-                reviewer.name AS reviewer_name
-         FROM change_request
-         JOIN pact ON pact.id = change_request.pact_id
-         JOIN account AS owner ON owner.id = pact.owner_account_id
-         LEFT JOIN account AS reviewer ON reviewer.id = change_request.decided_by_account_id
-         WHERE change_request.id = ?`,
-      id,
-    );
-    return row && storedChangeRequestOf(row);
-  }
-
-  #changeRequestView(row: StoredChangeRequest): ChangeRequestView {
-    const pact = this.#ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
-    const { request } = row;
-    const waiting = row.decision === null && row.withdrawn_at === null;
-    const base = {
-      id: row.id,
-      pactId: row.pact_id,
-      pactName: pact.name,
-      note: row.note,
-      requestedAt: new Date(row.requested_at),
-      // Reminders are the owner's own: reviewers don't see them.
-      current: withoutReminders(this.#currentTerms(pact)),
-    };
-    if (request.kind === "end") return { ...base, endsPact: true };
-    return {
-      ...base,
-      endsPact: false,
-      changes: this.#termChanges(
-        pact.owner_account_id,
-        request.before,
-        request.after,
-        termDiffs(request.before, request.after, dayClockOf(pact, pact.in_bed_by, pact.due_by)),
-      ),
-      start: waiting
-        ? this.#startOfNewTerms(
-            pact,
-            ownerZone(row.timezone, row.owner_account_id),
-            request.after,
-            this.#ctx.clock.now(),
-          )
-        : null,
-    };
-  }
-
-  /** Change requests waiting for a decision that `reviewerId` may make: those for pacts they review, oldest first. */
-  #changeRequestsToReview(reviewerId: AccountId): ReviewItem[] {
-    const ids = this.#ctx.all<{ id: string }>(
-      `SELECT change_request.id FROM change_request
-         JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
-                           AND pact_reviewer.reviewer_account_id = ?
-         WHERE change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
-         ORDER BY change_request.requested_at, change_request.id`,
-      reviewerId,
-    );
-    return ids.map(({ id }) => {
-      const row = this.#changeRequestRow(id)!;
-      return {
-        kind: "change-request",
-        ownerName: row.owner_name,
-        thread: this.#thread(id, true),
-        ...this.#changeRequestView(row),
-      };
-    });
-  }
-
-  /** The owner's change requests waiting for a decision (or just that for `pactId`), newest first. */
-  #waitingChangeRequests(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
-    const rows = this.#ctx.all<{
-      id: string;
-      pact_id: string;
-      name: string;
-      ends_pact: 0 | 1;
-      requested_at: string;
-    }>(
-      `SELECT change_request.id, change_request.pact_id, pact.name, change_request.ends_pact,
-                change_request.requested_at
-         FROM change_request JOIN pact ON pact.id = change_request.pact_id
-         WHERE pact.owner_account_id = ? AND change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
-           AND (? IS NULL OR pact.id = ?)
-         ORDER BY change_request.requested_at DESC, change_request.id`,
-      ownerId,
-      pactId ?? null,
-      pactId ?? null,
-    );
-    return rows.map((row) => ({
-      kind: "change-request",
-      id: row.id,
-      pactId: row.pact_id,
-      name: row.name,
-      endsPact: row.ends_pact === 1,
-      requestedAt: new Date(row.requested_at),
-    }));
-  }
-
-  /**
-   * Records a reviewer's decision on a change request and tells the owner.
-   * Approved, an end makes the pact Ended at once; a change applies its terms
-   * from the first occurrence not open yet, and takes off the reviewers it
-   * removes. Rejected, nothing changes.
-   */
-  #decideChangeRequest(row: StoredChangeRequest, decided: Decided, reviewerId: AccountId): void {
-    const { outcome } = decided;
-    const now = this.#ctx.clock.now();
-    this.#recordDecision("change_request", row.id, decided, reviewerId, now);
-    const { request } = row;
-    const pact = this.#ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
-    const reviewerName = accountName(this.#ctx, reviewerId);
-    const title = `${reviewerName} ${outcome} ${request.kind === "end" ? `ending ${pact.name}` : "your change"}`;
-    let body: string;
-    if (decided.outcome === "rejected") {
-      body = `${pact.name} · “${decided.reason}”`;
-    } else if (request.kind === "end") {
-      endPact(this.#ctx, pact.id, now);
-      body = `${pact.name} is Ended`;
-    } else {
-      const { before, after } = request;
-      for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
-        this.#ctx.db
-          .prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`)
-          .run(pact.id, removed);
-      }
-      const timezone = ownerZone(row.timezone, row.owner_account_id);
-      const { appliesFrom } = this.#startOfNewTerms(pact, timezone, after, now);
-      this.#applyTerms(pact, after, now, timezone);
-      body = `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
-    }
-    this.#ctx.enqueue({
-      recipient: row.owner_account_id,
-      kind: "change-request-decided",
-      payload: {
-        itemKind: "change-request",
-        itemId: row.id,
-        pactId: pact.id,
-        ...decisionDetails(decided),
-        title,
-        body,
-        url: APP_PATHS.pact(pact.id),
-      },
-    });
-  }
-
-  /**
-   * Whether approving the change request now leaves its One-time pact's new
-   * deadline at least an hour off, or keeps the deadline it has. Any other
-   * change can always be approved.
-   */
-  #approvableNow(row: StoredChangeRequest): boolean {
-    const { request } = row;
-    if (request.kind === "end" || request.after.schedule.kind !== "one-time") return true;
-    const pact = this.#ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
-    if (pact.stage === "ended") return true;
-    return this.#deadlineFarEnough(
-      pact,
-      ownerZone(row.timezone, row.owner_account_id),
-      request.after,
-      this.#ctx.clock.now(),
-    );
-  }
-
-  /** As the pact page puts it: when the newest terms start, while their first occurrence hasn't opened. */
-  #newTerms(pact: PactRow, timezone: string, now: Date): PactTerms["newTerms"] {
-    if (pact.stage === "ended") return null;
-    const latest = this.#ctx.one<{ until: LocalDate }>(
-      `SELECT until FROM pact_earlier_terms WHERE pact_id = ? ORDER BY until DESC LIMIT 1`,
-      pact.id,
-    );
-    if (!latest) return null;
-    const occurrences = occurrencesOf(this.#ctx, pact.id, timezone);
-    // A start date may put the first occurrence further off than a week.
-    const from = laterDate(pact.first_occurrence, latest.until);
-    const [start] = occurrences.between(from, addDays(from, 7));
-    const today = localDateOf(now, timezone);
-    if (!start || start.date <= today) return null;
-    const todayKeepsCents = this.#todayKeeps(pact.id, occurrences, today, { penaltyCents: pact.penalty_cents });
-    return { appliesFrom: start.date, todayKeepsCents };
-  }
-
-  /**
-   * What creating and editing share: `pact` checked as a pact made at
-   * `createdAt`, or why it's refused. `existing` is the pact being edited or
-   * changed: an Anki pact keeps its rollover hour, and its own deck counts as
-   * known even once it's gone from the deck list. The evidence source is
-   * checked first, then the terms, then the recipient and reviewers.
-   */
-  #checkedPact(
-    ownerId: AccountId,
-    timezone: string | null,
-    pact: NewPact,
-    createdAt: Date,
-    existing?: Pick<PactRow, "anki_deck_id" | "anki_rollover_hour">,
-  ): CheckedPact | { ok: false; reason: CreatePactRefusal } {
-    const source = this.#evidenceSource(ownerId, pact, existing);
-    if (!source.ok) return source;
-    const terms = checkedTerms(pact, source.ankiRollover, timezone, createdAt);
-    if (!terms.ok) return terms;
-    const people = this.#checkedPeople(ownerId, pact);
-    if (!people.ok) return people;
-    return { ...terms, reviewerIds: people.reviewerIds, ankiDeckId: source.ankiDeckId };
-  }
-
-  /**
-   * Where `pact`'s evidence comes from, or why it can't: Oura Ring and Anki
-   * need their connection, and an Anki pact a deck from the owner's deck list
-   * (or `existing`'s own deck). An Anki pact's day turns at the collection's
-   * rollover hour; `existing` keeps the one it has.
-   */
-  #evidenceSource(
-    ownerId: AccountId,
-    pact: NewPact,
-    existing: Pick<PactRow, "anki_deck_id" | "anki_rollover_hour"> | undefined,
-  ): { ok: true; ankiDeckId: string | null; ankiRollover: number | null } | { ok: false; reason: CreatePactRefusal } {
-    switch (pact.evidenceKind) {
-      case "camera":
-        return { ok: true, ankiDeckId: null, ankiRollover: null };
-      case "oura":
-        if (!this.#hasConnection(ownerId, "oura")) return { ok: false, reason: "oura-not-connected" };
-        return { ok: true, ankiDeckId: null, ankiRollover: null };
-      case "anki": {
-        if (!this.#hasConnection(ownerId, "anki")) return { ok: false, reason: "anki-not-connected" };
-        const list = this.#ankiDeckList(ownerId);
-        const deckId = pact.ankiDeckId ?? "";
-        const ownDeck = existing?.anki_deck_id === deckId && existing.anki_rollover_hour !== null;
-        if (!ownDeck && !list?.decks.some((deck) => deck.id === deckId)) return { ok: false, reason: "unknown-deck" };
-        return { ok: true, ankiDeckId: deckId, ankiRollover: existing?.anki_rollover_hour ?? list!.rolloverHour };
-      }
-    }
-  }
-
-  /** `pact`'s recipient and reviewers, or why they're refused: the owner's own recipient, and friends. */
-  #checkedPeople(
-    ownerId: AccountId,
-    pact: NewPact,
-  ): { ok: true; reviewerIds: AccountId[] } | { ok: false; reason: CreatePactRefusal } {
-    const isOwnRecipient = this.#ctx.db
-      .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
-      .get(pact.recipientId, ownerId);
-    if (!isOwnRecipient) return { ok: false, reason: "unknown-recipient" };
-    const reviewerIds = [...new Set(pact.reviewerIds)];
-    if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
-    if (!reviewerIds.every((id) => this.#areFriends(ownerId, id))) return { ok: false, reason: "not-a-friend" };
-    return { ok: true, reviewerIds };
-  }
-
-  #hasConnection(accountId: AccountId, service: ConnectionService): boolean {
-    return (
-      this.#ctx.db.prepare(`SELECT 1 FROM connection WHERE account_id = ? AND service = ?`).get(accountId, service) !==
-      undefined
-    );
-  }
-
-  /** The account's deck list as AnkiWeb last gave it, or null before the first. */
-  #ankiDeckList(accountId: AccountId): { decks: AnkiDeck[]; rolloverHour: number } | null {
-    const row = this.#ctx.one<{ decks: string; rollover_hour: number }>(
-      `SELECT decks, rollover_hour FROM anki_deck_list WHERE account_id = ?`,
-      accountId,
-    );
-    return row ? { decks: JSON.parse(row.decks) as AnkiDeck[], rolloverHour: row.rollover_hour } : null;
-  }
-
-  /** The deck's name as the last deck list or check found it, or null once it's gone from the list. */
-  #ankiDeckName(accountId: AccountId, deckId: string): string | null {
-    const listed = this.#ankiDeckList(accountId)?.decks.find((deck) => deck.id === deckId)?.name;
-    return listed ?? this.#ankiPactDeck(accountId, deckId)?.name ?? null;
-  }
-
-  /** A deck an Anki pact is on, as checks last found it; undefined before the first check. */
-  #ankiPactDeck(
-    accountId: AccountId,
-    deckId: string,
-  ): { name: string | null; missing_since: string | null } | undefined {
-    return this.#ctx.one<{ name: string | null; missing_since: string | null }>(
-      `SELECT name, missing_since FROM anki_pact_deck WHERE account_id = ? AND deck_id = ?`,
-      accountId,
-      deckId,
-    );
-  }
-
-  /** Whether the last check found the deck gone from the account's collection. */
-  #ankiDeckMissing(accountId: AccountId, deckId: string): boolean {
-    return (this.#ankiPactDeck(accountId, deckId)?.missing_since ?? null) !== null;
-  }
-
-  /** An Anki pact's deck and rollover hour; null for any other pact. */
-  #ankiTerms(pact: Pick<PactRow, "owner_account_id" | "anki_deck_id" | "anki_rollover_hour">): AnkiTerms | null {
-    if (pact.anki_deck_id === null || pact.anki_rollover_hour === null) return null;
-    return {
-      deckId: pact.anki_deck_id,
-      deckName: this.#ankiDeckName(pact.owner_account_id, pact.anki_deck_id),
-      deckMissing: this.#ankiDeckMissing(pact.owner_account_id, pact.anki_deck_id),
-      rolloverHour: pact.anki_rollover_hour,
-    };
   }
 
   /** How many of the account's Active pacts are judged from `service`. */
@@ -3527,101 +1607,6 @@ class Core implements PactCore {
 
   #disconnect(accountId: AccountId, service: ConnectionService): void {
     this.#ctx.db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = ?`).run(accountId, service);
-  }
-
-  /** Why the service can't be read for the account, or null when its connection works. */
-  #connectionProblem(accountId: AccountId, service: ConnectionService): ConnectionProblem | null {
-    const row = this.#ctx.one<{ status: Connection["status"] }>(
-      `SELECT status FROM connection WHERE account_id = ? AND service = ?`,
-      accountId,
-      service,
-    );
-    if (!row) return "not-connected";
-    return row.status === "connected" ? null : row.status;
-  }
-
-  #setReviewers(pactId: string, reviewerIds: AccountId[]): void {
-    for (const reviewerId of reviewerIds) {
-      this.#ctx.db
-        .prepare(`INSERT INTO pact_reviewer (pact_id, reviewer_account_id) VALUES (?, ?)`)
-        .run(pactId, reviewerId);
-    }
-  }
-
-  /** Pacts created by this time, as an ISO string, are past their edit window: for comparing in SQL. */
-  #editWindowCutoff(at = this.#ctx.clock.now()): string {
-    return new Date(at.getTime() - EDIT_WINDOW_MS).toISOString();
-  }
-
-  /** Removes the pact's evidence on the dates `removed` picks, and those occurrences, none of them judged. */
-  #removeEvidence(pactId: string, removed: (date: LocalDate) => boolean): void {
-    const rows = this.#ctx.all<{
-      id: string;
-      occurrence_date: LocalDate;
-    }>(`SELECT id, occurrence_date FROM evidence WHERE pact_id = ?`, pactId);
-    for (const { id, occurrence_date } of rows.filter((row) => removed(row.occurrence_date))) {
-      this.#ctx.db.prepare(`DELETE FROM evidence_photo WHERE evidence_id = ?`).run(id);
-      this.#ctx.db.prepare(`DELETE FROM evidence WHERE id = ?`).run(id);
-      this.#ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, occurrence_date);
-    }
-  }
-
-  #enqueueEvidenceReviewItems(pactId: string, evidenceId: string, date: LocalDate, ownerName: string): void {
-    tellAll(this.#ctx, reviewersOf(this.#ctx, pactId), "review-item", {
-      itemKind: "evidence",
-      itemId: evidenceId,
-      pactId,
-      title: `${ownerName} submitted evidence`,
-      body: `${pactName(this.#ctx, pactId)} · ${formatDate(date)}`,
-      url: APP_PATHS.review,
-    });
-  }
-
-  /** Tells each of `reviewerIds` they now review the pact, and what it asks. */
-  #tellPickedAsReviewer(
-    reviewerIds: readonly AccountId[],
-    title: string,
-    pact: { id: string; name: string; schedule: Schedule; penaltyCents: number },
-  ): void {
-    tellAll(this.#ctx, reviewerIds, "picked-as-reviewer", {
-      pactId: pact.id,
-      title,
-      body: `${pact.name} · ${scheduleText(pact.schedule)} · ${money(pact.penaltyCents)} per miss`,
-      url: APP_PATHS.review,
-    });
-  }
-
-  /**
-   * For each pact whose edit window has closed by `t` and whose reviewers
-   * haven't been told: tells them they've been picked, then about any
-   * evidence submitted in the window.
-   */
-  #closeEditWindows(t: Date): void {
-    const pacts = this.#ctx.all<PactRow>(
-      `SELECT * FROM pact WHERE reviewers_notified_at IS NULL AND created_at <= ? ORDER BY created_at, id`,
-      this.#editWindowCutoff(t),
-    );
-    for (const pact of pacts) {
-      const ownerName = accountName(this.#ctx, pact.owner_account_id);
-      this.#tellPickedAsReviewer(reviewersOf(this.#ctx, pact.id), `${ownerName} picked you as a reviewer`, {
-        id: pact.id,
-        name: pact.name,
-        schedule: scheduleOf(pact.schedule),
-        penaltyCents: pact.penalty_cents,
-      });
-      const closedAt = editWindowEnd(pact).toISOString();
-      const held = this.#ctx.all<{ id: string; day: LocalDate }>(
-        `SELECT id, day FROM evidence
-           WHERE pact_id = ? AND decision IS NULL AND submitted_at < ?
-           ORDER BY submitted_at, id`,
-        pact.id,
-        closedAt,
-      );
-      for (const { id, day } of held) {
-        this.#enqueueEvidenceReviewItems(pact.id, id, day, ownerName);
-      }
-      this.#ctx.db.prepare(`UPDATE pact SET reviewers_notified_at = ? WHERE id = ?`).run(t.toISOString(), pact.id);
-    }
   }
 
   /** Payments awaiting approval that `reviewerId` may decide, oldest recorded first. */
@@ -3651,7 +1636,7 @@ class Core implements PactCore {
         ownerName: row.owner_name,
         owedCents,
         owedAfterApprovalCents: Math.max(0, owedCents - row.amount_cents),
-        thread: this.#thread(row.id, true),
+        thread: thread(this.#ctx, row.id, true),
       };
     });
   }
@@ -3687,7 +1672,7 @@ class Core implements PactCore {
    */
   #decidePayment(payment: PaymentToDecide, decided: Decided, reviewerId: AccountId): void {
     const { outcome, reason } = decided;
-    this.#recordDecision("payment", payment.id, decided, reviewerId, this.#ctx.clock.now());
+    recordDecision(this.#ctx, "payment", payment.id, decided, reviewerId, this.#ctx.clock.now());
     const { amount_cents } = this.#ctx.db.prepare(`SELECT amount_cents FROM payment WHERE id = ?`).get(payment.id) as {
       amount_cents: number;
     };
@@ -3705,22 +1690,6 @@ class Core implements PactCore {
         url: APP_PATHS.ledger(payment.recipient_id),
       },
     });
-  }
-
-  /** Stores a reviewer's decision on the review item `id` in `table`. */
-  #recordDecision(
-    table: "evidence" | "excuse" | "payment" | "change_request",
-    id: string,
-    { outcome, reason }: Decided,
-    reviewerId: AccountId,
-    at: Date,
-  ): void {
-    this.#ctx.db
-      .prepare(
-        `UPDATE ${table} SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
-         WHERE id = ?`,
-      )
-      .run(outcome, reviewerId, at.toISOString(), reason, id);
   }
 
   /** Whether `photoId` is a photo of some evidence or excuse (`table`) and `accountId` owns or reviews its pact. */
@@ -3757,69 +1726,14 @@ class Core implements PactCore {
     );
   }
 
-  /** The photos of some evidence, in the order taken. */
-  #evidencePhotoIds(evidenceId: string): string[] {
-    return this.#ctx
-      .all<{ photo_id: string }>(
-        `SELECT photo_id FROM evidence_photo WHERE evidence_id = ? ORDER BY position`,
-        evidenceId,
-      )
-      .map((row) => row.photo_id);
-  }
-
-  /**
-   * Whether `ownerId` may submit evidence with `photoCount` photos for
-   * `pactId` at `at`, and if so for which occurrence and day: the one open at
-   * `at`, unless evidence for it is already waiting or approved, or it's
-   * already judged (a rejection judges it Missed at once). On Weekly count
-   * that's for the day: one day of evidence counts per day, and a day whose
-   * evidence was rejected is made up on another.
-   */
-  #evidenceAcceptance(
-    ownerId: AccountId,
-    timezone: string | null,
-    pactId: string,
-    photoCount: number,
-    at: Date,
-  ): { ok: true; occurrence: Occurrence; day: LocalDate } | { ok: false; reason: SubmitEvidenceRefusal } {
-    const row = this.#ctx.one<Pick<PactRow, "schedule" | "first_occurrence" | "evidence_kind" | "stage">>(
-      `SELECT schedule, first_occurrence, evidence_kind, stage FROM pact WHERE id = ? AND owner_account_id = ?`,
-      pactId,
-      ownerId,
-    );
-    if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
-    // Oura reports a bedtime night; there's never a photo to submit.
-    if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
-    if (photoCount === 0) return { ok: false, reason: "no-photos" };
-    if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
-    const { kind } = scheduleOf(row.schedule);
-    const occurrences = occurrencesOf(this.#ctx, pactId, timezone);
-    const occurrence = occurrences.openAt(at);
-    // One-time evidence is for its one occurrence, whichever day it comes.
-    const day = occurrence && kind === "one-time" ? occurrence.date : localDateOf(at, timezone);
-    // Past its due-by time, the day takes no more evidence.
-    if (!occurrence || at.getTime() >= occurrences.dayDueAt(localDateOf(at, timezone))!.getTime()) {
-      return { ok: false, reason: "not-open" };
-    }
-    const decision = evidenceDecision(this.#ctx, pactId, day, "day");
-    if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
-    if (decision === "approved") return { ok: false, reason: "already-approved" };
-    if ((kind === "weekly-count" && decision === "rejected") || isJudged(this.#ctx, pactId, occurrence.date)) {
-      return { ok: false, reason: "already-judged" };
-    }
-    // An Ended pact has no day open any more.
-    if (row.stage === "ended") return { ok: false, reason: "not-open" };
-    return { ok: true, occurrence, day };
-  }
-
   /** The owner's evidence, excuses and payments still waiting for a decision, newest first. */
   #waiting(ownerId: AccountId): TodayWaitingItem[] {
     return mergeByTime(
       waitingSince,
       "newest-first",
-      this.#waitingChangeRequests(ownerId),
-      this.#waitingEvidence(ownerId),
-      this.#waitingExcuses(ownerId),
+      waitingChangeRequests(this.#ctx, ownerId),
+      waitingEvidence(this.#ctx, ownerId),
+      waitingExcuses(this.#ctx, ownerId),
       this.#waitingPayments(ownerId),
     );
   }
@@ -3851,33 +1765,6 @@ class Core implements PactCore {
       }));
   }
 
-  /** The owner's evidence still waiting for a decision (or just that for `pactId`), newest first. */
-  #waitingEvidence(ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
-    const rows = this.#ctx.all<{
-      id: string;
-      pact_id: string;
-      name: string;
-      occurrence_date: string;
-      submitted_at: string;
-    }>(
-      `SELECT evidence.id, evidence.pact_id, pact.name, evidence.day AS occurrence_date, evidence.submitted_at
-         FROM evidence JOIN pact ON pact.id = evidence.pact_id
-         WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND (? IS NULL OR pact.id = ?)
-         ORDER BY evidence.submitted_at DESC, evidence.id`,
-      ownerId,
-      pactId ?? null,
-      pactId ?? null,
-    );
-    return rows.map((row) => ({
-      kind: "evidence",
-      id: row.id,
-      pactId: row.pact_id,
-      name: row.name,
-      occurrenceDate: row.occurrence_date,
-      submittedAt: new Date(row.submitted_at),
-    }));
-  }
-
   /** Today's alerts and sections for the owner, as `#todayAlerts` and `#todaySections` put them. */
   #todayCards(ownerId: AccountId, timezone: string): { alerts: TodayAlert[]; sections: TodaySection[] } {
     const now = this.#ctx.clock.now();
@@ -3897,14 +1784,14 @@ class Core implements PactCore {
    */
   #todayAlerts(ownerId: AccountId, now: Date, billAlerts: TodayAlert[]): TodayAlert[] {
     const alerts = [
-      ...this.#rejectedEvidenceAlerts(ownerId),
-      ...this.#rejectedDayAlerts(ownerId),
-      ...this.#rejectedExcuseAlerts(ownerId, now),
+      ...rejectedEvidenceAlerts(this.#ctx, ownerId),
+      ...rejectedDayAlerts(this.#ctx, ownerId),
+      ...rejectedExcuseAlerts(this.#ctx, ownerId, now),
       ...this.#questionAlerts(ownerId),
     ];
     // A connection matters only while an Active pact is judged from it.
     const problemWith = (service: ConnectionService) =>
-      this.#activePactsUsing(ownerId, service) > 0 ? this.#connectionProblem(ownerId, service) : null;
+      this.#activePactsUsing(ownerId, service) > 0 ? connectionProblem(this.#ctx, ownerId, service) : null;
     const connectionAlerts = (["oura", "anki"] as const).flatMap((service): TodayAlert[] => {
       const status = problemWith(service);
       return status ? [{ kind: "connection", service, status }] : [];
@@ -3930,7 +1817,7 @@ class Core implements PactCore {
     const automatic: TodayAutomaticCard[] = [];
     const noOuraData: TodayNoOuraDataCard[] = [];
     const comingUp: TodayComingUpCard[] = [];
-    for (const pact of this.#activePacts(ownerId)) {
+    for (const pact of activePacts(this.#ctx, ownerId)) {
       const placed = this.#pactToday(ownerId, pact, timezone, now);
       if (placed === null) continue;
       switch (placed.section) {
@@ -4115,8 +2002,8 @@ class Core implements PactCore {
       occurrenceDate: open.date,
       dueAt: open.dueAt,
       dueBy: termsOn(this.#ctx, pact.id, open.date).due_by,
-      deckName: this.#ankiDeckName(ownerId, ankiDeckOn(this.#ctx, pact.id, open.date)),
-      deckMissing: this.#ankiDeckMissing(ownerId, ankiDeckOn(this.#ctx, pact.id, open.date)),
+      deckName: ankiDeckName(this.#ctx, ownerId, ankiDeckOn(this.#ctx, pact.id, open.date)),
+      deckMissing: ankiDeckMissing(this.#ctx, ownerId, ankiDeckOn(this.#ctx, pact.id, open.date)),
       lastCheck: lastAnkiCheck(this.#ctx, pact.id, open.date),
     };
   }
@@ -4140,114 +2027,6 @@ class Core implements PactCore {
     if (progress.sessions + progress.waiting >= progress.target) return null;
     const { due_by: dueBy } = termsOn(this.#ctx, pactId, week.date);
     return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, week: progress };
-  }
-
-  /**
-   * One alert per occurrence of the owner's judged Missed through a
-   * rejection, newest rejection first, with when it was judged. No time
-   * limit. It goes once the owner accepts the miss, or files an excuse for
-   * the day (one waiting before the rejection counts too); a rejected
-   * excuse's own alert takes over then.
-   */
-  #rejectedEvidenceAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
-    const rows = this.#ctx.all<{
-      id: string;
-      name: string;
-      date: LocalDate;
-      judged_at: string;
-      amount_cents: number;
-      recipient_name: string;
-    }>(
-      `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at, penalty.amount_cents,
-                recipient.name AS recipient_name
-         FROM occurrence
-         JOIN pact ON pact.id = occurrence.pact_id
-         JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
-         JOIN recipient ON recipient.id = penalty.recipient_id
-         WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.miss_accepted_at IS NULL
-           AND ${MISSED_THROUGH_REJECTION}
-           AND NOT ${excuseCoversSql(
-             "occurrence.pact_id",
-             "occurrence.date",
-             "(excuse.decision IS NULL OR excuse.filed_at >= occurrence.judged_at)",
-           )}
-         ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
-      ownerId,
-    );
-    return rows.map((row) => {
-      const rejected = rejection(this.#ctx, row.id, row.date);
-      if (!rejected) throw new Error(`no rejected evidence for pact ${row.id} on ${row.date}`);
-      const judgedAt = new Date(row.judged_at);
-      return {
-        at: judgedAt,
-        alert: {
-          kind: "evidence-rejected",
-          pactId: row.id,
-          name: row.name,
-          ...rejected,
-          occurrenceDate: row.date,
-          penaltyCents: row.amount_cents,
-          recipientName: row.recipient_name,
-          excusableUntil: new Date(judgedAt.getTime() + EXCUSE_WINDOW_MS),
-          week: false,
-        },
-      };
-    });
-  }
-
-  /**
-   * One alert per Weekly count day of the owner's whose evidence was
-   * rejected, newest rejection first, with when it was rejected: nothing is
-   * Missed, and the day can be made up another day. It goes once the owner
-   * takes the L on it, an excuse covers the week (one rejected after the
-   * rejection has its own alert), or the week is judged.
-   */
-  #rejectedDayAlerts(ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
-    const rows = this.#ctx.all<{
-      id: string;
-      name: string;
-      occurrence_date: LocalDate;
-      day: LocalDate;
-      decided_at: string;
-      reject_reason: string;
-      reviewer_name: string;
-    }>(
-      `SELECT pact.id, pact.name, evidence.occurrence_date, evidence.day, evidence.decided_at,
-                evidence.reject_reason, reviewer.name AS reviewer_name
-         FROM evidence
-         JOIN pact ON pact.id = evidence.pact_id
-         JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
-         WHERE pact.owner_account_id = ? AND ${WEEKLY_COUNT_PACT}
-           AND evidence.decision = 'rejected' AND evidence.rejection_accepted_at IS NULL
-           AND NOT EXISTS (SELECT 1 FROM occurrence
-                           WHERE occurrence.pact_id = evidence.pact_id AND occurrence.date = evidence.occurrence_date
-                             AND occurrence.outcome IS NOT NULL)
-           AND NOT ${excuseCoversSql(
-             "evidence.pact_id",
-             "evidence.occurrence_date",
-             "(excuse.decision IS NULL OR excuse.decision = 'approved' OR excuse.filed_at >= evidence.decided_at)",
-           )}
-         ORDER BY evidence.decided_at DESC, pact.name, pact.id`,
-      ownerId,
-    );
-    return rows.map((row) => {
-      const terms = termsOn(this.#ctx, row.id, row.occurrence_date);
-      return {
-        at: new Date(row.decided_at),
-        alert: {
-          kind: "evidence-rejected",
-          pactId: row.id,
-          name: row.name,
-          reviewerName: row.reviewer_name,
-          reason: row.reject_reason,
-          occurrenceDate: row.day,
-          penaltyCents: terms.penalty_cents,
-          recipientName: recipientName(this.#ctx, terms.recipient_id),
-          excusableUntil: null,
-          week: true,
-        },
-      };
-    });
   }
 
   /**
@@ -4329,45 +2108,6 @@ class Core implements PactCore {
     return null;
   }
 
-  /** `ownerId`'s Active pacts, sorted by name. */
-  #activePacts(ownerId: AccountId): ActivePact[] {
-    const now = this.#ctx.clock.now();
-    const rows = this.#ctx.all<
-      Pick<
-        PactRow,
-        | "id"
-        | "name"
-        | "schedule"
-        | "in_bed_by"
-        | "due_by"
-        | "start_date"
-        | "end_date"
-        | "penalty_cents"
-        | "first_occurrence"
-        | "created_at"
-        | "evidence_kind"
-        | "anki_rollover_hour"
-      >
-    >(
-      `SELECT pact.id, pact.name, pact.schedule, pact.in_bed_by, pact.due_by, pact.start_date, pact.end_date,
-                pact.penalty_cents, pact.first_occurrence, pact.created_at, pact.evidence_kind,
-                pact.anki_rollover_hour
-         FROM pact
-         WHERE pact.owner_account_id = ? AND pact.stage = 'active'
-         ORDER BY pact.name, pact.created_at, pact.id`,
-      ownerId,
-    );
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      evidenceKind: row.evidence_kind,
-      penaltyCents: row.penalty_cents,
-      terms: occurrenceTermsOf(row),
-      startDate: row.start_date,
-      editWindowClosesAt: editWindowClosesAt(row, now),
-    }));
-  }
-
   async advanceTo(t: Date): Promise<void> {
     // Before the transaction, never in it: a slow Oura can't hold up other writes.
     // An account whose call throws has no data this tick; the next one retries.
@@ -4375,7 +2115,7 @@ class Core implements PactCore {
     const checked = await this.#fetchAnki(t);
     await this.#command(
       () => {
-        this.#closeEditWindows(t);
+        closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
         this.#recordAnkiChecks(checked);
         judgeDueBy(this.#ctx, t, this.#ankiChecksRunning);
@@ -4582,7 +2322,7 @@ class Core implements PactCore {
     const askedAt = this.#ctx.clock.now();
     const ranges = new Map<AccountId, { startDate: LocalDate; endDate: LocalDate }>();
     for (const { pact, night } of this.#nightsWaiting(t, owner)) {
-      if (this.#connectionProblem(pact.owner_account_id, "oura") !== null) continue;
+      if (connectionProblem(this.#ctx, pact.owner_account_id, "oura") !== null) continue;
       // Oura files a night's sleep under the day it ends, usually the day after;
       // a day more covers a sleep that ends late, whether Oura's end_date is inclusive or not.
       const range = ranges.get(pact.owner_account_id);
@@ -4644,7 +2384,8 @@ class Core implements PactCore {
         .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
         .run(pact.owner_account_id, night.date);
       if (sent.changes === 0) continue;
-      const fix = this.#connectionProblem(pact.owner_account_id, "oura") === null ? "Sync your ring" : "Reconnect Oura";
+      const fix =
+        connectionProblem(this.#ctx, pact.owner_account_id, "oura") === null ? "Sync your ring" : "Reconnect Oura";
       this.#ctx.enqueue({
         recipient: pact.owner_account_id,
         kind: "connection-problem",
@@ -4827,7 +2568,7 @@ class Core implements PactCore {
    * picker loads again.
    */
   #renameAnkiDecks(accountId: AccountId, names: Record<string, string>): void {
-    const list = this.#ankiDeckList(accountId);
+    const list = ankiDeckList(this.#ctx, accountId);
     if (!list) return;
     let renamed = false;
     const decks = list.decks.map((deck) => {
@@ -4863,13 +2604,7 @@ class Core implements PactCore {
          ON CONFLICT (account_id, deck_id) DO UPDATE SET name = COALESCE(anki_pact_deck.name, excluded.name),
            missing_since = COALESCE(anki_pact_deck.missing_since, excluded.missing_since)`,
       )
-      .run(account, deckId, this.#ankiDeckName(account, deckId), checkedAt.toISOString());
-  }
-
-  /** Whether the pact's schedule is Weekly count. It keeps its kind once its edit window has closed. */
-  #isWeekly(pactId: string): boolean {
-    const row = this.#ctx.db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
-    return scheduleOf(row.schedule).kind === "weekly-count";
+      .run(account, deckId, ankiDeckName(this.#ctx, account, deckId), checkedAt.toISOString());
   }
 
   lastTick(): Date | null {
@@ -4926,31 +2661,6 @@ class Core implements PactCore {
   }
 }
 
-interface InviteRow {
-  token: string;
-  inviter_account_id: string;
-  inviter_name: string;
-  expires_at: string;
-  used_at: string | null;
-  claimed_by_account_id: string | null;
-}
-
-/** A friendship row's two account ids, in the order the table stores them. */
-function friendshipPair(a: AccountId, b: AccountId): [AccountId, AccountId] {
-  return a < b ? [a, b] : [b, a];
-}
-
-/** An Active pact as Today and the Pacts tab read it. */
-interface ActivePact {
-  id: string;
-  name: string;
-  evidenceKind: EvidenceKind;
-  penaltyCents: number;
-  terms: OccurrenceTerms;
-  startDate: LocalDate | null;
-  editWindowClosesAt: Date | null;
-}
-
 /** A pact's card on Today and the section it goes in. */
 type TodayPlacement =
   | { section: "to-do"; card: TodayToDoCard | TodayAnkiCard }
@@ -4958,67 +2668,9 @@ type TodayPlacement =
   | { section: "no-oura-data"; card: TodayNoOuraDataCard }
   | { section: "coming-up"; card: TodayComingUpCard };
 
-/**
- * The day clock a pact form's times give as far as it has them: an Anki
- * day's with a rollover hour, else a night's with an in-bed-by time, else a
- * Camera day's.
- */
-function formDayClock(times: ClockTimes): DayClock {
-  if (times.ankiRollover !== null) return { kind: "anki", rollover: times.ankiRollover, dueBy: times.dueBy };
-  if (times.inBedBy !== null) return { kind: "night", inBedBy: times.inBedBy };
-  return { kind: "day", dueBy: times.dueBy };
-}
-
-/** A pact's times as its columns store them: each null where its terms have none. */
-interface ClockTimes {
-  inBedBy: ClockTime | null;
-  dueBy: ClockTime | null;
-  ankiRollover: number | null;
-}
-
-/** `terms`' times as the pact's columns store them. */
-function timesOf(terms: OccurrenceTerms): ClockTimes {
-  if (!hasSchedule(terms, "fixed-days")) return { inBedBy: null, dueBy: terms.dueBy, ankiRollover: null };
-  const { day } = terms;
-  switch (day.kind) {
-    case "day":
-      return { inBedBy: null, dueBy: day.dueBy, ankiRollover: null };
-    case "night":
-      return { inBedBy: day.inBedBy, dueBy: null, ankiRollover: null };
-    case "anki":
-      return { inBedBy: null, dueBy: day.dueBy, ankiRollover: day.rollover };
-  }
-}
-
 /** "1 card", "42 cards". */
 function cardsText(n: number): string {
   return `${n} ${n === 1 ? "card" : "cards"}`;
-}
-
-/** The day an Ended pact Ended, in `timezone`; null while it's Active. */
-function endedOnOf(pact: Pick<PactRow, "ended_at">, timezone: string): LocalDate | null {
-  return pact.ended_at === null ? null : localDateOf(new Date(pact.ended_at), timezone);
-}
-
-/** A pact's stage, and when it ended. Ending a pact sets both columns at once. */
-function stageOf(
-  row: Pick<PactRow, "id" | "stage" | "ended_at">,
-): { stage: "active" } | { stage: "ended"; endedAt: Date } {
-  if (row.stage === "active") return { stage: "active" };
-  if (row.ended_at === null) throw new Error(`pact ${row.id} ended with no ended_at`);
-  return { stage: "ended", endedAt: new Date(row.ended_at) };
-}
-
-/** An Anki day's deciding check as its occurrence row stores it; null when no check reached AnkiWeb. */
-function ankiCheckOf(row: { anki_cards_left: number | null; anki_checked_at: string | null }): AnkiCheck | null {
-  if (row.anki_cards_left === null || row.anki_checked_at === null) return null;
-  return { cardsLeft: row.anki_cards_left, checkedAt: new Date(row.anki_checked_at) };
-}
-
-/** A pact checked for creating or editing. */
-interface CheckedPact extends CheckedTerms {
-  reviewerIds: AccountId[];
-  ankiDeckId: string | null;
 }
 
 /**
@@ -5028,54 +2680,6 @@ interface CheckedPact extends CheckedTerms {
 function errorText(error: unknown): string {
   if (!(error instanceof Error)) return "unknown error";
   return error.name === "SyntaxError" ? error.name : `${error.name}: ${error.message}`;
-}
-
-function withoutReminders({
-  reminders: _reminders,
-  ...terms
-}: CurrentTerms & Pick<PactTerms, "reminders">): CurrentTerms {
-  return terms;
-}
-
-/** A change request as stored, with its pact's owner, their name and timezone, and its deciding reviewer's name. */
-interface ChangeRequestRow extends ReviewStateRow {
-  id: string;
-  pact_id: string;
-  ends_pact: 0 | 1;
-  /** JSON ChangeableTerms. */
-  before_terms: string;
-  after_terms: string | null;
-  note: string | null;
-  requested_at: string;
-  decided_by_account_id: AccountId | null;
-  withdrawn_at: string | null;
-  owner_account_id: AccountId;
-  owner_name: string;
-  timezone: string | null;
-}
-
-/**
- * What a change request asks: to end the pact, or to change its terms.
- * `ends_pact` is set exactly when `after_terms` is null (a CHECK holds it).
- */
-type RequestedChange = { kind: "end" } | { kind: "change"; before: ChangeableTerms; after: ChangeableTerms };
-
-/** A change request as `#changeRequestRow` reads it, with what it asks parsed. */
-type StoredChangeRequest = Omit<ChangeRequestRow, "ends_pact" | "before_terms" | "after_terms"> & {
-  request: RequestedChange;
-};
-
-function storedChangeRequestOf({
-  ends_pact: _endsPact,
-  before_terms: before,
-  after_terms: after,
-  ...row
-}: ChangeRequestRow): StoredChangeRequest {
-  return {
-    ...row,
-    request:
-      after === null ? { kind: "end" } : { kind: "change", before: storedTerms(before), after: storedTerms(after) },
-  };
 }
 
 /** A review item a reviewer may decide, as `decide` and `askOwner` read it. */
@@ -5097,48 +2701,6 @@ function itemPath(kind: ReviewItem["kind"], itemId: string): string {
     case "change-request":
       return APP_PATHS.changeRequest(itemId);
   }
-}
-
-/** The terms a change would give a pact: `checked`, from `change`, with the penalty and recipient it names. */
-function changeableTermsOf(checked: CheckedPact, change: PactChange): ChangeableTerms {
-  const { inBedBy, dueBy } = timesOf(checked.terms);
-  return {
-    name: checked.name,
-    description: checked.description,
-    inBedBy,
-    dueBy,
-    startDate: checked.startDate,
-    endDate: checked.terms.endDate,
-    schedule: checked.terms.schedule,
-    penaltyCents: change.penaltyCents,
-    recipientId: change.recipientId,
-    reviewerIds: [...checked.reviewerIds].sort(),
-    reminders: checked.reminders,
-    ankiDeckId: checked.ankiDeckId,
-  };
-}
-
-/**
- * Why changing a pact whose first occurrence is `firstOccurrence` from
- * `before` to `after` on `today` is refused, or null. Occurrences already
- * open keep their terms: a start date means nothing once the first has
- * opened, and an end date can't take away a day (or a week) that has.
- */
-function openOccurrencesRefusal(
-  firstOccurrence: LocalDate,
-  before: ChangeableTerms,
-  after: ChangeableTerms,
-  today: LocalDate,
-): "pact-started" | "end-date-too-early" | null {
-  const from = firstDayNotOpen(before.schedule, today);
-  if (after.startDate !== before.startDate && firstOccurrence < from) return "pact-started";
-  const firstFrom = firstOccurrenceAfterChange(firstOccurrence, after.schedule, from, after.startDate);
-  if (after.endDate !== null && after.endDate !== before.endDate) {
-    if (after.endDate < addDays(from, -1) || after.endDate < lastDayOf(after.schedule, firstFrom)) {
-      return "end-date-too-early";
-    }
-  }
-  return null;
 }
 
 /** A reminder the scheduler reached too late to send. */
@@ -5175,27 +2737,6 @@ interface FetchedSleep {
   askedAt: Date;
 }
 
-/** Evidence a reviewer is deciding on, as `decide` reads it. */
-interface EvidenceToDecide {
-  id: string;
-  pact_id: string;
-  occurrence_date: LocalDate;
-  /** The day it counts for: on Weekly count, the day of the week. */
-  day: LocalDate;
-  /** The owner's: every pact's owner has one, as creating a pact needs it. */
-  timezone: string;
-  decision: ReviewOutcome | null;
-  owner_account_id: AccountId;
-}
-
-/** An excuse a reviewer is deciding on, as `decide` reads it. */
-interface ExcuseToDecide {
-  id: string;
-  pact_id: string;
-  decision: ReviewOutcome | null;
-  owner_account_id: AccountId;
-}
-
 /**
  * Each of `times` that could go off for `pact` from `fromDate` through
  * `toDate`, with the day it's about and when that day's evidence is due: on
@@ -5229,11 +2770,6 @@ function remindersDue(
   );
 }
 
-/** A decision as its notification's details carry it: a rejection with its reason. */
-function decisionDetails(decided: Decided): { decision: "approved" } | { decision: "rejected"; reason: string } {
-  return decided.outcome === "approved" ? { decision: "approved" } : { decision: "rejected", reason: decided.reason };
-}
-
 /** Whether `accountId` checked a service within `intervalMs` before `now`, as `checks` records. */
 function checkedWithin(
   checks: ReadonlyMap<AccountId, number>,
@@ -5257,40 +2793,6 @@ function reviewItemSince(item: ReviewItem): Date {
     case "change-request":
       return item.requestedAt;
   }
-}
-
-/** When a waiting item was sent for a decision: for ordering them. */
-function waitingSince(item: TodayWaitingItem): Date {
-  switch (item.kind) {
-    case "evidence":
-      return item.submittedAt;
-    case "excuse":
-      return item.filedAt;
-    case "payment":
-      return item.recordedAt;
-    case "change-request":
-      return item.requestedAt;
-  }
-}
-
-/** The evidence columns `#evidenceView` reads. `day` is the day it was for; `occurrence_date` its occurrence's. */
-interface EvidenceViewRow {
-  id: string;
-  pact_id: string;
-  pact_name: string;
-  occurrence_date: LocalDate;
-  day: LocalDate;
-  submitted_at: string;
-}
-
-/** The excuse columns `#excuseView` reads, with the owner's timezone. */
-interface ExcuseViewRow {
-  id: string;
-  pact_id: string;
-  pact_name: string;
-  reason: string;
-  filed_at: string;
-  timezone: string;
 }
 
 /** The payment columns `paymentView` reads. */
@@ -5321,38 +2823,4 @@ interface PaymentToDecide {
   owner_account_id: AccountId;
   recipient_id: string;
   decision: ReviewOutcome | null;
-}
-
-/** A checked review decision, as `decide` hands it on: a rejection's reason is trimmed and never blank. */
-type Decided = { outcome: "approved"; reason: null } | { outcome: "rejected"; reason: string };
-
-/**
- * `lists` merged into one sorted by `at`, oldest or newest first. Ties keep
- * the order they have in `lists`, as the sort is stable.
- */
-function mergeByTime<T>(at: (item: T) => Date, direction: "oldest-first" | "newest-first", ...lists: T[][]): T[] {
-  const sign = direction === "oldest-first" ? 1 : -1;
-  return lists.flat().sort((a, b) => sign * (at(a).getTime() - at(b).getTime()));
-}
-
-export class UnknownAccountError extends Error {
-  constructor(accountId: AccountId) {
-    super(`no account ${accountId}`);
-    this.name = "UnknownAccountError";
-  }
-}
-
-function emailKey(email: string): string {
-  return email.trim().toLowerCase();
-}
-
-/** The IANA zone's canonical name, or null if `timezone` isn't an IANA zone. */
-function canonicalTimezone(timezone: string): string | null {
-  // Intl also accepts UTC offsets like "+05:00"; an account needs a real zone.
-  if (timezone.trim() === "" || /^[+-]/.test(timezone)) return null;
-  try {
-    return new Intl.DateTimeFormat("en-US", { timeZone: timezone }).resolvedOptions().timeZone;
-  } catch {
-    return null;
-  }
 }

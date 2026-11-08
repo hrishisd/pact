@@ -202,3 +202,25 @@ export function skipReason(status: OccurrenceStatus, now: Date): ExcuseSkipReaso
       return status.excuse === "approved" ? "excused" : null;
   }
 }
+
+/** SQL: the `pact` row's schedule is Weekly count. */
+export const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
+
+/**
+ * SQL: the Missed `occurrence` row (of the `pact` row) was judged through a
+ * rejection. Any rejected evidence will do: on Fixed days and One-time a
+ * rejection judges the occurrence at once. A Weekly count week's rejected
+ * evidence just doesn't count, so a short week is never Missed through it.
+ */
+export const MISSED_THROUGH_REJECTION = `(NOT ${WEEKLY_COUNT_PACT} AND EXISTS (SELECT 1 FROM evidence
+  WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
+    AND evidence.decision = 'rejected'))`;
+
+/**
+ * SQL: an excuse matching `condition` (on `excuse`) covers the occurrence of
+ * pact `pact` on `date` (SQL expressions).
+ */
+export function excuseCoversSql(pact: string, date: string, condition: string): string {
+  return `EXISTS (SELECT 1 FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+    WHERE excuse_day.pact_id = ${pact} AND excuse_day.date = ${date} AND ${condition})`;
+}
