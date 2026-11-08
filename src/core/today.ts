@@ -394,6 +394,10 @@ function weekToDo(
   return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, week: progress };
 }
 
+/** SQL: an excuse or vacation waiting, or rejected after the miss (its alert shows the miss), hides it from Missed. */
+const REJECTION_HIDES_MISS =
+  "(excuse.decision IS NULL OR (excuse.decision = 'rejected' AND excuse.decided_at >= occurrence.judged_at))";
+
 /**
  * The owner's occurrences judged Missed in the 48 hours before `now`,
  * latest first, but not accepted misses, nor those Missed through a
@@ -426,8 +430,9 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
          AND NOT ${excuseCoversSql(
            "occurrence.pact_id",
            "occurrence.date",
-           `(excuse.decision IS NULL OR (excuse.decision = 'rejected' AND excuse.decided_at >= occurrence.judged_at
-              AND ${noLaterFilingSql("excuse")}))`,
+           REJECTION_HIDES_MISS,
+           // A rejected vacation hides it only while its alert stands.
+           `(${REJECTION_HIDES_MISS} AND (excuse.decision IS NULL OR ${noLaterFilingSql("excuse")}))`,
          )}
        ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
     ownerId,

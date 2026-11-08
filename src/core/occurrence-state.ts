@@ -280,12 +280,18 @@ export const MISSED_THROUGH_REJECTION = `(NOT ${WEEKLY_COUNT_PACT} AND EXISTS (S
  * SQL: an excuse or vacation matching `condition` covers the occurrence of
  * pact `pact` on `date` (SQL expressions). `condition` reads
  * `excuse.decision`, `excuse.filed_at` and `excuse.decided_at`, which a
- * vacation has too, so a vacation counts as an excuse in the same state.
+ * vacation has too, so a vacation counts as an excuse in the same state,
+ * unless `vacationCondition` gives vacations their own.
  */
-export function excuseCoversSql(pact: string, date: string, condition: string): string {
+export function excuseCoversSql(
+  pact: string,
+  date: string,
+  condition: string,
+  vacationCondition: string = condition,
+): string {
   return `(EXISTS (SELECT 1 FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
     WHERE excuse_day.pact_id = ${pact} AND excuse_day.date = ${date} AND ${condition})
-  OR ${vacationCoversSql(pact, date, condition)})`;
+  OR ${vacationCoversSql(pact, date, vacationCondition)})`;
 }
 
 /**
