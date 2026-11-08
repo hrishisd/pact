@@ -426,7 +426,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **One-time for more evidence kinds:** v0 keeps One-time to Camera. As more kinds arrive (Photo upload, Anki), they can offer One-time too. An Oura Ring One-time pact would be a single night, so it would only ever be due on its date.
 - **Richer Camera evidence:** video or a time-lapse.
 - **Photo upload evidence kind:** a separate kind, alongside Camera, where the owner picks a photo from the library (e.g. a screenshot from another app). Camera stays live-capture only, opening the camera directly.
-- **Vacation mode:** the owner sets a date range and every pact is suspended for it: no occurrences, no reminders and no penalties. It's simpler than an excuse that covers every pact, and it could need no reviewer approval if it's set far enough ahead.
+- **Vacation:** being designed in `../vacation/spec.md`.
 - **Getting overdue bills paid:** v0 only notifies reviewers (when a bill first goes overdue, then weekly). Something with more social weight could follow, such as a text to the reviewer or a friend. The mechanism isn't designed yet.
 - **Email notifications:** a second Notifier channel, for reviewers who won't remember to open the app and for operator alerts, which survive a database restore better by email than by push.
 - **Text messages** (a rough idea that needs refining before it's built). Prompted by a reviewer who's happy to review but won't remember to open the app. Two possible stages:

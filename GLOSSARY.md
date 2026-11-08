@@ -68,7 +68,7 @@ Optional days that bound a recurring pact. The start date can only push its firs
 How Today shows a Camera pact's day once its due-by time has passed: Missed, and no evidence counts for it any more.
 
 **Satisfied / Missed / Excused**:
-The three ways an occurrence can end: the owner met the pact for that occurrence, the owner didn't, or a reviewer approved an excuse for it. Until then, the occurrence is **not judged yet**. An occurrence is Satisfied, never a pact; a pact ends as Ended.
+The three ways an occurrence can end: the owner met the pact for that occurrence, the owner didn't, or a reviewer approved an excuse or vacation covering it. Until then, the occurrence is **not judged yet**. An occurrence is Satisfied, never a pact; a pact ends as Ended.
 _Avoid_: Passed, failed, success, failure, pending, Kept, Done, Approved
 
 ### Proof and review
@@ -88,6 +88,10 @@ _Avoid_: Integration, connector, link
 **Excuse**:
 The owner's request to have one or more occurrences of one pact treated as excused, either because there was a good reason not to keep them or because the evidence was wrong.
 _Avoid_: Appeal, dispute, exemption, pass
+
+**Vacation**:
+The owner's request for a date range off from their pacts, made ahead of time. Once a reviewer approves it, the occurrences it covers are judged Excused, with no reminders and no penalties. It covers only occurrences that haven't opened yet; one already open needs an excuse. It doesn't pause the ledger.
+_Avoid_: Vacation mode, pause, break, holiday, time off, suspension
 
 **Reviewer**:
 A person the owner has picked to decide on their evidence, excuses, payments and change requests for a pact. An account can be an owner on some pacts and a reviewer on others.
