@@ -1,14 +1,16 @@
 // Vacations: the owner asks once, ahead of time, for a date range off from
 // the pacts they pick, and sends it to the reviewers they pick. Ticket 01:
 // what a vacation would cover, filing it, the owner's waiting vacations, and
-// withdrawing one. Approval and its effects on judging come later.
+// withdrawing one. Ticket 02: the picked reviewers' review item, questions,
+// the decision, and Excused days once it's approved.
 
 import { describe, expect, test } from "vitest";
 import type { NewVacation, Schedule } from "../shared/types.ts";
-import { bedtimePact } from "./testing/bedtime-pact.ts";
-import { MON_WED_FRI, ownerWithReviewers } from "./testing/camera-pact.ts";
-import { ok } from "./testing/queries.ts";
-import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
+import { ownerWithAnki } from "./testing/anki-pact.ts";
+import { bedtimePact, sleep } from "./testing/bedtime-pact.ts";
+import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { changed, ok, owed, pactOf, penalties, penaltyDays, statusOn } from "./testing/queries.ts";
+import { changeRequestIdOf, scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
 const THREE_A_WEEK: Schedule = { kind: "weekly-count", target: 3 };
 
@@ -461,5 +463,457 @@ describe("withdrawing a vacation", () => {
     expect(await reviewer.withdrawVacation(vacationId)).toEqual({ ok: false, reason: "vacation-not-found" });
     expect(await reviewer.withdrawVacation("no-such-vacation")).toEqual({ ok: false, reason: "vacation-not-found" });
     expect(owner.vacations()).toHaveLength(1);
+  });
+});
+
+// Ticket 02: the picked reviewers review it, and once approved its
+// occurrences are judged Excused at their due times.
+
+/** How a One-time pact's one occurrence stands. */
+function oneTimeStatus(owner: AccountHandle, pactId: string) {
+  const { history } = pactOf(owner, pactId);
+  if (history.kind !== "one-time") throw new Error(`a ${history.kind} heat map`);
+  return history.day.occurrence?.status.kind;
+}
+
+/** Every hour from `from` to `to` (scenario time strings), as scheduler ticks, so reminders and judging run as in production. */
+async function tickHourly(s: Scenario, from: string, to: string) {
+  const end = s.at(to).getTime();
+  for (let t = s.at(from).getTime(); t <= end; t += 3600_000) await s.advanceTo(new Date(t).toISOString());
+}
+
+describe("the spec's example", () => {
+  test("filed Wed for Mon+1 to Sun+1 and approved Thu: Mon+1, Wed+1 and Fri+1 are Excused at their due times, with no reminders and no penalties", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, {
+      reminders: ["18:00"],
+      dates: { startDate: s.date("Mon+1") },
+    });
+    await s.advanceTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
+    await s.advanceTo("Thu 10:00");
+
+    expect(await reviewer.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
+    await tickHourly(s, "Thu 11:00", "Mon+2 18:00");
+
+    for (const day of ["Mon+1", "Wed+1", "Fri+1"]) expect(statusOn(owner, gym, s.date(day))).toBe("excused");
+    expect(s.notifier.sentTo(owner, "reminder").map((n) => n.payload.occurrenceDate)).toEqual([s.date("Mon+2")]);
+    expect(penaltyDays(owner)).toEqual([]);
+    expect(owed(owner)).toBe(0);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+  });
+});
+
+/** The owner's Gym pact that `reviewer`, `second` and `third` review, and a vacation for Mon+1 to Sun+1 sent to `reviewer` and `second`, filed Wed 12:00. */
+async function sentToTwoOfThree(s: Scenario) {
+  const setup = await ownerWithReviewers(s);
+  const { owner, reviewer, second, createPact } = setup;
+  const third = await s.befriend(owner, "third");
+  const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer, second, third] });
+  s.setClockTo("Wed 12:00");
+  const vacationId = await file(owner, {
+    ...vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer, second]),
+    note: "Going to Portugal",
+  });
+  return { ...setup, third, gym, vacationId };
+}
+
+describe("the review item", () => {
+  test("goes only to the picked reviewers, with its dates, note, pacts and what each pact gives up", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, third, gym, vacationId } = await sentToTwoOfThree(s);
+
+    const pushes = s.notifier.sent.filter((n) => n.kind === "review-item");
+    expect(pushes.map((n) => n.recipient).toSorted()).toEqual([reviewer.id, second.id].toSorted());
+    expect(pushes[0]!.payload).toEqual({
+      itemKind: "vacation",
+      itemId: vacationId,
+      title: "owner asked for a vacation",
+      body: "Jan 12 – 18",
+      url: "/review",
+    });
+    const item = {
+      kind: "vacation",
+      id: vacationId,
+      ownerName: "owner",
+      from: s.date("Mon+1"),
+      to: s.date("Sun+1"),
+      days: 7,
+      note: "Going to Portugal",
+      pacts: { kind: "all" },
+      reviewerNames: ["reviewer", "second"],
+      covers: [
+        {
+          pactId: gym,
+          name: "Gym",
+          evidenceKind: "camera",
+          schedule: { kind: "fixed-days", days: MON_WED_FRI },
+          covered: ["Mon+1", "Wed+1", "Fri+1"].map((day) => ({ date: s.date(day) })),
+        },
+      ],
+      filedAt: s.at("Wed 12:00"),
+      thread: { comments: [], waitingOnReply: false },
+    };
+    expect(reviewer.reviewQueue()).toEqual([item]);
+    expect(second.reviewQueue()).toEqual([item]);
+    expect(third.reviewQueue()).toEqual([]);
+    expect(owner.reviewQueue()).toEqual([]);
+  });
+
+  test("sits after change requests, among the other items oldest first", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym, vacationId } = await sentToTwoOfThree(s);
+    s.setClockTo("Wed 12:30");
+    const excuseId = ok(
+      await owner.fileExcuse(gym, { from: s.date("Wed"), to: s.date("Wed"), reason: "Sick" }, []),
+    ).excuseId;
+    const changeId = changeRequestIdOf(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 100 })));
+
+    expect(reviewer.reviewQueue().map((item) => item.id)).toEqual([changeId, vacationId, excuseId]);
+  });
+
+  test("a reviewer of a covered pact who wasn't picked can't decide or ask about it", async () => {
+    const s = scenario();
+    const { third, vacationId } = await sentToTwoOfThree(s);
+
+    expect(await third.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    expect(await third.askOwner(vacationId, "Where to?")).toEqual({ ok: false, reason: "item-not-found" });
+    expect(s.notifier.sentTo(third, "review-item")).toEqual([]);
+  });
+
+  test("either picked reviewer can decide; the first decision is final and the item leaves both queues", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, vacationId } = await sentToTwoOfThree(s);
+
+    expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
+
+    expect(await reviewer.decide(vacationId, { kind: "reject", reason: "No" })).toEqual({
+      ok: false,
+      reason: "already-decided",
+    });
+    expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "already-decided" });
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(second.reviewQueue()).toEqual([]);
+    expect(await owner.withdrawVacation(vacationId)).toEqual({ ok: false, reason: "not-waiting" });
+  });
+
+  test("the owner can't decide their own vacation, and a rejection needs a reason", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await sentToTwoOfThree(s);
+
+    expect(await owner.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    expect(await reviewer.decide(vacationId, { kind: "reject", reason: " " })).toEqual({
+      ok: false,
+      reason: "blank-reason",
+    });
+  });
+
+  test("a withdrawn vacation leaves the queues and can't be decided", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await sentToTwoOfThree(s);
+    ok(await owner.withdrawVacation(vacationId));
+
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(await reviewer.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+  });
+});
+
+describe("a question about a vacation", () => {
+  test("leaves both picked queues and shows on its Profile card, not Today; the reply brings it back to both", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, vacationId } = await sentToTwoOfThree(s);
+    s.setClockTo("Wed 13:00");
+
+    expect(await reviewer.askOwner(vacationId, "When does your flight leave?")).toEqual({ ok: true });
+
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(second.reviewQueue()).toEqual([]);
+    expect(second.waitingOnReply()).toEqual([expect.objectContaining({ kind: "vacation", id: vacationId })]);
+    expect(s.notifier.sentTo(owner, "reviewer-question")).toEqual([
+      expect.objectContaining({
+        payload: {
+          itemKind: "vacation",
+          itemId: vacationId,
+          title: "reviewer asked about your vacation",
+          body: "“When does your flight leave?”",
+          url: "/profile",
+        },
+      }),
+    ]);
+    expect(owner.today().alerts).toEqual([]);
+    expect(owner.today().waiting).toEqual([]);
+    expect(owner.vacations()).toMatchObject([
+      {
+        id: vacationId,
+        state: { kind: "waiting-on-reply", askedBy: "reviewer", question: "When does your flight leave?" },
+      },
+    ]);
+
+    s.setClockTo("Wed 14:00");
+    expect(await owner.reply(vacationId, "Sun at 7am")).toEqual({ ok: true });
+
+    const replies = s.notifier.sent.filter((n) => n.kind === "owner-replied");
+    expect(replies.map((n) => n.recipient).toSorted()).toEqual([reviewer.id, second.id].toSorted());
+    expect(replies[0]!.payload.title).toBe("owner replied about their vacation");
+    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
+    expect(second.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
+    expect(owner.vacations()).toMatchObject([{ state: { kind: "waiting" } }]);
+  });
+
+  test("the other picked reviewer can approve it while it waits on the reply", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, vacationId } = await sentToTwoOfThree(s);
+    ok(await reviewer.askOwner(vacationId, "When does your flight leave?"));
+
+    expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
+    expect(second.waitingOnReply()).toEqual([]);
+    expect(await owner.reply(vacationId, "Sun")).toEqual({ ok: false, reason: "not-waiting" });
+  });
+
+  test("the owner can withdraw it while it waits on their reply", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await sentToTwoOfThree(s);
+    ok(await reviewer.askOwner(vacationId, "When does your flight leave?"));
+
+    expect(await owner.withdrawVacation(vacationId)).toEqual({ ok: true });
+    expect(reviewer.waitingOnReply()).toEqual([]);
+  });
+});
+
+describe("the owner hears the decision", () => {
+  test("approved: one Decision push that opens Profile, and the card says who approved it", async () => {
+    const s = scenario();
+    const { owner, second, vacationId } = await sentToTwoOfThree(s);
+    s.setClockTo("Thu 10:00");
+    ok(await second.decide(vacationId, { kind: "approve" }));
+
+    expect(s.notifier.sentTo(owner, "vacation-decided")).toEqual([
+      expect.objectContaining({
+        payload: {
+          itemKind: "vacation",
+          itemId: vacationId,
+          decision: "approved",
+          title: "second approved your vacation",
+          body: "Jan 12 – 18",
+          url: "/profile",
+        },
+      }),
+    ]);
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, state: { kind: "approved", reviewerName: "second" } }]);
+  });
+
+  test("rejected: the push quotes the reason and opens Today, and the vacation leaves Profile", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await sentToTwoOfThree(s);
+    ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
+
+    expect(s.notifier.sentTo(owner, "vacation-decided")).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          decision: "rejected",
+          reason: "Not that week",
+          title: "reviewer rejected your vacation",
+          body: "“Not that week”",
+          url: "/",
+        }),
+      }),
+    ]);
+    expect(owner.vacations()).toEqual([]);
+  });
+
+  test("with the Decision setting off, approving sends nothing", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await sentToTwoOfThree(s);
+    await owner.setNotificationSetting("decision", false);
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(s.notifier.sentTo(owner, "vacation-decided")).toEqual([]);
+  });
+
+  test("an approved vacation stays on Profile until its last day has passed", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await sentToTwoOfThree(s);
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    await s.advanceTo("Sun+1 23:00");
+    expect(owner.vacations()).toMatchObject([{ id: vacationId }]);
+    await s.advanceTo("Mon+2 00:00");
+    expect(owner.vacations()).toEqual([]);
+  });
+});
+
+describe("once approved, covered occurrences are Excused", () => {
+  test("a covered Weekly count week is Excused at the end of its Sunday; an uncovered partial week keeps its full target", async () => {
+    const s = scenario();
+    const { owner, second, piano } = await ownerWithThreePacts(s, "Mon 12:00");
+    const vacationId = await file(owner, vacation(s.date("Sun+1"), s.date("Sat+2"), [piano], [second]));
+    ok(await second.decide(vacationId, { kind: "approve" }));
+
+    await s.advanceTo("Mon+3 00:00");
+
+    // The week of Mon+1, whose Thursday is outside, is three days short; the week of Mon+2 adds nothing.
+    expect(penalties(owner).filter((penalty) => penalty.pactName === "Piano")).toEqual([
+      expect.objectContaining({ date: s.date("Mon+1"), cents: 1500 }),
+    ]);
+    const { history } = pactOf(owner, piano);
+    if (history.kind !== "weekly-count") throw new Error("not a week heat map");
+    expect(history.weeks.find((week) => week.date === s.date("Mon+2"))?.occurrence?.status.kind).toBe("excused");
+  });
+
+  test("a covered One-time deadline is Excused at the deadline and the pact Ends", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const visa = await createPact("Visa", { kind: "one-time", deadline: s.date("Wed+1"), submitAnytime: false });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [visa], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    await s.advanceTo("Thu+1 00:00");
+
+    expect(oneTimeStatus(owner, visa)).toBe("excused");
+    expect(pactOf(owner, visa).stage).toBe("ended");
+    expect(owed(owner)).toBe(0);
+  });
+
+  test("a covered bedtime night with no Oura data is Excused when it closes; one with an on-time bedtime is Satisfied", async () => {
+    const s = scenario();
+    const { owner, reviewer, bed } = await ownerWithThreePacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Tue+1"), [bed], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+    s.ouraSource.addSleep(owner.id, sleep("Mon+1 23:30"));
+
+    await s.advanceTo("Wed+1 17:59");
+    expect(statusOn(owner, bed, s.date("Mon+1"))).toBe("satisfied");
+    expect(statusOn(owner, bed, s.date("Tue+1"))).toBe("not-judged");
+    await s.advanceTo("Wed+1 18:00");
+    expect(statusOn(owner, bed, s.date("Tue+1"))).toBe("excused");
+    expect(penaltyDays(owner, "Bed")).not.toContain(s.date("Tue+1"));
+  });
+
+  test("Pact doesn't check AnkiWeb for an Anki day the approved vacation covers", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact, deckShows } = await ownerWithAnki(s);
+    const spanish = await createPact({ days: ["tue"] });
+    await s.advanceTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Tue+1"), s.date("Tue+1"), [spanish], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+    const callsBefore = s.ankiSource.countCalls.length;
+
+    deckShows({}, s.date("Tue+1"), "Tue+1 04:00");
+    await s.advanceTo("Tue+1 04:00");
+    await s.advanceTo("Tue+1 12:00");
+    await owner.checkAnki();
+    await s.advanceTo("Wed+1 00:00");
+
+    expect(s.ankiSource.countCalls.length).toBe(callsBefore);
+    expect(statusOn(owner, spanish, s.date("Tue+1"))).toBe("excused");
+  });
+
+  test("an excuse filed for a covered day skips it as Excused", async () => {
+    const s = scenario();
+    const { owner, gym, vacationId, reviewer } = await sentToTwoOfThree(s);
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(ok(owner.excusePreview(gym, { from: s.date("Fri"), to: s.date("Mon+1") })).preview).toMatchObject({
+      covered: [{ date: s.date("Fri") }],
+      skipped: [{ date: s.date("Mon+1"), reason: "excused" }],
+    });
+  });
+
+  test("a new vacation skips days already on an approved one", async () => {
+    const s = scenario();
+    const { owner, gym, vacationId, reviewer } = await sentToTwoOfThree(s);
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(forPact(owner, s.date("Mon+1"), s.date("Mon+2"), [gym], gym)).toMatchObject({
+      covered: [{ date: s.date("Mon+2") }],
+      skipped: ["Mon+1", "Wed+1", "Fri+1"].map((day) => ({ date: s.date(day), reason: "on-vacation" })),
+    });
+  });
+
+  test("evidence rejected on a covered day leaves it for its due time, which makes it Excused, not Missed", async () => {
+    const s = scenario();
+    const { owner, gym, vacationId, reviewer } = await sentToTwoOfThree(s);
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+    s.setClockTo("Mon+1 10:00");
+    const evidenceId = ok(await owner.submitEvidence(gym, [photo()])).evidenceId;
+
+    ok(await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" }));
+    expect(statusOn(owner, gym, s.date("Mon+1"))).toBe("not-judged");
+    await s.advanceTo("Tue+1 00:00");
+
+    expect(statusOn(owner, gym, s.date("Mon+1"))).toBe("excused");
+    expect(penaltyDays(owner)).not.toContain(s.date("Mon+1"));
+  });
+
+  test("a covered One-time deadline moved outside the vacation isn't covered any more; moved within it, it still is", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const inside = await createPact("Visa", { kind: "one-time", deadline: s.date("Wed+1"), submitAnytime: false });
+    const outside = await createPact("Forms", { kind: "one-time", deadline: s.date("Thu+1"), submitAnytime: false });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Thu+1"), [inside, outside], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    const move = async (pactId: string, deadline: string) => {
+      const change = changed(owner, pactId, { schedule: { kind: "one-time", deadline, submitAnytime: false } });
+      ok(await reviewer.decide(changeRequestIdOf(await owner.changePact(pactId, change)), { kind: "approve" }));
+    };
+    await move(inside, s.date("Tue+1"));
+    await move(outside, s.date("Fri"));
+    await s.advanceTo("Sat 00:00");
+    await s.advanceTo("Wed+1 00:00");
+
+    expect(oneTimeStatus(owner, inside)).toBe("excused");
+    expect(oneTimeStatus(owner, outside)).toBe("missed");
+  });
+});
+
+describe("what the owner isn't bothered with on covered days", () => {
+  test("a rejected day in a covered Weekly count week raises no alert, as under an approved excuse", async () => {
+    const s = scenario();
+    const { owner, second, piano } = await ownerWithThreePacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [piano], [second]));
+    ok(await second.decide(vacationId, { kind: "approve" }));
+    s.setClockTo("Tue+1 10:00");
+    const evidenceId = ok(await owner.submitEvidence(piano, [photo()])).evidenceId;
+
+    ok(await second.decide(evidenceId, { kind: "reject", reason: "That's last week's log" }));
+
+    expect(owner.today().alerts).toEqual([]);
+  });
+
+  test("a covered night with no Oura data by 15:00 sends no push, as under an approved excuse", async () => {
+    const s = scenario();
+    const { owner, reviewer, bed } = await ownerWithThreePacts(s);
+    const vacationId = await file(owner, vacation(s.date("Tue+1"), s.date("Tue+1"), [bed], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+    await s.advanceTo("Wed+1 14:00");
+    const before = s.notifier.sentTo(owner, "connection-problem").length;
+
+    await s.advanceTo("Wed+1 15:00");
+
+    expect(s.notifier.sentTo(owner, "connection-problem")).toHaveLength(before);
+  });
+});
+
+describe("the ledger carries on during an approved vacation", () => {
+  test("a pact not on it still adds penalties that go on the Wednesday bill, and Overdue reminders keep running", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await fifteenOwed(s);
+    const read = await createPact("Read", MON_WED_FRI);
+    s.setClockTo("Sat 00:20");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+2"), [read], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    await tickHourly(s, "Sat 01:00", "Thu+2 18:00");
+
+    expect(penaltyDays(owner, "Read")).toEqual([]);
+    expect(penaltyDays(owner, "Gym")).toEqual(
+      ["Mon", "Wed", "Fri", "Mon+1", "Wed+1", "Fri+1", "Mon+2", "Wed+2"].map((day) => s.date(day)),
+    );
+    expect(s.notifier.sentTo(owner, "new-bill")).toHaveLength(2);
+    expect(s.notifier.sentTo(owner, "overdue-bill")).toHaveLength(2);
   });
 });

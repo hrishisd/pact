@@ -1,6 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { APP_PATHS } from "../shared/api.ts";
-import { inviteTokenFromPath, pagePath, routeFromPath, type Page, type TabId } from "./navigation.ts";
+import {
+  inviteTokenFromPath,
+  opensProfileSheet,
+  pagePath,
+  routeFromPath,
+  type Page,
+  type TabId,
+} from "./navigation.ts";
 
 /** An id that needs encoding in a path. */
 const ID = "a b/c?d";
@@ -75,6 +82,14 @@ describe("links already sent keep opening the same page", () => {
     ["/payments/m1", { tab: "today", stack: [{ kind: "payment", id: "m1" }] }],
   ] as const)("%s", (path, route) => {
     expect(routeFromPath(path)).toEqual(route);
+  });
+
+  test("/profile opens Today with the Profile sheet up", () => {
+    expect(APP_PATHS.profile).toBe("/profile");
+    expect(routeFromPath("/profile")).toEqual({ tab: "today", stack: [] });
+    expect(opensProfileSheet("/profile")).toBe(true);
+    expect(opensProfileSheet(APP_PATHS.today)).toBe(false);
+    expect(opensProfileSheet("/profile/")).toBe(false);
   });
 
   test("an invite link is /invite/ and the token as it was made", () => {

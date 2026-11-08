@@ -23,6 +23,20 @@ export function formatDate(date: LocalDate): string {
   return formatDay(new Date(Date.UTC(year, month - 1, day)).toISOString(), "UTC");
 }
 
+/** "Dec 20", from `formatDate`'s "Sun Dec 20". */
+export function monthDay(date: LocalDate): string {
+  return formatDate(date).slice(4);
+}
+
+/** A vacation's dates: "Dec 20 – Jan 2", "Dec 20 – 26" within one month, or "Dec 20" for one day. */
+export function dateSpan(from: LocalDate, to: LocalDate): string {
+  if (from === to) return monthDay(from);
+  const [toMonth, toDay] = monthDay(to).split(" ");
+  return monthDay(from).startsWith(`${toMonth} `)
+    ? `${monthDay(from)} – ${toDay}`
+    : `${monthDay(from)} – ${monthDay(to)}`;
+}
+
 /** An instant, as an ISO string, as its day in `timeZone` (the profile's): "Thu Oct 22", like `formatDate`. */
 export function formatDay(instant: string, timeZone: string): string {
   const part = partsIn(instant, timeZone, { weekday: "short", month: "short", day: "numeric" });

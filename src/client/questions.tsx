@@ -40,7 +40,7 @@ export function Thread({
   );
 }
 
-const REPLY_REFUSAL_TEXT: Record<Refusal<ReplyResult>, string> = {
+export const REPLY_REFUSAL_TEXT: Record<Refusal<ReplyResult>, string> = {
   "item-not-found": "This wasn't found.",
   "not-waiting": "It's been decided already, so there's nothing to reply to.",
   "no-question": "There's no question waiting for your reply.",

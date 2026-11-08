@@ -1,5 +1,5 @@
 // The Review tab: the account's Review Queue (change requests first, then
-// evidence, excuses and payments), one item at a time, with Reject (a reason
+// evidence, excuses, payments and vacations), one item at a time, with Reject (a reason
 // is required, and the form says what rejecting does), Ask, Approve, and
 // Prev/Skip. Below it, the items waiting on their owner's reply, which a
 // reviewer can still open and decide.
@@ -8,11 +8,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json, ReviewQueueResponse } from "../shared/api.ts";
 import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { formatDate, formatDayTime, money, weekdayName } from "./format.ts";
+import { dateSpan, formatDate, formatDayTime, money, weekdayName } from "./format.ts";
 import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
-import { DiffList, EverythingElse, startsText } from "./change-terms.tsx";
+import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-page.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
+import { coveredText, firstName, pactsText, plural } from "./vacation-text.ts";
 import { Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
@@ -97,7 +98,7 @@ export function Review({
             body={
               waitingList
                 ? "What's left is waiting on a reply, below."
-                : "When a friend picks you as a reviewer, their evidence, excuses, payments and change requests show up here."
+                : "When a friend picks you as a reviewer, their evidence, excuses, payments, change requests and vacations show up here."
             }
           />
           {waitingList}
@@ -166,6 +167,8 @@ function ItemView({
       return <ChangeRequestItem key={item.id} item={item} {...props} />;
     case "payment":
       return <PaymentItem key={item.id} item={item} {...props} />;
+    case "vacation":
+      return <VacationItem key={item.id} item={item} {...props} />;
   }
 }
 
@@ -174,9 +177,10 @@ const ASK_PLACEHOLDER: Record<ReviewItem["kind"], string> = {
   excuse: "e.g. Did you see a doctor?",
   payment: "e.g. Can you send the whole screenshot?",
   "change-request": "e.g. What changed?",
+  vacation: "e.g. Can you keep Spanish going on the trip?",
 };
 
-/** What a review item is about, in a row: the pact's name, or the payment. */
+/** What a review item is about, in a row: the pact's name, the payment, or "Vacation". */
 function itemTitle(item: Json<ReviewItem>): string {
   switch (item.kind) {
     case "evidence":
@@ -186,7 +190,16 @@ function itemTitle(item: Json<ReviewItem>): string {
       return item.endsPact ? `End ${item.pactName}` : item.pactName;
     case "payment":
       return `${money(item.amountCents)} to ${item.recipientName}`;
+    case "vacation":
+      return "Vacation";
   }
+}
+
+/** What a row waiting on the owner's reply says after the kind: when it was asked, or a vacation's dates and owner. */
+function waitingDetail(item: Json<ReviewItem>, timezone: string): string | undefined {
+  if (item.kind === "vacation") return `${dateSpan(item.from, item.to)} · from ${item.ownerName}`;
+  const asked = item.thread.comments.at(-1);
+  return asked && `asked ${formatDayTime(asked.sentAt, timezone)}`;
 }
 
 /**
@@ -211,18 +224,15 @@ function WaitingOnReply({
           <div className="cards">
             {items
               .filter((item) => item.ownerName === owner)
-              .map((item) => {
-                const asked = item.thread.comments.at(-1);
-                return (
-                  <WaitingRow
-                    key={item.id}
-                    kind={item.kind}
-                    title={itemTitle(item)}
-                    detail={asked && `asked ${formatDayTime(asked.sentAt, timezone)}`}
-                    onOpen={() => onOpen(item.id)}
-                  />
-                );
-              })}
+              .map((item) => (
+                <WaitingRow
+                  key={item.id}
+                  kind={item.kind}
+                  title={itemTitle(item)}
+                  detail={waitingDetail(item, timezone)}
+                  onOpen={() => onOpen(item.id)}
+                />
+              ))}
           </div>
         </section>
       ))}
@@ -242,6 +252,7 @@ type EvidenceReviewItem = Extract<Json<ReviewItem>, { kind: "evidence" }>;
 type ExcuseReviewItem = Extract<Json<ReviewItem>, { kind: "excuse" }>;
 type PaymentReviewItem = Extract<Json<ReviewItem>, { kind: "payment" }>;
 type ChangeReviewItem = Extract<Json<ReviewItem>, { kind: "change-request" }>;
+type VacationReviewItem = Extract<Json<ReviewItem>, { kind: "vacation" }>;
 
 /** After the core answered: null when the decision went through. */
 type OnDecided = (refusal: DecideRefusal | null) => void;
@@ -430,6 +441,63 @@ function PaymentItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: P
         itemId={item.id}
         onAsk={onAsk}
         placeholder="e.g. The screenshot shows a different amount"
+        onDecided={onDecided}
+      />
+    </>
+  );
+}
+
+/**
+ * A Vacation item: the dates, the note, who it went to, and what each pact on
+ * it gives up. It's approved or rejected as a whole.
+ */
+function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: VacationReviewItem }) {
+  const reviewers = item.reviewerNames;
+  const decides = reviewers.length === 1 ? "" : reviewers.length === 2 ? " Either can decide." : " Any one can decide.";
+  return (
+    <>
+      <FromOwner item={item} />
+      <article className="card">
+        <div className="spread">
+          <h3>Vacation</h3>
+          <span className="meta">
+            {dateSpan(item.from, item.to)} · {plural(item.days, "day", "days")}
+          </span>
+        </div>
+        <span className="small muted">
+          {formatDate(item.from)} – {formatDate(item.to)} · {pactsText(item.pacts)}
+        </span>
+        {item.note !== null && <span className="quote">“{item.note}”</span>}
+        <span className="small muted">
+          Sent to {listNames(reviewers)}.{decides}
+        </span>
+        <span className="label">Covers</span>
+        <div className="list">
+          {item.covers.map((cover) => {
+            const { head, lines } = coveredText(cover, cover.covered, item.from, item.to);
+            return (
+              <div key={cover.pactId} className="covrow">
+                <span className="rt">
+                  <b>{cover.name}</b>
+                  <small>{head}</small>
+                  {lines.map((line) => (
+                    <small key={line}>{line}</small>
+                  ))}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="muted small">
+          Approving excuses all of these and stops their reminders on these days. Once approved, it can't be changed.
+        </p>
+      </article>
+      <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
+      <Decision
+        itemId={item.id}
+        onAsk={onAsk}
+        placeholder="e.g. Not two weeks before the gym challenge ends"
+        cost={<p className="small">Rejecting keeps every day of {firstName(item.ownerName)}'s pacts as it is.</p>}
         onDecided={onDecided}
       />
     </>

@@ -14,7 +14,7 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
   "picked-as-reviewer": { label: "Picked as a reviewer", hint: "A friend picked you as a reviewer on a pact" },
   "review-item": {
     label: "New review item",
-    hint: "Evidence, an excuse, a payment or a change request is waiting for you",
+    hint: "Evidence, an excuse, a payment, a change request or a vacation is waiting for you",
   },
   decision: { label: "Decision", hint: "A reviewer approved or rejected something of yours" },
   comment: { label: "Comment", hint: "A reviewer asked you about something, or a friend replied to your question" },

@@ -85,6 +85,8 @@ export type NotificationKind =
   | "payment-decided"
   /** To the owner: a reviewer approved or rejected their change request. */
   | "change-request-decided"
+  /** To the owner: one of the reviewers they picked approved or rejected their vacation. */
+  | "vacation-decided"
   /** To the owner: a reviewer asked about one of their review items. */
   | "reviewer-question"
   /** To each reviewer of an item: its owner replied to a question, so it's back in their queue. */
@@ -120,11 +122,13 @@ interface NotificationDetails {
   "picked-as-reviewer": { pactId: string };
   "review-item":
     | { itemKind: "evidence" | "excuse" | "change-request"; itemId: string; pactId: string }
-    | { itemKind: "payment"; itemId: string; recipientId: string };
+    | { itemKind: "payment"; itemId: string; recipientId: string }
+    | { itemKind: "vacation"; itemId: string };
   "evidence-decided": { itemKind: "evidence"; itemId: string; pactId: string } & DecisionDetails;
   "excuse-decided": { itemKind: "excuse"; itemId: string; pactId: string } & DecisionDetails;
   "payment-decided": { itemKind: "payment"; itemId: string; recipientId: string } & DecisionDetails;
   "change-request-decided": { itemKind: "change-request"; itemId: string; pactId: string } & DecisionDetails;
+  "vacation-decided": { itemKind: "vacation"; itemId: string } & DecisionDetails;
   "reviewer-question": { itemKind: ReviewItem["kind"]; itemId: string };
   "owner-replied": { itemKind: ReviewItem["kind"]; itemId: string };
   /** `occurrenceDate`: "YYYY-MM-DD", the day judged. */

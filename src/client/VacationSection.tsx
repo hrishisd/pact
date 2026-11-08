@@ -1,13 +1,16 @@
 // The Profile sheet's Vacation section: the owner's vacations waiting for
-// approval, each with Withdraw, and Plan a vacation below them.
+// approval or approved ahead, soonest first, and Plan a vacation below them.
+// A waiting one has Withdraw; one waiting on the owner's reply also has Reply.
 
 import { useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type { VacationCard } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
+import { dateSpan } from "./format.ts";
+import { REPLY_REFUSAL_TEXT } from "./questions.tsx";
 import { loadedData, loadFailure, useLoad, useSend } from "./ui.tsx";
-import { dateSpan, pactsText, plural } from "./vacation-text.ts";
+import { firstName, pactsText, plural } from "./vacation-text.ts";
 
 const WITHDRAWN = "Vacation withdrawn. Your pacts keep all their days.";
 
@@ -15,6 +18,10 @@ export function VacationSection({ message, onPlan }: { message: string | null; o
   const { state, reload } = useLoad(api.vacations);
   const vacations = loadedData(state);
   const [said, setSaid] = useState(message);
+  const saying = (text: string) => () => {
+    setSaid(text);
+    reload();
+  };
 
   return (
     <section className="stack">
@@ -26,13 +33,11 @@ export function VacationSection({ message, onPlan }: { message: string | null; o
       <div className="label">Vacation</div>
       {loadFailure(state) && <p className="muted small">Vacations couldn't load.</p>}
       {vacations?.map((vacation) => (
-        <WaitingCard
+        <VacationCardView
           key={vacation.id}
           vacation={vacation}
-          onWithdrawn={() => {
-            setSaid(WITHDRAWN);
-            reload();
-          }}
+          onWithdrawn={saying(WITHDRAWN)}
+          onReplied={saying(`Reply sent. It's back with ${listNames(vacation.reviewerNames.map(firstName))}.`)}
         />
       ))}
       <div className="spread">
@@ -52,9 +57,59 @@ function sentTo(names: string[]): string {
     : `Sent to ${listNames(names)}. Nothing changes until one of them approves it.`;
 }
 
-function WaitingCard({ vacation, onWithdrawn }: { vacation: Json<VacationCard>; onWithdrawn: () => void }) {
-  const [asking, setAsking] = useState(false);
-  const { busy, error, run } = useSend(
+const CHIPS: Record<VacationCard["state"]["kind"], { className: string; text: string }> = {
+  waiting: { className: "c-wait", text: "Waiting for approval" },
+  "waiting-on-reply": { className: "c-reply", text: "Waiting on your reply" },
+  approved: { className: "c-ok", text: "Approved" },
+};
+
+/** One vacation's card: its dates, note and pacts, then where it stands and what the owner can do. */
+function VacationCardView({
+  vacation,
+  onWithdrawn,
+  onReplied,
+}: {
+  vacation: Json<VacationCard>;
+  onWithdrawn: () => void;
+  onReplied: () => void;
+}) {
+  const { state } = vacation;
+  const chip = CHIPS[state.kind];
+  return (
+    <div className="card vaccard">
+      <div className="spread">
+        <b>Vacation {dateSpan(vacation.from, vacation.to)}</b>
+        <span className={`chip ${chip.className}`}>{chip.text}</span>
+      </div>
+      {vacation.note && <div className="vacnote">{vacation.note}</div>}
+      <small className="muted">
+        {pactsText(vacation.pacts)} · {plural(vacation.days, "day", "days")}
+      </small>
+      {state.kind === "approved" ? (
+        <small className="muted">Approved by {state.reviewerName}. It can't be changed now.</small>
+      ) : (
+        <WaitingActions vacation={vacation} onWithdrawn={onWithdrawn} onReplied={onReplied} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the owner can do while a vacation waits: Withdraw, which asks first,
+ * and, while a question waits on their reply, the question and Reply.
+ */
+function WaitingActions({
+  vacation,
+  onWithdrawn,
+  onReplied,
+}: {
+  vacation: Json<VacationCard>;
+  onWithdrawn: () => void;
+  onReplied: () => void;
+}) {
+  const [open, setOpen] = useState<"withdraw" | "reply" | null>(null);
+  const { state } = vacation;
+  const withdraw = useSend(
     async () => {
       const result = await api.withdrawVacation(vacation.id);
       if (!result.ok) return "It's no longer waiting for approval. Reopen Profile to see where it stands.";
@@ -64,36 +119,92 @@ function WaitingCard({ vacation, onWithdrawn }: { vacation: Json<VacationCard>; 
   );
 
   return (
-    <div className="card vaccard">
-      <div className="spread">
-        <b>Vacation {dateSpan(vacation.from, vacation.to)}</b>
-        <span className="chip c-wait">Waiting for approval</span>
-      </div>
-      {vacation.note && <div className="vacnote">{vacation.note}</div>}
-      <small className="muted">
-        {pactsText(vacation.pacts)} · {plural(vacation.days, "day", "days")}
-      </small>
-      <small>{sentTo(vacation.reviewerNames)}</small>
-      {asking ? (
+    <>
+      {state.kind === "waiting-on-reply" ? (
+        <span className="small">
+          <b>{firstName(state.askedBy)} asked:</b> “{state.question}”
+        </span>
+      ) : (
+        <small>{sentTo(vacation.reviewerNames)}</small>
+      )}
+      {open === "withdraw" ? (
         <div className="alert amber" role="status">
           <span>Withdraw this vacation? Your pacts keep all their days.</span>
           <div className="row2">
-            <button className="btn sm danger" disabled={busy} onClick={() => run()}>
-              {busy ? "Withdrawing…" : "Withdraw"}
+            <button className="btn sm danger" disabled={withdraw.busy} onClick={() => withdraw.run()}>
+              {withdraw.busy ? "Withdrawing…" : "Withdraw"}
             </button>
-            <button className="btn sm" disabled={busy} onClick={() => setAsking(false)}>
+            <button className="btn sm" disabled={withdraw.busy} onClick={() => setOpen(null)}>
               Keep it
             </button>
           </div>
         </div>
+      ) : open === "reply" && state.kind === "waiting-on-reply" ? (
+        <VacationReply
+          itemId={vacation.id}
+          askedBy={state.askedBy}
+          onCancel={() => setOpen(null)}
+          onReplied={onReplied}
+        />
       ) : (
         <div className="row2">
-          <button className="btn sm danger" onClick={() => setAsking(true)}>
+          {state.kind === "waiting-on-reply" && (
+            <button className="btn sm primary" onClick={() => setOpen("reply")}>
+              Reply
+            </button>
+          )}
+          <button className="btn sm danger" onClick={() => setOpen("withdraw")}>
             Withdraw
           </button>
         </div>
       )}
+      {withdraw.error && <p className="error small">{withdraw.error}</p>}
+    </>
+  );
+}
+
+/** The reply to a reviewer's question about a vacation: a text box, Cancel, and "Send to Sam". */
+function VacationReply({
+  itemId,
+  askedBy,
+  onCancel,
+  onReplied,
+}: {
+  itemId: string;
+  askedBy: string;
+  onCancel: () => void;
+  onReplied: () => void;
+}) {
+  const [text, setText] = useState("");
+  const { busy, error, run } = useSend(
+    async () => {
+      const result = await api.reply(itemId, text);
+      if (!result.ok) return REPLY_REFUSAL_TEXT[result.reason];
+      onReplied();
+    },
+    (failure) => `Couldn't send. ${failureText(failure, "Check your connection and try again.")}`,
+  );
+  return (
+    <div className="stack">
+      <label className="field">
+        <span>Reply</span>
+        <textarea
+          className="inp"
+          rows={3}
+          value={text}
+          placeholder="e.g. My flight leaves Sun Dec 20 at 7am"
+          onChange={(e) => setText(e.target.value)}
+        />
+      </label>
       {error && <p className="error small">{error}</p>}
+      <div className="row2">
+        <button className="btn sm" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn sm primary" disabled={busy || text.trim() === ""} onClick={() => run()}>
+          {busy ? "Sending…" : `Send to ${firstName(askedBy)}`}
+        </button>
+      </div>
     </div>
   );
 }

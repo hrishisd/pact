@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
+import { APP_PATHS, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { ChangePact } from "./ChangePact.tsx";
@@ -14,7 +14,7 @@ import { InvitePage } from "./InvitePage.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
 import { forgetThisDevice, usePush, type Push } from "./push.ts";
 import { LedgerPage, Ledgers } from "./Ledgers.tsx";
-import { inviteTokenFromPath, useNavigation, type Page, type TabId } from "./navigation.ts";
+import { inviteTokenFromPath, opensProfileSheet, useNavigation, type Page, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
 import { PaymentPage } from "./PaymentPage.tsx";
 import { PlanVacation } from "./PlanVacation.tsx";
@@ -237,7 +237,8 @@ function Shell({
 }) {
   const nav = useNavigation();
   const { tab, page } = nav;
-  const [profileOpen, setProfileOpen] = useState(false);
+  // A vacation's decision or question opens /profile: the sheet over Today.
+  const [profileOpen, setProfileOpen] = useState(() => opensProfileSheet(window.location.pathname));
   // What the Profile sheet's Vacation section says when it opens, after a vacation is sent.
   const [vacationMessage, setVacationMessage] = useState<string | null>(null);
   const reviewCount = useReviewCount(tab);
@@ -245,6 +246,12 @@ function Shell({
   // Pact and recipient names learnt by loading their pages, for a page opened from a link.
   const [pactNames, pactLoaded] = useLearntNames();
   const [ledgerNames, ledgerLoaded] = useLearntNames();
+
+  // Then the address is Today's, so a reload doesn't open the sheet again.
+  useEffect(() => {
+    if (opensProfileSheet(window.location.pathname))
+      window.history.replaceState(window.history.state, "", APP_PATHS.today);
+  }, []);
 
   const openProfile = () => {
     setVacationMessage(null);

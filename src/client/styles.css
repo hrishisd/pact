@@ -1635,7 +1635,11 @@ details.folded .kv {
   }
 }
 
-/* Vacations: the Profile card and the Plan a vacation flow. */
+/* Vacations: the Profile card, the Plan a vacation flow and the review item. */
+.k-vacation {
+  background: var(--sunk);
+  color: var(--muted);
+}
 .vaccard {
   gap: 8px;
 }

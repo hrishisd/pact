@@ -9,9 +9,9 @@ import { dayCount } from "../shared/calendar.ts";
 import { MAX_EXCUSE_SPAN_DAYS, type FileVacationRefusal } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
-import { formatDate, money, scheduleText } from "./format.ts";
+import { dateSpan, formatDate, money, scheduleText } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
-import { dateSpan, firstName, monthDay, pactsText, plural } from "./vacation-text.ts";
+import { coveredText, firstName, occurrenceNames, pactsText, plural, weekOf } from "./vacation-text.ts";
 import { Loaded, settleUnlessDropped, useLoad, useSend } from "./ui.tsx";
 
 type Options = VacationOptionsResponse;
@@ -398,55 +398,32 @@ function CoverRow({ pact, preview, from, to }: { pact: PactOption; preview: Pact
   const { className, icon } = KIND_ICONS[pact.evidenceKind];
   const { schedule } = pact;
   const weekly = schedule.kind === "weekly-count";
-  const [one, many] =
-    pact.evidenceKind === "oura"
-      ? ["night", "nights"]
-      : pact.evidenceKind === "anki"
-        ? ["Anki day", "Anki days"]
-        : ["day", "days"];
   const covered = preview.covered;
-  const first = covered[0];
-  const last = covered.at(-1);
-  const weekOf = (date: string) => `Week of ${monthDay(date)}`;
 
   let head: string;
   const lines: string[] = [];
   if (!preview.ticked) {
+    const [one, many] = weekly ? ["week", "weeks"] : occurrenceNames(pact.evidenceKind);
     const due =
       covered.length === 0
         ? ""
         : schedule.kind === "one-time"
           ? ` · deadline ${formatDate(schedule.deadline)} still due`
-          : ` · ${plural(covered.length, weekly ? "week" : one, weekly ? "weeks" : many)} still due`;
+          : ` · ${plural(covered.length, one, many)} still due`;
     head = `Not on vacation${due}`;
-  } else if (schedule.kind === "one-time") {
-    if (first) {
-      head = `Deadline ${formatDate(schedule.deadline)} excused`;
-      lines.push("The pact ends.");
-    } else {
-      head = `Deadline ${formatDate(schedule.deadline)} isn't in these days`;
-      if (preview.skipped.length === 0) lines.push("Nothing changes for it.");
-    }
-  } else if (weekly) {
-    head =
-      first && last
-        ? `${plural(covered.length, "week", "weeks")} off · ${dateSpan(first.date, last.through ?? last.date)}`
-        : "No whole weeks off";
-    for (const week of covered) {
-      if (week.date < from || (week.through ?? week.date) > to) lines.push(`${weekOf(week.date)}: whole week off`);
-    }
-    for (const week of preview.notCovered) {
-      lines.push(
-        `${weekOf(week.date)}: not covered, still ${schedule.target}× by ${formatDate(week.through ?? week.date)}`,
-      );
-    }
   } else {
-    head =
-      first && last
-        ? `${plural(covered.length, one, many)} off · ${dateSpan(first.date, last.date)}`
-        : `No ${many} in these days`;
-  }
-  if (preview.ticked) {
+    const text = coveredText(pact, covered, from, to);
+    head = text.head;
+    lines.push(...text.lines);
+    if (schedule.kind === "one-time" && covered.length === 0 && preview.skipped.length === 0)
+      lines.push("Nothing changes for it.");
+    if (schedule.kind === "weekly-count") {
+      for (const week of preview.notCovered) {
+        lines.push(
+          `${weekOf(week.date)}: not covered, still ${schedule.target}× by ${formatDate(week.through ?? week.date)}`,
+        );
+      }
+    }
     for (const skipped of preview.skipped) {
       lines.push(`${weekly ? weekOf(skipped.date) : formatDate(skipped.date)}: ${SKIP_TEXT[skipped.reason]}`);
     }
