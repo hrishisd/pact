@@ -1075,6 +1075,16 @@ describe("after a rejection", () => {
     expect(await reviewer.acceptVacationRejection(vacationId)).toEqual({ ok: false, reason: "vacation-not-found" });
   });
 
+  test("Take the L leaves Wed+1, Missed after the rejection, on Today's Missed with its own 48 hours", async () => {
+    const s = scenario();
+    const { owner, gym, vacationId } = await rejectedAfterMonday(s);
+    await tickHourly(s, "Tue+1 09:00", "Thu+1 01:00");
+
+    ok(await owner.acceptVacationRejection(vacationId));
+
+    expect(cards(owner, "missed")).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Wed+1") })]);
+  });
+
   test("Take the L on a vacation that isn't rejected has nothing to accept", async () => {
     const s = scenario();
     const { owner, vacationId } = await waitingOverGym(s);
@@ -1112,7 +1122,7 @@ describe("while a vacation waits after its first day", () => {
     );
   });
 
-  test("a Weekly count week short at the end of its Sunday is Missed with each short day's penalty held; approval removes them all", async () => {
+  test("a Weekly count week short at the end of its Sunday is Missed with each short day's penalty held, shown as its week; approval removes them all", async () => {
     const s = scenario();
     const { owner, second, piano } = await ownerWithThreePacts(s);
     const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [piano], [second]));
@@ -1126,6 +1136,17 @@ describe("while a vacation waits after its first day", () => {
       expect.objectContaining({ occurrenceDate: s.date("Mon+1"), amountCents: 1000, held: true }),
     ]);
     expect(s.notifier.sentTo(owner, "missed-occurrence").filter((n) => n.payload.pactId === piano)).toEqual([]);
+    expect(second.reviewQueue()).toEqual([
+      expect.objectContaining({
+        id: vacationId,
+        covers: [
+          expect.objectContaining({
+            pactId: piano,
+            held: [{ date: s.date("Mon+1"), through: s.date("Sun+1"), penaltyCents: 1000 }],
+          }),
+        ],
+      }),
+    ]);
 
     ok(await second.decide(vacationId, { kind: "approve" }));
     expect(piano$()).toEqual([]);

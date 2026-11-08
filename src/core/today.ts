@@ -30,10 +30,9 @@ import { billsForToday, waitingPayments } from "./money.ts";
 import {
   evidenceDecision,
   excuseCoversSql,
-  excuseOn,
   isJudged,
   MISSED_THROUGH_REJECTION,
-  stillNudged,
+  stillToDo,
   weekProgress,
 } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
@@ -230,8 +229,7 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
   }
   const today = localDateOf(now, timezone);
   // Nights the owner needn't hear about: judged, or with an excuse filed (a waiting vacation keeps them).
-  const open = (night: Occurrence) =>
-    !isJudged(ctx, pact.id, night.date) && stillNudged(excuseOn(ctx, pact.id, night.date));
+  const open = (night: Occurrence) => !isJudged(ctx, pact.id, night.date) && stillToDo(ctx, pact.id, night.date);
   const nights = between(addDays(today, -2), today);
   // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
   const tonight = nights.find(
@@ -274,7 +272,8 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
 /**
  * An Anki pact on Today: its day open now under To do until it's judged
  * (Satisfied the moment Pact sees the deck finished) or past its due time,
- * unless an excuse covers it; Coming up before its first day opens.
+ * unless an excuse or an approved vacation covers it; Coming up before its
+ * first day opens.
  */
 function ankiToday(
   ctx: CoreContext,
@@ -286,7 +285,7 @@ function ankiToday(
   const { first, openAt } = occurrencesOf(ctx, pact.id, timezone);
   const open = openAt(now);
   if (open && !isJudged(ctx, pact.id, open.date) && now.getTime() < open.dueAt.getTime()) {
-    if (!stillNudged(excuseOn(ctx, pact.id, open.date))) return null;
+    if (!stillToDo(ctx, pact.id, open.date)) return null;
     return { section: "to-do", card: ankiCard(ctx, pact, ownerId, open) };
   }
   if (!open && now.getTime() < first.opensAt.getTime()) {
@@ -325,7 +324,7 @@ function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: 
   const decision = evidenceDecision(ctx, pact.id, open.date);
   if (decision === "waiting" || decision === "approved") return null;
   // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
-  if (!stillNudged(excuseOn(ctx, pact.id, open.date))) return null;
+  if (!stillToDo(ctx, pact.id, open.date)) return null;
   return {
     section: "to-do",
     card: {
@@ -375,8 +374,8 @@ function ankiCard(ctx: CoreContext, pact: ActivePact, ownerId: AccountId, open: 
 
 /**
  * A Weekly count week's To do card as of `now`, when `today` still takes
- * evidence (before `todayDueAt`) and has none, no excuse covers the week,
- * and its target isn't met or waiting for approval; else null.
+ * evidence (before `todayDueAt`) and has none, no excuse or approved vacation
+ * covers the week, and its target isn't met or waiting for approval; else null.
  */
 function weekToDo(
   ctx: CoreContext,
@@ -387,7 +386,7 @@ function weekToDo(
   now: Date,
 ): Pick<TodayToDoCard, "occurrenceDate" | "dueAt" | "dueBy" | "week"> | null {
   if (now.getTime() >= todayDueAt.getTime()) return null;
-  if (!stillNudged(excuseOn(ctx, pactId, week.date))) return null;
+  if (!stillToDo(ctx, pactId, week.date)) return null;
   if (evidenceDecision(ctx, pactId, today, "day") !== "none") return null;
   const progress = weekProgress(ctx, pactId, week.date);
   if (progress.sessions + progress.waiting >= progress.target) return null;
@@ -398,9 +397,9 @@ function weekToDo(
 /**
  * The owner's occurrences judged Missed in the 48 hours before `now`,
  * latest first, but not accepted misses, nor those Missed through a
- * rejection or on a rejected excuse (those are alerts), nor those on an
- * excuse or vacation waiting for approval. Today's day of a Camera pact with a due-by
- * time is Closed.
+ * rejection or on a rejected excuse or vacation (those are alerts), nor
+ * those on an excuse or vacation waiting for approval. Today's day of a
+ * Camera pact with a due-by time is Closed.
  */
 function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, now: Date): TodayMissedCard[] {
   const today = localDateOf(now, timezone);

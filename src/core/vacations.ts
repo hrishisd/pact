@@ -364,9 +364,12 @@ function vacationCovers(ctx: CoreContext, vacationId: string, timezone: string):
         return occurrence ? [occurrenceSpan(ctx, pact.id, occurrence)] : [];
       });
     if (covered.length === 0) return [];
+    // A held penalty's date is a covered occurrence's, so it shows as that occurrence: a Weekly count one as its week.
     const mine = held
       .filter((penalty) => penalty.pact_id === pact.id)
-      .map(({ date, amount_cents: penaltyCents }) => ({ date, penaltyCents }));
+      .flatMap(({ date, amount_cents: penaltyCents }) =>
+        covered.filter((span) => span.date === date).map((span) => ({ ...span, penaltyCents })),
+      );
     return [
       {
         pactId: pact.id,
@@ -578,7 +581,8 @@ export function rejectedVacationAlerts(ctx: CoreContext, ownerId: AccountId): { 
 
 /**
  * The owner takes the L on their rejected vacation `vacationId`: its alert
- * goes, and so do the Missed occurrences it covered, from Today's Missed.
+ * goes, and so do the covered occurrences already Missed when it was
+ * rejected, from Today's Missed. Days judged later keep their own card.
  */
 export function acceptVacationRejection(
   ctx: CoreContext,
@@ -599,8 +603,9 @@ export function acceptVacationRejection(
     .prepare(
       `UPDATE occurrence SET miss_accepted_at = ?
        WHERE outcome = 'missed' AND miss_accepted_at IS NULL
+         AND judged_at <= (SELECT decided_at FROM vacation WHERE id = ?)
          AND (pact_id, date) IN (SELECT pact_id, date FROM vacation_day WHERE vacation_id = ?)`,
     )
-    .run(now, vacationId);
+    .run(now, vacationId, vacationId);
   return { ok: true };
 }

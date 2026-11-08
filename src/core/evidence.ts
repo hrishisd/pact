@@ -359,9 +359,9 @@ export function waitingEvidence(ctx: CoreContext, ownerId: AccountId, pactId?: s
 /**
  * One alert per occurrence of the owner's judged Missed through a
  * rejection, newest rejection first, with when it was judged. No time
- * limit. It goes once the owner accepts the miss, or files an excuse for
- * the day (one waiting before the rejection counts too); a rejected
- * excuse's own alert takes over then.
+ * limit. It goes once the owner accepts the miss, or files an excuse or a
+ * vacation for the day (one waiting before the rejection counts too); a
+ * rejected excuse's or vacation's own alert takes over then.
  */
 export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
   const rows = ctx.all<{
@@ -413,7 +413,7 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
  * One alert per Weekly count day of the owner's whose evidence was
  * rejected, newest rejection first, with when it was rejected: nothing is
  * Missed, and the day can be made up another day. It goes once the owner
- * takes the L on it, an excuse covers the week (one rejected after the
+ * takes the L on it, an excuse or a vacation covers the week (one rejected after the
  * rejection has its own alert), or the week is judged.
  */
 export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {

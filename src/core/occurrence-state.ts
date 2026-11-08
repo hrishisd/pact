@@ -80,11 +80,13 @@ export function excuseOn(ctx: CoreContext, pactId: string, date: LocalDate): Exc
 }
 
 /**
- * Whether Today and the No Oura data push still show the owner an
- * occurrence with `cover`: nothing covers it, or only a vacation waiting for
- * approval, whose days keep their cards and reminders until it's approved.
+ * Whether Today and the No Oura data push still show the owner the pact's
+ * occurrence on `date` as theirs to do: nothing covers it, or only a
+ * vacation waiting for approval, whose days keep their cards and reminders
+ * until it's approved.
  */
-export function stillNudged(cover: ExcuseCover): boolean {
+export function stillToDo(ctx: CoreContext, pactId: string, date: LocalDate): boolean {
+  const cover = excuseOn(ctx, pactId, date);
   return cover === null || cover === "vacation-waiting";
 }
 

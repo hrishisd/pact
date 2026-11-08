@@ -14,7 +14,7 @@ import {
   excuseOn,
   isJudged,
   pactsToJudge,
-  stillNudged,
+  stillToDo,
   type PactToJudge,
 } from "./occurrence-state.ts";
 import { nightStartsAt, noOuraDataPushAt, type Occurrence } from "./occurrences.ts";
@@ -149,7 +149,7 @@ export function pushNoOuraData(ctx: CoreContext, t: Date): void {
     const offset = ouraOffset(ctx, pact.owner_account_id, pact.timezone);
     if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone, offset).getTime()) continue;
     if (t.getTime() >= night.closesAt.getTime() || isJudged(ctx, pact.id, night.date)) continue;
-    if (!stillNudged(excuseOn(ctx, pact.id, night.date))) continue;
+    if (!stillToDo(ctx, pact.id, night.date)) continue;
     const sent = ctx.db
       .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
       .run(pact.owner_account_id, night.date);
