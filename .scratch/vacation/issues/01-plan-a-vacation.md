@@ -34,7 +34,7 @@ An owner plans a vacation from Profile, sees exactly what it covers before askin
 - [x] Filed on Tue for Wed to Sun: the week of Mon has its Thursday inside but opened on Monday, so it's skipped as already open.
 - [x] One-time: a ticked pact with its deadline inside is covered; one with its deadline outside covers nothing; one with Submit anytime is skipped as already open, and the options query marks it as one that can't be ticked.
 - [x] Dates: a first day of today, a last day before the first, and 63 days are refused; 62 days are accepted.
-- [ ] Overlaps: days already Excused, on a waiting excuse, on a waiting vacation and on an approved vacation are skipped with their reasons; a vacation with nothing left is refused ("nothing-to-cover").
+- [x] Overlaps: days already Excused, on a waiting excuse, on a waiting vacation and on an approved vacation are skipped with their reasons; a vacation with nothing left is refused ("nothing-to-cover").
 - [x] An excuse filed for a day on a waiting vacation skips it as "on-waiting-vacation"; after the vacation is withdrawn, the excuse covers it.
 - [x] Refused: no pact ticked, no reviewer picked, a picked reviewer who reviews none of the ticked pacts, a pact still in its edit window, another owner's pact.
 - [x] A pact created after filing isn't covered, and the preview and the stored days agree for the same input.
@@ -65,3 +65,7 @@ In `../manual-checks.md` (After ticket 01): the native date pickers and the foot
 - The Overlaps criterion stays unticked for one part, "on an approved vacation". Every other part has a scenario. Nothing can approve a vacation until ticket 02, and core tests can't write storage directly. `vacationOn` already counts approved vacations, and the preview skips their days as "on-vacation". Ticket 02 should add that scenario.
 - A waiting vacation whose last day has passed stays on Profile with Withdraw, since it can still be decided and, after ticket 03, may hold penalties. Ticket 04, which adds "Last one", should decide when a waiting card leaves.
 - The iPhone date pickers and footer bar are in `../manual-checks.md` (After ticket 01).
+
+### Ticket 02 closed the Overlaps gap
+
+- "A new vacation skips days already on an approved one" (`vacations.test.ts`, under "once approved, covered occurrences are Excused") approves a vacation, then previews and files a second one over the same days: they're skipped as "on-vacation". The Overlaps criterion is ticked.

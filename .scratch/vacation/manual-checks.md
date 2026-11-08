@@ -15,6 +15,7 @@ Things that need a real phone and real push notifications. Steps marked **(human
 - [ ] **(human)** The reviewer approves. The owner's phone gets "Sam approved your vacation", which opens the Profile sheet with the Approved card.
 - [ ] **(human)** With Decision turned off on the owner's Notifications page, an approval sends nothing. Turn it back on afterwards.
 - [ ] **(human)** No push arrives when the vacation starts or ends.
+- [ ] **(human)** On the phone, with the app already open on another tab, tapping the question push still lands on Today with the Profile sheet up. Reply from the card with the keyboard open: Cancel and "Send to Sam" stay reachable above the keyboard.
 
 ## After ticket 03
 
