@@ -1,6 +1,6 @@
 # 04 During and after a vacation: Today's banner, the heat map and Profile
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: `../spec.md` stories 18 to 20, and Screens (Today "During an approved vacation" and the covered occurrences left off it, "Heat map", and the Profile cards "On now" and "Last one"). The screens follow the prototype's sections 2 (move the clock to during and back) and 3.
