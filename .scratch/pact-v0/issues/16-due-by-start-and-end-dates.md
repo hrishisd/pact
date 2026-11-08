@@ -1,6 +1,6 @@
 # 16 Due-by time, start date and end date
 
-Status: ready-for-agent
+Status: done
 Blocked by: 11
 
 Spec stories: 17–19, 26 (start date), 83 (Ended). Rules: Creation and change, Judging, Today (Closed).
@@ -32,3 +32,5 @@ The optional time fields on a pact.
 ## Comments
 
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/due-by-and-dates.test.ts. A pact with an end date becomes Ended at the start of the day after it, or when its last occurrence closes if later (6pm the next day for a bedtime pact), with no notification. Due-by is Camera only and any HH:MM except 00:00. The start date can't change once the pact has started. The scenarios were written first but weren't run red before the code.
+
+- 2026-11-08: The human confirmed the choices listed for this ticket under "Decisions to confirm" in `manual-checks.md`, so the review is done and the Status is `done`. The phone checks in `manual-checks.md` are still open; a bug found there becomes a new ticket.

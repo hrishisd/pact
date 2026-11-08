@@ -1,6 +1,6 @@
 # 13 Reminders for Fixed-days and bedtime pacts
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05, 08, 11
 
 Spec stories: 23, 85 (Fixed days), 87. Rules: Reminders, Time. ADR 0002 (After downtime).
@@ -30,3 +30,5 @@ Weekly count reminders (14), One-time dated reminders (15).
 ## Comments
 
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/reminders.test.ts. A reminder is a time of day, refused if at or after the due time; on a bedtime pact a time before 18:00 means the morning after. Camera reminders skip a day with evidence; bedtime reminders always fire; neither fires on an excused occurrence. Each pact keeps a cursor, so a restart can't resend. Reminders more than 15 minutes late are dropped with one operator alert per tick. At most 5 per pact. The pact page has its own Change button for reminders, which also works while a change request waits.
+
+- 2026-11-08: The human confirmed the choices listed for this ticket under "Decisions to confirm" in `manual-checks.md`, so the review is done and the Status is `done`. The phone checks in `manual-checks.md` are still open; a bug found there becomes a new ticket.
