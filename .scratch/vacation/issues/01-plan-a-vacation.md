@@ -1,6 +1,6 @@
 # 01 Plan a vacation: Profile row, four steps, waiting card and withdraw
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: `../spec.md` stories 1 to 12, the Rules section, Reviewing ("Picking reviewers"), Screens ("Profile sheet" and "Plan a vacation flow") and Data. The screens follow the prototype on `prototype/vacation` (`.scratch/vacation/prototype/vacation.prototype.html`, section 1, round 4), except that the Reviewers step always shows. It's already prototyped, so build directly.

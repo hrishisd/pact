@@ -1,6 +1,6 @@
 # 02 Review a vacation: the review item, questions, approval and Excused days
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: `../spec.md` stories 11, 13, 14, 20, 22 to 24 and 26, the Reviewing, Judging and money ("Outcome", "Reminders and checks"), Notifications and Data sections, and Screens ("Review item, Vacation kind" and the Profile cards for waiting on your reply and approved ahead). The screens follow the prototype's section 2.
