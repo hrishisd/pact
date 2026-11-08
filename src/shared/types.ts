@@ -1228,10 +1228,10 @@ export interface ExcuseDay {
 
 /**
  * Why a day in an excuse's dates can't be excused now: Satisfied, already Excused
- * (or approved ahead), already on an excuse waiting for approval, or Missed
- * more than 48 hours ago.
+ * (or approved ahead), already on an excuse or a vacation waiting for
+ * approval, or Missed more than 48 hours ago.
  */
-export type ExcuseSkipReason = "satisfied" | "excused" | "on-waiting-excuse" | "window-closed";
+export type ExcuseSkipReason = "satisfied" | "excused" | "on-waiting-excuse" | "on-waiting-vacation" | "window-closed";
 
 /** The days an excuse with some dates would cover, and those it would skip. */
 export interface ExcusePreview {
@@ -1283,6 +1283,128 @@ export type ExcuseResult = { ok: true; excuse: ExcuseDetail } | { ok: false; rea
 
 export type AcceptExcuseRejectionResult =
   { ok: true } | { ok: false; reason: "excuse-not-found" | "nothing-to-accept" };
+
+/** One of the owner's pacts the Pacts step of Plan a vacation offers. */
+export interface VacationPactOption {
+  id: string;
+  name: string;
+  evidenceKind: EvidenceKind;
+  schedule: Schedule;
+  penaltyCents: number;
+  /** Its reviewers, by name: the Reviewers step offers those of the ticked pacts. */
+  reviewers: Friend[];
+  /** A One-time pact with Submit anytime has been open since it was made, so it can't be ticked. */
+  alreadyOpen: boolean;
+}
+
+/** What Plan a vacation offers: the owner's Active pacts whose edit window has closed. */
+export interface VacationOptions {
+  /** The owner's today: the first day has to be after it. */
+  today: LocalDate;
+  recurring: VacationPactOption[];
+  oneTime: VacationPactOption[];
+  /** Some Active pact is still in its edit window, so it isn't offered yet. */
+  inEditWindow: boolean;
+}
+
+/** The days and pacts an owner picks for a vacation. */
+export interface VacationRequest {
+  /** The first and last day, in the owner's timezone, both included. */
+  from: LocalDate;
+  to: LocalDate;
+  /** The pacts ticked. */
+  pactIds: string[];
+}
+
+export interface NewVacation extends VacationRequest {
+  /** What the owner is doing, for the reviewers. Optional; trimmed, and a blank note is none. */
+  note?: string;
+  /** The reviewers it goes to: each reviews at least one ticked pact. */
+  reviewerIds: AccountId[];
+}
+
+/** An occurrence a vacation covers or skips: a Weekly count week by its Monday, with its Sunday. */
+export interface VacationOccurrence {
+  date: LocalDate;
+  /** Weekly count only: its week's Sunday. */
+  through?: LocalDate;
+}
+
+/**
+ * Why a vacation skips an occurrence in its dates: it has already opened,
+ * it's already Excused (or an approved excuse covers it ahead), it's on an
+ * excuse waiting for approval, or it's on another vacation.
+ */
+export type VacationSkipReason = "already-open" | "excused" | "on-waiting-excuse" | "on-vacation";
+
+/** What a vacation's dates mean for one offered pact. */
+export interface VacationPactPreview {
+  pactId: string;
+  /** Whether it's ticked. An unticked pact's `covered` are the occurrences it keeps. */
+  ticked: boolean;
+  /** Oldest first. */
+  covered: VacationOccurrence[];
+  /** Oldest first. */
+  skipped: (VacationOccurrence & { reason: VacationSkipReason })[];
+  /** Weekly count weeks the dates touch whose Thursday is outside them: not covered, with their full target. */
+  notCovered: VacationOccurrence[];
+}
+
+/**
+ * Which pacts a vacation has, as its summary says it: every offered pact
+ * that can be ticked, every recurring one and no One-time one, or some.
+ */
+export type VacationPacts = { kind: "all" } | { kind: "all-recurring" } | { kind: "some"; names: string[] };
+
+/** What a vacation with some dates and pacts would cover if filed now. */
+export interface VacationPreview {
+  /** Days from the first to the last, both included. */
+  days: number;
+  /** One per offered pact, in the order the options list them, recurring first. */
+  pacts: VacationPactPreview[];
+  summary: VacationPacts;
+  /** No ticked pact has an occurrence left to cover: filing is refused. */
+  coversNothing: boolean;
+}
+
+export type VacationDatesRefusal =
+  /** Not a "YYYY-MM-DD" date, or the last day before the first. */
+  | "invalid-dates"
+  /** The first day is today or earlier. */
+  | "not-after-today"
+  /** More than MAX_EXCUSE_SPAN_DAYS days. */
+  | "too-many-days";
+
+export type VacationPreviewResult =
+  | { ok: true; preview: VacationPreview }
+  /** pact-not-offered: a ticked pact isn't one the options let the owner tick. */
+  | { ok: false; reason: VacationDatesRefusal | "pact-not-offered" };
+
+export type FileVacationRefusal =
+  | Extract<VacationPreviewResult, { ok: false }>["reason"]
+  | "no-pacts"
+  | "no-reviewers"
+  /** A picked reviewer reviews none of the ticked pacts. */
+  | "reviewer-not-offered"
+  /** No ticked pact has an occurrence left to cover. */
+  | "nothing-to-cover";
+
+export type FileVacationResult = { ok: true; vacationId: string } | { ok: false; reason: FileVacationRefusal };
+
+export type WithdrawVacationResult = { ok: true } | { ok: false; reason: "vacation-not-found" | "not-waiting" };
+
+/** One of the owner's vacations as its Profile card shows it. */
+export interface VacationCard {
+  id: string;
+  from: LocalDate;
+  to: LocalDate;
+  days: number;
+  note: string | null;
+  pacts: VacationPacts;
+  /** Who it was sent to, by name. */
+  reviewerNames: string[];
+  state: { kind: "waiting" };
+}
 
 export interface Health {
   /** False when there has been no scheduler tick in the last 5 minutes. */

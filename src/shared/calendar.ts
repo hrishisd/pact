@@ -26,3 +26,12 @@ export function addDays(date: LocalDate, days: number): LocalDate {
   const { year, month, day } = parseLocalDate(date);
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
+
+/** How many days run from `from` to `to`, both included: 1 for a single day. */
+export function dayCount(from: LocalDate, to: LocalDate): number {
+  const utc = (date: LocalDate) => {
+    const { year, month, day } = parseLocalDate(date);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((utc(to) - utc(from)) / 86_400_000) + 1;
+}

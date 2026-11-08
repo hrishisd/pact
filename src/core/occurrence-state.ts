@@ -51,6 +51,24 @@ export function excuseOn(ctx: CoreContext, pactId: string, date: LocalDate): "wa
 }
 
 /**
+ * Whether a vacation waiting for approval, or else an approved one, covers
+ * the occurrence. A withdrawn or rejected vacation covers nothing.
+ */
+export function vacationOn(ctx: CoreContext, pactId: string, date: LocalDate): "waiting" | "approved" | null {
+  const decisions = ctx
+    .all<{ decision: ReviewOutcome | null }>(
+      `SELECT vacation.decision FROM vacation_day JOIN vacation ON vacation.id = vacation_day.vacation_id
+         WHERE vacation_day.pact_id = ? AND vacation_day.date = ? AND vacation.withdrawn_at IS NULL
+           AND (vacation.decision IS NULL OR vacation.decision = 'approved')`,
+      pactId,
+      date,
+    )
+    .map((row) => row.decision);
+  if (decisions.includes(null)) return "waiting";
+  return decisions.length > 0 ? "approved" : null;
+}
+
+/**
  * Where the evidence for an occurrence (or with `by` "day", for one day of
  * it) stands: waiting or approved if any is, else rejected or none.
  */

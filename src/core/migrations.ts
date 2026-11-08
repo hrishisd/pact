@@ -707,4 +707,60 @@ export const migrations: readonly Migration[] = [
   ALTER TABLE pact_earlier_terms ADD COLUMN anki_deck_id TEXT;
   UPDATE pact_earlier_terms SET anki_deck_id = (SELECT anki_deck_id FROM pact WHERE pact.id = pact_earlier_terms.pact_id);
   `,
+  // 28: vacations
+  `
+  -- The owner's request for a date range off from the pacts they pick, sent
+  -- to the reviewers they pick as one review item. first_day and last_day
+  -- are "YYYY-MM-DD" in the owner's timezone, both included. note is NULL
+  -- when blank. decision is NULL while it waits; the first decision is
+  -- final. withdrawn_at is when the owner withdrew it while it waited.
+  -- rejection_accepted_at is when the owner took the L on its rejection.
+  CREATE TABLE vacation (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    first_day TEXT NOT NULL,
+    last_day TEXT NOT NULL,
+    note TEXT,
+    filed_at TEXT NOT NULL,
+    decision TEXT CHECK (decision IN ('approved', 'rejected')),
+    decided_by_account_id TEXT REFERENCES account (id),
+    decided_at TEXT,
+    reject_reason TEXT,
+    withdrawn_at TEXT,
+    rejection_accepted_at TEXT,
+    CHECK (last_day >= first_day),
+    CHECK ((decision IS NULL) = (decided_at IS NULL)),
+    CHECK ((decision IS NULL) = (decided_by_account_id IS NULL)),
+    CHECK ((decision IS 'rejected') = (reject_reason IS NOT NULL)),
+    CHECK (rejection_accepted_at IS NULL OR decision = 'rejected'),
+    CHECK (decision IS NULL OR withdrawn_at IS NULL)
+  );
+  CREATE INDEX vacation_owner ON vacation (owner_account_id);
+
+  -- The pacts ticked, including one with nothing covered.
+  CREATE TABLE vacation_pact (
+    vacation_id TEXT NOT NULL REFERENCES vacation (id),
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    PRIMARY KEY (vacation_id, pact_id)
+  );
+
+  -- The reviewers picked: only they can decide it.
+  CREATE TABLE vacation_reviewer (
+    vacation_id TEXT NOT NULL REFERENCES vacation (id),
+    reviewer_account_id TEXT NOT NULL REFERENCES account (id),
+    PRIMARY KEY (vacation_id, reviewer_account_id)
+  );
+  CREATE INDEX vacation_reviewer_account ON vacation_reviewer (reviewer_account_id);
+
+  -- The occurrences a vacation covers, by date (a Weekly count week by its
+  -- Monday), fixed when it's filed, as excuse_day. An occurrence is on at
+  -- most one excuse or vacation waiting for approval; the core checks that.
+  CREATE TABLE vacation_day (
+    vacation_id TEXT NOT NULL REFERENCES vacation (id),
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    date TEXT NOT NULL,
+    PRIMARY KEY (vacation_id, pact_id, date)
+  );
+  CREATE INDEX vacation_day_occurrence ON vacation_day (pact_id, date);
+  `,
 ];

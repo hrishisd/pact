@@ -78,6 +78,7 @@ export const SKIP_REASON_TEXT: Record<ExcuseSkipReason, string> = {
   satisfied: "Satisfied",
   excused: "Already Excused",
   "on-waiting-excuse": "Already on an excuse waiting for approval",
+  "on-waiting-vacation": "On a vacation waiting for approval",
   "window-closed": "Missed more than 48 hours ago",
 };
 
