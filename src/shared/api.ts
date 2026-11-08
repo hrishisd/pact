@@ -53,6 +53,7 @@ import type {
   SubmitEvidenceResult,
   Today,
   FileVacationResult,
+  LastVacation,
   NewVacation,
   VacationCard,
   VacationOptions,
@@ -201,6 +202,8 @@ export const API_PATHS = {
   acceptExcuseRejection: <T extends string>(excuseId: T) => `/api/excuses/${excuseId}/accept-rejection` as const,
   /** GET: the owner's vacations waiting for approval or approved, through their last day. POST: file a vacation. */
   vacations: "/api/vacations",
+  /** GET: the owner's last approved vacation that has ended, or null. */
+  lastVacation: "/api/vacations/last",
   /** GET: what Plan a vacation offers. */
   vacationOptions: "/api/vacations/options",
   /** POST: what a vacation with some dates and pacts would cover. */
@@ -379,6 +382,9 @@ export type FileVacationResponse = Json<FileVacationResult>;
 
 /** GET /api/vacations: the owner's vacations for Profile. */
 export type VacationsResponse = Json<VacationCard>[];
+
+/** GET /api/vacations/last: Profile's "Last one", or null. */
+export type LastVacationResponse = Json<LastVacation> | null;
 
 /** POST /api/vacations/:id/withdraw (no body). */
 export type WithdrawVacationResponse = Json<WithdrawVacationResult>;

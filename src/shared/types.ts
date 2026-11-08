@@ -430,7 +430,7 @@ export interface OccurrenceRecord {
 /**
  * Where an occurrence stands, with the reviewer's decision that settled it:
  * approved evidence (Satisfied), rejected evidence (Missed), or an approved
- * excuse (Excused, or a day ahead it already covers). Each is null when no
+ * excuse or vacation (Excused, or a day ahead it already covers). Each is null when no
  * one decision settled it, such as a day Missed with no evidence or a Weekly
  * count week.
  */
@@ -447,6 +447,8 @@ export type RecordedStatus =
   | (Extract<OccurrenceStatus, { kind: "excused" | "not-judged" }> & {
       /** Who approved the excuse that covers it, and the excuse's reason. */
       excuseApproval: { reviewerName: string; reason: string } | null;
+      /** The dates of the approved vacation that covers it, when one does; left out otherwise. */
+      vacation?: { from: LocalDate; to: LocalDate };
     });
 
 /** What an Oura Ring or Anki pact's judged occurrence adds to its record. */
@@ -780,6 +782,24 @@ export interface Today {
   sections: TodaySection[];
   waiting: TodayWaitingItem[];
   yesterday: TodayYesterdayEntry[];
+  /**
+   * The owner's approved vacations on today's date, from their first to
+   * their last day, each a banner after the alerts. The occurrences they
+   * cover are in no section and not in Yesterday. Left out when there's none.
+   */
+  vacations?: TodayVacation[];
+}
+
+/** An approved vacation on now, as Today's banner shows it. */
+export interface TodayVacation {
+  id: string;
+  from: LocalDate;
+  /** Its last day: "On vacation until" it. */
+  to: LocalDate;
+  note: string | null;
+  pacts: VacationPacts;
+  /** Each pact with something covered, in the order the owner's pacts were made. */
+  covers: VacationCover[];
 }
 
 /** Something that needs the owner, shown first. */
@@ -1461,12 +1481,20 @@ export interface VacationCard {
 
 /**
  * Where a vacation on Profile stands: waiting for approval, waiting on the
- * owner's reply to a reviewer's question, or approved and not over yet.
+ * owner's reply to a reviewer's question, approved ahead of its first day,
+ * or approved and on now, from its first to its last day.
  */
 export type VacationState =
   | { kind: "waiting" }
   | { kind: "waiting-on-reply"; askedBy: string; question: string }
-  | { kind: "approved"; reviewerName: string };
+  | { kind: "approved"; reviewerName: string }
+  | { kind: "on-now" };
+
+/** The dates of the owner's last approved vacation that has ended, as Profile's "Last one" shows them. */
+export interface LastVacation {
+  from: LocalDate;
+  to: LocalDate;
+}
 
 /** One pact a vacation covers, as its review item shows it: what the pact gives up, as the days stand now. */
 export interface VacationCover {

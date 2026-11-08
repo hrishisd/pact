@@ -33,13 +33,14 @@ import {
   isJudged,
   MISSED_THROUGH_REJECTION,
   stillToDo,
+  vacationOn,
   weekProgress,
 } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import { activePacts, waitingSince, type ActivePact } from "./pacts.ts";
-import { noLaterFilingSql, rejectedVacationAlerts } from "./vacations.ts";
+import { noLaterFilingSql, rejectedVacationAlerts, vacationsOnNow } from "./vacations.ts";
 import {
   accountRow,
   ankiDeckMissing,
@@ -61,7 +62,16 @@ export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
   const { alerts, sections } = timezone === null ? { alerts: [], sections: [] } : todayCards(ctx, accountId, timezone);
   const hasPacts = ctx.db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
   const yesterday = timezone === null ? [] : yesterdayEntries(ctx, accountId, timezone);
-  return { hasPacts, alerts, sections, waiting: waiting(ctx, accountId), yesterday };
+  const vacations =
+    timezone === null ? [] : vacationsOnNow(ctx, accountId, timezone, localDateOf(ctx.clock.now(), timezone));
+  return {
+    hasPacts,
+    alerts,
+    sections,
+    waiting: waiting(ctx, accountId),
+    yesterday,
+    ...(vacations.length > 0 && { vacations }),
+  };
 }
 
 /**
@@ -178,7 +188,8 @@ function todaySections(
         noOuraData.push(placed.card);
         break;
       case "coming-up":
-        comingUp.push(placed.card);
+        // A first occurrence an approved vacation covers isn't coming up: the owner is off that day.
+        if (vacationOn(ctx, pact.id, placed.card.opensOn) !== "approved") comingUp.push(placed.card);
         break;
     }
   }
