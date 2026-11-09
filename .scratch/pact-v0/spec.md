@@ -433,6 +433,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
   1. SMS reminders for owners, and SMS nudges for reviewers that link straight to the review item.
   2. Answering a review item by text, with Y/N or a comment.
   - Sending texts needs a provider such as Twilio, at a fraction of a cent per text. US numbers also need A2P 10DLC registration, and replies need an inbound webhook. SMS would be one more Notifier channel.
+- **Faster, more responsive app:** make fewer interactions wait on a network round trip, since each one makes the app feel slow. Options include optimistic UI updates, caching data on the device, and queueing actions taken offline until the connection returns. Not yet designed.
 
 ## Further Notes
 
