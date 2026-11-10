@@ -1,6 +1,8 @@
 # Pact v0
 
-Status: ready-for-agent
+Status: done
+
+Note (2026-11-10): Anki pacts and vacations have their own specs, `../anki-evidence/spec.md` and `../vacation/spec.md`, which add to and in places change this one. Review items now have five kinds: vacation joined evidence, excuses, payments and change requests. The Review item entry under "Domain model (schema level)" is corrected for that; other lists of four kinds in this spec are as originally written.
 
 ## Problem Statement
 
@@ -185,7 +187,7 @@ Each scheduled **occurrence** is judged as **Satisfied**, **Missed** or **Excuse
 - **Occurrence**: pact, period (a date, a Mon–Sun week, or start-to-deadline for One-time with Submit anytime), outcome (not judged yet | Satisfied | Missed | Excused), judged-at time, for bedtime pacts the observed bedtime, and whether the owner accepted a miss (Take the L, which only takes it off Today).
 - **Evidence**: occurrence (for Weekly count: the week plus the day it counts for), files (photos in v0), server-received time, decision.
 - **Excuse**: owner, one pact, the occurrences it covers, reason, photos (0–3), filed-at time, decision. The covered occurrences are fixed when it's filed: the pact's scheduled days in the chosen dates that could be excused then. Days ahead are included, even though their occurrences haven't opened yet.
-- **Review item**: kind (Change request | Evidence | Excuse | Payment), subject, comment thread, decision (approve/reject, a reason when rejected, decided by, decided at). It's waiting on the owner whenever the latest comment is a reviewer's.
+- **Review item**: kind (Change request | Evidence | Excuse | Payment | Vacation), subject, comment thread, decision (approve/reject, a reason when rejected, decided by, decided at). It's waiting on the owner whenever the latest comment is a reviewer's.
 - **Change request**: pact and the proposed new terms.
 - **Penalty**: occurrence, recipient, amount, added-at time, state (held, while a pending excuse covers it; or owed), and the bill it's on, once it's on one.
 - **Bill**: owner, recipient, created-at time (a Wednesday at 18:00), due-at time (created + 7 days), and its penalties. It never changes after it's created.

@@ -1,6 +1,6 @@
 # 15 One-time schedule
 
-Status: ready-for-agent
+Status: done
 Blocked by: 11, 13, 16
 
 Spec stories: 16, 17 (due-by time on One-time), 23 (dated reminders), 26 (One-time), 31, 85 (One-time). Rules: Creation and change (One-time exception, Submit anytime), Judging, Reminders. Glossary: Deadline, Submit anytime.
@@ -51,3 +51,5 @@ A Camera pact with a single occurrence by a deadline, e.g. a dentist appointment
 - 2026-11-03: Built on branch claude/unblocked-tickets-prototypes-361pre (stacked on ticket 08's branch). Pending human review, so Status stays ready-for-agent. Core scenarios are in src/core/one-time.test.ts; the choices made where the spec was open are under Notes above. Start and end dates are refused on One-time. Reminders carry their own date. A change of deadline moves the one occurrence, with its evidence and excuse days.
 
 - 2026-11-08: The human confirmed that approved evidence is Satisfied at the deadline. Still open: whether a One-time pact should have a start date (see `manual-checks.md`, Decisions to confirm). Status stays `ready-for-agent` until that is answered.
+
+- 2026-11-10 (design review): Verified every acceptance criterion has a passing scenario on `main` (`src/core/one-time.test.ts`); set to done. The open start-date question is a product decision, not unfinished work, and stays under "Decisions to confirm" in `manual-checks.md`.

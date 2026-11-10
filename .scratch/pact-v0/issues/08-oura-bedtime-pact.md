@@ -1,9 +1,9 @@
 # 08 Connect Oura and judge a bedtime pact
 
-Status: ready-for-human
+Status: done
 Blocked by: 03
 
-**Not finished: needs checking with a real ring.** Merged and deployed with Oura switched off; it hasn't been tried against real Oura data. The steps to finish are in `.scratch/pact-v0/manual-checks.md` (Oura Ring section). Original list:
+Built and on `main`, deployed with Oura switched off. It hasn't been tried against real Oura data; those checks are in `.scratch/pact-v0/manual-checks.md` (Oura Ring section). Original list:
 - [ ] Set the Fly secrets `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and `OURA_TOKEN_KEY` (`openssl rand -base64 32`). Production now starts without them, with Oura off.
 - [ ] Add `https://pact.hrishisd.com/api/oura/callback` as a redirect address in the Oura app.
 - [ ] Connect a real ring and record a `sleep` response. Answer the open questions under Comments (UTC offset, short `long_sleep`, `end_date`, Oura's URLs), and seed the fake from it.
@@ -84,3 +84,5 @@ The No Oura data card, check-now, the 3pm push and disconnection handling (09). 
 - An approved excuse beats a late bedtime, and an on-time bedtime beats an excuse, as approved photos do for Camera pacts.
 - A failed Oura call fails the whole tick, so nothing is half-applied, and the next tick retries. (Changed 2026-11-04: a failure now affects only that account's nights for that tick.)
 - Connecting needs `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` and `OURA_TOKEN_KEY` in production. Development without them connects at once and reads sleep from `oura-sleep.json` next to the database.
+
+- 2026-11-10 (design review): Verified every acceptance criterion has a passing scenario on `main` (`src/core/bedtime.test.ts`, refreshes in `src/core/oura.test.ts`); set to done under the closing rule in `docs/agents/issue-tracker.md`, with the real-ring, secrets and redirect checks left in `manual-checks.md` (Oura Ring section).
