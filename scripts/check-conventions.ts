@@ -11,7 +11,9 @@
 //     the old cover predicates are gone, and a cover table's rows are touched only
 //     there, in migrations, and by the module that files and decides that kind;
 //   - the layers import only what they may: src/client/ imports only src/client/
-//     and src/shared/, and src/core/ never imports src/server/ or src/client/.
+//     and src/shared/, and src/core/ never imports src/server/ or src/client/;
+//   - no folder holds an x.test.ts beside an x.test.tsx: TypeScript reads them as one
+//     module and type-checks only the .ts one.
 // And over .scratch/: every `Status:` line uses a value docs/agents/triage-labels.md lists.
 // A line with a `conventions-ok` comment is skipped. Exits 1 on any finding.
 
@@ -139,6 +141,16 @@ for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
       if (file.startsWith("src/") && localeComparePattern.test(line))
         findings.push(`${where}: give localeCompare a locale ("en-US"), or the machine's decides the order`);
     });
+}
+
+// x.test.ts and x.test.tsx resolve to the same module, so tsc keeps only the .ts one
+// and never type-checks the other; Vitest still runs both.
+const testNames = new Set<string>();
+for (const file of testFiles("src")) {
+  const name = file.replace(/\.tsx?$/, "");
+  if (testNames.has(name))
+    findings.push(`${name}.ts and ${name}.tsx: merge them, tsc type-checks only one of a same-name pair`);
+  testNames.add(name);
 }
 
 // The values docs/agents/triage-labels.md lists for a ticket's or spec's `Status:` line.

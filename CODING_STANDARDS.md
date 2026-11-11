@@ -1,6 +1,6 @@
 # Coding standards
 
-Read before writing code and at review time. `npm run lint` enforces the mechanical rules: formatting (Prettier; a pre-commit hook formats staged files, `npm run format` does the whole repo), unused code (knip), glossary words, system time, the machine's timezone and locale, real timers and `Math.random` in the core and in tests, and `localeCompare` without a locale (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
+Read before writing code and at review time. `npm run lint` enforces the mechanical rules: formatting (Prettier; a pre-commit hook formats staged files, `npm run format` does the whole repo), unused code (knip), glossary words, system time, the machine's timezone and locale, real timers and `Math.random` in the core and in tests, `localeCompare` without a locale, and a `.test.ts` beside a same-name `.test.tsx`, which `tsc` would skip (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
 
 ## The core owns every domain rule
 

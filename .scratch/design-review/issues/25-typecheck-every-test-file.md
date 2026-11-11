@@ -1,6 +1,6 @@
 # 25 Some .test.tsx files are never type-checked
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Found while building ticket 09.
@@ -18,9 +18,9 @@ Vitest still runs those files, so their tests pass or fail, but a fixture can dr
 
 ## Acceptance criteria
 
-- [ ] `tsc --listFiles` lists every `*.test.ts` and `*.test.tsx` under `src/`.
-- [ ] The conventions check refuses a new same-name pair; shown by trying it.
-- [ ] `npm run check` passes.
+- [x] `tsc --listFiles` lists every `*.test.ts` and `*.test.tsx` under `src/`.
+- [x] The conventions check refuses a new same-name pair; shown by trying it.
+- [x] `npm run check` passes.
 
 ## Owner decision (2026-11-11)
 
