@@ -1,6 +1,6 @@
 # 25 Some .test.tsx files are never type-checked
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 Found while building ticket 09.
@@ -21,3 +21,7 @@ Vitest still runs those files, so their tests pass or fail, but a fixture can dr
 - [ ] `tsc --listFiles` lists every `*.test.ts` and `*.test.tsx` under `src/`.
 - [ ] The conventions check refuses a new same-name pair; shown by trying it.
 - [ ] `npm run check` passes.
+
+## Owner decision (2026-11-11)
+
+Ready for an agent. Run it before ticket 10.

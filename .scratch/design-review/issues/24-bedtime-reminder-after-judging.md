@@ -1,6 +1,6 @@
 # 24 A bedtime night judged before its reminder: R7 or "always reminded"?
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 Found while building ticket 08.
@@ -22,3 +22,7 @@ Either:
 
 - [ ] The owner picks 1 or 2.
 - [ ] `../spec.md` R7 and `docs/behaviour.md` say the same thing as the code.
+
+## Owner decision (2026-11-11)
+
+Follow R7: once Oura has judged a bedtime night, that night gets no reminder. Change the code to match, and update the reminders spec so it no longer says otherwise.
