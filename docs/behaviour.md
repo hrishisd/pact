@@ -169,6 +169,13 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 - Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:135`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:166`). Missed shows the last 48 hours, without misses from a rejection or covered days (`recentlyMissed`, `today.ts:419`).
 - Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:175`). Test: `invites.test.ts`.
 
+## Text and request limits
+
+- Free text is capped, counted after trimming: a pact's or a recipient's name at 80 characters (`MAX_NAME_CHARS`), and every other text at 2,000 (`MAX_TEXT_CHARS`, both in `src/shared/types.ts`): a pact's description, change request and end request notes, excuse reasons, vacation and payment notes, reject reasons, questions and replies. Longer text is refused with `text-too-long` (`text-limits.ts`). The client's text fields stop at the same caps (`maxLength`). Test: `text-limits.test.ts`.
+- An /api request body over 64 KB is refused with HTTP 413 (`body-too-large`) before it is read. The three photo upload routes (evidence, excuses, payments) have their own larger limits (`MAX_JSON_BODY_BYTES`, `photoBodyLimit`, `src/server/app.ts`). Test: `app.test.ts`, "a JSON body over 64 KB".
+- Text stored before these caps is left as it is.
+
 ## Time and timezones
 
 - Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:257`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
+- An account with no confirmed timezone gets `no-timezone` from creating a pact and from Plan a vacation's options, preview and filing (`vacationOptions`, `previewVacation`, `fileVacation` in `vacations.ts`). **Known bug:** Profile's vacation cards and "Last one" still throw for such an account. See [ticket 22](../.scratch/design-review/issues/22-vacation-cards-without-timezone.md).

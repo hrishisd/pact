@@ -1378,9 +1378,12 @@ describe("vacations", () => {
 
     const options = await owner.get<VacationOptionsResponse>(API_PATHS.vacationOptions);
     expect(options.body).toMatchObject({
-      today: s.date("Mon"),
-      recurring: [{ id: pactId, reviewers: [{ id: friendId, name: "friend" }] }],
-      oneTime: [],
+      ok: true,
+      options: {
+        today: s.date("Mon"),
+        recurring: [{ id: pactId, reviewers: [{ id: friendId, name: "friend" }] }],
+        oneTime: [],
+      },
     });
     const preview = await owner.post<VacationPreviewResponse>(API_PATHS.vacationPreview, request);
     expect(preview.body).toMatchObject({ ok: true, preview: { days: 7, summary: { kind: "all" } } });
@@ -1959,6 +1962,19 @@ describe("api", () => {
         expect(answer).toEqual({ name, method, status: 401, body: { error: "unauthenticated" } });
       }
     }
+  });
+
+  test("a JSON body over 64 KB is refused with 413 before the core sees it; a photo upload over 64 KB still goes through", async () => {
+    const { owner, pactId } = await ownerWithPact();
+
+    const huge = await owner.post(API_PATHS.recipients, { name: "x".repeat(65 * 1024) });
+
+    expect(huge).toEqual({ status: 413, body: { error: "body-too-large" } });
+    expect((await owner.get<RecipientsResponse>(API_PATHS.recipients)).body).toEqual([
+      expect.objectContaining({ name: "Sam" }),
+    ]);
+    const photo = await owner.postForm(API_PATHS.evidence(pactId), [[EVIDENCE_PHOTO_FIELD, jpeg(200 * 1024)]]);
+    expect(photo).toEqual({ status: 200, body: expect.objectContaining({ ok: true }) });
   });
 
   test("a timezone request without a timezone is an invalid request", async () => {

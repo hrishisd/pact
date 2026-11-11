@@ -6,13 +6,14 @@
 
 import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type {
-  AppliesNow,
-  ChangePactRefusal,
-  ChangePreview,
-  CreatePactRefusal,
-  PactChange,
-  PactTerms,
+import {
+  MAX_TEXT_CHARS,
+  type AppliesNow,
+  type ChangePactRefusal,
+  type ChangePreview,
+  type CreatePactRefusal,
+  type PactChange,
+  type PactTerms,
 } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import {
@@ -232,6 +233,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           <span>Why? (optional)</span>
           <textarea
             className="inp"
+            maxLength={MAX_TEXT_CHARS}
             value={note}
             placeholder="e.g. Money is tight this month"
             onChange={(e) => setNote(e.target.value)}

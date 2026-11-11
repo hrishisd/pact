@@ -73,6 +73,7 @@ import {
   type PactRow,
   type ReviewStateRow,
 } from "./rows.ts";
+import { textTooLong } from "./text-limits.ts";
 
 export function changePreview(
   ctx: CoreContext,
@@ -132,6 +133,7 @@ export function requestEnd(ctx: CoreContext, accountId: AccountId, pactId: strin
   if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
   if (editWindowClosesAt(pact, ctx.clock.now()) !== null) return { ok: false, reason: "edit-window-open" };
   if (waitingChangeRequestId(ctx, pactId) !== null) return { ok: false, reason: "change-request-waiting" };
+  if (textTooLong(note)) return { ok: false, reason: "text-too-long" };
   const id = sendChangeRequest(ctx, pact, ownerName, changeableTerms(ctx, pact), null, note);
   return { ok: true, changeRequestId: id };
 }
@@ -317,6 +319,7 @@ export function checkedChange(
   if (!pact) return { ok: false, reason: "pact-not-found" };
   if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
   if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
+  if (textTooLong(change.note)) return { ok: false, reason: "text-too-long" };
   const { note: _note, ankiDeckId: newDeckId, ...terms } = change;
   // An Anki pact keeps its deck unless the change names another.
   const ankiDeckId = pact.anki_deck_id === null ? undefined : (newDeckId ?? pact.anki_deck_id);

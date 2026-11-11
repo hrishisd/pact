@@ -50,7 +50,19 @@ export interface NewRecipient {
   name: string;
 }
 
-export type AddRecipientResult = { ok: true; recipient: Recipient } | { ok: false; reason: "blank-name" };
+/** The most characters, once trimmed, a pact's or a recipient's name may have. */
+export const MAX_NAME_CHARS = 80;
+
+/**
+ * The most characters, once trimmed, any other free text may have: a pact's
+ * description, a note, a reason, a question or a reply.
+ */
+export const MAX_TEXT_CHARS = 2000;
+
+/** Text over its cap (`MAX_NAME_CHARS` or `MAX_TEXT_CHARS`). */
+export type TextTooLong = "text-too-long";
+
+export type AddRecipientResult = { ok: true; recipient: Recipient } | { ok: false; reason: "blank-name" | TextTooLong };
 
 /** The days of the week, Monday first, matching the Mon–Sun week. */
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -163,6 +175,7 @@ export type CreatePactRefusal =
   | "reminder-after-due-time"
   | "blank-name"
   | "blank-description"
+  | TextTooLong
   | "no-days"
   /**
    * A Weekly count or One-time on an Oura Ring or Anki pact, a target that isn't a
@@ -651,7 +664,7 @@ export type AskOwnerResult =
       ok: false;
       reason:
         /** Not an item this account may decide, or none. */
-        "item-not-found" | "already-decided" | "blank-question";
+        "item-not-found" | "already-decided" | "blank-question" | TextTooLong;
     };
 
 export type ReplyResult =
@@ -665,7 +678,8 @@ export type ReplyResult =
         | "not-waiting"
         /** Its latest comment isn't a reviewer's question. */
         | "no-question"
-        | "blank-reply";
+        | "blank-reply"
+        | TextTooLong;
     };
 
 /** Where a review item of the owner's stands. */
@@ -696,6 +710,7 @@ export type DecideRefusal =
   /** A reviewer of the pact has already decided it; the first decision is final. */
   | "already-decided"
   | "blank-reason"
+  | TextTooLong
   /** Approving a change to a One-time pact whose new deadline is less than an hour away: it can only be rejected. */
   | "deadline-too-soon";
 
@@ -1170,7 +1185,8 @@ export type RecordPaymentRefusal =
   /** A payment needs one screenshot of it. */
   | "no-screenshot"
   /** More than what's owed less payments awaiting approval: the ledger would go below zero. */
-  | "payment-exceeds-owed";
+  | "payment-exceeds-owed"
+  | TextTooLong;
 
 export type RecordPaymentResult = { ok: true; paymentId: string } | { ok: false; reason: RecordPaymentRefusal };
 
@@ -1335,6 +1351,7 @@ export type ExcuseOptionsResult =
 export type FileExcuseRefusal =
   | ExcuseDatesRefusal
   | "blank-reason"
+  | TextTooLong
   /** More than MAX_EXCUSE_PHOTOS photos. */
   | "too-many-photos"
   /** None of the pact's days in the dates can be excused now. */
@@ -1363,6 +1380,9 @@ export interface VacationPactOption {
   alreadyOpen: boolean;
 }
 
+/** Plan a vacation counts days in the owner's timezone, so one must be confirmed first. */
+type NoTimezone = "no-timezone";
+
 /** What Plan a vacation offers: the owner's Active pacts whose edit window has closed. */
 export interface VacationOptions {
   /** The owner's today: the first day has to be after it. */
@@ -1372,6 +1392,8 @@ export interface VacationOptions {
   /** Some Active pact is still in its edit window, so it isn't offered yet. */
   inEditWindow: boolean;
 }
+
+export type VacationOptionsResult = { ok: true; options: VacationOptions } | { ok: false; reason: NoTimezone };
 
 /** The days and pacts an owner picks for a vacation. */
 export interface VacationRequest {
@@ -1444,7 +1466,7 @@ export type VacationDatesRefusal =
 export type VacationPreviewResult =
   | { ok: true; preview: VacationPreview }
   /** pact-not-offered: a ticked pact isn't one the options let the owner tick. */
-  | { ok: false; reason: VacationDatesRefusal | "pact-not-offered" };
+  | { ok: false; reason: VacationDatesRefusal | "pact-not-offered" | NoTimezone };
 
 export type FileVacationRefusal =
   | Extract<VacationPreviewResult, { ok: false }>["reason"]
@@ -1453,7 +1475,8 @@ export type FileVacationRefusal =
   /** A picked reviewer reviews none of the ticked pacts. */
   | "reviewer-not-offered"
   /** No ticked pact has an occurrence left to cover. */
-  | "nothing-to-cover";
+  | "nothing-to-cover"
+  | TextTooLong;
 
 export type FileVacationResult = { ok: true; vacationId: string } | { ok: false; reason: FileVacationRefusal };
 
@@ -1646,7 +1669,10 @@ export type ChangePactResult = { ok: true; outcome: ChangePactOutcome } | { ok: 
 
 export type RequestEndResult =
   | { ok: true; changeRequestId: string }
-  | { ok: false; reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" };
+  | {
+      ok: false;
+      reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" | TextTooLong;
+    };
 
 /** A change request, as its reviewers and its owner see it. */
 export type ChangeRequestView = ChangeRequestBase & ({ endsPact: true } | TermsChangeRequest);

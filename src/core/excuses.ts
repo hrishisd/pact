@@ -43,6 +43,7 @@ import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { editWindowClosesAt, EXCUSE_WINDOW_MS, isLocalDate } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
+import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
   accountRow,
@@ -106,6 +107,7 @@ export async function fileExcuse(
     const checked = excusePreview(ctx, accountId, timezone, pactId, excuse, at);
     if (!checked.ok) return checked;
     if (reason === "") return { ok: false, reason: "blank-reason" };
+    if (textTooLong(reason)) return { ok: false, reason: "text-too-long" };
     if (photos.length > MAX_EXCUSE_PHOTOS) return { ok: false, reason: "too-many-photos" };
     if (checked.preview.covered.length === 0) return { ok: false, reason: "nothing-to-excuse" };
     return checked;

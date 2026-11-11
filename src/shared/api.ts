@@ -56,7 +56,7 @@ import type {
   LastVacation,
   NewVacation,
   VacationCard,
-  VacationOptions,
+  VacationOptionsResult,
   VacationPreviewResult,
   VacationRequest,
   WithdrawVacationResult,
@@ -369,8 +369,8 @@ export type ExcuseResponse = Json<ExcuseResult>;
 /** POST /api/excuses/:id/accept-rejection (no body). */
 export type AcceptExcuseRejectionResponse = Json<AcceptExcuseRejectionResult>;
 
-/** GET /api/vacations/options */
-export type VacationOptionsResponse = Json<VacationOptions>;
+/** GET /api/vacations/options. An account with no timezone is a 200 refusal. */
+export type VacationOptionsResponse = Json<VacationOptionsResult>;
 
 /** POST /api/vacations/preview. A body of another shape is a 400; the core's refusals are 200s. */
 export type VacationPreviewRequest = VacationRequest;
@@ -535,5 +535,5 @@ export interface HealthResponse {
 
 /** Body of every non-2xx /api response. */
 export interface ApiErrorResponse {
-  error: "unauthenticated" | "invalid-request" | "not-found" | "photo-too-large";
+  error: "unauthenticated" | "invalid-request" | "not-found" | "photo-too-large" | "body-too-large";
 }

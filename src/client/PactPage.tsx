@@ -8,8 +8,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
 import { termsOf } from "../shared/terms.ts";
-import type { ChangePactRefusal, Friend, PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import {
+  MAX_NAME_CHARS,
+  MAX_TEXT_CHARS,
+  type ChangePactRefusal,
+  type Friend,
+  type PactChange,
+  type PactTerms,
+  type PactWaitingItem,
+} from "../shared/types.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { datesText } from "./excuse-days.tsx";
@@ -287,6 +295,7 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
     async () => {
       const result = await api.endPact(pact.id, note.trim() === "" ? {} : { note });
       if (!result.ok) {
+        if (result.reason === "text-too-long") return TEXT_TOO_LONG_TEXT;
         return result.reason === "change-request-waiting"
           ? "A change request is already waiting. Withdraw it first."
           : "This pact can't be ended now. Reopen it to see where it stands.";
@@ -313,6 +322,7 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
             <span>Why? (optional)</span>
             <textarea
               className="inp"
+              maxLength={MAX_TEXT_CHARS}
               value={note}
               placeholder="e.g. I've moved and the gym is too far"
               onChange={(e) => setNote(e.target.value)}
@@ -493,6 +503,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
         <span>Name</span>
         <input
           className="inp"
+          maxLength={MAX_NAME_CHARS}
           value={name}
           placeholder={pact.evidenceKind === "oura" ? "e.g. In bed by midnight" : "e.g. Gym"}
           onChange={(e) => setName(e.target.value)}

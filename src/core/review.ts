@@ -41,6 +41,7 @@ import {
   type VacationToDecide,
 } from "./vacations.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
+import { textTooLong } from "./text-limits.ts";
 import {
   accountRow,
   editWindowCutoff,
@@ -87,6 +88,7 @@ export function askOwner(ctx: CoreContext, accountId: AccountId, itemId: string,
   if (item.row.decision !== null) return { ok: false, reason: "already-decided" };
   const text = question.trim();
   if (text === "") return { ok: false, reason: "blank-question" };
+  if (textTooLong(text)) return { ok: false, reason: "text-too-long" };
   addComment(ctx, itemId, accountId, false, text);
   ctx.enqueue({
     recipient: item.row.owner_account_id,
@@ -110,6 +112,7 @@ export function ownerReply(ctx: CoreContext, accountId: AccountId, itemId: strin
   if (!thread(ctx, itemId, true).waitingOnReply) return { ok: false, reason: "no-question" };
   const text = reply.trim();
   if (text === "") return { ok: false, reason: "blank-reply" };
+  if (textTooLong(text)) return { ok: false, reason: "text-too-long" };
   addComment(ctx, itemId, accountId, true, text);
   tellAll(ctx, item.reviewerIds, "owner-replied", {
     itemKind: item.kind,
@@ -134,6 +137,7 @@ export function decide(
   if (item.row.decision !== null) return { ok: false, reason: "already-decided" };
   const reason = decision.kind === "reject" ? decision.reason.trim() : null;
   if (reason === "") return { ok: false, reason: "blank-reason" };
+  if (reason !== null && textTooLong(reason)) return { ok: false, reason: "text-too-long" };
   const decided: Decided = reason === null ? { outcome: "approved", reason: null } : { outcome: "rejected", reason };
   switch (item.kind) {
     case "evidence":

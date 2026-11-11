@@ -39,6 +39,7 @@ import { excuseCoversSql, rejection, vacationCoversSql, WEEKLY_COUNT_PACT, weekP
 import { settingIsOff, tellAll } from "./outbox.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
+import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
   accountRow,
@@ -610,6 +611,7 @@ function paymentAcceptance(
     .prepare(`SELECT 1 FROM recipient WHERE id = ? AND owner_account_id = ?`)
     .get(payment.recipientId, ownerId);
   if (!isOwnRecipient) return { ok: false, reason: "recipient-not-found" };
+  if (textTooLong(payment.note)) return { ok: false, reason: "text-too-long" };
   if (!Number.isSafeInteger(payment.amountCents) || payment.amountCents <= 0) {
     return { ok: false, reason: "invalid-amount" };
   }

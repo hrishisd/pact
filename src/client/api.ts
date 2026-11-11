@@ -136,6 +136,13 @@ export function failureText(error: unknown, network: string): string {
   return error instanceof NetworkError ? network : "Something went wrong on our side. Try again in a minute.";
 }
 
+/**
+ * What a `text-too-long` refusal says. The text fields' `maxLength` keeps
+ * text within the core's caps, so only an older page or a paste around it
+ * gets here.
+ */
+export const TEXT_TOO_LONG_TEXT = "That's too long. Shorten it and try again.";
+
 /** `failureText` for an upload, except that a photo the server found too large gets `tooLarge`. */
 export function uploadFailureText(error: unknown, tooLarge: string, network: string): string {
   return error instanceof ApiError && error.code === "photo-too-large" ? tooLarge : failureText(error, network);

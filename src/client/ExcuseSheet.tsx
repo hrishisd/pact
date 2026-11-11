@@ -10,6 +10,7 @@ import { addDays } from "../shared/calendar.ts";
 import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
+  MAX_TEXT_CHARS,
   type ExcuseDatesRefusal,
   type ExcuseDay,
   type ExcuseOptions,
@@ -17,7 +18,7 @@ import {
   type FileExcuseRefusal,
   type PactTerms,
 } from "../shared/types.ts";
-import { api, failureText, uploadFailureText } from "./api.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { DayChip, SKIP_REASON_TEXT, dayNote, excuseDayText } from "./excuse-days.tsx";
 import { formatDate, money, scheduleText, hoursLeft } from "./format.ts";
@@ -231,6 +232,7 @@ function ExcuseForm({
         <span>Reason</span>
         <textarea
           className="inp"
+          maxLength={MAX_TEXT_CHARS}
           value={reason}
           placeholder="e.g. Sick with the flu"
           onChange={(e) => setReason(e.target.value)}
@@ -601,6 +603,7 @@ const DATES_REFUSAL_TEXT: Record<ExcuseDatesRefusal, string> = {
 const FILE_REFUSAL_TEXT: Record<FileExcuseRefusal, string> = {
   ...DATES_REFUSAL_TEXT,
   "blank-reason": "Write a reason first.",
+  "text-too-long": TEXT_TOO_LONG_TEXT,
   "too-many-photos": `An excuse can have at most ${MAX_EXCUSE_PHOTOS} photos. Remove some.`,
   "nothing-to-excuse": "None of these days can be excused now.",
 };

@@ -4,8 +4,14 @@
 
 import { useState } from "react";
 import type { Json } from "../shared/api.ts";
-import type { AskOwnerResult, QuestionThread, Refusal, ReplyResult } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import {
+  MAX_TEXT_CHARS,
+  type AskOwnerResult,
+  type QuestionThread,
+  type Refusal,
+  type ReplyResult,
+} from "../shared/types.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { formatDayTime } from "./format.ts";
 import { Sheet, useSend } from "./ui.tsx";
 
@@ -45,6 +51,7 @@ const REPLY_REFUSAL_TEXT: Record<Refusal<ReplyResult>, string> = {
   "not-waiting": "It's been decided already, so there's nothing to reply to.",
   "no-question": "There's no question waiting for your reply.",
   "blank-reply": "Write a reply first.",
+  "text-too-long": TEXT_TOO_LONG_TEXT,
 };
 
 /**
@@ -83,6 +90,7 @@ export function ReplyBox({
     <textarea
       className="inp"
       rows={3}
+      maxLength={MAX_TEXT_CHARS}
       value={text}
       placeholder={placeholder}
       aria-label={onCancel ? undefined : "Your reply"}
@@ -122,6 +130,7 @@ const ASK_REFUSAL_TEXT: Record<Refusal<AskOwnerResult>, string> = {
   "item-not-found": "That item isn't in your queue any more.",
   "already-decided": "Another reviewer already decided that one.",
   "blank-question": "Write your question first.",
+  "text-too-long": TEXT_TOO_LONG_TEXT,
 };
 
 /**
@@ -167,6 +176,7 @@ export function AskSheet({
         <textarea
           className="inp"
           rows={3}
+          maxLength={MAX_TEXT_CHARS}
           value={text}
           placeholder={placeholder}
           autoFocus
