@@ -91,9 +91,19 @@ const COVER_TABLES: [RegExp, string][] = [
   [/\bvacation_day\b/, "src/core/vacations.ts"],
 ];
 
-// Writes that judge an occurrence or End a pact, on one line of SQL, and the modules that may make them.
-const judgingWritePattern =
-  /\b(INSERT\s+INTO\s+penalty|DELETE\s+FROM\s+penalty|UPDATE\s+pact\s+SET\s+stage)\b|\bUPDATE\s+occurrence\s+SET\b.*\b(outcome|judged_at)\b/i;
+// Writes that judge an occurrence or End a pact, and the modules that may make them: a
+// penalty inserted (OR IGNORE, OR REPLACE and REPLACE INTO too) or deleted, an occurrence's
+// outcome or judged_at set by UPDATE, an upsert's DO UPDATE or REPLACE, and a pact's stage
+// set by UPDATE. Matched over the whole file, so a statement split across lines is caught;
+// `[^;`"]` keeps a match inside one statement, and a SET clause ends at its WHERE.
+const judgingWritePatterns = [
+  /\b(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+penalty\b/gi,
+  /\bDELETE\s+FROM\s+penalty\b/gi,
+  /\bUPDATE(?:\s+OR\s+\w+)?\s+occurrence\b[^;`"]*?\bSET\b(?:(?!\bWHERE\b)[^;`"])*?\b(?:outcome|judged_at)\s*=/gi,
+  /\bINTO\s+occurrence\b[^;`"]*?\bDO\s+UPDATE\s+SET\b[^;`"]*?\b(?:outcome|judged_at)\b/gi,
+  /\b(?:INSERT\s+OR\s+REPLACE|REPLACE)\s+INTO\s+occurrence\b[^;`"]*?\b(?:outcome|judged_at)\b/gi,
+  /\bUPDATE(?:\s+OR\s+\w+)?\s+pact\b[^;`"]*?\bSET\b(?:(?!\bWHERE\b)[^;`"])*?\bstage\s*=/gi,
+];
 const JUDGING_WRITERS = new Set(["src/core/settle.ts", "src/core/ending.ts", MIGRATIONS]);
 
 // A relative import or export's path: `from "../x.ts"`, `import "./x.css"` or `import("./x.ts")`.
@@ -108,49 +118,55 @@ const findings: string[] = [];
 for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
   const isTest = /\.test\.tsx?$/.test(file) || file.startsWith("src/core/testing/");
   const inCore = file.startsWith("src/core/") && !isTest && file !== SYSTEM_CLOCK_ADAPTER;
-  readFileSync(file, "utf8")
-    .split("\n")
-    .forEach((line, index) => {
-      if (line.includes("conventions-ok")) return;
-      const where = `${file}:${index + 1}`;
-      if (file.startsWith("src/")) {
-        const avoided = avoidedPattern.exec(line);
-        if (avoided && !ALLOWED_PHRASES.some((phrase) => line.includes(phrase)))
-          findings.push(`${where}: "${avoided[0]}" is a word GLOSSARY.md says to avoid`);
-      }
-      if (file.startsWith("src/") && !isTest && file !== MIGRATIONS && keptOutcomePattern.test(line))
-        findings.push(`${where}: the outcome is Satisfied, not Kept`);
-      const systemTime = systemTimePattern.test(line);
-      const systemClock = systemClockPattern.test(line);
-      if (inCore && (systemTime || (systemClock && file !== SYSTEM_CLOCK_EXPORT)))
-        findings.push(`${where}: the core reads time only from the Clock port`);
-      if (isTest && (systemTime || systemClock))
-        findings.push(`${where}: tests read time from a FakeClock or a fixed Date, never the real clock`);
-      if ((isTest || inCore) && machineTimezonePattern.test(line))
-        findings.push(`${where}: use the UTC Date methods, or Intl with a named timeZone and locale`);
-      if ((isTest || inCore) && timerPattern.test(line))
-        findings.push(`${where}: no real timers in tests or the core; move a FakeClock, or hold a fake`);
-      if ((isTest || inCore) && randomPattern.test(line))
-        findings.push(`${where}: no Math.random in tests or the core`);
-      if (!COVER_READERS.has(file) && oldCoverPredicatePattern.test(line))
+  const text = readFileSync(file, "utf8");
+  const lines = text.split("\n");
+  if (file.startsWith("src/") && !isTest && !JUDGING_WRITERS.has(file))
+    for (const pattern of judgingWritePatterns)
+      for (const match of text.matchAll(pattern)) {
+        const index = text.slice(0, match.index).split("\n").length - 1;
+        if (lines[index]?.includes("conventions-ok")) continue;
         findings.push(
-          `${where}: read an occurrence's cover with coverOn or occurrenceView (covers.ts, occurrence-state.ts)`,
+          `${file}:${index + 1}: outcomes, penalties and a pact's stage are written only by settle.ts and ending.ts`,
         );
-      for (const [table, owner] of COVER_TABLES)
-        if (file.startsWith("src/") && !COVER_READERS.has(file) && file !== owner && table.test(line))
-          findings.push(`${where}: read an occurrence's cover through covers.ts (coverOn, coveredSql, cover_day_v)`);
-      if (file.startsWith("src/") && !isTest && !JUDGING_WRITERS.has(file) && judgingWritePattern.test(line))
-        findings.push(`${where}: outcomes, penalties and a pact's stage are written only by settle.ts and ending.ts`);
-      const layer = file.split("/")[1] ?? "";
-      const mayImport = file.startsWith("src/") ? LAYER_IMPORTS[layer] : undefined;
-      if (mayImport)
-        for (const [, path] of line.matchAll(importPattern)) {
-          const folder = relative("src", join(dirname(file), path ?? "")).split("/")[0] ?? "";
-          if (!mayImport(folder)) findings.push(`${where}: src/${layer}/ doesn't import src/${folder}/`);
-        }
-      if (file.startsWith("src/") && localeComparePattern.test(line))
-        findings.push(`${where}: give localeCompare a locale ("en-US"), or the machine's decides the order`);
-    });
+      }
+  lines.forEach((line, index) => {
+    if (line.includes("conventions-ok")) return;
+    const where = `${file}:${index + 1}`;
+    if (file.startsWith("src/")) {
+      const avoided = avoidedPattern.exec(line);
+      if (avoided && !ALLOWED_PHRASES.some((phrase) => line.includes(phrase)))
+        findings.push(`${where}: "${avoided[0]}" is a word GLOSSARY.md says to avoid`);
+    }
+    if (file.startsWith("src/") && !isTest && file !== MIGRATIONS && keptOutcomePattern.test(line))
+      findings.push(`${where}: the outcome is Satisfied, not Kept`);
+    const systemTime = systemTimePattern.test(line);
+    const systemClock = systemClockPattern.test(line);
+    if (inCore && (systemTime || (systemClock && file !== SYSTEM_CLOCK_EXPORT)))
+      findings.push(`${where}: the core reads time only from the Clock port`);
+    if (isTest && (systemTime || systemClock))
+      findings.push(`${where}: tests read time from a FakeClock or a fixed Date, never the real clock`);
+    if ((isTest || inCore) && machineTimezonePattern.test(line))
+      findings.push(`${where}: use the UTC Date methods, or Intl with a named timeZone and locale`);
+    if ((isTest || inCore) && timerPattern.test(line))
+      findings.push(`${where}: no real timers in tests or the core; move a FakeClock, or hold a fake`);
+    if ((isTest || inCore) && randomPattern.test(line)) findings.push(`${where}: no Math.random in tests or the core`);
+    if (!COVER_READERS.has(file) && oldCoverPredicatePattern.test(line))
+      findings.push(
+        `${where}: read an occurrence's cover with coverOn or occurrenceView (covers.ts, occurrence-state.ts)`,
+      );
+    for (const [table, owner] of COVER_TABLES)
+      if (file.startsWith("src/") && !COVER_READERS.has(file) && file !== owner && table.test(line))
+        findings.push(`${where}: read an occurrence's cover through covers.ts (coverOn, coveredSql, cover_day_v)`);
+    const layer = file.split("/")[1] ?? "";
+    const mayImport = file.startsWith("src/") ? LAYER_IMPORTS[layer] : undefined;
+    if (mayImport)
+      for (const [, path] of line.matchAll(importPattern)) {
+        const folder = relative("src", join(dirname(file), path ?? "")).split("/")[0] ?? "";
+        if (!mayImport(folder)) findings.push(`${where}: src/${layer}/ doesn't import src/${folder}/`);
+      }
+    if (file.startsWith("src/") && localeComparePattern.test(line))
+      findings.push(`${where}: give localeCompare a locale ("en-US"), or the machine's decides the order`);
+  });
 }
 
 // x.test.ts and x.test.tsx resolve to the same module, so tsc keeps only the .ts one

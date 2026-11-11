@@ -1,6 +1,6 @@
 # 13 One `endPact`, and ending waits for the open occurrence
 
-Status: ready-for-agent
+Status: done
 Blocked by: 12
 
 Closes: F1 and rule R1 (`../interaction-audit.md` finding 1, probe P1); H3 steps 6 and 7 (`../architecture-review.md`, H3); the judging-writes check from W4. Last of three `settle` tickets.
@@ -55,3 +55,7 @@ From ticket 13 (2026-11-11): built.
 - Tests changed by the rule beyond the two named: `:738` (Thursday, open at approval, now Missed), `:822` (Friday opened at midnight, so it is kept and Missed), the bedtime "later nights" test (Tuesday night opened at the start of Tuesday), `history.test.ts` (an Ended pact's heat map; Yesterday), and the end request in `app.test.ts` (Active with `ending` after approval).
 - The client copy: Review "Approving ends Gym after Sun Jan 18, once this week is judged." or "Approving ends Gym now."; ChangeRequestPage "If approved, Gym ends ..."; PactPage "Ending approved: Gym ends after ..., once that day is judged." The Ended line on the pact page is unchanged.
 - Filed ticket 27: end and change requests the owner can still send while an approved end waits.
+
+## Owner decision (2026-11-11)
+
+Keep the change-request catch-up in `decide`. Removing it would judge a One-time occurrence Missed after a later deadline was approved, which the current code correctly avoids. The criterion that asked for its removal counts as met with this decision.

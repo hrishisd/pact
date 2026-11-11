@@ -36,9 +36,9 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - An approved schedule change applies from the first day not yet open: tomorrow, or next Monday for Weekly count (`firstDayNotOpen`, `pact-rules.ts:274`). Change requests never rescue an occurrence that is open now. The earlier terms are kept per occurrence in `pact_earlier_terms` (`applyTerms`, `change-requests.ts:437`). Test: `change-requests.test.ts`.
 - An end date approved too late to keep the day open now is moved to that day (`laterDate(after.endDate, lastOpen)` in `applyTerms`).
 - With an end date, a Weekly count pact counts only whole weeks: it Ends after the last whole week before the end date (`pact-rules.ts:153`; decided in pact-v0 ticket 14). Test: `weekly-count.test.ts:685`.
-- One-time: the new deadline must be at least an hour away, both when sent and when approved (`deadlineFarEnough` in `checkedChange`; `approvableNow`, `change-requests.ts:745`). A request decided after the occurrence was judged leaves the pact as it was (`applyOneTimeTerms`, `change-requests.ts:483`). Test: `one-time.test.ts`.
+- One-time: the new deadline must be at least an hour away, both when sent and when approved (`deadlineFarEnough` in `checkedChange`; `approvableNow`, `change-requests.ts:755`). A request decided after the occurrence was judged leaves the pact as it was (`applyOneTimeTerms`, `change-requests.ts:483`). Test: `one-time.test.ts`.
 - Before approving a change request, the decider first catches judging up to now (`decide`, `review.ts:128`), so terms never apply to an occurrence already due and an end approved with nothing open leaves no due occurrence unjudged.
-- A reviewer being removed can still decide until the request is approved, and is deleted at approval (`changeOutcome`, `change-requests.ts:363`; `decideChangeRequest`, `change-requests.ts:696`). The owner is told the outcome (`change-request-decided`).
+- A reviewer being removed can still decide until the request is approved, and is deleted at approval (`changeOutcome`, `change-requests.ts:363`; `decideChangeRequest`, `change-requests.ts:700`). The owner is told the outcome (`change-request-decided`).
 - The owner can withdraw a waiting request. Nobody is notified (`withdrawChangeRequest`, `change-requests.ts:161`).
 - An end request is refused once the pact has Ended, while the edit window is open, or while another request waits (`requestEnd`, `change-requests.ts:128`).
 - An approved end request takes effect when the occurrence or week open at approval closes, as every other change does (rule R1). An occurrence is open from when it opens until it closes, unless it is judged; a bedtime night opens at the start of its date and closes at 18:00 the next day. Approval sets the end date to the last day of that occurrence's period (`endTiming`, `endAfter`, `ending.ts:44`, `:72`); a One-time pact keeps its deadline and Ends when it is judged. Until then the pact is Active, its open occurrence is judged normally and takes evidence and excuses as usual, and its page says "Ending approved: Gym ends after Sun Jan 18, once this week is judged." With nothing open, the pact Ends at once. The owner's push says "Gym ends after Sun Jan 18", or "Gym is Ended". The reviewer sees when it would End before approving. Test: `change-requests.test.ts`, "ending a pact".
@@ -47,7 +47,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 ### Ending
 
 - A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `ending.ts:107`). An end date an approved end request set Ends it the same way. Test: `due-by-and-dates.test.ts`.
-- A One-time pact Ends when its occurrence is judged (`settle`, `settle.ts:34`).
+- A One-time pact Ends when its occurrence is judged (`settle`, `settle.ts:35`).
 - Every ending goes through `endPact(ctx, pactId, cause, at)` (`ending.ts:25`), with cause `end-date`, `one-time-judged` or `end-request`. It withdraws a waiting change request, silently.
 - Only `settle.ts`, `ending.ts` and migrations insert or delete penalties, update an occurrence's outcome or judging time, or update a pact's stage (`scripts/check-conventions.ts`).
 - Only Active pacts are judged and reminded (`pactsToJudge`, `occurrence-state.ts:233`; `remind`, `reminders.ts:37`). An occurrence due after the end is ignored (`dueAfterEnd`, `occurrence-state.ts:205`).
@@ -65,7 +65,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 ### Judging
 
-- Every judging path goes through `settle` (`settle.ts:34`): the tick, evidence decisions, cover decisions and withdrawals, bedtime nights and Anki checks. It reads the occurrence's facts, asks `verdictOf` (`src/core/verdict.ts`) for its outcome, and stores it with its penalty if the occurrence isn't judged yet. A stored outcome is kept, except that a Missed one an approved cover now excuses becomes Excused without its penalty (design review ticket 12).
+- Every judging path goes through `settle` (`settle.ts:35`): the tick, evidence decisions, cover decisions and withdrawals, bedtime nights and Anki checks. It reads the occurrence's facts, asks `verdictOf` (`src/core/verdict.ts`) for its outcome, and stores it with its penalty if the occurrence isn't judged yet. A stored outcome is kept, except that a Missed one an approved cover now excuses becomes Excused without its penalty (design review ticket 12).
 - A penalty on a bill is never excused or changed: the excuse window closes before billing takes a penalty, and `settle` throws rather than touch a billed penalty, so the command changes nothing (`deletePenalties`, `settle.ts:93`). Test: `bills.test.ts` "a billed penalty".
 - The tick settles each Active pact's occurrences in due order, and keeps a `judged_through` cursor (`settlePactDueBy`, `settle.ts:163`). It also settles days behind the cursor that evidence still holds: an owner's move west can put a due time the cursor passed back ahead, and a decision before then leaves the day for the tick (`settleBehindCursor`, `settle.ts:188`). Test: `judging.test.ts`.
 - At the due time an occurrence is judged in this order:
@@ -106,7 +106,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 - An Anki day is Satisfied at the first check showing 0 new, 0 learning and 0 review cards left (`recordAnkiChecks`, `anki-days.ts:173`, which settles the day). Test: `anki-days.test.ts`.
 - Days still to do are polled every 10 minutes, and the owner can check now at most every 15 seconds (`ANKI_POLL_INTERVAL_MS`, `anki-days.ts:15`; `ankiDaysWaiting`, `anki-days.ts:91`).
-- A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts:19`).
+- A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts:18`).
 - Losing the connection marks it Needs reconnecting (`markDisconnected`, `connections.ts:91`). A deck that no longer exists raises an alert (`anki_pact_deck`).
 
 ## Covers: excuses, vacations and holds
@@ -149,7 +149,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
   - Payments: anyone who reviews one of the owner's pacts with that recipient, now, in earlier terms, or through a penalty to it (`paymentReviewersSql`, `money.ts:72`).
   - Vacations: the picked reviewers.
   - Change requests: the pact's reviewers, while the request is not withdrawn and the pact is Active.
-- The first decision is final. Others get `already-decided`. A rejection needs a reason (`decide`, `review.ts:124`). Test: `review.test.ts`.
+- The first decision is final. Others get `already-decided`. A rejection needs a reason (`decide`, `review.ts:128`). Test: `review.test.ts`.
 - A reviewer can ask the owner a question. Only the owner is notified, and the item leaves the review queue until the owner replies. The reply notifies every reviewer (`askOwner`, `review.ts:83`; `ownerReply`, `review.ts:105`; decided in pact-v0 ticket 12). Test: `reviewer-questions.test.ts`.
 - The review queue shows change requests first, then everything else oldest first (`reviewItems`, `review.ts:303`; `reviewItemSince`, `review.ts:365`).
 - Withdrawal: an owner can withdraw a change request or a vacation, not evidence, an excuse or a payment.
