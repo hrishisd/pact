@@ -8,7 +8,7 @@
 // Today, vacation days on the heat map, and Profile on now and after.
 
 import { describe, expect, test } from "vitest";
-import type { NewVacation, Schedule } from "../shared/types.ts";
+import type { NewVacation, PactChange, Schedule } from "../shared/types.ts";
 import { ownerWithAnki } from "./testing/anki-pact.ts";
 import { bedtimePact, sleep } from "./testing/bedtime-pact.ts";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
@@ -60,7 +60,7 @@ describe("what the Pacts and Reviewers steps offer", () => {
     // Still in its edit window: not offered.
     await createPact("Read", MON_WED_FRI);
 
-    expect(ok(owner.vacationOptions()).options).toEqual({
+    expect(owner.vacationOptions()).toEqual({
       today: s.date("Wed"),
       recurring: [
         expect.objectContaining({
@@ -222,7 +222,7 @@ describe("what a vacation covers", () => {
       const s = scenario();
       const { owner, anytime } = await withOneTimePacts(s);
 
-      expect(ok(owner.vacationOptions()).options.oneTime.find((pact) => pact.id === anytime)).toMatchObject({
+      expect(owner.vacationOptions().oneTime.find((pact) => pact.id === anytime)).toMatchObject({
         alreadyOpen: true,
       });
       expect(forPact(owner, s.date("Mon+1"), s.date("Sun+1"), [], anytime)).toMatchObject({
@@ -1398,13 +1398,22 @@ describe("the heat map after an approved vacation", () => {
     for (const day of ["Mon+1", "Tue+1", "Thu+1", "Fri+1", "Sat+1", "Sun+1"]) {
       expect(dayOn(owner, bed, s.date(day))?.status).toEqual({
         kind: "excused",
+        cover: { kind: "vacation", state: "approved" },
+        phase: "past-due",
         excuseApproval: null,
         vacation: onVacation,
       });
     }
-    expect(dayOn(owner, bed, s.date("Wed+1"))?.status).toEqual({ kind: "satisfied", approvedBy: null });
+    expect(dayOn(owner, bed, s.date("Wed+1"))?.status).toEqual({
+      kind: "satisfied",
+      cover: { kind: "vacation", state: "approved" },
+      phase: "past-due",
+      approvedBy: null,
+    });
     expect(dayOn(owner, bed, s.date("Fri"))?.status).toEqual({
       kind: "excused",
+      cover: { kind: "excuse", state: "approved" },
+      phase: "past-due",
       excuseApproval: { reviewerName: "reviewer", reason: "Red-eye flight" },
     });
   });
@@ -1417,7 +1426,7 @@ describe("the heat map after an approved vacation", () => {
 
     expect(dayOn(owner, bed, s.date("Tue+1"))?.status).toMatchObject({
       kind: "not-judged",
-      excuse: "approved",
+      cover: { kind: "vacation", state: "approved" },
       excuseApproval: null,
       vacation: { from: s.date("Mon+1"), to: s.date("Sun+1") },
     });
@@ -1435,6 +1444,8 @@ describe("the heat map after an approved vacation", () => {
     if (history.kind !== "weekly-count") throw new Error("not a week heat map");
     expect(history.weeks.find((week) => week.date === s.date("Mon+1"))?.occurrence?.status).toEqual({
       kind: "excused",
+      cover: { kind: "vacation", state: "approved" },
+      phase: "past-due",
       excuseApproval: null,
       vacation: { from: s.date("Mon+1"), to: s.date("Sat+1") },
     });
@@ -1493,5 +1504,52 @@ describe("Profile during and after a vacation", () => {
     expect(await owner.withdrawVacation(vacationId)).toEqual({ ok: true });
     expect(owner.vacations()).toEqual([]);
     expect(owner.lastVacation()).toBeNull();
+  });
+});
+
+describe("a change that removes a covered day", () => {
+  test("a Wednesday dropped by an approved change and added back by a later one isn't on the vacation any more: it is judged as usual", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Tue 12:00");
+    const vacationId = await file(owner, vacation(s.date("Wed+1"), s.date("Wed+1"), [gym], [reviewer]));
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    const fewer = changed(owner, gym, { schedule: { kind: "fixed-days", days: ["mon", "fri"] } });
+    ok(await reviewer.decide(changeRequestIdOf(await owner.changePact(gym, fewer)), { kind: "approve" }));
+    const back = ok(
+      await owner.changePact(gym, changed(owner, gym, { schedule: { kind: "fixed-days", days: MON_WED_FRI } })),
+    );
+    await s.advanceTo("Sat 00:00");
+    await s.advanceTo("Thu+1 00:00");
+
+    expect(back.outcome.kind).toBe("stricter");
+    expect(statusOn(owner, gym, s.date("Wed+1"))).toBe("missed");
+    expect(penaltyDays(owner)).toContain(s.date("Wed+1"));
+  });
+
+  test("Weekly count: a target change keeps every covered week; an earlier end date takes the weeks after it off for good", async () => {
+    const s = scenario();
+    const { owner, second, piano } = await ownerWithThreePacts(s);
+    await file(owner, vacation(s.date("Mon+1"), s.date("Sun+2"), [piano], [second]));
+    /** The weeks the waiting vacation covers, as its review item shows them. */
+    const coveredWeeks = () =>
+      second
+        .reviewQueue()
+        .flatMap((item) => (item.kind === "vacation" ? item.covers : []))
+        .flatMap((cover) => cover.covered.map(({ date }) => date));
+    async function approved(change: Partial<PactChange>) {
+      const result = ok(await owner.changePact(piano, changed(owner, piano, change)));
+      if (result.outcome.kind === "needs-approval")
+        ok(await second.decide(changeRequestIdOf(result), { kind: "approve" }));
+    }
+
+    await approved({ schedule: { kind: "weekly-count", target: 2 } });
+    expect(coveredWeeks()).toEqual([s.date("Mon+1"), s.date("Mon+2")]);
+    await approved({ endDate: s.date("Sun+1") });
+    expect(coveredWeeks()).toEqual([s.date("Mon+1")]);
+    await approved({ endDate: s.date("Sun+3") });
+    expect(coveredWeeks()).toEqual([s.date("Mon+1")]);
   });
 });

@@ -20,7 +20,7 @@ import {
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
-import { DayChip, SKIP_REASON_TEXT, dayNote, excuseDayText } from "./excuse-days.tsx";
+import { Chip, DayChip, SKIP_REASON_TEXT, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
 import { EDIT_WINDOW_TEXT, formatDate, hoursLeft, money, scheduleText } from "./format.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useNow, useSend } from "./ui.tsx";
@@ -418,7 +418,7 @@ function PactPageDates({
                 <b>{excuseDayText(d)}</b>
                 <small>{recentNote(d, now, timezone, weekly, oura)}</small>
               </span>
-              <DayChip status={d.status} now={now} week={weekly} oura={oura} />
+              <DayChip status={d.status} now={now} timezone={timezone} week={weekly} oura={oura} />
             </label>
           ))}
           <label className="opt">
@@ -508,17 +508,18 @@ function DayCard({
   timezone: string;
   now: number;
 }) {
-  // On Weekly count, a covered day is its week's Monday, and holds through that week's Sunday.
-  const holds = (date: string) => (weekly ? date <= day && day <= addDays(date, 6) : date === day);
-  const covered = preview?.covered.find((d) => holds(d.date));
+  // On Weekly count, the core dates a day by its week: its Monday, through its Sunday.
+  const holds = (d: { date: string; through?: string }) => d.date <= day && day <= (d.through ?? d.date);
+  const covered = preview?.covered.find(holds);
   const status = covered?.status;
-  const skipped = preview?.skipped.find((d) => holds(d.date));
+  const presented = status && presentOccurrence(status, now, { timezone, week: weekly, oura });
+  const skipped = preview?.skipped.find(holds);
   const week = covered?.date ?? skipped?.date;
   return (
     <div className="card excuse-day">
       <div className="spread">
         <b>{weekly && week !== undefined ? `Week of ${formatDate(week)}` : formatDate(day)}</b>
-        {status && <DayChip status={status} now={now} week={weekly} oura={oura} />}
+        {presented && <Chip chip={presented.chip} />}
       </div>
       {status?.kind === "missed" ? (
         <>
@@ -527,8 +528,8 @@ function DayCard({
           </span>
           <span className="meta due">{hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse</span>
         </>
-      ) : status ? (
-        <span className="meta">{dayNote(status, now, timezone, weekly, oura)}</span>
+      ) : presented ? (
+        <span className="meta">{presented.note}</span>
       ) : skipped ? (
         <span className="meta">{SKIP_REASON_TEXT[skipped.reason]}</span>
       ) : null}
@@ -556,7 +557,7 @@ function DayList({
     ...preview.covered.map((d) => ({
       date: d.date,
       covered: true,
-      note: dayNote(d.status, now, timezone, weekly, oura),
+      note: presentOccurrence(d.status, now, { timezone, week: weekly, oura }).note,
     })),
     ...preview.skipped.map((d) => ({ date: d.date, covered: false, note: SKIP_REASON_TEXT[d.reason] })),
   ].sort((a, b) => a.date.localeCompare(b.date, "en-US"));
@@ -581,7 +582,7 @@ function recentNote(d: Day, now: number, timezone: string, weekly: boolean, oura
   const { status } = d;
   if (status.kind === "missed")
     return `${money(status.penaltyCents)} · ${hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse`;
-  return dayNote(status, now, timezone, weekly, oura);
+  return presentOccurrence(status, now, { timezone, week: weekly, oura }).note;
 }
 
 /** `preview` without `day` and the days before it: the later days a run-on adds. */

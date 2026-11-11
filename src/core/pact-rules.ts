@@ -95,7 +95,7 @@ export interface CheckedTerms {
 export function checkedTerms(
   pact: NewPact,
   ankiRollover: number | null,
-  timezone: string | null,
+  timezone: string,
   createdAt: Date,
 ): CheckedTerms | { ok: false; reason: CreatePactRefusal } {
   const oura = pact.evidenceKind === "oura";
@@ -138,7 +138,6 @@ export function checkedTerms(
   if (name === "") return { ok: false, reason: "blank-name" };
   if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
   if (nameTooLong(name) || textTooLong(description)) return { ok: false, reason: "text-too-long" };
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   const dueBy = pact.dueBy ?? null;
   // The day clock is for Fixed days: Oura Ring and Anki pacts were refused any other schedule above.
   const day = dayClockOf(

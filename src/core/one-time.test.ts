@@ -140,7 +140,7 @@ describe("Submit anytime off", () => {
     expect(occurrenceOf(owner, dentist)).toEqual({
       date: s.date("Thu"),
       occurrence: {
-        status: { kind: "satisfied", approvedBy: "reviewer" },
+        status: { kind: "satisfied", cover: null, phase: "past-due", approvedBy: "reviewer" },
         detail: null,
       },
     });
@@ -164,7 +164,8 @@ describe("Submit anytime off", () => {
     expect(occurrenceOf(owner, late).occurrence?.status).toEqual({
       kind: "missed",
       penaltyCents: 500,
-      held: false,
+      cover: null,
+      phase: "past-due",
       excusableUntil: new Date(s.at("Thu 09:00").getTime() + 2 * DAY_MS),
       recipientName: "Sam",
       rejection: null,
@@ -200,7 +201,12 @@ describe("Submit anytime on", () => {
     expect(pactOf(owner, taxes).stage).toBe("active");
     await s.advanceTo("Fri 00:00");
 
-    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: "reviewer" });
+    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({
+      kind: "satisfied",
+      cover: null,
+      phase: "past-due",
+      approvedBy: "reviewer",
+    });
     expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", endedAt: s.at("Fri 00:00") });
   });
 
@@ -281,6 +287,8 @@ describe("judging", () => {
 
     expect(occurrenceOf(owner, dentist).occurrence?.status).toEqual({
       kind: "excused",
+      cover: { kind: "excuse", state: "approved" },
+      phase: "past-due",
       excuseApproval: { reviewerName: "reviewer", reason: "The dentist cancelled" },
     });
     expect(owed(owner)).toBe(0);
@@ -301,6 +309,8 @@ describe("judging", () => {
 
     expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({
       kind: "excused",
+      cover: { kind: "excuse", state: "approved" },
+      phase: "past-due",
       excuseApproval: { reviewerName: "reviewer", reason: "The forms never came" },
     });
     expect(pactOf(owner, taxes).stage).toBe("ended");
@@ -440,7 +450,12 @@ describe("changing a One-time pact", () => {
     expect(pactOf(owner, taxes)).toMatchObject({ schedule: oneTime(s.date("Thu")), newTerms: null });
     await reviewer.decide(evidenceId, { kind: "approve" });
     await s.advanceTo("Fri 00:00");
-    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: "reviewer" });
+    expect(occurrenceOf(owner, taxes).occurrence?.status).toEqual({
+      kind: "satisfied",
+      cover: null,
+      phase: "past-due",
+      approvedBy: "reviewer",
+    });
   });
 
   test("Submit anytime off: moving the date earlier or later needs approval", async () => {

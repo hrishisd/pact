@@ -41,8 +41,7 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
   });
 
   await test.step("the owner invites the reviewer and they become friends", async () => {
-    await owner.goto(`${DEV_SIGN_IN_PATH}?as=operator`);
-    await owner.getByRole("button", { name: "Confirm" }).click();
+    await owner.goto(`${DEV_SIGN_IN_PATH}?as=operator&timezone=${TIMEZONE}`);
     await owner.getByRole("button", { name: "Invite a friend" }).click();
     const profile = owner.getByRole("dialog", { name: "Profile" });
     await profile.getByRole("button", { name: "Invite a friend" }).click();
@@ -50,11 +49,12 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
     const token = link!.split("/invite/")[1]!;
     await profile.getByRole("button", { name: "Done" }).click();
 
-    await reviewer.goto(`${DEV_SIGN_IN_PATH}?email=friend@example.test&name=Friend&invite=${token}`);
+    await reviewer.goto(
+      `${DEV_SIGN_IN_PATH}?email=friend@example.test&name=Friend&invite=${token}&timezone=${TIMEZONE}`,
+    );
     await reviewer.getByRole("button", { name: "Accept" }).click();
     await expect(reviewer.getByRole("heading", { name: "You and operator are friends" })).toBeVisible();
     await reviewer.getByRole("button", { name: "Open Pact" }).click();
-    await reviewer.getByRole("button", { name: "Confirm" }).click();
   });
 
   await test.step("the owner creates a Camera pact", async () => {

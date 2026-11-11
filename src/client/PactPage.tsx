@@ -22,7 +22,7 @@ import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
-import { listNames, openOccurrenceText } from "./change-terms.tsx";
+import { endsWhenText, listNames, openOccurrenceText } from "./change-terms.tsx";
 import { formOf } from "./pact-form.ts";
 import { PROBLEMS, ReviewersStep } from "./pact-form-steps.tsx";
 import { clockText, EDIT_WINDOW_TEXT, formatDate, formatDay, minutesLeft, money } from "./format.ts";
@@ -109,7 +109,13 @@ export function PactPage({
             )}
             <HeatMap pact={pact} timezone={timezone} now={now} />
             <Terms pact={pact} changeable={changeable} changeWaiting={waiting} onSaved={reload} onInvite={onInvite} />
-            {changeable && !waiting && <EndPact pact={pact} onSent={reload} />}
+            {changeable && !waiting && pact.ending === null && <EndPact pact={pact} onSent={reload} />}
+            {pact.ending && (
+              <p className="small muted">
+                Ending approved: {pact.name} ends {endsWhenText(pact, { kind: "after", ...pact.ending })}. Penalties
+                already judged stay on the ledger.
+              </p>
+            )}
             {pact.stage === "ended" && (
               <p className="small muted">
                 Ended {formatDay(pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on the
@@ -281,7 +287,8 @@ function Actions({
 
 /**
  * End pact, at the bottom of the page after the edit window, with its sheet.
- * Ending is a change request, so it's gone while one waits.
+ * Ending is a change request, so it's gone while one waits, and once an end
+ * is approved.
  */
 function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
   const [asking, setAsking] = useState(false);
@@ -295,8 +302,10 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
       const result = await api.endPact(pact.id, note.trim() === "" ? {} : { note });
       if (!result.ok) {
         if (result.reason === "text-too-long") return TEXT_TOO_LONG_TEXT;
-        return result.reason === "change-request-waiting"
-          ? "A change request is already waiting. Withdraw it first."
+        if (result.reason === "change-request-waiting")
+          return "A change request is already waiting. Withdraw it first.";
+        return result.reason === "end-approved"
+          ? "Its end is already approved. Reopen it to see when it ends."
           : "This pact can't be ended now. Reopen it to see where it stands.";
       }
       setAsking(false);

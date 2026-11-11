@@ -10,6 +10,7 @@ import {
   EXCUSE_REASON_FIELD,
   EXCUSE_TO_FIELD,
   INVITE_TOKEN_SIGN_IN_KEY,
+  TIMEZONE_SIGN_IN_KEY,
   APP_PATHS,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
@@ -91,9 +92,19 @@ import {
 
 export const authClient = createAuthClient({ basePath: AUTH_BASE_PATH });
 
+/** The browser's IANA timezone: a new account is created with it. */
+function detectedTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 /** Starts Google sign-in; the browser leaves the app and comes back to `/`. */
 export function signInWithGoogle(): Promise<unknown> {
-  return authClient.signIn.social({ provider: "google", callbackURL: "/", errorCallbackURL: AUTH_ERROR_PATH });
+  return authClient.signIn.social({
+    provider: "google",
+    callbackURL: "/",
+    errorCallbackURL: AUTH_ERROR_PATH,
+    additionalData: { [TIMEZONE_SIGN_IN_KEY]: detectedTimezone() },
+  });
 }
 
 /**
@@ -106,7 +117,7 @@ export function signInWithInvite(token: string): Promise<unknown> {
     provider: "google",
     callbackURL: APP_PATHS.invite(token),
     errorCallbackURL: APP_PATHS.invite(token),
-    additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: token },
+    additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: token, [TIMEZONE_SIGN_IN_KEY]: detectedTimezone() },
   });
 }
 

@@ -56,7 +56,7 @@ import type {
   LastVacation,
   NewVacation,
   VacationCard,
-  VacationOptionsResult,
+  VacationOptions,
   VacationPreviewResult,
   VacationRequest,
   WithdrawVacationResult,
@@ -109,6 +109,12 @@ export const INVITE_REQUIRED_PATH = "/invite-required";
  * callback would create a new account.
  */
 export const INVITE_TOKEN_SIGN_IN_KEY = "inviteToken";
+
+/**
+ * Every sign-in carries the browser's IANA timezone through Google's redirect
+ * the same way, under this key: a new account is created with it.
+ */
+export const TIMEZONE_SIGN_IN_KEY = "timezone";
 
 /**
  * How connecting Oura went, on the new pact form's URL after Oura's callback:
@@ -380,8 +386,8 @@ export type ExcuseResponse = Json<ExcuseResult>;
 /** POST /api/excuses/:id/accept-rejection (no body). */
 export type AcceptExcuseRejectionResponse = Json<AcceptExcuseRejectionResult>;
 
-/** GET /api/vacations/options. An account with no timezone is a 200 refusal. */
-export type VacationOptionsResponse = Json<VacationOptionsResult>;
+/** GET /api/vacations/options. */
+export type VacationOptionsResponse = Json<VacationOptions>;
 
 /** POST /api/vacations/preview. A body of another shape is a 400; the core's refusals are 200s. */
 export type VacationPreviewRequest = VacationRequest;

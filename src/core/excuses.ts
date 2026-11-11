@@ -9,7 +9,6 @@ import {
   MAX_EXCUSE_SPAN_DAYS,
   type AcceptExcuseRejectionResult,
   type AccountId,
-  type EvidenceKind,
   type ExcuseDates,
   type ExcuseDatesRefusal,
   type ExcuseDay,
@@ -30,19 +29,14 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { judge } from "./judging.ts";
-import {
-  dueAfterEnd,
-  judgingReached,
-  occurrenceSpan,
-  occurrenceStatus,
-  skipReason,
-  vacationOn,
-} from "./occurrence-state.ts";
+import { coversOn } from "./covers.ts";
+import type { AnkiChecksRunning } from "./judging.ts";
+import { dueAfterEnd, occurrenceSpan, occurrenceStatus, skipReason } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { editWindowClosesAt, EXCUSE_WINDOW_MS, isLocalDate } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
+import { settleCoverDays } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
@@ -68,7 +62,7 @@ export function excuseOptions(ctx: CoreContext, accountId: AccountId, pactId: st
   const { timezone } = accountRow(ctx, accountId);
   const now = ctx.clock.now();
   const pact = ownPact(ctx, accountId, pactId);
-  if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!pact) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
   const today = localDateOf(now, timezone);
   // Days before today an excuse could cover: Missed in the last 48 hours, or still waiting on evidence.
@@ -235,13 +229,13 @@ export function previewExcuse(
 function excusePreview(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pactId: string,
   dates: ExcuseDates,
   now: Date,
 ): { ok: true; preview: ExcusePreview } | { ok: false; reason: ExcuseDatesRefusal } {
   const pact = ownPact(ctx, ownerId, pactId);
-  if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!pact) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
   const { from, to } = dates;
   if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };
@@ -253,7 +247,7 @@ function excusePreview(
     const day = excuseDay(ctx, pactId, occurrence);
     const skipped = excuseSkipReason(ctx, pactId, day, now);
     if (skipped !== null) {
-      preview.skipped.push({ date: occurrence.date, reason: skipped });
+      preview.skipped.push({ ...occurrenceSpan(ctx, pactId, occurrence), reason: skipped });
       continue;
     }
     preview.covered.push(day);
@@ -269,7 +263,8 @@ function excusePreview(
 function excuseSkipReason(ctx: CoreContext, pactId: string, day: ExcuseDay, now: Date): ExcuseSkipReason | null {
   const reason = skipReason(day.status, now);
   if (reason !== null) return reason;
-  return vacationOn(ctx, pactId, day.date) === "waiting" ? "on-waiting-vacation" : null;
+  const vacationWaiting = coversOn(ctx, pactId, day.date).some((c) => c.kind === "vacation" && c.state === "waiting");
+  return vacationWaiting ? "on-waiting-vacation" : null;
 }
 
 /**
@@ -329,20 +324,24 @@ export function excuseDatesText(ctx: CoreContext, excuseId: string): string {
 
 /**
  * Records a reviewer's decision on an excuse waiting for approval and tells
- * the owner. Approved: its days are excused (`excuseApprovedDays`).
- * Rejected: nothing to change, as its holds are released by no longer
- * waiting and its days are judged as usual.
+ * the owner, and settles its days (`settleCoverDays`). Approved: they're
+ * excused. Rejected: nothing to change, as its holds are released by no
+ * longer waiting and its days are judged as usual.
  */
-export function decideExcuse(ctx: CoreContext, excuse: ExcuseToDecide, decided: Decided, reviewerId: AccountId): void {
+export function decideExcuse(
+  ctx: CoreContext,
+  excuse: ExcuseToDecide,
+  decided: Decided,
+  reviewerId: AccountId,
+  ankiChecksRunning: AnkiChecksRunning,
+): void {
   const { outcome, reason } = decided;
   const now = ctx.clock.now();
   recordDecision(ctx, "excuse", excuse.id, decided, reviewerId, now);
-  if (outcome === "approved") {
-    const dates = ctx
-      .all<{ date: LocalDate }>(`SELECT date FROM excuse_day WHERE excuse_id = ?`, excuse.id)
-      .map((row) => row.date);
-    excuseApprovedDays(ctx, excuse.pact_id, dates, now);
-  }
+  const days = ctx
+    .all<{ date: LocalDate }>(`SELECT date FROM excuse_day WHERE excuse_id = ?`, excuse.id)
+    .map((row) => row.date);
+  settleCoverDays(ctx, excuse.pact_id, days, now, ankiChecksRunning);
   const dates = excuseDatesText(ctx, excuse.id);
   ctx.enqueue({
     recipient: excuse.owner_account_id,
@@ -358,46 +357,6 @@ export function decideExcuse(ctx: CoreContext, excuse: ExcuseToDecide, decided: 
       url: outcome === "approved" ? APP_PATHS.excuse(excuse.id) : APP_PATHS.today,
     },
   });
-}
-
-/**
- * What approving an excuse or vacation does to the pact's days on `dates`,
- * as of `now`: Missed days become Excused, without their penalties, and days
- * not judged yet that judging has reached (their evidence was waiting) are
- * judged Excused now; the rest are judged Excused at their due time. A
- * bedtime night not judged yet is left to judging, which waits for Oura
- * until it closes. Days the pact no longer has after it Ended are left alone.
- */
-export function excuseApprovedDays(ctx: CoreContext, pactId: string, dates: LocalDate[], now: Date): void {
-  const { timezone, evidence_kind: evidenceKind } = ctx.one<{ timezone: string; evidence_kind: EvidenceKind }>(
-    `SELECT account.timezone, pact.evidence_kind FROM pact JOIN account ON account.id = pact.owner_account_id
-       WHERE pact.id = ?`,
-    pactId,
-  )!;
-  const { covering } = occurrencesOf(ctx, pactId, timezone);
-  for (const date of dates) {
-    const occurrence = covering(date);
-    // The pact Ended before the day fell due: it's never judged.
-    if (occurrence === null || dueAfterEnd(ctx, pactId, occurrence)) continue;
-    const row = ctx.one<{ outcome: string | null }>(
-      `SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`,
-      pactId,
-      date,
-    );
-    if (row?.outcome === "missed") {
-      ctx.db.prepare(`DELETE FROM penalty WHERE pact_id = ? AND occurrence_date = ?`).run(pactId, date);
-      ctx.db
-        .prepare(`UPDATE occurrence SET outcome = 'excused', judged_at = ? WHERE pact_id = ? AND date = ?`)
-        .run(now.toISOString(), pactId, date);
-    } else if (
-      (row?.outcome ?? null) === null &&
-      // A bedtime night waits for Oura until it closes: an on-time bedtime beats the excuse.
-      evidenceKind !== "oura" &&
-      judgingReached(ctx, pactId, date, now)
-    ) {
-      judge(ctx, pactId, date, "excused", now);
-    }
-  }
 }
 
 /** Excuses waiting for approval that `reviewerId` may decide: those for pacts they review. */

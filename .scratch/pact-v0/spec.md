@@ -141,7 +141,7 @@ Each scheduled **occurrence** is judged as **Satisfied**, **Missed** or **Excuse
 
 85. As an owner, I want each pact's reminders to fire only while the occurrence still needs evidence (on scheduled days for Fixed days; once, on its own date, for each One-time reminder), so that I'm not nagged about things I've already done.
 86. As an owner on a Weekly count pact, I want reminders to fire only on days without evidence and only until I've met the week's target, so that they stop once I'm done.
-87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to go off every scheduled night, even if I'm already in bed, so that I get a cue to start getting ready for bed. The app can't tell I'm in bed until my ring syncs, usually the next morning.
+87. As an owner, I want bedtime reminders (e.g. "11:30pm: wind down") to go off every scheduled night, even if I'm already in bed, so that I get a cue to start getting ready for bed. The app can't tell I'm in bed until my ring syncs, usually the next morning; once it has judged the night, it doesn't remind me.
 88. As a user, I want to turn each kind of event notification (picked as a reviewer on a new pact, new review item, decision, comment, Missed occurrence, Connection problem, new bill, overdue bill) on or off, so that I control how much I'm contacted.
 
 ### Today and navigation
@@ -289,7 +289,7 @@ Each scheduled **occurrence** is judged as **Satisfied**, **Missed** or **Excuse
 - Fixed days: fire on scheduled days, only if that day has no evidence.
 - One-time: each reminder has its own date and time and fires once, unless evidence has already been submitted. There are no recurring reminders on One-time pacts.
 - Weekly count: fire only on days without evidence and while the week's target is unmet.
-- Bedtime: fire every scheduled night, even if the owner is already in bed. The app can't know that until the ring syncs, usually the next morning.
+- Bedtime: fire every scheduled night, even if the owner is already in bed. The app can't know that until the ring syncs, usually the next morning. A night Oura has already judged (the ring synced before the reminder) gets no reminder (decided 2026-11-11, design-review ticket 24).
 
 **Overdue**
 - While any bill is overdue and not covered by payments awaiting approval, the owner gets a daily reminder and an alert.

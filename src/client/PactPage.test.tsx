@@ -90,3 +90,22 @@ describe("the Add a reviewer sheet", () => {
     expect(screen.queryByText(/Your friends couldn't load/)).toBeNull();
   });
 });
+
+test("a pact whose end was approved says when it ends, and offers no End pact", async () => {
+  stubApi({ pact: answers({ ok: true, pact: { ...cameraPact(), ending: { lastDay: "2026-01-08" } } }) });
+  renderPactPage();
+
+  expect(
+    await screen.findByText(
+      "Ending approved: Gym ends after Thu Jan 8, once that day is judged. Penalties already judged stay on the ledger.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "End pact" })).toBeNull();
+});
+
+test("an Active pact past its edit window offers End pact", async () => {
+  stubApi({ pact: answers({ ok: true, pact: cameraPact() }) });
+  renderPactPage();
+
+  expect(await screen.findByRole("button", { name: "End pact" })).toBeTruthy();
+});

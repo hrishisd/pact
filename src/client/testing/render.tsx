@@ -77,6 +77,7 @@ export function cameraPact(editWindowClosesAt: string | null = null): PactPage {
     waiting: [],
     history: { kind: "fixed-days", days: [] },
     connectionProblem: null,
+    ending: null,
     stage: "active",
   };
 }

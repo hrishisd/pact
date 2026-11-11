@@ -3,83 +3,122 @@
 // "pending".
 
 import type { Json } from "../shared/api.ts";
-import type { ExcuseDay, ExcuseSkipReason, OccurrenceStatus } from "../shared/types.ts";
-import { dueClockText, EXCUSE_WINDOW_TEXT, formatDate, money } from "./format.ts";
+import type { ExcuseDay, ExcuseSkipReason, LocalDate, OccurrenceStatus } from "../shared/types.ts";
+import { dateIn, dueClockText, EXCUSE_WINDOW_TEXT, formatDate, money } from "./format.ts";
 
 type Status = Json<OccurrenceStatus>;
 
 /**
- * A day's chip as of `now` (ms): Satisfied, Excused, Missed (with "· excuse
- * waiting for approval" while one is), "Excuse waiting for approval" for a
- * day not judged yet with one waiting, and otherwise Due today (This week,
- * for a Weekly count `week`), Coming up or Not judged yet (No Oura data for
- * an `oura` night). A day ahead with an approved excuse already reads
- * Excused. `compact` drops the excuse wording, and the chip of a day not
- * judged yet.
+ * How a heat map square looks: an outcome, a day an approved vacation
+ * excuses ("vac"), or for a day not judged yet whether it's ahead, open now
+ * or past due.
  */
-export function DayChip({
-  status,
-  now,
-  compact = false,
-  week = false,
-  oura = false,
-}: {
-  status: Status;
-  now: number;
+export type Square = "satisfied" | "missed" | "excused" | "vac" | "not-judged" | "open" | "ahead";
+
+/** A chip's colour: its `c-*` class. */
+type Tone = "ok" | "excused" | "vac" | "missed" | "wait" | "todo" | "soon";
+
+/** One occurrence as every screen shows it: its chip, its heat map square and the small line under it. */
+export interface OccurrencePresentation {
+  /** Null for a `compact` day not judged yet. */
+  chip: { text: string; tone: Tone } | null;
+  /** The chip's words, even where `compact` drops the chip: a square's label, so it says what the chip does. */
+  label: string;
+  square: Square;
+  /** "$5 held", "Not open yet", "Due at midnight", "Not judged yet", or "". */
+  note: string;
+}
+
+export interface PresentOptions {
+  /** The profile's timezone, for the due time. */
+  timezone: string;
+  /** Compact, as in a review item's rows, where the line under the day says what's held: drops the cover wording, and the chip of a day not judged yet. */
   compact?: boolean;
+  /** A Weekly count week. */
   week?: boolean;
   /** A bedtime pact's night: one past its in-bed-by time is waiting on Oura. */
   oura?: boolean;
-}) {
-  // Compact, as in a review item's rows, where the line under the day says what's held.
-  if (compact && status.kind === "missed") return <span className="chip c-missed">Missed</span>;
-  if (compact && status.kind === "not-judged") return null;
-  switch (status.kind) {
-    case "satisfied":
-      return <span className="chip c-ok">Satisfied</span>;
-    case "excused":
-      return <span className="chip c-excused">Excused</span>;
-    case "missed":
-      return (
-        <span className="chip c-missed">
-          {status.held ? `Missed · ${heldBy(status)} waiting for approval` : "Missed"}
-        </span>
-      );
-    case "not-judged":
-      if (status.excuse === "approved") return <span className="chip c-excused">Excused</span>;
-      if (status.excuse === "waiting") return <span className="chip c-wait">Excuse waiting for approval</span>;
-      if (status.evidenceWaiting) return <span className="chip c-wait">Waiting for approval</span>;
-      if (Date.parse(status.opensAt) > now) return <span className="chip c-soon">Coming up</span>;
-      if (Date.parse(status.dueAt) > now)
-        return <span className="chip c-todo">{week ? "This week" : "Due today"}</span>;
-      return <span className="chip c-soon">{oura ? "No Oura data" : "Not judged yet"}</span>;
-  }
-}
-
-/** What holds a Missed day's penalty: an excuse or a vacation waiting for approval. */
-function heldBy(status: Extract<Status, { kind: "missed" }>): string {
-  return status.heldByVacation ? "vacation" : "excuse";
+  /** A One-time pact's date: open on another day (Submit anytime), it's due on that date, not today. */
+  dueOn?: LocalDate;
 }
 
 /**
- * The small line under a covered day: "$5 held", "Not open yet", "Due at
- * midnight" or at its due time in `timezone` (the profile's), "Due by
- * Sunday" for a Weekly count `week`, "Not judged yet" ("No Oura data" for an
- * `oura` night), or nothing.
+ * Where an occurrence stands as of `now` (ms), the one order every screen
+ * uses: its outcome; for a day not judged yet, an approved cover (Excused, or
+ * Vacation), then a cover waiting for approval, then evidence waiting, then
+ * where it is in time. A Missed day says which cover holds its penalty. The
+ * core says where it stands; the browser clock only moves a day not judged
+ * yet from Coming up to Due today to Not judged yet while the screen is open.
  */
-export function dayNote(status: Status, now: number, timezone: string, week = false, oura = false): string {
+export function presentOccurrence(status: Status, now: number, options: PresentOptions): OccurrencePresentation {
+  const { timezone, compact = false, week = false, oura = false, dueOn } = options;
+  const { cover } = status;
+  const chip = (text: string, tone: Tone) => ({ text, tone });
+  const coveredSquare: Square = cover?.kind === "vacation" ? "vac" : "excused";
+  const coveredChip = cover?.kind === "vacation" ? chip("Vacation", "vac") : chip("Excused", "excused");
   switch (status.kind) {
-    case "missed":
-      return status.held ? `${money(status.penaltyCents)} held` : `${money(status.penaltyCents)} to be held`;
-    case "not-judged":
-      if (Date.parse(status.opensAt) > now) return "Not open yet";
-      if (Date.parse(status.dueAt) > now)
-        return week ? "Due by Sunday" : `Due at ${dueClockText(status.dueAt, timezone)}`;
-      return oura ? "No Oura data" : "Not judged yet";
     case "satisfied":
+      return { chip: chip("Satisfied", "ok"), label: "Satisfied", square: "satisfied", note: "" };
     case "excused":
-      return "";
+      return { chip: coveredChip, label: coveredChip.text, square: coveredSquare, note: "" };
+    case "missed": {
+      const held = cover?.state === "waiting";
+      const label = held ? `Missed · ${cover.kind} waiting for approval` : "Missed";
+      return {
+        chip: chip(compact ? "Missed" : label, "missed"),
+        label,
+        square: "missed",
+        note: held ? `${money(status.penaltyCents)} held` : `${money(status.penaltyCents)} to be held`,
+      };
+    }
+    case "not-judged": {
+      // The core's phase, moved on by the browser clock while the screen is open, never back.
+      const clockPhase =
+        Date.parse(status.opensAt) > now ? "ahead" : Date.parse(status.dueAt) > now ? "open" : "past-due";
+      const phase = PHASES.indexOf(clockPhase) > PHASES.indexOf(status.phase) ? clockPhase : status.phase;
+      const square: Square = phase === "ahead" ? "ahead" : phase === "open" ? "open" : "not-judged";
+      const note =
+        phase === "ahead"
+          ? "Not open yet"
+          : phase === "open"
+            ? week
+              ? "Due by Sunday"
+              : `Due at ${dueClockText(status.dueAt, timezone)}`
+            : oura
+              ? "No Oura data"
+              : "Not judged yet";
+      const shown = (c: { text: string; tone: Tone }, s: Square = square) => ({
+        chip: compact ? null : c,
+        label: c.text,
+        square: s,
+        note,
+      });
+      if (cover?.state === "approved") return shown(coveredChip, coveredSquare);
+      if (cover?.state === "waiting")
+        return shown(chip(`${cover.kind === "vacation" ? "Vacation" : "Excuse"} waiting for approval`, "wait"));
+      if (status.evidenceWaiting) return shown(chip("Waiting for approval", "wait"));
+      if (phase === "ahead") return shown(chip("Coming up", "soon"));
+      if (phase === "open") {
+        if (dueOn !== undefined && dateIn(now, timezone) !== dueOn)
+          return shown(chip(`Due ${formatDate(dueOn)}`, "todo"));
+        return shown(chip(week ? "This week" : "Due today", "todo"));
+      }
+      return shown(chip(oura ? "No Oura data" : "Not judged yet", "soon"));
+    }
   }
+}
+
+/** A day not judged yet's phases, in the order time moves it through them. */
+const PHASES: Status["phase"][] = ["ahead", "open", "past-due"];
+
+/** An occurrence's chip, as `presentOccurrence` words it, or nothing. */
+export function DayChip({ status, now, ...options }: { status: Status; now: number } & PresentOptions) {
+  return <Chip chip={presentOccurrence(status, now, options).chip} />;
+}
+
+/** A presented occurrence's chip, or nothing. */
+export function Chip({ chip }: { chip: OccurrencePresentation["chip"] }) {
+  return chip && <span className={`chip c-${chip.tone}`}>{chip.text}</span>;
 }
 
 /** Why a day in the dates is skipped, as the sheet's Skipped rows say it. */

@@ -1,6 +1,6 @@
 # Coding standards
 
-Read before writing code and at review time. `npm run lint` enforces the mechanical rules: formatting (Prettier; a pre-commit hook formats staged files, `npm run format` does the whole repo), unused code (knip), glossary words, system time, the machine's timezone and locale, real timers and `Math.random` in the core and in tests, and `localeCompare` without a locale (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
+Read before writing code and at review time. `npm run lint` enforces the mechanical rules: formatting (Prettier; a pre-commit hook formats staged files, `npm run format` does the whole repo), unused code (knip), glossary words, system time, the machine's timezone and locale, real timers and `Math.random` in the core and in tests, `localeCompare` without a locale, and a `.test.ts` beside a same-name `.test.tsx`, which `tsc` would skip (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
 
 ## The core owns every domain rule
 
@@ -21,7 +21,7 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 
 ## Tests
 
-- Core behaviour is tested through `scenario()` with named times ("Mon 18:00", America/New_York) and fake ports, not by calling internals. The one exception is occurrence timing (`src/core/occurrences.ts`), which is also tested at its own interface (`occurrences.test.ts`) for calendar cases a scenario can't express, such as daylight saving changes. HTTP behaviour is tested at the `app.test.ts` seam, with Google faked at its token endpoint.
+- Core behaviour is tested through `scenario()` with named times ("Mon 18:00", America/New_York) and fake ports, not by calling internals. The one exception is occurrence timing (`src/core/occurrences.ts`), which is also tested at its own interface (`occurrences.test.ts`) for calendar cases a scenario can't express, such as daylight saving changes. The second is the verdict function (`verdictOf`, `src/core/verdict.ts`), tested at its own interface (`verdict.test.ts`) because the combinations of evidence, covers, automatic data and ends are many; every scenario also checks after each command and tick that stored outcomes match it (`src/core/testing/verdict-check.ts`). HTTP behaviour is tested at the `app.test.ts` seam, with Google faked at its token endpoint.
 - Client components are tested in `*.test.tsx` files, which run in jsdom (Vitest's `dom` project; every other test runs in Node). They render a screen with `renderWithUser` and answer its api calls with `stubApi` (`src/client/testing/render.tsx`); a call left unstubbed throws.
 - Write the test first and watch it fail for the right reason. A test that passes before the code exists (for example, through the SPA fallback's 200) proves nothing.
 - Account ids are random in production (scenarios make them rise in creation order); never depend on id order. A test that fails the `n`th call to a port names one account only when that account is the only one being called.

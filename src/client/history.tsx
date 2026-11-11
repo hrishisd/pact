@@ -14,63 +14,27 @@ import type {
   TodayYesterdayEntry,
 } from "../shared/types.ts";
 import { addDays, parseLocalDate } from "../shared/calendar.ts";
-import { DayChip } from "./excuse-days.tsx";
-import { listNames } from "./change-terms.tsx";
 import {
-  ankiMissText,
-  clockText,
-  clockTime,
-  dateIn,
-  dateSpan,
-  formatDate,
-  money,
-  NIGHT_CLOSES_TEXT,
-} from "./format.ts";
+  Chip,
+  DayChip,
+  presentOccurrence,
+  type OccurrencePresentation,
+  type PresentOptions,
+  type Square,
+} from "./excuse-days.tsx";
+import { listNames } from "./change-terms.tsx";
+import { ankiMissText, clockText, clockTime, dateSpan, formatDate, money, NIGHT_CLOSES_TEXT } from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
 type Week = Json<HeatMapWeek>;
 
-/**
- * How a square looks: an outcome, a day an approved vacation excuses ("vac"),
- * or for a day not judged yet whether it's ahead, open now or past due.
- */
-type Square = "satisfied" | "missed" | "excused" | "vac" | "not-judged" | "open" | "ahead" | "none";
+/** A week's square shows no count when nothing was counted toward it: Excused, Vacation or not open yet. */
+const UNCOUNTED: Square[] = ["excused", "vac", "ahead"];
 
-function squareOf(record: Occurrence | null, now: number): Square {
-  if (record === null) return "none";
-  const { status } = record;
-  if (vacationOf(status)) return "vac";
-  if (status.kind !== "not-judged") return status.kind;
-  if (status.excuse === "approved") return "excused";
-  if (Date.parse(status.opensAt) > now) return "ahead";
-  return Date.parse(status.dueAt) > now ? "open" : "not-judged";
-}
-
-/** The dates of the approved vacation that excuses an occurrence with `status`, if one does. */
-function vacationOf(status: Occurrence["status"]): { from: LocalDate; to: LocalDate } | undefined {
-  return status.kind === "excused" || status.kind === "not-judged" ? status.vacation : undefined;
-}
-
-/**
- * An occurrence's chip: as on excuses, except that a day a vacation excuses
- * says Vacation, and a bedtime night past its due time and not judged yet is
- * waiting on Oura.
- */
-function OccurrenceChip({
-  record,
-  now,
-  week = false,
-  oura = false,
-}: {
-  record: Occurrence;
-  now: number;
-  week?: boolean;
-  /** A bedtime pact's night. */
-  oura?: boolean;
-}) {
-  if (vacationOf(record.status)) return <span className="chip c-vac">Vacation</span>;
-  return <DayChip status={record.status} now={now} week={week} oura={oura} />;
+/** An occurrence's square and chip, as `presentOccurrence` has them; no square for a day with no occurrence. */
+function present(record: Occurrence | null, now: number, options: PresentOptions) {
+  return record === null ? null : presentOccurrence(record.status, now, options);
 }
 
 /**
@@ -114,7 +78,7 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
 
 /** What a Missed occurrence cost: held while an excuse or vacation waits, else paid to its recipient. */
 function missedCost(status: Extract<Occurrence["status"], { kind: "missed" }>): string {
-  return status.held
+  return status.cover?.state === "waiting"
     ? `${money(status.penaltyCents)} held.`
     : `${money(status.penaltyCents)} to ${status.recipientName ?? "your recipient"}.`;
 }
@@ -161,16 +125,6 @@ export function monthLabels(weeks: HeatMapColumn[]): string[] {
   return labels;
 }
 
-const SQUARE_TEXT: Record<Exclude<Square, "none">, string> = {
-  satisfied: "Satisfied",
-  missed: "Missed",
-  excused: "Excused",
-  vac: "Vacation",
-  "not-judged": "Not judged yet",
-  open: "Due today",
-  ahead: "Not open yet",
-};
-
 /**
  * The pact page's History: a GitHub-style grid, a column per week since the
  * first occurrence and a row per weekday, scrolled to now. Tapping a square
@@ -206,33 +160,26 @@ function OneTimeHistory({
 }) {
   const record = day.occurrence;
   if (record === null) return null;
-  const square = squareOf(record, now);
+  // Open before its date, with Submit anytime: it's due on the deadline's date, not today.
+  const { chip, square } = presentOccurrence(record.status, now, {
+    timezone,
+    oura: pact.evidenceKind === "oura",
+    dueOn: day.date,
+  });
   const line = occurrenceLine(
     record,
     timezone,
     pact.reviewers.map((r) => r.name),
   );
-  // Open before its date, with Submit anytime: it's due on the deadline's date, not today.
-  const { status } = record;
-  const dueOn =
-    status.kind === "not-judged" &&
-    !status.evidenceWaiting &&
-    status.excuse === null &&
-    square === "open" &&
-    dateIn(now, timezone) !== day.date;
   return (
     <section className="card">
       <h3>History</h3>
       <div className="hmdetail one" role="status">
-        <span className={`cell ${square === "none" ? "none" : square}`} aria-hidden="true" />
+        <span className={`cell ${square}`} aria-hidden="true" />
         <span className="rt">
           <span className="spread">
             <b>{formatDate(day.date)}</b>
-            {dueOn ? (
-              <span className="chip c-todo">Due {formatDate(day.date)}</span>
-            ) : (
-              <OccurrenceChip record={record} now={now} oura={pact.evidenceKind === "oura"} />
-            )}
+            <Chip chip={chip} />
           </span>
           {line && <span className="small muted">{line}</span>}
         </span>
@@ -289,7 +236,7 @@ function DailyHeatMap({
                   <HeatMapSquare
                     key={day.date}
                     day={day}
-                    square={squareOf(day.occurrence, now)}
+                    presented={present(day.occurrence, now, { timezone, oura: pact.evidenceKind === "oura" })}
                     selected={day.date === selected}
                     onSelect={() => setSelected(day.date)}
                   />
@@ -307,7 +254,12 @@ function DailyHeatMap({
               {formatDate(picked.date)}
               {pact.evidenceKind === "oura" && " night"}
             </b>
-            <OccurrenceChip record={picked.occurrence} now={now} oura={pact.evidenceKind === "oura"} />
+            <DayChip
+              status={picked.occurrence.status}
+              now={now}
+              timezone={timezone}
+              oura={pact.evidenceKind === "oura"}
+            />
           </div>
           {line && <span className="small muted">{line}</span>}
         </div>
@@ -371,22 +323,22 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
       <div className="hm-scroll" ref={scroller}>
         <div className="hm-weeks">
           {weeks.map((week, i) => {
-            const square = squareOf(week.occurrence, now);
+            const presented = present(week.occurrence, now, { timezone, week: true });
             const monday = new Date(`${week.date}T00:00:00Z`);
             const month = monday.getUTCDate() <= 7 || i === 0 ? MONTHS[monday.getUTCMonth()] : "";
             return (
               <div key={week.date} className="hm-wcol">
                 <span className="hm-lbl">{month}</span>
-                {square === "none" ? (
+                {presented === null ? (
                   <div className="cell wk none" />
                 ) : (
                   <button
-                    className={`cell wk ${square}${week.date === selected ? " sel" : ""}`}
-                    aria-label={`Week of ${formatDate(week.date)}: ${SQUARE_TEXT[square]}, ${weekText(week)}`}
+                    className={`cell wk ${presented.square}${week.date === selected ? " sel" : ""}`}
+                    aria-label={`Week of ${formatDate(week.date)}: ${presented.label}, ${weekText(week)}`}
                     aria-pressed={week.date === selected}
                     onClick={() => setSelected(week.date)}
                   >
-                    {square === "excused" || square === "vac" || square === "ahead" ? "" : week.progress.sessions}
+                    {UNCOUNTED.includes(presented.square) ? "" : week.progress.sessions}
                   </button>
                 )}
               </div>
@@ -400,7 +352,7 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
         <div className="hmdetail" role="status">
           <div className="spread">
             <b>Week of {formatDate(picked.date)}</b>
-            <OccurrenceChip record={picked.occurrence} now={now} week />
+            <DayChip status={picked.occurrence.status} now={now} timezone={timezone} week />
           </div>
           <span className="small muted">{weekLine(picked, timezone)}</span>
         </div>
@@ -437,20 +389,20 @@ function weekLine(week: Week, timezone: string): string {
 
 function HeatMapSquare({
   day,
-  square,
+  presented,
   selected,
   onSelect,
 }: {
   day: Day;
-  square: Square;
+  presented: OccurrencePresentation | null;
   selected: boolean;
   onSelect: () => void;
 }) {
-  if (square === "none") return <div className="cell none" />;
+  if (presented === null) return <div className="cell none" />;
   return (
     <button
-      className={`cell ${square}${selected ? " sel" : ""}`}
-      aria-label={`${formatDate(day.date)}: ${SQUARE_TEXT[square]}`}
+      className={`cell ${presented.square}${selected ? " sel" : ""}`}
+      aria-label={`${formatDate(day.date)}: ${presented.label}`}
       aria-pressed={selected}
       onClick={onSelect}
     />
@@ -484,7 +436,12 @@ export function Yesterday({
                 <b>{entry.name}</b>
                 {line && <small>{line}</small>}
               </span>
-              <OccurrenceChip record={entry.occurrence} now={now} oura={entry.evidenceKind === "oura"} />
+              <DayChip
+                status={entry.occurrence.status}
+                now={now}
+                timezone={timezone}
+                oura={entry.evidenceKind === "oura"}
+              />
             </button>
           );
         })}

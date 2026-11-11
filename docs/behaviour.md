@@ -22,7 +22,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 - For the first 10 minutes after creation the owner can edit or delete the pact freely (`EDIT_WINDOW_MS`, `pact-rules.ts:36`; `editPact`, `pacts.ts:116`; `deletePact`, `pacts.ts:160`). An edit does not restart the window. Test: `edit-window.test.ts`.
 - An edit that drops days from the schedule removes evidence for those days. An edit to a One-time deadline moves its occurrence with its evidence (`editPact`, `moveOneTimeOccurrence`, `pacts.ts:528`).
-- Reviewers are told they were picked only when the window closes, and evidence submitted inside the window goes to them then (`closeEditWindows`, `pacts.ts:571`). Until then a reviewer cannot see or decide the pact's evidence (`evidence.ts:204`; `itemToDecide` in `review.ts:177`).
+- Reviewers are told they were picked only when the window closes, and evidence submitted inside the window goes to them then (`closeEditWindows`, `pacts.ts:571`). Until then a reviewer cannot see or decide the pact's evidence (`evidence.ts:200`; `itemToDecide` in `review.ts:182`).
 - No excuse can be filed while the window is open (`edit-window-open`, `excuseOptions`, `excuses.ts:66`), and vacations offer only pacts past it (`offeredPacts`, `vacations.ts:77`).
 
 ### Change requests
@@ -36,20 +36,22 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - An approved schedule change applies from the first day not yet open: tomorrow, or next Monday for Weekly count (`firstDayNotOpen`, `pact-rules.ts:274`). Change requests never rescue an occurrence that is open now. The earlier terms are kept per occurrence in `pact_earlier_terms` (`applyTerms`, `change-requests.ts:437`). Test: `change-requests.test.ts`.
 - An end date approved too late to keep the day open now is moved to that day (`laterDate(after.endDate, lastOpen)` in `applyTerms`).
 - With an end date, a Weekly count pact counts only whole weeks: it Ends after the last whole week before the end date (`pact-rules.ts:153`; decided in pact-v0 ticket 14). Test: `weekly-count.test.ts:685`.
-- One-time: the new deadline must be at least an hour away, both when sent and when approved (`deadlineFarEnough` in `checkedChange`; `approvableNow`, `change-requests.ts:745`). A request decided after the occurrence was judged leaves the pact as it was (`applyOneTimeTerms`, `change-requests.ts:483`). Test: `one-time.test.ts`.
-- Before approving a change request, the decider first catches judging up to now (`decide`, `review.ts:124`), so terms never apply to an occurrence already due.
-- A reviewer being removed can still decide until the request is approved, and is deleted at approval (`changeOutcome`, `change-requests.ts:363`; `decideChangeRequest`, `change-requests.ts:696`). The owner is told the outcome (`change-request-decided`).
+- One-time: the new deadline must be at least an hour away, both when sent and when approved (`deadlineFarEnough` in `checkedChange`; `approvableNow`, `change-requests.ts:755`). A request decided after the occurrence was judged leaves the pact as it was (`applyOneTimeTerms`, `change-requests.ts:483`). Test: `one-time.test.ts`.
+- Before approving a change request, the decider first catches judging up to now (`decide`, `review.ts:128`), so terms never apply to an occurrence already due and an end approved with nothing open leaves no due occurrence unjudged.
+- A reviewer being removed can still decide until the request is approved, and is deleted at approval (`changeOutcome`, `change-requests.ts:363`; `decideChangeRequest`, `change-requests.ts:700`). The owner is told the outcome (`change-request-decided`).
 - The owner can withdraw a waiting request. Nobody is notified (`withdrawChangeRequest`, `change-requests.ts:161`).
 - An end request is refused once the pact has Ended, while the edit window is open, or while another request waits (`requestEnd`, `change-requests.ts:128`).
-- An approved end request Ends the pact at once (`decideChangeRequest` calls `endPact(now)`). **Known bug:** this drops the occurrence open at approval instead of letting it be judged, unlike every other change. See [ticket 13](../.scratch/design-review/issues/13-one-end-pact.md). Evidence already waiting for that day stays in the queue (interaction audit P5c).
-- **Known bug:** when an approved change removes a day from the schedule, an excuse or vacation that covers that day is not deleted. A later change that adds the day back finds it already covered. See [ticket 14](../.scratch/design-review/issues/14-cover-cleanup-on-schedule-change.md).
+- While an approved end waits for its open occurrence, the pact takes no new end request and no change beyond the at-once ones (the name, the reminders, added reviewers); both are refused with `end-approved` (`requestEnd`, `checkedChange`). Anything else would apply after the end, and a later end date, a stricter change, would undo it without approval. The pact page shows no End pact then. Test: `change-requests.test.ts`, "while an approved end waits".
+- An approved end request takes effect when the occurrence or week open at approval closes, as every other change does (rule R1). An occurrence is open from when it opens until it closes, unless it is judged; a bedtime night opens at the start of its date and closes at 18:00 the next day. Approval sets the end date to the last day of that occurrence's period (`endTiming`, `endAfter`, `ending.ts:44`, `:72`); a One-time pact keeps its deadline and Ends when it is judged. Until then the pact is Active, its open occurrence is judged normally and takes evidence and excuses as usual, and its page says "Ending approved: Gym ends after Sun Jan 18, once this week is judged." With nothing open, the pact Ends at once. The owner's push says "Gym ends after Sun Jan 18", or "Gym is Ended". The reviewer sees when it would End before approving. Test: `change-requests.test.ts`, "ending a pact".
+- When a change takes days off the schedule (fewer days, a later start date, an earlier end date), the excuse and vacation days on those dates from the first day not open are deleted, unless the occurrence is judged (rule R9, `uncoverRemovedDays`, `covers.ts`, called from `applyTerms`). A later change that adds a day back finds it not covered, as vac:61 says, and it is judged as usual. A Weekly count target change removes no week. An excuse or vacation left with no days still waits for a decision, showing no days; [ticket 20](../.scratch/design-review/issues/20-withdrawal-reasons-and-moot-items.md) withdraws it. One-time pacts move their covers with the deadline instead (`moveOneTimeOccurrence`, `pacts.ts`). Every table keyed by an occurrence must be handled in both places, or `scripts/check-conventions.ts` says why not. Test: `excuses.test.ts` and `vacations.test.ts`, "a change that removes a covered day".
 
 ### Ending
 
-- A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `judging.ts:94`). Test: `due-by-and-dates.test.ts`.
-- A One-time pact Ends when its occurrence is judged (`judge`, `judging.ts:189`).
-- Ending withdraws a waiting change request, silently (`endPact`, `judging.ts:234`).
-- Only Active pacts are judged and reminded (`pactsToJudge`, `occurrence-state.ts:230`; `remind`, `reminders.ts:37`). An occurrence due after the end is ignored (`dueAfterEnd`, `occurrence-state.ts:202`).
+- A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `ending.ts:107`). An end date an approved end request set Ends it the same way. Test: `due-by-and-dates.test.ts`.
+- A One-time pact Ends when its occurrence is judged (`settle`, `settle.ts:35`).
+- Every ending goes through `endPact(ctx, pactId, cause, at)` (`ending.ts:25`), with cause `end-date`, `one-time-judged` or `end-request`. It withdraws a waiting change request, silently.
+- Only `settle.ts`, `ending.ts` and migrations insert or delete penalties, update an occurrence's outcome or judging time, or update a pact's stage (`scripts/check-conventions.ts`).
+- Only Active pacts are judged and reminded (`pactsToJudge`, `occurrence-state.ts:233`; `remind`, `reminders.ts:37`). An occurrence due after the end is ignored (`dueAfterEnd`, `occurrence-state.ts:205`).
 - The pact list shows pacts in the edit window first, then Active, then Ended (`pactList`, `pacts.ts:207`).
 
 ## Occurrences and judging
@@ -64,39 +66,48 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 ### Judging
 
-- The tick judges each Active pact's occurrences in due order, and keeps a `judged_through` cursor (`judgePactDueBy`, `judging.ts:49`). Test: `judging.test.ts`.
-- At the due time an occurrence is judged in this order (`judgeAtDueTime`, `judging.ts:124`):
+- Every judging path goes through `settle` (`settle.ts:35`): the tick, evidence decisions, cover decisions and withdrawals, bedtime nights and Anki checks. It reads the occurrence's facts, asks `verdictOf` (`src/core/verdict.ts`) for its outcome, and stores it with its penalty if the occurrence isn't judged yet. A stored outcome is kept, except that a Missed one an approved cover now excuses becomes Excused without its penalty (design review ticket 12).
+- A penalty on a bill is never excused or changed: the excuse window closes before billing takes a penalty, and `settle` throws rather than touch a billed penalty, so the command changes nothing (`deletePenalties`, `settle.ts:93`). Test: `bills.test.ts` "a billed penalty".
+- The tick settles each Active pact's occurrences in due order, and keeps a `judged_through` cursor (`settlePactDueBy`, `settle.ts:163`). It also settles days behind the cursor that evidence still holds: an owner's move west can put a due time the cursor passed back ahead, and a decision before then leaves the day for the tick (`settleBehindCursor`, `settle.ts:188`). Test: `judging.test.ts`.
+- At the due time an occurrence is judged in this order:
   1. Approved evidence: Satisfied.
   2. An approved excuse or vacation: Excused.
   3. Evidence waiting for a reviewer: wait.
   4. Otherwise: Missed, with the penalty.
-- The owner gets a Missed push only when no excuse or vacation covers the day, waiting or approved (`judging.ts:138`; decided in pact-v0 ticket 07).
-- A Weekly count week is Satisfied when its days of approved evidence reach the target. Otherwise an approved cover makes it Excused, waiting evidence holds it, and else it is Missed with one penalty of days short × penalty (`judgeWeek`, `judging.ts:149`; `judge`, `judging.ts:189`). Test: `weekly-count.test.ts`.
-- The penalty uses the terms that applied to the occurrence, including its recipient (`termsOn`, in `judge`).
+- The owner gets a Missed push whenever an occurrence or week becomes Missed, whatever judged it: the due time or a late evidence decision (rule R4, design review ticket 11). Two exceptions: nobody is told about a day an excuse or vacation covers, waiting or approved (decided in pact-v0 ticket 07), and a rejection that judges a Fixed day or One-time occurrence Missed tells the owner through the rejection push alone (v0:324). A Missed push caused by a decision comes after the decision's push (`settle`). Test: `weekly-count.test.ts` "a week judged by a late decision", `rejection.test.ts`.
+- A Weekly count week is Satisfied when its days of approved evidence reach the target. Otherwise an approved cover makes it Excused, waiting evidence holds it, and else it is Missed with one penalty of days short × penalty (`verdictOf`). Test: `weekly-count.test.ts`.
+- The judging rules are stated once in `verdictOf` (`src/core/verdict.ts`); every scenario checks the stored outcomes against it (design review ticket 10).
+- The penalty uses the terms that applied to the occurrence, including its recipient (`termsOn`, read by `occurrenceFacts`).
 - A One-time occurrence with approved evidence is Satisfied at the deadline (decided in pact-v0 ticket 15).
+
+### How an occurrence is shown
+
+- Every screen that shows an occurrence (the heat map's squares and chip, Yesterday, the excuse sheet, the excuse page and the Excuse review item) words it through one function, `presentOccurrence` (`src/client/excuse-days.tsx`), in one order. Satisfied, Excused (Vacation when an approved vacation covers it) or Missed. A Missed day under a waiting cover reads "Missed · excuse waiting for approval" or "Missed · vacation waiting for approval". A day not judged yet reads, first match wins: Excused or Vacation under an approved cover; "Excuse waiting for approval" or "Vacation waiting for approval"; "Waiting for approval" while its evidence waits; then Coming up, Due today ("This week" for a Weekly count week; "Due Mon Jan 12" for a One-time pact open before its date) or Not judged yet ("No Oura data" for a bedtime night). Test: `excuse-days.test.tsx`.
+- A heat map square's colour is its outcome, Vacation, or for a day not judged yet whether it is ahead, open or past due. Its label is the chip's words, so the square and the chip agree. Test: `history.test.tsx`.
+- The browser clock only moves a day not judged yet from Coming up to Due today to Not judged yet while a screen is open; the core decides everything else.
 
 ### Evidence
 
-- Camera only. One to 10 photos (`MAX_EVIDENCE_PHOTOS`), for the occurrence open now and before its due time. The received time is the latest photo's receipt (`submitEvidence`, `evidence.ts:62`; `evidenceAcceptance`, `evidence.ts:294`). Test: `evidence.test.ts`.
+- Camera only. One to 10 photos (`MAX_EVIDENCE_PHOTOS`), for the occurrence open now and before its due time. The received time is the latest photo's receipt (`submitEvidence`, `evidence.ts:58`; `evidenceAcceptance`, `evidence.ts:272`). Test: `evidence.test.ts`.
 - One piece of evidence per day may wait or be approved. On a Weekly count, a day with rejected evidence takes no more (decided in pact-v0 ticket 14). Evidence is refused once the occurrence is judged or the pact has Ended.
-- A rejection judges the occurrence Missed at once, unless the day was excused ahead, which leaves it Excused (`decideEvidence`, `evidence.ts:231`; decided in pact-v0 ticket 07). Test: `rejection.test.ts`.
-- An approval judges the occurrence Satisfied at once if judging has already reached the day.
-- A late decision on a Weekly count week judges the week but does not tell the owner it was Missed (`decideEvidence` passes `tell = false` to `judgeWeek`). **Known bug:** the owner should be told whenever a week becomes Missed. See [ticket 11](../.scratch/design-review/issues/11-settle-tick-and-evidence.md).
-- The owner is told each decision (`evidence-decided`). A rejection shows an alert until the owner takes the L or files an excuse (`rejectedEvidenceAlerts`, `evidence.ts:366`). On a Weekly count, the rejected-day alert appears when the week is judged (`rejectedDayAlerts`, `evidence.ts:419`).
-- Take the L accepts a miss and clears its alert (`acceptMiss`, `evidence.ts:103`). Test: `accept-miss.test.ts`.
+- A rejection judges the occurrence Missed at once, unless the day was excused ahead, which leaves it Excused (`decideEvidence`, `evidence.ts:227`; decided in pact-v0 ticket 07). Test: `rejection.test.ts`.
+- An approval judges the occurrence Satisfied at once if it is past its due time. A late decision on a Weekly count week judges the week at once: Satisfied if its approved days reach the target, else Missed, with the Missed push.
+- **Known bug:** an approval of evidence that was still waiting when an approved excuse or vacation made the day Excused changes nothing; the vacation spec (vac:78) says it makes the day Satisfied. See [ticket 26](../.scratch/design-review/issues/26-late-approval-satisfies-excused-day.md).
+- The owner is told each decision (`evidence-decided`). A rejection shows an alert until the owner takes the L or files an excuse (`rejectedEvidenceAlerts`, `evidence.ts:344`). On a Weekly count, the rejected-day alert appears when the week is judged (`rejectedDayAlerts`, `evidence.ts:398`).
+- Take the L accepts a miss and clears its alert (`acceptMiss`, `evidence.ts:99`). Test: `accept-miss.test.ts`.
 
 ### Oura Ring
 
-- The first long sleep that starts in the night window decides the night: Satisfied if it starts by the in-bed-by time, Missed if later. No sleep by the time the night closes means Missed at close (`judgeNights`, `bedtime.ts:180`). Test: `bedtime.test.ts`.
-- An approved excuse beats a late sleep. A sleep on time beats an excuse (`judgeNights`; decided in pact-v0 ticket 08).
-- If no Oura data has come in by 15:00 the next day, the owner gets one push for that night and a No Oura data card, unless the night is no longer something to do (`noOuraDataPushAt`, `occurrences.ts:525`; `pushNoOuraData`, `bedtime.ts:147`). Test: `oura-no-data.test.ts`.
+- The first long sleep that starts in the night window decides the night: Satisfied if it starts by the in-bed-by time, Missed if later. No sleep by the time the night closes means Missed at close. The first long sleep is stored on the night as it arrives, with when it arrived, and the night is settled from it (`judgeNights`, `bedtime.ts:168`). Test: `bedtime.test.ts`.
+- An approved excuse beats a late sleep. A sleep on time beats an excuse (`verdictOf`; decided in pact-v0 ticket 08).
+- If no Oura data has come in by 15:00 the next day, the owner gets one push for that night and a No Oura data card, unless the night is no longer something to do (`noOuraDataPushAt`, `occurrences.ts:525`; `pushNoOuraData`, `bedtime.ts:137`). Test: `oura-no-data.test.ts`.
 - Oura is asked at most every 15 seconds when the owner checks now (`checkOura`, `bedtime.ts:28`). A failed fetch is logged and retried next tick and affects only that account. A revoked token marks the connection Needs reconnecting and stops calls for that account (decided in pact-v0 tickets 08 and 09). Disconnecting deletes the tokens.
 
 ### Anki
 
-- An Anki day is Satisfied at the first check showing 0 new, 0 learning and 0 review cards left (`recordAnkiChecks`, `anki-days.ts:170`). Test: `anki-days.test.ts`.
+- An Anki day is Satisfied at the first check showing 0 new, 0 learning and 0 review cards left (`recordAnkiChecks`, `anki-days.ts:173`, which settles the day). Test: `anki-days.test.ts`.
 - Days still to do are polled every 10 minutes, and the owner can check now at most every 15 seconds (`ANKI_POLL_INTERVAL_MS`, `anki-days.ts:15`; `ankiDaysWaiting`, `anki-days.ts:91`).
-- A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts:26`).
+- A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts:18`).
 - Losing the connection marks it Needs reconnecting (`markDisconnected`, `connections.ts:91`). A deck that no longer exists raises an alert (`anki_pact_deck`).
 
 ## Covers: excuses, vacations and holds
@@ -108,9 +119,9 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - Days after the end, days already excused, and days on a waiting vacation are skipped (`excuseSkipReason`, `excuses.ts:267`). Days a change removed from the schedule are not offered (`excuseDays`, `excuses.ts:277`).
 - On a Weekly count, excusing any day of a week covers the whole week (`excusePreview`, `excuses.ts:248`). Test: `weekly-count.test.ts:440`.
 - An excuse dated any day of a Submit anytime window covers the One-time occurrence (decided in pact-v0 ticket 15).
-- The pact's reviewers get a push. Any one of them decides it (`decideExcuse`, `excuses.ts:334`).
-- Approval turns Missed days into Excused and deletes their penalties, and judges days that judging has reached as Excused now. Oura nights are left to judging (`excuseApprovedDays`, `excuses.ts:369`).
-- After a rejection the owner can file again while a day is still excusable, or take the L. The alert goes once no day is left (`rejectedExcuseAlerts`, `excuses.ts:465`; `acceptExcuseRejection`, `excuses.ts:175`).
+- The pact's reviewers get a push. Any one of them decides it (`decideExcuse`, `excuses.ts:331`).
+- Approval turns Missed days into Excused and deletes their penalties, and judges days past their due time as Excused now. Oura nights not judged yet are left to judging, which waits for Oura until they close. Rejection and withdrawal settle the days too, which changes nothing, and a check of AnkiWeb still running holds an Anki day as it does for the tick (`settleCoverDays`, `settle.ts:117`).
+- After a rejection the owner can file again while a day is still excusable, or take the L. The alert goes once no day is left (`rejectedExcuseAlerts`, `excuses.ts:426`; `acceptExcuseRejection`, `excuses.ts:171`).
 - An excuse cannot be withdrawn.
 
 ### Vacations
@@ -118,37 +129,37 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - A vacation covers several pacts at once, for dates after today, at most 62 days. The owner picks the reviewers who decide it from the pacts' reviewers (`vacationPreview`, `vacations.ts:113`; `fileVacation`, `vacations.ts:217`). Test: `vacations.test.ts`.
 - It offers Active pacts past their edit window. A One-time pact whose occurrence is already open is listed but cannot be covered (`offeredPacts`, `vacations.ts:77`; `vacationSkipReason`, `vacations.ts:181`).
 - A Weekly count week is covered only when the vacation covers every day from Thursday on. The Check step lists each week it does not cover (`pactPreview`, `vacations.ts:150`; `PlanVacation.tsx:420-425`). This differs on purpose from an excuse (rule R11 in `.scratch/design-review/spec.md`).
-- Only the picked reviewers are told and may decide (`vacationToDecide`, `vacations.ts:525`). Approval excuses each covered day as an approved excuse would (`decideVacation`, `vacations.ts:548`).
-- The owner can withdraw a vacation that waits. Nobody is notified (`withdrawVacation`, `vacations.ts:583`).
-- After a rejection, Take the L covers only the days that were Missed at the time of the rejection (`acceptVacationRejection`, `vacations.ts:654`; decided in vacation ticket 03).
-- Moving a One-time deadline keeps a vacation day only if the new deadline is inside the vacation (`moveOneTimeOccurrence`, `pacts.ts:528`).
+- Only the picked reviewers are told and may decide (`vacationToDecide`, `vacations.ts:528`). Approval excuses each covered day as an approved excuse would (`decideVacation`, `vacations.ts:552`).
+- The owner can withdraw a vacation that waits. Nobody is notified (`withdrawVacation`, `vacations.ts:579`).
+- After a rejection, Take the L covers only the days that were Missed at the time of the rejection (`acceptVacationRejection`, `vacations.ts:666`; decided in vacation ticket 03).
+- Moving a One-time deadline keeps a vacation day only if the new deadline is inside the vacation (`moveOneTimeOccurrence`, `pacts.ts:529`; `moveCovers`, `covers.ts:102`).
 
 ### Holds and the 48-hour window
 
-- A waiting excuse or vacation that covers a Missed day holds its penalty: it is left off bills and out of what is owed (`PENALTY_HELD`, `money.ts:85`). Test: `ledgers.test.ts`.
+- A waiting excuse or vacation that covers a Missed day holds its penalty: it is left off bills and out of what is owed (`PENALTY_HELD`, `money.ts:87`). Test: `ledgers.test.ts`.
 - A bill takes only penalties added at least 48 hours before it, so a Missed day can still be excused before it is billed (`billOwner`, `money.ts:394`).
-- When one day has several covers, a waiting excuse comes first, then an approved excuse or vacation, then a waiting vacation (`excuseOn`, `occurrence-state.ts:67`).
-- A waiting excuse takes the day off the owner's to-do list. A waiting vacation does not (`stillToDo`, `occurrence-state.ts:88`).
+- Excuses and vacations are read as one kind of cover (`covers.ts`; the `cover_day_v` view). When one day has several covers, a waiting excuse comes first, then an approved excuse, then an approved vacation, then a waiting vacation (`coverOn`, `covers.ts:55`). A rejected or withdrawn cover covers nothing.
+- A waiting excuse takes the day off the owner's to-do list and stops its reminders. A waiting vacation keeps both (`keepsToDo`, `covers.ts:76`; rule R7 below).
 
 ## Review items
 
 The five kinds are evidence, excuses, vacations, payments and change requests.
 
-- Who decides (`itemToDecide`, `review.ts:177`):
+- Who decides (`itemToDecide`, `review.ts:182`):
   - Evidence and excuses: the pact's current reviewers.
   - Payments: anyone who reviews one of the owner's pacts with that recipient, now, in earlier terms, or through a penalty to it (`paymentReviewersSql`, `money.ts:72`).
   - Vacations: the picked reviewers.
   - Change requests: the pact's reviewers, while the request is not withdrawn and the pact is Active.
-- The first decision is final. Others get `already-decided`. A rejection needs a reason (`decide`, `review.ts:124`). Test: `review.test.ts`.
+- The first decision is final. Others get `already-decided`. A rejection needs a reason (`decide`, `review.ts:128`). Test: `review.test.ts`.
 - A reviewer can ask the owner a question. Only the owner is notified, and the item leaves the review queue until the owner replies. The reply notifies every reviewer (`askOwner`, `review.ts:83`; `ownerReply`, `review.ts:105`; decided in pact-v0 ticket 12). Test: `reviewer-questions.test.ts`.
 - The review queue shows change requests first, then everything else oldest first (`reviewItems`, `review.ts:303`; `reviewItemSince`, `review.ts:365`).
 - Withdrawal: an owner can withdraw a change request or a vacation, not evidence, an excuse or a payment.
-- Waiting lists: Today lists the owner's waiting change requests, evidence, excuses and payments (`waiting`, `today.ts:102`). The pact page lists change requests, evidence and excuses (`pactPage`, `pacts.ts:241-262`). Waiting vacations appear on neither, only on Profile, so a reviewer's question about a vacation does not show on Today (`questionAlerts`, `today.ts:81`).
+- Waiting lists: Today lists the owner's waiting change requests, evidence, excuses and payments (`waiting`, `today.ts:95`). The pact page lists change requests, evidence and excuses (`pactPage`, `pacts.ts:241-262`). Waiting vacations appear on neither, only on Profile, so a reviewer's question about a vacation does not show on Today (`questionAlerts`, `today.ts:74`).
 
 ## Money
 
 - A penalty is owed to its recipient. Owed is unheld penalties less approved payments, never below zero (`ledgerSummaries`, `money.ts:248`).
-- Bills are made each Wednesday at 18:00 in the owner's timezone, one per recipient, due 7 days later (`makeBills`, `money.ts:376`; `BILL_TERM_DAYS`, `bill-math.ts`). The owner is told only if something on it is unpaid. Test: `bills.test.ts`.
+- Bills are made each Wednesday at 18:00 in the owner's timezone, one per recipient, due 7 days later (`makeBills`, `money.ts:377`; `BILL_TERM_DAYS`, `bill-math.ts`). The owner is told only if something on it is unpaid. Test: `bills.test.ts`.
 - A payment needs a screenshot and may not exceed what is owed less payments already waiting (`recordPayment`, `money.ts:93`; `paymentAcceptance`, `money.ts:604`). Test: `payments.test.ts`.
 - Approved payments go to billed penalties first, oldest bill first, then to unbilled ones by when they were added. Held penalties are skipped (`allocate`, `money.ts:310`).
 - An Overdue spell starts when a bill is past due and unpaid. The owner is reminded daily. Reviewers are told when the spell starts and weekly after (`remindOverdue`, `money.ts:444`; `overdueOf`, `bill-math.ts:35`).
@@ -160,14 +171,13 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 - Each push belongs to one setting the person can turn off: picked as reviewer, review item, decision, comment, missed occurrence, new bill, overdue bill, connection problem (`NOTIFICATION_SETTINGS`, `src/shared/types.ts:712`). Test: `notifications.test.ts`.
 - Pushes are written to an outbox and sent after the change commits.
 - Reminders go at their times in the account's timezone, once each (`remind`, `reminders.ts:37`; `reminder_sent`). One more than 15 minutes late is dropped with an operator alert (`REMINDER_LATE_MS`, `reminders.ts:25`). Test: `reminders.test.ts`.
-- A reminder is skipped when an approved cover is on the day. Otherwise (`worthReminding`, `reminders.ts:118`):
-  - Oura Ring: always sent.
+- A reminder fires for an occurrence if and only if Today shows it as the owner's to do (a To do card, or for a bedtime night the Automatic or No Oura data card), as far as cover, judging and evidence go: one view decides both (`toDo` and `remind`, `occurrenceView`, `occurrence-state.ts:115`; rule R7 in `.scratch/design-review/spec.md`). An approved cover or a waiting excuse removes both; a waiting vacation keeps both. Reminders keep their own timing: each goes at its time, before the due time. Otherwise (`worthReminding`, `reminders.ts:111`):
+  - Oura Ring: sent every scheduled night until Oura has judged it. The ring usually syncs the next morning, so most nights are reminded even when the owner is already in bed; a night judged before its reminder gets none (ticket 24 in `.scratch/design-review/issues/`).
   - Anki: sent until the day is judged.
-  - Camera: sent while no evidence is in and the day is not judged.
-  - Weekly count: sent while approved and waiting days are fewer than the target.
-- **Known bug:** a waiting excuse removes the day from Today's to-do list but its reminders still fire. See [ticket 08](../.scratch/design-review/issues/08-one-occurrence-view.md).
-- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:135`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:166`). Missed shows the last 48 hours, without misses from a rejection or covered days (`recentlyMissed`, `today.ts:419`).
-- Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:175`). Test: `invites.test.ts`.
+  - Camera: sent while no evidence is in for the occurrence and it is not judged.
+  - Weekly count: sent on a day with no evidence, while approved and waiting days are fewer than the target. Test: `reminders.test.ts`.
+- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows the last 48 hours, without misses from a rejection or covered days (`recentlyMissed`, `today.ts:405`).
+- Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:179`). Test: `invites.test.ts`.
 
 ## Text and request limits
 
@@ -177,5 +187,5 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 
 ## Time and timezones
 
-- Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:257`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
-- An account with no confirmed timezone gets `no-timezone` from creating a pact and from Plan a vacation's options, preview and filing (`vacationOptions`, `previewVacation`, `fileVacation` in `vacations.ts`). **Known bug:** Profile's vacation cards and "Last one" still throw for such an account. See [ticket 22](../.scratch/design-review/issues/22-vacation-cards-without-timezone.md).
+- Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:243`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
+- Every account has a timezone. A new account gets its browser's timezone at sign-up: the client sends it through Google's redirect in the OAuth state (`TIMEZONE_SIGN_IN_KEY`, `src/shared/api.ts`), and `signIn` stores its canonical name (`accounts.ts:27`). A sign-in with no timezone, or one `Intl` does not accept, gets UTC; it is never refused. Signing in again leaves the timezone alone. The person sees it and can change it in Profile. There is no "Is this your timezone?" screen: this differs from story 2 in `.scratch/pact-v0/spec.md` (ticket 22). Migration 30 gave UTC to accounts made before this that never confirmed one. Test: `sign-in.test.ts`.

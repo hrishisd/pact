@@ -27,7 +27,8 @@ export default defineConfig({
   webServer: {
     // The built client, served by the server itself: no Vite, so no port shared with `npm run dev`.
     command: `rm -rf "${DATA_DIR}" && npm run build && npm start`,
-    url: `${BASE_URL}/health`,
+    // Liveness, not /health: /health is 503 while the disk is over 80% full, as CI runners' often are.
+    url: `${BASE_URL}/healthz`,
     reuseExistingServer: false,
     timeout: 60_000,
     env: {

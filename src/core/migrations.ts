@@ -766,4 +766,72 @@ export const migrations: readonly Migration[] = [
   );
   CREATE INDEX vacation_day_occurrence ON vacation_day (pact_id, date);
   `,
+  // 29: one read of what covers an occurrence
+  `
+  -- Every day an excuse or a vacation covers, whatever its state, read as one
+  -- kind of cover. An excuse can't be withdrawn, so its withdrawn_at is NULL.
+  CREATE VIEW cover_day_v AS
+    SELECT 'excuse' AS kind, excuse.id, excuse_day.pact_id, excuse_day.date, excuse.filed_at, excuse.decision,
+           excuse.decided_at, NULL AS withdrawn_at
+      FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+    UNION ALL
+    SELECT 'vacation', vacation.id, vacation_day.pact_id, vacation_day.date, vacation.filed_at, vacation.decision,
+           vacation.decided_at, vacation.withdrawn_at
+      FROM vacation_day JOIN vacation ON vacation.id = vacation_day.vacation_id;
+  `,
+  // 30: every account has a timezone
+  {
+    foreignKeysOff: true,
+    sql: `
+  -- An account now gets its browser's timezone when it is created, so the
+  -- column is NOT NULL. An account that never confirmed one gets UTC (it owns
+  -- no pact: creating one needed a timezone). SQLite can't add NOT NULL to a
+  -- column, so this rebuilds account by SQLite's 12-step procedure, with
+  -- foreign keys off so the old table can be dropped while others reference
+  -- it. Its only index besides its keys' is account_one_operator; it has no
+  -- triggers, and no view reads it. The tables that reference it do so by
+  -- name, so they reference the new table once it's renamed.
+  UPDATE account SET timezone = 'UTC' WHERE timezone IS NULL;
+  CREATE TABLE account_new (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    -- lower-cased email: one account per Google address, matched case-insensitively
+    email_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    -- IANA zone, canonical name
+    timezone TEXT NOT NULL,
+    is_operator INTEGER NOT NULL DEFAULT 0 CHECK (is_operator IN (0, 1)),
+    created_at TEXT NOT NULL,
+    billed_through TEXT,
+    oura_latest_bedtime_start TEXT
+  );
+  INSERT INTO account_new (id, email, email_key, name, timezone, is_operator, created_at, billed_through,
+                           oura_latest_bedtime_start)
+    SELECT id, email, email_key, name, timezone, is_operator, created_at, billed_through, oura_latest_bedtime_start
+    FROM account;
+  DROP TABLE account;
+  ALTER TABLE account_new RENAME TO account;
+  CREATE UNIQUE INDEX account_one_operator ON account (is_operator) WHERE is_operator = 1;
+  `,
+  },
+  // 31: a bedtime night's first sleep period is kept when it arrives
+  `
+  -- When the core got the bedtime_start a bedtime night keeps: the first
+  -- long_sleep period Oura reported for it, stored as it arrives, before the
+  -- night is judged. Until now it was stored only when it judged the night
+  -- Satisfied or Missed, as it arrived, so those nights take their judging time.
+  -- A Missed one a cover excused later was judged again on approval: it takes
+  -- the approval's time, which judges it Excused then all the same.
+  ALTER TABLE occurrence ADD COLUMN bedtime_arrived_at TEXT;
+  UPDATE occurrence SET bedtime_arrived_at = judged_at WHERE bedtime_start IS NOT NULL;
+  `,
+  // 32: an approved end waits for the occurrence open at approval
+  `
+  -- When a reviewer approved ending this pact, while an occurrence (or week)
+  -- was open: approval set end_date to that occurrence's last day, and the
+  -- pact Ends once it closes. Null for a pact whose end wasn't approved, or
+  -- that Ended at approval with nothing open. Pacts Ended before this
+  -- migration keep null: they Ended at approval.
+  ALTER TABLE pact ADD COLUMN end_approved_at TEXT;
+  `,
 ];

@@ -72,7 +72,7 @@ import type {
   NewVacation,
   LastVacation,
   VacationCard,
-  VacationOptionsResult,
+  VacationOptions,
   VacationPreviewResult,
   VacationRequest,
   WithdrawChangeRequestResult,
@@ -105,13 +105,14 @@ import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { acceptMiss, evidencePage, submitEvidence } from "./evidence.ts";
 import { acceptExcuseRejection, excuseOptions, excusePage, fileExcuse, previewExcuse } from "./excuses.ts";
-import { endPastEndDate, judgeDueBy } from "./judging.ts";
+import { endPastEndDate } from "./ending.ts";
 import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOverdue } from "./money.ts";
 import { deliverPending, enqueue } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
 import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
 import { askOwner, decide, ownerReply, reviewQueue, viewPhoto, waitingOnReply, type PhotoResult } from "./review.ts";
+import { settleAll } from "./settle.ts";
 import { todayPage } from "./today.ts";
 import {
   acceptVacationRejection,
@@ -148,8 +149,13 @@ export interface PactCore {
    * account on the operator's first sign-in, or with a usable invite token,
    * which the new account then claims: no one else can sign in with it or
    * accept it. Signing in doesn't use the invite up (accepting it does).
+   * A new account gets `timezone`, the browser's, under its canonical name,
+   * or UTC when it is missing or not a zone; an existing account keeps its own.
    */
-  signIn(identity: { email: string; name: string }, options?: { inviteToken?: string }): Promise<SignInResult>;
+  signIn(
+    identity: { email: string; name: string },
+    options?: { inviteToken?: string; timezone?: string },
+  ): Promise<SignInResult>;
   /** The invite page's view of `token` for a signed-out visitor: a claimed invite shows as used. */
   invite(token: string): InviteLookup;
   /** The account signed in with `email` (whatever its case), or null if there is none. Never writes. */
@@ -330,9 +336,8 @@ export interface AccountView {
   /**
    * What Plan a vacation offers: the owner's Active pacts whose edit window
    * has closed, recurring and One-time apart, each with its reviewers.
-   * Refused for an account with no timezone, as are the preview and filing.
    */
-  vacationOptions(): VacationOptionsResult;
+  vacationOptions(): VacationOptions;
   /**
    * What a vacation with `request`'s dates and ticked pacts would cover if
    * filed now, for every offered pact, and what it would skip and why: what
@@ -512,7 +517,10 @@ class Core implements PactCore {
     return this.#delivery;
   }
 
-  signIn(identity: { email: string; name: string }, options: { inviteToken?: string } = {}): Promise<SignInResult> {
+  signIn(
+    identity: { email: string; name: string },
+    options: { inviteToken?: string; timezone?: string } = {},
+  ): Promise<SignInResult> {
     return this.#command(() => signIn(this.#ctx, this.#operatorEmailKey, identity, options));
   }
 
@@ -576,7 +584,8 @@ class Core implements PactCore {
       fileVacation: (vacation) => this.#command(() => fileVacation(this.#ctx, accountId, vacation)),
       vacations: () => vacationCards(this.#ctx, accountId),
       lastVacation: () => lastVacation(this.#ctx, accountId),
-      withdrawVacation: (vacationId) => this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId)),
+      withdrawVacation: (vacationId) =>
+        this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId, this.#ankiPolling.checksRunning)),
       acceptVacationRejection: (vacationId) =>
         this.#command(() => acceptVacationRejection(this.#ctx, accountId, vacationId)),
       recordPayment: (payment, screenshot) =>
@@ -604,8 +613,8 @@ class Core implements PactCore {
       () => {
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
-        recordAnkiChecks(this.#ctx, checked);
-        judgeDueBy(this.#ctx, t, this.#ankiPolling.checksRunning);
+        recordAnkiChecks(this.#ctx, checked, this.#ankiPolling.checksRunning);
+        settleAll(this.#ctx, t, this.#ankiPolling.checksRunning);
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
         noteOuraClock(this.#ctx, fetched.sleep);
         judgeNights(this.#ctx, t, fetched.sleep);

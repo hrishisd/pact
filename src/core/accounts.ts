@@ -28,7 +28,7 @@ export function signIn(
   ctx: CoreContext,
   operatorEmailKey: string,
   identity: { email: string; name: string },
-  options: { inviteToken?: string },
+  options: { inviteToken?: string; timezone?: string },
 ): SignInResult {
   const existing = accountIdForEmail(ctx, identity.email);
   if (existing !== null) return { ok: true, accountId: existing };
@@ -40,12 +40,14 @@ export function signIn(
   if (!isOperator && !invited) return { ok: false, reason: "invite-required" };
 
   const id = ctx.newId();
+  // The browser's zone; a sign-in that brings none Intl accepts gets UTC, which Profile can change.
+  const timezone = (options.timezone === undefined ? null : canonicalTimezone(options.timezone)) ?? "UTC";
   ctx.db
     .prepare(
-      `INSERT INTO account (id, email, email_key, name, is_operator, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO account (id, email, email_key, name, timezone, is_operator, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, identity.email, key, identity.name, isOperator ? 1 : 0, ctx.clock.now().toISOString());
+    .run(id, identity.email, key, identity.name, timezone, isOperator ? 1 : 0, ctx.clock.now().toISOString());
   if (invited) {
     ctx.db.prepare(`UPDATE invite SET claimed_by_account_id = ? WHERE token = ?`).run(id, invite.token);
   }

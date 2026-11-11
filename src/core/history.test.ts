@@ -17,7 +17,7 @@ async function excused(owner: AccountHandle, reviewer: AccountHandle, pactId: st
 }
 
 const satisfied = (approvedBy: string | null, detail: OccurrenceDetail | null = null): OccurrenceRecord => ({
-  status: { kind: "satisfied", approvedBy },
+  status: { kind: "satisfied", cover: null, phase: "past-due", approvedBy },
   detail,
 });
 
@@ -30,7 +30,8 @@ const missed = (
   status: {
     kind: "missed",
     penaltyCents: 500,
-    held: false,
+    cover: null,
+    phase: "past-due",
     excusableUntil: new Date(s.at(judgedAt).getTime() + 48 * 3600_000),
     recipientName: "Sam",
     rejection,
@@ -39,17 +40,29 @@ const missed = (
 });
 
 const excusedBy = (reviewerName: string, reason: string): OccurrenceRecord => ({
-  status: { kind: "excused", excuseApproval: { reviewerName, reason } },
+  status: {
+    kind: "excused",
+    cover: { kind: "excuse", state: "approved" },
+    phase: "past-due",
+    excuseApproval: { reviewerName, reason },
+  },
   detail: null,
 });
 
-const notJudged = (s: Scenario, day: string, next: string, evidenceWaiting = false): OccurrenceRecord => ({
+const notJudged = (
+  s: Scenario,
+  day: string,
+  next: string,
+  evidenceWaiting = false,
+  phase: "ahead" | "past-due" = "past-due",
+): OccurrenceRecord => ({
   status: {
     kind: "not-judged",
     opensAt: s.at(`${day} 00:00`),
     dueAt: s.at(`${next} 00:00`),
     evidenceWaiting,
-    excuse: null,
+    cover: null,
+    phase,
     excuseApproval: null,
   },
   detail: null,
@@ -92,7 +105,7 @@ describe("the heat map", () => {
       { date: s.date("Wed+1"), occurrence: notJudged(s, "Wed+1", "Thu+1", true) },
       { date: s.date("Thu+1"), occurrence: null },
       // Ahead.
-      { date: s.date("Fri+1"), occurrence: notJudged(s, "Fri+1", "Sat+1") },
+      { date: s.date("Fri+1"), occurrence: notJudged(s, "Fri+1", "Sat+1", false, "ahead") },
       { date: s.date("Sat+1"), occurrence: null },
       { date: s.date("Sun+1"), occurrence: null },
     ]);
@@ -105,7 +118,7 @@ describe("the heat map", () => {
     const gym = await createPact("Gym", ["fri"]);
 
     expect(heatMapDays(owner, gym)).toEqual([
-      { date: s.date("Fri"), occurrence: notJudged(s, "Fri", "Sat") },
+      { date: s.date("Fri"), occurrence: notJudged(s, "Fri", "Sat", false, "ahead") },
       { date: s.date("Sat"), occurrence: null },
       { date: s.date("Sun"), occurrence: null },
     ]);
@@ -162,9 +175,10 @@ describe("the heat map", () => {
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     await s.advanceTo("Wed+1 10:00");
 
+    // Tuesday was open when the end was approved: it's judged, and the pact Ended once it closed.
     expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
       [s.date("Mon"), "missed"],
-      [s.date("Tue"), null],
+      [s.date("Tue"), "missed"],
       [s.date("Wed"), null],
       [s.date("Thu"), null],
       [s.date("Fri"), null],
@@ -273,9 +287,11 @@ describe("Yesterday on Today", () => {
     await s.advanceTo("Tue 10:00");
     const end = ok(await owner.requestEnd(gym));
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
-    // Ended Tuesday: Monday's day is still yesterday's on Tuesday, but there's no Tuesday on Wednesday.
+    // Ended once Tuesday closed: Tuesday is still yesterday's on Wednesday, but there's no Wednesday on Thursday.
     expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual([s.date("Mon")]);
     await s.advanceTo("Wed 10:00");
+    expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual([s.date("Tue")]);
+    await s.advanceTo("Thu 10:00");
     expect(owner.today().yesterday).toEqual([]);
   });
 });

@@ -11,7 +11,7 @@ import { WEEKDAYS, type NewPact } from "../shared/types.ts";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
-import { changed, ok, pactOf } from "./testing/queries.ts";
+import { cards, changed, ok, pactOf } from "./testing/queries.ts";
 
 /** The reminders the owner was sent, as pact and occurrence date. */
 function reminders(s: Scenario, owner: AccountHandle) {
@@ -180,6 +180,44 @@ describe("reminders on a Fixed days Camera pact", () => {
     expect(reminders(s, owner)).toEqual([{ pactId: gym, occurrenceDate: s.date("Mon") }]);
   });
 
+  test("don't fire on a day an excuse filed that morning covers, while Today shows no To do card for it", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reminders: ["18:00"] });
+    await s.advanceTo("Mon 18:00");
+    await s.advanceTo("Wed 08:00");
+    ok(await owner.fileExcuse(gym, { from: s.date("Wed"), to: s.date("Wed"), reason: "Sick" }, []));
+
+    await s.advanceTo("Wed 12:00");
+    expect(cards(owner, "to-do")).toEqual([]);
+    await s.advanceTo("Wed 17:00");
+    await s.advanceTo("Wed 18:00");
+
+    expect(reminders(s, owner)).toEqual([{ pactId: gym, occurrenceDate: s.date("Mon") }]);
+  });
+
+  test("keep firing, as Today keeps the To do card, on a day a vacation waiting for approval covers", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reminders: ["18:00"], dates: { startDate: s.date("Mon+1") } });
+    await s.advanceTo("Wed 12:00");
+    ok(
+      await owner.fileVacation({
+        from: s.date("Mon+1"),
+        to: s.date("Fri+1"),
+        pactIds: [gym],
+        reviewerIds: [reviewer.id],
+      }),
+    );
+
+    await s.advanceTo("Mon+1 12:00");
+    expect(cards(owner, "to-do")).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon+1") })]);
+    await s.advanceTo("Mon+1 17:00");
+    await s.advanceTo("Mon+1 18:00");
+
+    expect(reminders(s, owner)).toEqual([{ pactId: gym, occurrenceDate: s.date("Mon+1") }]);
+  });
+
   test("stop once the pact has Ended", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
@@ -205,26 +243,41 @@ describe("reminders on a Fixed days Camera pact", () => {
 });
 
 describe("reminders on a bedtime pact", () => {
-  test("fire every scheduled night, even when the owner is already in bed", async () => {
+  test("fire every scheduled night Oura hasn't judged yet, but not one it already has (R7)", async () => {
     const s = scenario();
     const { owner, bed } = await bedtimeWithReminders(s, "00:00", ["23:30"], ["mon", "tue", "wed"]);
-    // In bed at 22:00, and the ring synced before the reminder.
+    // In bed at 22:00 on Monday, and the ring synced before the reminder.
     s.ouraSource.addSleep(owner.id, sleep("Mon 22:00"));
 
+    await s.advanceTo("Mon 23:00");
+    expect(cards(owner, "automatic")).toEqual([]);
     for (const day of ["Mon", "Tue", "Wed", "Thu"]) await s.advanceTo(`${day} 23:30`);
 
     expect(s.notifier.sentTo(owner, "reminder")).toMatchObject([
       {
         payload: {
           pactId: bed,
-          occurrenceDate: s.date("Mon"),
+          occurrenceDate: s.date("Tue"),
           title: "In bed by midnight",
           body: "In bed by 12:00am tonight.",
         },
       },
-      { payload: { pactId: bed, occurrenceDate: s.date("Tue") } },
       { payload: { pactId: bed, occurrenceDate: s.date("Wed") } },
     ]);
+  });
+
+  test("don't fire on a night an excuse waiting for approval covers, which has no Automatic card either", async () => {
+    const s = scenario();
+    const { owner, bed } = await bedtimeWithReminders(s, "00:00", ["23:30"], ["mon", "tue", "wed"]);
+    await s.advanceTo("Mon 23:30");
+    await s.advanceTo("Tue 09:00");
+    ok(await owner.fileExcuse(bed, { from: s.date("Tue"), to: s.date("Tue"), reason: "Red-eye flight" }, []));
+
+    await s.advanceTo("Tue 23:00");
+    expect(cards(owner, "automatic")).toEqual([]);
+    await s.advanceTo("Tue 23:30");
+
+    expect(reminders(s, owner)).toEqual([{ pactId: bed, occurrenceDate: s.date("Mon") }]);
   });
 
   test("a time before 18:00 goes off the morning after", async () => {

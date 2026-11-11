@@ -9,8 +9,8 @@ import type { Json, ReviewQueueResponse } from "../shared/api.ts";
 import { MAX_TEXT_CHARS, type DecideRefusal, type ReviewDecision, type ReviewItem } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { dateSpan, formatDate, formatDayTime, money, weekdayName } from "./format.ts";
-import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
-import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
+import { Chip, excuseDatesText, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
+import { DiffList, endsWhenText, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-page.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
 import { coveredText, firstName, pactsText, plural, weekOf } from "./vacation-text.ts";
@@ -346,14 +346,18 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
         <div className="list">
           {item.days.map((day) => {
             const { date, status } = day;
-            const note = dayNote(status, now, timezone, day.through !== undefined);
+            const { chip, note } = presentOccurrence(status, now, {
+              timezone,
+              week: day.through !== undefined,
+              compact: true,
+            });
             return (
               <div key={date} className="covrow">
                 <span className="rt">
                   <b>{excuseDayText(day)}</b>
                   {note && <small>{note}</small>}
                 </span>
-                <DayChip status={status} now={now} compact />
+                <Chip chip={chip} />
               </div>
             );
           })}
@@ -388,8 +392,8 @@ function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { i
         {item.note !== null && <span className="quote">“{item.note}”</span>}
         {item.endsPact ? (
           <p className="small">
-            Approving makes {item.pactName} Ended at once: no more days. Penalties already judged stay on{" "}
-            {item.ownerName}'s ledger.
+            {item.ending && `Approving ends ${item.pactName} ${endsWhenText(item.current, item.ending)}. `}
+            Penalties already judged stay on {item.ownerName}'s ledger.
           </p>
         ) : (
           <>

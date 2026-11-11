@@ -72,7 +72,7 @@ function ExcuseView({
               <span className="rt">
                 <b>{excuseDayText(day)}</b>
               </span>
-              <DayChip status={day.status} now={now} week={day.through !== undefined} />
+              <DayChip status={day.status} now={now} timezone={timezone} week={day.through !== undefined} />
             </div>
           ))}
         </div>

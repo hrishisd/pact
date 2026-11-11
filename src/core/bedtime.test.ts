@@ -291,6 +291,27 @@ describe("judging a night", () => {
     expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
   });
 
+  test("an excuse approved as the night closes, before Oura's next look, leaves the night to that look", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    s.ouraSource.addSleep(owner.id, sleep("Mon 23:00"));
+    s.setClockTo("Tue 10:00");
+    const filed = ok(
+      await owner.fileExcuse(pactId, { from: s.date("Tue"), to: s.date("Tue"), reason: "Ring is charging" }, []),
+    );
+    await s.advanceTo("Wed 17:59");
+
+    // The ring synced an on-time bedtime just before the close; the tick at 18:00 hasn't asked Oura yet.
+    s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));
+    s.setClockTo("Wed 18:00");
+    await reviewer.decide(filed.excuseId, { kind: "approve" });
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("not-judged");
+
+    await s.advanceTo("Wed 18:00");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
+  });
+
   test("an approved excuse beats a late bedtime Oura reports afterwards; an on-time one is still Satisfied", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithOura(s);

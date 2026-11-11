@@ -19,7 +19,7 @@ The `fnm` and iCloud notes apply to the owner's Mac. A cloud session has Node on
 
 ## Browser smoke test
 
-`npm run test:e2e` runs one Playwright flow (`e2e/smoke.spec.ts`) across screens as two people: invite and become friends, create a Camera pact, submit evidence, approve it, a day Missed, file an excuse from the Missed card and open it from Waiting for approval, reject it, record a payment. It asserts on what a user sees (text and roles), not on CSS classes. About 10 seconds; not part of `npm run check` or CI.
+`npm run test:e2e` runs one Playwright flow (`e2e/smoke.spec.ts`) across screens as two people: invite and become friends, create a Camera pact, submit evidence, approve it, a day Missed, file an excuse from the Missed card and open it from Waiting for approval, reject it, record a payment. It asserts on what a user sees (text and roles), not on CSS classes. About 10 seconds. Not part of `npm run check`; CI runs it as its own job (`e2e` in `.github/workflows/ci.yml`), in parallel with the check, and a failure there keeps the trace as the `playwright-traces` artifact.
 
 - `playwright.config.ts` builds the client and starts the server in development (`npm start`) on port 3100 with a fresh database in the system temp directory (`pact-e2e/`), so it doesn't touch the dev database or a dev server on 3000 and 5173.
 - `@playwright/test` is pinned to the machine's Playwright (1.63.0), whose Chromium is preinstalled. Elsewhere, `npx playwright install chromium` once.
@@ -40,7 +40,7 @@ Development only: `GET /api/dev/sign-in` signs in and redirects. It doesn't exis
 | Anyone already with an account | http://localhost:5173/api/dev/sign-in?email=EMAIL | `/` |
 
 - A new account needs an invite token: sign in as the operator, then Profile → Invite a friend, and take the token from the link it shows (`/invite/TOKEN`). Or with curl: `POST /api/invites` with the operator's cookie returns `{ token }`.
-- A new account first confirms its timezone, then sees the app. `name` defaults to the email's local part. No usable invite redirects to `/invite-required`.
+- A new account gets the timezone in `timezone` (an IANA name, such as `&timezone=Europe/London`), as a Google sign-in brings the browser's; it defaults to `America/New_York`. An existing account keeps its own: change it in Profile. `name` defaults to the email's local part. No usable invite redirects to `/invite-required`.
 - To switch person in one browser, visit the URL for the other person; the new session cookie replaces the old one.
 - With curl, keep a cookie jar in your scratchpad: `curl -c JAR "http://localhost:5173/api/dev/sign-in?as=operator"`, then `curl -b JAR http://localhost:5173/api/me`.
 

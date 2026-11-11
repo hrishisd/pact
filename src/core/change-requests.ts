@@ -28,7 +28,8 @@ import type {
 import { laterDate, localDateOf } from "./calendar.ts";
 import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import type { CoreContext } from "./context.ts";
-import { endPact } from "./judging.ts";
+import { uncoverRemovedDays } from "./covers.ts";
+import { endAfter, endPact, endTiming } from "./ending.ts";
 import { dueSoonEnough, hasSchedule, lastDayOf, occurrences, occurrencesOverTime } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import {
@@ -58,7 +59,6 @@ import {
   friendsSortedByName,
   occurrencesOf,
   occurrenceTermsOf,
-  ownerZone,
   ownPact,
   recipientName,
   recordDecision,
@@ -132,6 +132,7 @@ export function requestEnd(ctx: CoreContext, accountId: AccountId, pactId: strin
   if (!pact) return { ok: false, reason: "pact-not-found" };
   if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
   if (editWindowClosesAt(pact, ctx.clock.now()) !== null) return { ok: false, reason: "edit-window-open" };
+  if (pact.end_approved_at !== null) return { ok: false, reason: "end-approved" };
   if (waitingChangeRequestId(ctx, pactId) !== null) return { ok: false, reason: "change-request-waiting" };
   if (textTooLong(note)) return { ok: false, reason: "text-too-long" };
   const id = sendChangeRequest(ctx, pact, ownerName, changeableTerms(ctx, pact), null, note);
@@ -196,7 +197,7 @@ export interface ChangeRequestRow extends ReviewStateRow {
   withdrawn_at: string | null;
   owner_account_id: AccountId;
   owner_name: string;
-  timezone: string | null;
+  timezone: string;
 }
 
 /**
@@ -300,7 +301,7 @@ export function waitingChangeRequestId(ctx: CoreContext, pactId: string): string
 export function checkedChange(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pactId: string,
   change: PactChange,
   now: Date,
@@ -345,6 +346,10 @@ export function checkedChange(
   const diffs = termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by));
   if (waitingChangeRequestId(ctx, pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
     return { ok: false, reason: "change-request-waiting" };
+  }
+  // An approved end waits for the open occurrence: nothing after it will be judged, and a later end date would undo it.
+  if (pact.end_approved_at !== null && diffs.some((diff) => diff.effect !== "at-once")) {
+    return { ok: false, reason: "end-approved" };
   }
   // A One-time change applies to its occurrence even once it's open, given an hour to the new deadline.
   if (checked.terms.schedule.kind === "one-time" && !deadlineFarEnough(ctx, pact, zone, after, now)) {
@@ -476,6 +481,9 @@ export function applyTerms(ctx: CoreContext, pact: PactRow, after: ChangeableTer
       after.ankiDeckId,
       pact.id,
     );
+  // A day the new terms don't have is covered no more, so a later change that adds it back finds it uncovered.
+  const scheduled = occurrencesOf(ctx, pact.id, timezone);
+  uncoverRemovedDays(ctx, pact.id, from, (date) => scheduled.includes(date));
 }
 
 /**
@@ -652,7 +660,9 @@ export function changeRequestView(ctx: CoreContext, row: StoredChangeRequest): C
     // Reminders are the owner's own: reviewers don't see them.
     current: withoutReminders(currentTerms(ctx, pact)),
   };
-  if (request.kind === "end") return { ...base, endsPact: true };
+  if (request.kind === "end") {
+    return { ...base, endsPact: true, ending: waiting ? endTiming(ctx, pact.id, ctx.clock.now()) : null };
+  }
   return {
     ...base,
     endsPact: false,
@@ -663,9 +673,7 @@ export function changeRequestView(ctx: CoreContext, row: StoredChangeRequest): C
       request.after,
       termDiffs(request.before, request.after, dayClockOf(pact, pact.in_bed_by, pact.due_by)),
     ),
-    start: waiting
-      ? startOfNewTerms(ctx, pact, ownerZone(row.timezone, row.owner_account_id), request.after, ctx.clock.now())
-      : null,
+    start: waiting ? startOfNewTerms(ctx, pact, row.timezone, request.after, ctx.clock.now()) : null,
   };
 }
 
@@ -692,9 +700,11 @@ export function changeRequestsToReview(ctx: CoreContext, reviewerId: AccountId):
 
 /**
  * Records a reviewer's decision on a change request and tells the owner.
- * Approved, an end makes the pact Ended at once; a change applies its terms
- * from the first occurrence not open yet, and takes off the reviewers it
- * removes. Rejected, nothing changes.
+ * Approved, an end makes the pact Ended once the occurrence (or week) open
+ * now closes, after it's judged as usual, or at once with none open (`decide`
+ * has caught judging up first); a change applies its terms from the first
+ * occurrence not open yet, and takes off the reviewers it removes. Rejected,
+ * nothing changes.
  */
 export function decideChangeRequest(
   ctx: CoreContext,
@@ -713,14 +723,20 @@ export function decideChangeRequest(
   if (decided.outcome === "rejected") {
     body = `${pact.name} · “${decided.reason}”`;
   } else if (request.kind === "end") {
-    endPact(ctx, pact.id, now);
-    body = `${pact.name} is Ended`;
+    const timing = endTiming(ctx, pact.id, now);
+    if (timing.kind === "after") {
+      endAfter(ctx, pact.id, timing.lastDay, now);
+      body = `${pact.name} ends after ${formatDate(timing.lastDay)}`;
+    } else {
+      endPact(ctx, pact.id, "end-request", now);
+      body = `${pact.name} is Ended`;
+    }
   } else {
     const { before, after } = request;
     for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
       ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`).run(pact.id, removed);
     }
-    const timezone = ownerZone(row.timezone, row.owner_account_id);
+    const { timezone } = row;
     const { appliesFrom } = startOfNewTerms(ctx, pact, timezone, after, now);
     applyTerms(ctx, pact, after, now, timezone);
     body = `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
@@ -750,5 +766,5 @@ export function approvableNow(ctx: CoreContext, row: StoredChangeRequest): boole
   if (request.kind === "end" || request.after.schedule.kind !== "one-time") return true;
   const pact = ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
   if (pact.stage === "ended") return true;
-  return deadlineFarEnough(ctx, pact, ownerZone(row.timezone, row.owner_account_id), request.after, ctx.clock.now());
+  return deadlineFarEnough(ctx, pact, row.timezone, request.after, ctx.clock.now());
 }

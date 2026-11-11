@@ -28,6 +28,8 @@ import type {
 } from "../shared/types.ts";
 import { laterDate, localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
+import { moveCovers } from "./covers.ts";
+import { endingOf } from "./ending.ts";
 import { enqueueEvidenceReviewItems, waitingEvidence } from "./evidence.ts";
 import { waitingExcuses } from "./excuses.ts";
 import { pactHistory } from "./history.ts";
@@ -178,7 +180,6 @@ export function firstOccurrence(
   const { timezone } = accountRow(ctx, accountId);
   const pact = editing === undefined ? undefined : ownPact(ctx, accountId, editing);
   if (editing !== undefined && !pact) return { ok: false, reason: "pact-not-found" };
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   // An Anki pact keeps the rollover hour it was made with; a new one takes the deck list's.
   const ankiRollover = pact
     ? pact.anki_rollover_hour
@@ -241,7 +242,7 @@ export function pactList(ctx: CoreContext, accountId: AccountId): PactSummary[] 
 export function pactPage(ctx: CoreContext, accountId: AccountId, pactId: string): PactResult {
   const { timezone } = accountRow(ctx, accountId);
   const row = ownPact(ctx, accountId, pactId);
-  if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!row) return { ok: false, reason: "pact-not-found" };
   const now = ctx.clock.now();
   const { first } = occurrencesOf(ctx, pactId, timezone);
   const service = SERVICE_OF_KIND[row.evidence_kind];
@@ -261,6 +262,7 @@ export function pactPage(ctx: CoreContext, accountId: AccountId, pactId: string)
     ) as PactWaitingItem[],
     history: pactHistory(ctx, row, timezone, first, now),
     connectionProblem: row.stage === "active" && service !== null ? connectionProblem(ctx, accountId, service) : null,
+    ending: endingOf(row),
   };
   return { ok: true, pact };
 }
@@ -354,7 +356,7 @@ export function waitingSince(item: TodayWaitingItem): Date {
 export function checkedPact(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pact: NewPact,
   createdAt: Date,
   existing?: Pick<PactRow, "anki_deck_id" | "anki_rollover_hour">,
@@ -529,22 +531,15 @@ export function moveOneTimeOccurrence(ctx: CoreContext, pactId: string, from: Lo
   if (from === to) return;
   ctx.db
     .prepare(
-      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, miss_accepted_at)
-       SELECT pact_id, ?, outcome, judged_at, bedtime_start, miss_accepted_at FROM occurrence
+      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at)
+       SELECT pact_id, ?, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at FROM occurrence
        WHERE pact_id = ? AND date = ?`,
     )
     .run(to, pactId, from);
   ctx.db
     .prepare(`UPDATE evidence SET occurrence_date = ?, day = ? WHERE pact_id = ? AND occurrence_date = ?`)
     .run(to, to, pactId, from);
-  ctx.db.prepare(`UPDATE excuse_day SET date = ? WHERE pact_id = ? AND date = ?`).run(to, pactId, from);
-  ctx.db
-    .prepare(
-      `UPDATE vacation_day SET date = ? WHERE pact_id = ? AND date = ?
-         AND vacation_id IN (SELECT id FROM vacation WHERE first_day <= ? AND last_day >= ?)`,
-    )
-    .run(to, pactId, from, to, to);
-  ctx.db.prepare(`DELETE FROM vacation_day WHERE pact_id = ? AND date = ?`).run(pactId, from);
+  moveCovers(ctx, pactId, from, to);
   ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, from);
 }
 

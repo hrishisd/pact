@@ -189,9 +189,7 @@ export type CreatePactRefusal =
   | "unknown-recipient"
   | "no-reviewers"
   /** A reviewer isn't the owner's friend (the owner can't review their own pact). */
-  | "not-a-friend"
-  /** Days are counted in the owner's timezone, so one must be confirmed first. */
-  | "no-timezone";
+  | "not-a-friend";
 
 /** The most reminders a pact can have. */
 export const MAX_REMINDERS = 5;
@@ -237,7 +235,7 @@ export interface FirstOccurrence {
 
 export type FirstOccurrenceResult =
   | { ok: true; firstOccurrence: FirstOccurrence }
-  | { ok: false; reason: "no-days" | "deadline-too-soon" | "no-timezone" | "pact-not-found" };
+  | { ok: false; reason: "no-days" | "deadline-too-soon" | "pact-not-found" };
 
 /** A card in the Pacts tab. */
 export interface PactSummary {
@@ -251,12 +249,16 @@ export interface PactSummary {
   editWindowClosesAt: Date | null;
 }
 
-/** Active from creation; Ended once its end date passes, an approved change request ends it, or a One-time occurrence is judged. */
+/**
+ * Active from creation; Ended once its end date passes, an approved end
+ * request takes effect (once the occurrence open at approval closes), or a
+ * One-time occurrence is judged.
+ */
 export type PactStage = "active" | "ended";
 
 /**
  * The pact page: a pact's terms as its owner sees them. Ended, it says
- * when: when an approved change request ended it, when its end date passed
+ * when: when an approved end request took effect, when its end date passed
  * (once its last occurrence closed), or for One-time when its occurrence was
  * judged.
  */
@@ -269,7 +271,7 @@ interface PactPageTerms {
    * they go off. On a Camera pact: that time on each scheduled day, before
    * the day's due time, while it has no evidence. On an Oura Ring pact: each
    * scheduled night (from 18:00 that evening, else the morning after), before
-   * the in-bed-by time, even if the owner is already in bed. Neither fires on
+   * the in-bed-by time, unless Oura has already judged the night. Neither fires on
    * an occurrence an approved excuse covers. On a One-time pact each is
    * dated and goes off once, before the deadline, unless evidence was
    * already submitted.
@@ -290,6 +292,12 @@ interface PactPageTerms {
   history: PactHistory;
   /** An Active Oura Ring or Anki pact whose owner's Oura or AnkiWeb can't be read: the same alert as on Today. Else null. */
   connectionProblem: ConnectionProblem | null;
+  /**
+   * An Active pact whose end was approved while an occurrence was open: it
+   * Ends once that occurrence (or week), whose last day is `lastDay`, is
+   * judged. Else null.
+   */
+  ending: { lastDay: LocalDate } | null;
 }
 
 /**
@@ -753,8 +761,8 @@ export type SavePushSubscriptionResult = { ok: true } | { ok: false; reason: "in
 export interface Profile {
   email: string;
   name: string;
-  /** IANA zone, e.g. "America/New_York". Null until the user confirms one. */
-  timezone: string | null;
+  /** IANA zone, e.g. "America/New_York": the browser's at sign-up, until changed in Profile. */
+  timezone: string;
   /** The connections the account has made, if any. */
   connections: Connection[];
 }
@@ -1284,32 +1292,43 @@ export interface NewExcuse extends ExcuseDates {
   reason: string;
 }
 
+/** The excuse or vacation that counts for an occurrence, waiting for approval or approved. */
+export interface OccurrenceCover {
+  kind: "excuse" | "vacation";
+  state: "waiting" | "approved";
+}
+
 /**
- * Where one of a pact's occurrences stands. `excuse` says whether an excuse
- * waiting for approval, or an approved one, covers a day not judged yet.
+ * Where one of a pact's occurrences stands: its outcome, the cover that
+ * counts for it, and where it is in time.
  */
-export type OccurrenceStatus =
-  | { kind: "satisfied" }
-  | { kind: "excused" }
-  | {
-      kind: "missed";
-      /** Its penalty. */
-      penaltyCents: number;
-      /** Held while an excuse or vacation for it waits for approval. */
-      held: boolean;
-      /** Set when what holds it is a vacation waiting for approval, not an excuse. */
-      heldByVacation?: true;
-      /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
-      excusableUntil: Date;
-    }
-  | {
-      kind: "not-judged";
-      opensAt: Date;
-      dueAt: Date;
-      /** Its evidence is waiting for a reviewer. */
-      evidenceWaiting: boolean;
-      excuse: "waiting" | "approved" | null;
-    };
+export type OccurrenceStatus = OccurrenceStanding &
+  (
+    | { kind: "satisfied" }
+    | { kind: "excused" }
+    | {
+        kind: "missed";
+        /** Its penalty, held while `cover` waits for approval. */
+        penaltyCents: number;
+        /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+        excusableUntil: Date;
+      }
+    | {
+        kind: "not-judged";
+        opensAt: Date;
+        dueAt: Date;
+        /** Its evidence is waiting for a reviewer. */
+        evidenceWaiting: boolean;
+      }
+  );
+
+/** What every `OccurrenceStatus` carries, whatever its outcome. */
+export interface OccurrenceStanding {
+  /** The excuse or vacation that counts for it; null when none does (a rejected or withdrawn one doesn't). */
+  cover: OccurrenceCover | null;
+  /** Before it opens, open, or past its due time. */
+  phase: "ahead" | "open" | "past-due";
+}
 
 /** One of a pact's days on an excuse, and where it stands. */
 export interface ExcuseDay {
@@ -1331,8 +1350,8 @@ export type ExcuseSkipReason = "satisfied" | "excused" | "on-waiting-excuse" | "
 export interface ExcusePreview {
   /** Oldest first, as they stand before filing. */
   covered: ExcuseDay[];
-  /** Oldest first. */
-  skipped: { date: LocalDate; reason: ExcuseSkipReason }[];
+  /** Oldest first, dated as `ExcuseDay`s are: a Weekly count week by its Monday, through its Sunday. */
+  skipped: (Pick<ExcuseDay, "date" | "through"> & { reason: ExcuseSkipReason })[];
   /** The penalties filing would hold: those of the covered Missed days. */
   heldCents: number;
 }
@@ -1392,9 +1411,6 @@ export interface VacationPactOption {
   alreadyOpen: boolean;
 }
 
-/** Plan a vacation counts days in the owner's timezone, so one must be confirmed first. */
-type NoTimezone = "no-timezone";
-
 /** What Plan a vacation offers: the owner's Active pacts whose edit window has closed. */
 export interface VacationOptions {
   /** The owner's today: the first day has to be after it. */
@@ -1404,8 +1420,6 @@ export interface VacationOptions {
   /** Some Active pact is still in its edit window, so it isn't offered yet. */
   inEditWindow: boolean;
 }
-
-export type VacationOptionsResult = { ok: true; options: VacationOptions } | { ok: false; reason: NoTimezone };
 
 /** The days and pacts an owner picks for a vacation. */
 export interface VacationRequest {
@@ -1478,7 +1492,7 @@ export type VacationDatesRefusal =
 export type VacationPreviewResult =
   | { ok: true; preview: VacationPreview }
   /** pact-not-offered: a ticked pact isn't one the options let the owner tick. */
-  | { ok: false; reason: VacationDatesRefusal | "pact-not-offered" | NoTimezone };
+  | { ok: false; reason: VacationDatesRefusal | "pact-not-offered" };
 
 export type FileVacationRefusal =
   | Extract<VacationPreviewResult, { ok: false }>["reason"]
@@ -1664,6 +1678,8 @@ export type ChangePactRefusal =
   | "pact-ended"
   /** A change request waits: until it's decided or withdrawn, only the name, the reminders and added reviewers change. */
   | "change-request-waiting"
+  /** An approved end waits for the occurrence open at approval: until the pact Ends, only the name, the reminders and added reviewers change. */
+  | "end-approved"
   /** The start date can't change once the first occurrence has opened. */
   | "pact-started"
   /** Fixed days and Weekly count can't be swapped after the edit window: a new pact is needed. */
@@ -1683,11 +1699,26 @@ export type RequestEndResult =
   | { ok: true; changeRequestId: string }
   | {
       ok: false;
-      reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" | TextTooLong;
+      reason:
+        "pact-not-found" | "edit-window-open" | "pact-ended" | "end-approved" | "change-request-waiting" | TextTooLong;
     };
 
 /** A change request, as its reviewers and its owner see it. */
-export type ChangeRequestView = ChangeRequestBase & ({ endsPact: true } | TermsChangeRequest);
+export type ChangeRequestView = ChangeRequestBase & (EndRequest | TermsChangeRequest);
+
+/** A request to end the pact. */
+interface EndRequest {
+  endsPact: true;
+  /** While it waits: when the pact would End if it were approved now. Null once decided or withdrawn. */
+  ending: EndTiming | null;
+}
+
+/**
+ * When an approved end takes effect: once the occurrence (or Weekly count
+ * week) open at approval is judged, `lastDay` being the last day of its
+ * period, which the pact keeps; or at once, when none is open.
+ */
+export type EndTiming = { kind: "after"; lastDay: LocalDate } | { kind: "at-once" };
 
 interface ChangeRequestBase {
   /** The change request's id. */

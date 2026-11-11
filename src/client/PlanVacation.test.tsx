@@ -21,7 +21,7 @@ function pact(id: string, name: string, reviewers: { id: string; name: string }[
 }
 
 function options(recurring: VacationPactOption[], oneTime: VacationPactOption[] = []): VacationOptionsResponse {
-  return { ok: true, options: { today: "2026-12-09", recurring, oneTime, inEditWindow: false } };
+  return { today: "2026-12-09", recurring, oneTime, inEditWindow: false };
 }
 
 /** A preview that covers one Monday of every ticked pact; "All pacts" when `all` are ticked. */

@@ -9,6 +9,7 @@ import type {
   ApprovalReason,
   ChangeRequestView,
   CurrentTerms,
+  EndTiming,
   EvidenceKind,
   Schedule,
   TermChange,
@@ -40,6 +41,20 @@ export const TERM_LABELS: Record<Term, string> = {
 export function termLabel(term: Term, schedule: Pick<Schedule, "kind">): string {
   if (term === "schedule" && schedule.kind === "weekly-count") return "Target";
   return term === "schedule" && schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term];
+}
+
+/**
+ * When an approved end takes effect, for a pact of this evidence kind and
+ * kind of schedule: "after Sun Jan 18, once this week is judged", or "now".
+ */
+export function endsWhenText(
+  terms: { evidenceKind: EvidenceKind; schedule: Pick<Schedule, "kind"> },
+  ending: EndTiming,
+): string {
+  if (ending.kind === "at-once") return "now";
+  const open =
+    terms.schedule.kind === "weekly-count" ? "this week" : terms.evidenceKind === "oura" ? "that night" : "that day";
+  return `after ${formatDate(ending.lastDay)}, once ${open} is judged`;
 }
 
 /** What a pact's open occurrence is called in "Today keeps $5 per miss": This week, for Weekly count. */

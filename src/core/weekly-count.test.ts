@@ -12,7 +12,7 @@ import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
 import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
-import { cards, changed, ledgerHistory, ok, owed, pactOf } from "./testing/queries.ts";
+import { cards, changed, ledgerHistory, ok, owed, pactOf, penalties } from "./testing/queries.ts";
 
 // The pact is made in the reference week; its first week is the next one,
 // "Mon+1".
@@ -62,7 +62,8 @@ describe("the spec's examples", () => {
         status: {
           kind: "missed",
           penaltyCents: 500,
-          held: false,
+          cover: null,
+          phase: "past-due",
           excusableUntil: new Date(s.at("Mon+2 00:00").getTime() + 2 * DAY_MS),
           recipientName: "Sam",
           rejection: null,
@@ -304,7 +305,12 @@ describe("evidence", () => {
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status.kind).toBe("not-judged");
     await s.advanceTo("Mon+2 00:00");
 
-    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: null });
+    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
+      kind: "satisfied",
+      cover: null,
+      phase: "past-due",
+      approvedBy: null,
+    });
   });
 
   test("evidence waiting for a decision at the end of Sunday holds the outcome until it's decided", async () => {
@@ -326,7 +332,8 @@ describe("evidence", () => {
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
       kind: "missed",
       penaltyCents: 500,
-      held: false,
+      cover: null,
+      phase: "past-due",
       excusableUntil: new Date(s.at("Tue+2 10:00").getTime() + 2 * DAY_MS),
       recipientName: "Sam",
       rejection: null,
@@ -346,8 +353,76 @@ describe("evidence", () => {
 
     await reviewer.decide(late, { kind: "approve" });
 
-    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: null });
+    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
+      kind: "satisfied",
+      cover: null,
+      phase: "past-due",
+      approvedBy: null,
+    });
     expect(owed(owner)).toBe(0);
+  });
+});
+
+describe("a week judged by a late decision", () => {
+  /** The owner's pushes about Piano, as kind and title, in delivery order. */
+  const pushes = (s: Scenario, owner: AccountHandle) =>
+    s.notifier.sentTo(owner).map((n) => [n.kind, n.payload.title] as const);
+
+  test("a 3× week whose third session is approved after Sunday is Satisfied, with no Missed push", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(3), { penaltyCents: 1000 });
+    await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
+    await sessionAt(s, "Tue+1 10:00", owner, reviewer, piano);
+    s.setClockTo("Sun+1 22:00");
+    const late = await submit(owner, piano);
+    await s.advanceTo("Mon+2 10:00");
+
+    ok(await reviewer.decide(late, { kind: "approve" }));
+
+    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status.kind).toBe("satisfied");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+    expect(owed(owner)).toBe(0);
+  });
+
+  test("with two sessions in all, a late approval of the second leaves the week Missed and says so after the decision", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(3), { penaltyCents: 1000 });
+    await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
+    s.setClockTo("Sun+1 22:00");
+    const late = await submit(owner, piano);
+    await s.advanceTo("Mon+2 10:00");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+
+    ok(await reviewer.decide(late, { kind: "approve" }));
+
+    expect(pushes(s, owner).slice(-2)).toEqual([
+      ["evidence-decided", "reviewer approved your evidence"],
+      ["missed-occurrence", "Piano is Missed"],
+    ]);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toHaveLength(1);
+    expect(penalties(owner).map((p) => [p.date, p.cents])).toEqual([[s.date("Mon+1"), 1000]]);
+    await s.advanceTo("Tue+2 10:00");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toHaveLength(1);
+  });
+
+  test("a late rejection that leaves the week short says it's Missed", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(2));
+    await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
+    s.setClockTo("Sun+1 22:00");
+    const late = await submit(owner, piano);
+    await s.advanceTo("Mon+2 10:00");
+
+    ok(await reviewer.decide(late, { kind: "reject", reason: "Blurry" }));
+
+    expect(pushes(s, owner).slice(-2)).toEqual([
+      ["evidence-decided", "reviewer rejected your evidence"],
+      ["missed-occurrence", "Piano is Missed"],
+    ]);
+    expect(owed(owner)).toBe(500);
   });
 });
 
@@ -456,7 +531,8 @@ describe("excuses", () => {
               opensAt: s.at("Mon+1 00:00"),
               dueAt: s.at("Mon+2 00:00"),
               evidenceWaiting: false,
-              excuse: null,
+              cover: null,
+              phase: "open",
             },
           },
         ],
@@ -472,11 +548,33 @@ describe("excuses", () => {
     await s.advanceTo("Mon+2 00:00");
 
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence).toEqual({
-      status: { kind: "excused", excuseApproval: { reviewerName: "reviewer", reason: "Recital" } },
+      status: {
+        kind: "excused",
+        cover: { kind: "excuse", state: "approved" },
+        phase: "past-due",
+        excuseApproval: { reviewerName: "reviewer", reason: "Recital" },
+      },
       detail: null,
     });
     expect(owed(owner)).toBe(0);
     expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+  });
+
+  test("a week an excuse can't cover is skipped by its Monday, through its Sunday", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(3));
+    s.setClockTo("Tue+1 10:00");
+    await owner.fileExcuse(piano, { from: s.date("Wed+1"), to: s.date("Wed+1"), reason: "Recital" }, []);
+
+    expect(owner.excusePreview(piano, { from: s.date("Thu+1"), to: s.date("Thu+1") })).toEqual({
+      ok: true,
+      preview: {
+        covered: [],
+        skipped: [{ date: s.date("Mon+1"), through: s.date("Sun+1"), reason: "on-waiting-excuse" }],
+        heldCents: 0,
+      },
+    });
   });
 
   test("a short week can be excused within 48 hours, which removes all its penalties", async () => {
@@ -495,6 +593,8 @@ describe("excuses", () => {
 
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
       kind: "excused",
+      cover: { kind: "excuse", state: "approved" },
+      phase: "past-due",
       excuseApproval: { reviewerName: "reviewer", reason: "Sick all week" },
     });
     expect(owed(owner)).toBe(0);
@@ -745,7 +845,7 @@ describe("dates, bills and the heat map", () => {
       {
         date: s.date("Mon+1"),
         progress: { sessions: 2, waiting: 0, target: 2 },
-        occurrence: { status: { kind: "satisfied", approvedBy: null }, detail: null },
+        occurrence: { status: { kind: "satisfied", cover: null, phase: "past-due", approvedBy: null }, detail: null },
       },
       {
         date: s.date("Mon+2"),
@@ -756,7 +856,8 @@ describe("dates, bills and the heat map", () => {
             opensAt: s.at("Mon+2 00:00"),
             dueAt: s.at("Mon+3 00:00"),
             evidenceWaiting: false,
-            excuse: null,
+            cover: null,
+            phase: "open",
             excuseApproval: null,
           },
           detail: null,

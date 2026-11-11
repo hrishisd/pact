@@ -30,13 +30,6 @@ type Session =
   | { kind: "failed"; error: unknown }
   | { kind: "signed-in"; profile: MeResponse };
 
-/** A profile whose timezone the user has confirmed. */
-type ConfirmedProfile = MeResponse & { timezone: string };
-
-function isConfirmed(profile: MeResponse): profile is ConfirmedProfile {
-  return profile.timezone !== null;
-}
-
 export function App() {
   const [session, setSession] = useState<Session>({ kind: "loading" });
   const [inviteToken, setInviteToken] = useState(() => inviteTokenFromPath(window.location.pathname));
@@ -62,8 +55,8 @@ export function App() {
 
   if (session.kind === "loading") return <div className="screen" aria-busy="true" />;
 
-  // An invite link shows before the sign-in gate and the timezone screen:
-  // accept first, then the app asks for a timezone if it still needs one.
+  // An invite link shows before the sign-in gate: sign in from it, accept,
+  // then the app.
   if (inviteToken !== null && session.kind !== "failed") {
     const leave = () => {
       window.history.replaceState(null, "", "/");
@@ -92,7 +85,6 @@ export function App() {
       const { profile } = session;
       const updated = (next: MeResponse) => setSession({ kind: "signed-in", profile: next });
       const signedOut = () => setSession({ kind: "signed-out" });
-      if (!isConfirmed(profile)) return <ConfirmTimezone profile={profile} onConfirmed={updated} />;
       return <Shell profile={profile} onProfile={updated} onSignedOut={signedOut} />;
     }
   }
@@ -126,58 +118,9 @@ function SignIn() {
 
 // ---------- Timezone ----------
 
-function detectedTimezone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
-
 function allTimezones(including: string): string[] {
   const zones = Intl.supportedValuesOf("timeZone");
   return zones.includes(including) ? zones : [including, ...zones].sort();
-}
-
-/** Story 2: first sign-in shows the browser's timezone for the user to confirm or change. */
-function ConfirmTimezone({
-  profile,
-  onConfirmed,
-}: {
-  profile: MeResponse;
-  onConfirmed: (p: ConfirmedProfile) => void;
-}) {
-  const detected = useMemo(detectedTimezone, []);
-  const [picking, setPicking] = useState(false);
-  const [zone, setZone] = useState(detected);
-  const { save, saving, error } = useSaveTimezone(profile, onConfirmed);
-
-  return (
-    <Centered>
-      <div className="stack">
-        <span className="label">Welcome, {firstName(profile.name)}</span>
-        <h1>Is this your timezone?</h1>
-        <p className="muted">We’ll use it for due times and deadlines.</p>
-      </div>
-      <div className="card">
-        {picking ? (
-          <TimezoneSelect value={zone} onChange={setZone} />
-        ) : (
-          <div className="stack-sm">
-            <b className="tz-name">{prettyZone(detected)}</b>
-            <span className="muted small">{zoneDetail(detected)}</span>
-          </div>
-        )}
-      </div>
-      {error && <p className="error">{error}</p>}
-      <div className="stack">
-        <button className="btn primary block" disabled={saving} onClick={() => save(zone)}>
-          {picking ? "Use this timezone" : "Confirm"}
-        </button>
-        {!picking && (
-          <button className="btn block" onClick={() => setPicking(true)}>
-            Pick another
-          </button>
-        )}
-      </div>
-    </Centered>
-  );
 }
 
 function TimezoneSelect({ value, onChange }: { value: string; onChange: (zone: string) => void }) {
@@ -196,7 +139,7 @@ function TimezoneSelect({ value, onChange }: { value: string; onChange: (zone: s
   );
 }
 
-function useSaveTimezone(profile: MeResponse, onSaved: (p: ConfirmedProfile) => void) {
+function useSaveTimezone(profile: MeResponse, onSaved: (p: MeResponse) => void) {
   const { busy, error, run } = useSend(
     async (timezone: string) => {
       const result = await api.setTimezone(timezone);
@@ -231,7 +174,7 @@ function Shell({
   onProfile,
   onSignedOut,
 }: {
-  profile: ConfirmedProfile;
+  profile: MeResponse;
   onProfile: (p: MeResponse) => void;
   onSignedOut: () => void;
 }) {
@@ -515,7 +458,7 @@ function ProfileSheet({
   onProfile,
   onSignedOut,
 }: {
-  profile: ConfirmedProfile;
+  profile: MeResponse;
   push: Push;
   onSetUpNotifications: () => void;
   /** What the Vacation section says on opening, such as "Sent to Sam for approval." */
@@ -607,7 +550,7 @@ function ConnectionsSection({
   timezone,
   onProfile,
 }: {
-  connections: ConfirmedProfile["connections"];
+  connections: MeResponse["connections"];
   timezone: string;
   onProfile: (p: MeResponse) => void;
 }) {
@@ -651,7 +594,7 @@ function ConnectionRow({
   timezone,
   onProfile,
 }: {
-  connection: ConfirmedProfile["connections"][number];
+  connection: MeResponse["connections"][number];
   timezone: string;
   onProfile: (p: MeResponse) => void;
 }) {
@@ -744,25 +687,10 @@ function ConnectionRow({
 
 // ---------- helpers ----------
 
-function firstName(name: string): string {
-  return name.trim().split(/\s+/)[0] || "there";
-}
-
 /** "America/Los_Angeles" → "Los Angeles (America)". */
 function prettyZone(zone: string): string {
   const parts = zone.split("/");
   if (parts.length < 2) return zone.replaceAll("_", " ");
   const city = parts.slice(1).join(" / ").replaceAll("_", " ");
   return `${city} (${parts[0]})`;
-}
-
-/** e.g. "GMT-07:00 · now 3:42 PM". */
-function zoneDetail(zone: string): string {
-  const now = new Date();
-  const offset =
-    new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longOffset" })
-      .formatToParts(now)
-      .find((p) => p.type === "timeZoneName")?.value ?? "";
-  const time = new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit" }).format(now);
-  return `${offset} · now ${time}`;
 }

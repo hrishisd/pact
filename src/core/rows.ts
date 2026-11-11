@@ -56,6 +56,8 @@ export interface PactRow {
   created_at: string;
   reviewers_notified_at: string | null;
   ended_at: string | null;
+  /** When an end was approved that waits for the occurrence open then (`endAfter`, ending.ts). */
+  end_approved_at: string | null;
   /** JSON: "HH:MM" each, in the order they go off. */
   reminders: string;
   reminded_through: string | null;
@@ -106,20 +108,6 @@ export function scheduleOf(json: string): Schedule {
 /** A pact's stored reminders: "HH:MM" times, or dated ones on One-time. */
 export function remindersOf(json: string): string[] {
   return JSON.parse(json) as string[];
-}
-
-/**
- * A pact owner's timezone. Every pact's owner has one: creating a pact needs
- * it, and a timezone can be changed but never cleared.
- */
-export function ownerZone(timezone: string | null, ownerId: AccountId): string {
-  if (timezone === null) throw new Error(`account ${ownerId} owns a pact but has no timezone`);
-  return timezone;
-}
-
-/** The timezone of an account that owns a pact, read from its row. */
-export function timezoneOf(ctx: CoreContext, accountId: AccountId): string {
-  return ownerZone(accountRow(ctx, accountId).timezone, accountId);
 }
 
 /**
@@ -297,11 +285,8 @@ export function lastAnkiCheck(ctx: CoreContext, pactId: string, date: LocalDate,
 }
 
 /** The account's email, name and timezone; throws `UnknownAccountError` when there's no such account. */
-export function accountRow(
-  ctx: CoreContext,
-  accountId: AccountId,
-): { email: string; name: string; timezone: string | null } {
-  const row = ctx.one<{ email: string; name: string; timezone: string | null }>(
+export function accountRow(ctx: CoreContext, accountId: AccountId): { email: string; name: string; timezone: string } {
+  const row = ctx.one<{ email: string; name: string; timezone: string }>(
     `SELECT email, name, timezone FROM account WHERE id = ?`,
     accountId,
   );

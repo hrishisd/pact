@@ -67,7 +67,6 @@ export const PROBLEMS: Record<Problem, string> = {
   "unknown-recipient": "That recipient isn't on your list. Pick another.",
   "no-reviewers": "Pick at least one reviewer.",
   "not-a-friend": "Only friends can be reviewers.",
-  "no-timezone": "Confirm your timezone first.",
   "pact-not-found": "This pact wasn't found.",
   "edit-window-closed": `The ${EDIT_WINDOW_TEXT} are up.`,
   "evidence-kind-fixed": "A pact's evidence kind can't change.",

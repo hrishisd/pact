@@ -8,19 +8,13 @@ import type { AccountId, LocalDate } from "../shared/types.ts";
 import { earlierDate, laterDate, localDateOf } from "./calendar.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { enqueueMissed, judge } from "./judging.ts";
-import {
-  endedBedtimePacts,
-  excuseOn,
-  isJudged,
-  pactsToJudge,
-  stillToDo,
-  type PactToJudge,
-} from "./occurrence-state.ts";
+import { coverOn, keepsToDo } from "./covers.ts";
+import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { nightStartsAt, noOuraDataPushAt, type Occurrence } from "./occurrences.ts";
-import { deadlineWallClock, nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
+import { nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
 import type { OuraSleepPeriod, OuraSource } from "./ports.ts";
-import { accountRow, connectionProblem, occurrencesOf, ouraOffset, ownerZone, termsOn } from "./rows.ts";
+import { accountRow, connectionProblem, occurrencesOf, ouraOffset } from "./rows.ts";
+import { settle } from "./settle.ts";
 
 /** The core ignores a check of Oura now this soon after the account's last one. */
 const OURA_CHECK_INTERVAL_MS = 15_000;
@@ -70,16 +64,12 @@ export function noteOuraClock(ctx: CoreContext, sleep: Map<AccountId, OuraSleepP
  * got to, whose window (18:00 that day to 18:00 the next) has started by `t`.
  * An Ended pact still has the nights that fell due before it Ended.
  */
-function nightsWaiting(
-  ctx: CoreContext,
-  t: Date,
-  owner?: AccountId,
-): { pact: PactToJudge & { timezone: string }; night: Occurrence }[] {
+function nightsWaiting(ctx: CoreContext, t: Date, owner?: AccountId): { pact: PactToJudge; night: Occurrence }[] {
   const waiting = [];
   for (const pact of [...pactsToJudge(ctx), ...endedBedtimePacts(ctx)]) {
     if (pact.evidence_kind !== "oura") continue;
     if (owner !== undefined && pact.owner_account_id !== owner) continue;
-    const timezone = ownerZone(pact.timezone, pact.owner_account_id);
+    const { timezone } = pact;
     const endedAt = pact.ended_at === null ? null : new Date(pact.ended_at);
     const until = endedAt !== null && endedAt.getTime() < t.getTime() ? endedAt : t;
     const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
@@ -88,7 +78,7 @@ function nightsWaiting(
     for (const night of occurrencesOf(ctx, pact.id, timezone).between(from, localDateOf(until, timezone))) {
       if (nightStartsAt(night.date, timezone, offset).getTime() > t.getTime()) break;
       if (endedAt !== null && night.dueAt.getTime() > endedAt.getTime()) break;
-      if (!isJudged(ctx, pact.id, night.date)) waiting.push({ pact: { ...pact, timezone }, night });
+      if (!isJudged(ctx, pact.id, night.date)) waiting.push({ pact, night });
     }
   }
   return waiting;
@@ -149,7 +139,7 @@ export function pushNoOuraData(ctx: CoreContext, t: Date): void {
     const offset = ouraOffset(ctx, pact.owner_account_id, pact.timezone);
     if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone, offset).getTime()) continue;
     if (t.getTime() >= night.closesAt.getTime() || isJudged(ctx, pact.id, night.date)) continue;
-    if (!stillToDo(ctx, pact.id, night.date)) continue;
+    if (!keepsToDo(coverOn(ctx, pact.id, night.date))) continue;
     const sent = ctx.db
       .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
       .run(pact.owner_account_id, night.date);
@@ -169,13 +159,11 @@ export function pushNoOuraData(ctx: CoreContext, t: Date): void {
 }
 
 /**
- * Judges bedtime nights in order, from where judging got to. A night is
- * decided by the first long_sleep Oura reports starting in its window,
- * read on Oura's own clock: Satisfied if it starts before the in-bed-by time,
- * else Missed, as of `t`, when it arrived. With an approved excuse or
- * vacation, a late period makes it Excused instead, and so does no period by
- * 18:00 the next day, then. With neither by then, it's Missed then. The first night still
- * waiting stops the cursor.
+ * Settles bedtime nights in order, from where judging got to, as of `t`.
+ * A night is decided by the first long_sleep Oura reports starting in its
+ * window, read on Oura's own clock, which is kept on the night as it
+ * arrives (`verdictOf` has the rules). A night with none by 18:00 the next
+ * day is judged then. The first night still waiting stops the cursor.
  */
 export function judgeNights(
   ctx: CoreContext,
@@ -186,31 +174,27 @@ export function judgeNights(
   const stopped = new Set<string>();
   for (const { pact, night } of nightsWaiting(ctx, t, owner)) {
     if (stopped.has(pact.id)) continue;
-    const inBedBy = termsOn(ctx, pact.id, night.date).in_bed_by!;
     const period = (sleep.get(pact.owner_account_id) ?? [])
       .filter((p) => p.type === "long_sleep" && nightOf(p.bedtime_start) === night.date)
       .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start), "en-US"))[0];
-    const excuse = excuseOn(ctx, pact.id, night.date);
-    const satisfied = period !== undefined && wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
-    // As for a photo: an on-time bedtime beats an approved excuse, and an approved excuse beats a late one.
-    // So with no period yet, an approved excuse waits for one until the night closes.
-    if (excuse === "approved" && !satisfied && (period !== undefined || night.closesAt.getTime() <= t.getTime())) {
-      judge(ctx, pact.id, night.date, "excused", period ? t : night.closesAt);
-    } else if (period) {
-      judge(ctx, pact.id, night.date, satisfied ? "satisfied" : "missed", t);
-      ctx.db
-        .prepare(`UPDATE occurrence SET bedtime_start = ? WHERE pact_id = ? AND date = ?`)
-        .run(period.bedtime_start, pact.id, night.date);
-      if (!satisfied && excuse === null) enqueueMissed(ctx, pact.id, night.date);
-    } else if (night.closesAt.getTime() <= t.getTime()) {
-      judge(ctx, pact.id, night.date, "missed", night.closesAt);
-      if (excuse === null) enqueueMissed(ctx, pact.id, night.date);
-    } else {
+    if (period) noteFirstSleep(ctx, pact.id, night.date, period.bedtime_start, t);
+    if (settle(ctx, pact.id, night.date, t) === null) {
       stopped.add(pact.id);
       continue;
     }
     ctx.db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(night.date, pact.id);
   }
+}
+
+/** Keeps the night's first sleep period, and when it arrived, unless it already has one. */
+function noteFirstSleep(ctx: CoreContext, pactId: string, date: LocalDate, bedtimeStart: string, at: Date): void {
+  ctx.db.prepare(`INSERT INTO occurrence (pact_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`).run(pactId, date);
+  ctx.db
+    .prepare(
+      `UPDATE occurrence SET bedtime_start = ?, bedtime_arrived_at = ?
+         WHERE pact_id = ? AND date = ? AND bedtime_start IS NULL`,
+    )
+    .run(bedtimeStart, at.toISOString(), pactId, date);
 }
 
 /** What `fetchSleep` got from Oura: sleep by account, the accounts it answered "disconnected" for, and when it was asked. */

@@ -18,14 +18,10 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { judge, judgeWeek } from "./judging.ts";
+import { coveredSql } from "./covers.ts";
 import {
-  dueAfterEnd,
   evidenceDecision,
-  excuseCoversSql,
-  excuseOn,
   isJudged,
-  judgingReached,
   MISSED_THROUGH_REJECTION,
   rejection,
   WEEKLY_COUNT_PACT,
@@ -41,7 +37,6 @@ import {
   decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
-  isWeekly,
   occurrencesOf,
   ownPact,
   pactName,
@@ -58,6 +53,7 @@ import {
   type ReviewOutcome,
   type ReviewStateRow,
 } from "./rows.ts";
+import { settle } from "./settle.ts";
 
 export async function submitEvidence(
   ctx: CoreContext,
@@ -222,11 +218,11 @@ export function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): Revie
 }
 
 /**
- * Records a reviewer's decision on waiting evidence and tells the owner.
- * A rejection is final: it judges the occurrence Missed as of now, open or
- * not. An approval judges it Satisfied as of now once judging has reached it,
- * since it was waiting on this decision; before that, judging at the due
- * time will.
+ * Records a reviewer's decision on waiting evidence, tells the owner, and
+ * settles the occurrence (`verdictOf` has the rules): a rejection of a Fixed
+ * day or One-time occurrence judges it Missed as of now, open or not; a
+ * decision on an occurrence past its due time that was waiting on it judges
+ * it as of now.
  */
 export function decideEvidence(
   ctx: CoreContext,
@@ -237,26 +233,6 @@ export function decideEvidence(
   const { outcome, reason } = decided;
   const now = ctx.clock.now();
   recordDecision(ctx, "evidence", evidence.id, decided, reviewerId, now);
-  // A day ahead with an approved excuse or vacation stays for judging at its due time, which makes it Excused.
-  const excusedAhead = excuseOn(ctx, evidence.pact_id, evidence.occurrence_date) === "approved";
-  const occurrence = occurrencesOf(ctx, evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date);
-  if (occurrence === null || dueAfterEnd(ctx, evidence.pact_id, occurrence)) {
-    // The pact Ended before the day fell due: it's never judged.
-  } else if (isWeekly(ctx, evidence.pact_id)) {
-    // A week waiting on this decision past its due time is judged now; the decision told the owner.
-    if (
-      !isJudged(ctx, evidence.pact_id, evidence.occurrence_date) &&
-      judgingReached(ctx, evidence.pact_id, evidence.occurrence_date, now)
-    ) {
-      judgeWeek(ctx, evidence.pact_id, occurrence, now, false);
-    }
-  } else if (
-    !isJudged(ctx, evidence.pact_id, evidence.occurrence_date) &&
-    ((outcome === "rejected" && !excusedAhead) || judgingReached(ctx, evidence.pact_id, evidence.occurrence_date, now))
-  ) {
-    const judged = outcome === "approved" ? "satisfied" : excusedAhead ? "excused" : "missed";
-    judge(ctx, evidence.pact_id, evidence.occurrence_date, judged, now);
-  }
   ctx.enqueue({
     recipient: evidence.owner_account_id,
     kind: "evidence-decided",
@@ -271,6 +247,8 @@ export function decideEvidence(
       url: outcome === "approved" ? APP_PATHS.pact(evidence.pact_id) : APP_PATHS.today,
     },
   });
+  // After the decision's push, so a Missed push it causes comes second.
+  settle(ctx, evidence.pact_id, evidence.occurrence_date, now);
 }
 
 /** The photos of some evidence, in the order taken. */
@@ -294,7 +272,7 @@ export function evidencePhotoIds(ctx: CoreContext, evidenceId: string): string[]
 export function evidenceAcceptance(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pactId: string,
   photoCount: number,
   at: Date,
@@ -304,7 +282,7 @@ export function evidenceAcceptance(
     pactId,
     ownerId,
   );
-  if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!row) return { ok: false, reason: "pact-not-found" };
   // Oura reports a bedtime night; there's never a photo to submit.
   if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
   if (photoCount === 0) return { ok: false, reason: "no-photos" };
@@ -380,10 +358,11 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
        JOIN recipient ON recipient.id = penalty.recipient_id
        WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.miss_accepted_at IS NULL
          AND ${MISSED_THROUGH_REJECTION}
-         AND NOT ${excuseCoversSql(
+         AND NOT ${coveredSql(
            "occurrence.pact_id",
            "occurrence.date",
-           "(excuse.decision IS NULL OR excuse.filed_at >= occurrence.judged_at)",
+           "any",
+           "cover.decision IS NULL OR cover.filed_at >= occurrence.judged_at",
          )}
        ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
     ownerId,
@@ -436,10 +415,11 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
          AND NOT EXISTS (SELECT 1 FROM occurrence
                          WHERE occurrence.pact_id = evidence.pact_id AND occurrence.date = evidence.occurrence_date
                            AND occurrence.outcome IS NOT NULL)
-         AND NOT ${excuseCoversSql(
+         AND NOT ${coveredSql(
            "evidence.pact_id",
            "evidence.occurrence_date",
-           "(excuse.decision IS NULL OR excuse.decision = 'approved' OR excuse.filed_at >= evidence.decided_at)",
+           "any",
+           "cover.decision IS NULL OR cover.decision = 'approved' OR cover.filed_at >= evidence.decided_at",
          )}
        ORDER BY evidence.decided_at DESC, pact.name, pact.id`,
     ownerId,

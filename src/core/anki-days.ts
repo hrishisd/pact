@@ -4,10 +4,12 @@
 import type { AccountId, AnkiDecksResult } from "../shared/types.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { judge, noteAnkiResult } from "./judging.ts";
-import { excuseOn, isJudged } from "./occurrence-state.ts";
+import { noteAnkiResult, type AnkiChecksRunning } from "./judging.ts";
+import { coverOn } from "./covers.ts";
+import { isJudged } from "./occurrence-state.ts";
 import type { AnkiCountsResult, AnkiSource } from "./ports.ts";
-import { accountRow, ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf, ownerZone } from "./rows.ts";
+import { runningAnkiChecks, settle } from "./settle.ts";
+import { accountRow, ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
 
 /** The core ignores a check of AnkiWeb now this soon after the account's last one. */
 const ANKI_CHECK_INTERVAL_MS = 15_000;
@@ -80,7 +82,7 @@ export async function checkAnki(
   if (ankiDaysWaiting(ctx, now, accountId).length === 0) return;
   polling.checks.set(accountId, now.getTime());
   const fetched = await fetchAnki(ctx, ankiSource, polling, now, accountId);
-  await command(() => recordAnkiChecks(ctx, fetched));
+  await command(() => recordAnkiChecks(ctx, fetched, polling.checksRunning));
 }
 
 /**
@@ -93,7 +95,7 @@ function ankiDaysWaiting(
   t: Date,
   owner?: AccountId,
 ): { pactId: string; account: AccountId; deckId: string }[] {
-  const pacts = ctx.all<{ id: string; owner_account_id: AccountId; timezone: string | null }>(
+  const pacts = ctx.all<{ id: string; owner_account_id: AccountId; timezone: string }>(
     `SELECT pact.id, pact.owner_account_id, account.timezone
        FROM pact
        JOIN account ON account.id = pact.owner_account_id
@@ -105,10 +107,10 @@ function ankiDaysWaiting(
     owner ?? null,
   );
   return pacts.flatMap((pact) => {
-    const open = occurrencesOf(ctx, pact.id, ownerZone(pact.timezone, pact.owner_account_id)).openAt(t);
+    const open = occurrencesOf(ctx, pact.id, pact.timezone).openAt(t);
     if (!open || t.getTime() >= open.dueAt.getTime() || isJudged(ctx, pact.id, open.date)) return [];
     // An approved excuse or vacation covers it: it's Excused at its due time whatever the deck shows.
-    if (excuseOn(ctx, pact.id, open.date) === "approved") return [];
+    if (coverOn(ctx, pact.id, open.date)?.state === "approved") return [];
     return [{ pactId: pact.id, account: pact.owner_account_id, deckId: ankiDeckOn(ctx, pact.id, open.date) }];
   });
 }
@@ -161,13 +163,14 @@ export async function fetchAnki(
 }
 
 /**
- * Records each check AnkiWeb answered, deck by deck, and judges each Active
- * Anki pact on a checked deck Satisfied as of the check when it found the
- * deck finished (New, Learn and Due all 0) for the pact's day, evaluated
- * before that day's due time. A deck gone from the collection records
- * nothing. A refused login marks the connection Needs reconnecting.
+ * Records each check AnkiWeb answered, deck by deck, and settles the day of
+ * each Active Anki pact on a checked deck it found finished (New, Learn and
+ * Due all 0) for that day, evaluated before its due time: Satisfied as of
+ * the check (`verdictOf`), given the checks of AnkiWeb still running. A deck
+ * gone from the collection records nothing. A refused login marks the
+ * connection Needs reconnecting.
  */
-export function recordAnkiChecks(ctx: CoreContext, fetched: FetchedAnki[]): void {
+export function recordAnkiChecks(ctx: CoreContext, fetched: FetchedAnki[], checksRunning: AnkiChecksRunning): void {
   for (const { account, result, checkedAt } of fetched) {
     if (!result.ok) {
       markDisconnected(ctx, "anki", account, checkedAt);
@@ -195,22 +198,21 @@ export function recordAnkiChecks(ctx: CoreContext, fetched: FetchedAnki[]): void
           checkedAt.toISOString(),
         );
     }
-    const pacts = ctx.all<{ id: string; timezone: string | null }>(
+    const pacts = ctx.all<{ id: string; timezone: string }>(
       `SELECT pact.id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.owner_account_id = ? AND pact.stage = 'active' AND pact.evidence_kind = 'anki'
          ORDER BY pact.created_at, pact.id`,
       account,
     );
     for (const pact of pacts) {
-      const { includes, covering } = occurrencesOf(ctx, pact.id, ownerZone(pact.timezone, account));
+      const { includes, covering } = occurrencesOf(ctx, pact.id, pact.timezone);
       const day = includes(ankiDate) ? covering(ankiDate) : null;
       if (!day || asOf.getTime() >= day.dueAt.getTime() || checkedAt.getTime() >= day.dueAt.getTime()) continue;
       // The deck the day is on: a deck change approved since it opened applies from the next.
       const counts = result.decks[ankiDeckOn(ctx, pact.id, day.date)];
       if (!counts || counts.new + counts.learn + counts.review > 0) continue;
-      if (isJudged(ctx, pact.id, day.date)) continue;
-      judge(ctx, pact.id, day.date, "satisfied", checkedAt);
-      noteAnkiResult(ctx, pact.id, day.date, { cardsLeft: 0, checkedAt });
+      const settled = settle(ctx, pact.id, day.date, checkedAt, runningAnkiChecks(checksRunning, account));
+      if (settled?.to.kind === "satisfied") noteAnkiResult(ctx, pact.id, day.date, { cardsLeft: 0, checkedAt });
     }
   }
 }

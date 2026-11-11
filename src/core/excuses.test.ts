@@ -5,11 +5,11 @@
 // rejected-excuse alert.
 
 import { describe, expect, test } from "vitest";
-import type { NewExcuse, TodayAlert } from "../shared/types.ts";
+import type { NewExcuse, TodayAlert, Weekday } from "../shared/types.ts";
 import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import type { AccountHandle } from "./testing/scenario.ts";
 import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
-import { changed, ledgerHistory, ok, owed } from "./testing/queries.ts";
+import { changed, ledgerHistory, ok, owed, penaltyDays, statusOn } from "./testing/queries.ts";
 
 /** An excuse for `from` to `to` (or just `from`), "Sick with the flu". */
 function sick(from: string, to = from): NewExcuse {
@@ -200,14 +200,14 @@ describe("days ahead", () => {
       excuse: {
         days: [s.date("Fri"), s.date("Sat"), s.date("Sun")].map((date) => ({
           date,
-          status: { kind: "not-judged", evidenceWaiting: false, excuse: "waiting" },
+          status: { kind: "not-judged", evidenceWaiting: false, cover: { kind: "excuse", state: "waiting" } },
         })),
       },
     });
     await s.advanceTo("Thu 10:00");
     await reviewer.decide(excuseId, { kind: "approve" });
     expect(owner.excuse(excuseId)).toMatchObject({
-      excuse: { days: [{ status: { kind: "not-judged", excuse: "approved" } }, {}, {}] },
+      excuse: { days: [{ status: { kind: "not-judged", cover: { kind: "excuse", state: "approved" } } }, {}, {}] },
     });
     await s.advanceTo("2026-01-12T05:00:00Z"); // Mon Jan 12, 00:00 in New York
 
@@ -250,7 +250,14 @@ describe("an excuse covering today", () => {
     expect(owed(owner)).toBe(0);
     expect(ledgerHistory(owner)).toEqual([expect.objectContaining({ occurrenceDate: s.date("Mon"), held: true })]);
     expect(owner.excuse(excuseId)).toMatchObject({
-      excuse: { days: [{ date: s.date("Mon"), status: { kind: "missed", penaltyCents: 500, held: true } }] },
+      excuse: {
+        days: [
+          {
+            date: s.date("Mon"),
+            status: { kind: "missed", penaltyCents: 500, cover: { kind: "excuse", state: "waiting" } },
+          },
+        ],
+      },
     });
     // A miss with an excuse waiting isn't on Today's Missed section, and isn't pushed.
     expect(owner.today().sections).toEqual([]);
@@ -275,7 +282,7 @@ describe("which days an excuse covers", () => {
     await s.advanceTo("Fri 08:00");
 
     const dates = { from: s.date("Mon"), to: s.date("Sun") };
-    const fridayOpen = { kind: "not-judged", evidenceWaiting: false, excuse: null };
+    const fridayOpen = { kind: "not-judged", evidenceWaiting: false, cover: null, phase: "open" };
     expect(owner.excusePreview(gym, dates)).toEqual({
       ok: true,
       preview: {
@@ -675,7 +682,13 @@ describe("the review item", () => {
       days: [
         {
           date: s.date("Mon"),
-          status: { kind: "missed", penaltyCents: 500, held: true, excusableUntil: s.at("Thu 00:00") },
+          status: {
+            kind: "missed",
+            penaltyCents: 500,
+            excusableUntil: s.at("Thu 00:00"),
+            cover: { kind: "excuse", state: "waiting" },
+            phase: "past-due",
+          },
         },
         {
           date: s.date("Wed"),
@@ -684,7 +697,8 @@ describe("the review item", () => {
             opensAt: s.at("Wed 00:00"),
             dueAt: s.at("Thu 00:00"),
             evidenceWaiting: false,
-            excuse: "waiting",
+            cover: { kind: "excuse", state: "waiting" },
+            phase: "ahead",
           },
         },
       ],
@@ -740,7 +754,7 @@ describe("the pact page", () => {
         today: s.date("Wed"),
         recentDays: [
           { date: s.date("Wed"), status: expect.objectContaining({ kind: "not-judged" }) },
-          { date: s.date("Mon"), status: expect.objectContaining({ kind: "missed", held: false }) },
+          { date: s.date("Mon"), status: expect.objectContaining({ kind: "missed", cover: null }) },
         ],
       },
     });
@@ -771,5 +785,61 @@ describe("restarts", () => {
     expect(owner.today().waiting).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId })]);
     await reviewer.decide(excuseId, { kind: "approve" });
     expect(ledgerHistory(owner)).toEqual([]);
+  });
+});
+
+describe("a change that removes a covered day", () => {
+  /** Puts `days` in force for Gym: approved by the reviewer, or at once if the change is stricter. */
+  async function changeDays(owner: AccountHandle, reviewer: AccountHandle, gym: string, days: Weekday[]) {
+    const result = ok(await owner.changePact(gym, changed(owner, gym, { schedule: { kind: "fixed-days", days } })));
+    if (result.outcome.kind !== "stricter") ok(await reviewer.decide(changeRequestIdOf(result), { kind: "approve" }));
+  }
+
+  test("a Wednesday dropped by an approved change and added back by a later one isn't excused any more: it is Missed with its penalty", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Tue 12:00");
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon+1"), s.date("Sun+1")));
+    ok(await reviewer.decide(excuseId, { kind: "approve" }));
+
+    await changeDays(owner, reviewer, gym, ["mon", "fri"]);
+    await changeDays(owner, reviewer, gym, MON_WED_FRI);
+    await s.advanceTo("Sat 00:00");
+    await s.advanceTo("Thu+1 00:00");
+
+    expect(statusOn(owner, gym, s.date("Wed+1"))).toBe("missed");
+    expect(penaltyDays(owner)).toContain(s.date("Wed+1"));
+    // The days the schedule kept stay excused.
+    expect(statusOn(owner, gym, s.date("Mon+1"))).toBe("excused");
+  });
+
+  test("a judged day's excuse is untouched by a later change that removes the day", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Tue 08:00");
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Mon")));
+    ok(await reviewer.decide(excuseId, { kind: "approve" }));
+
+    await changeDays(owner, reviewer, gym, ["wed", "fri"]);
+    await changeDays(owner, reviewer, gym, MON_WED_FRI);
+
+    expect(statusOn(owner, gym, s.date("Mon"))).toBe("excused");
+    expect(owner.excuse(excuseId)).toMatchObject({
+      excuse: { days: [{ date: s.date("Mon"), status: { kind: "excused" } }] },
+    });
+  });
+
+  test("an excuse whose only day was removed shows no days on its page and in the Review Queue, and still waits", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Tue 12:00");
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Wed+1")));
+
+    await changeDays(owner, reviewer, gym, ["mon", "fri"]);
+    await changeDays(owner, reviewer, gym, MON_WED_FRI);
+
+    expect(owner.excuse(excuseId)).toMatchObject({ excuse: { days: [] } });
+    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId, days: [] })]);
   });
 });

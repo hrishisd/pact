@@ -6,7 +6,7 @@ import { describe, expect, test } from "vitest";
 import { MON_WED_FRI, ownerWithReviewers, submit } from "./testing/camera-pact.ts";
 import { referenceDate, scenario, type AccountHandle } from "./testing/scenario.ts";
 import type { Today } from "../shared/types.ts";
-import { cards, ledgerHistory } from "./testing/queries.ts";
+import { cards, ledgerHistory, statusOn } from "./testing/queries.ts";
 
 describe("judging at the end of a scheduled day", () => {
   test("Mon/Wed/Fri $5 pact: Monday ends with no evidence, so it's Missed and the ledger shows $5 owed to the recipient", async () => {
@@ -45,7 +45,7 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 0 })]);
     expect(owner.today()).toEqual({
       ...nothingOnToday,
-      yesterday: gymMonday({ kind: "satisfied", approvedBy: "reviewer" }),
+      yesterday: gymMonday({ kind: "satisfied", cover: null, phase: "past-due", approvedBy: "reviewer" }),
     });
   });
 
@@ -118,6 +118,24 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.today().alerts).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon") })]);
   });
 
+  test("evidence waiting when the tick passed Monday, approved after a move west put Monday's end back ahead: Satisfied when Monday ends in the new timezone", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+    const evidenceId = await submit(owner, gym);
+    await s.advanceTo("Tue 00:30");
+    // In Los Angeles Monday ends at Tue 03:00 New York time.
+    await owner.setTimezone("America/Los_Angeles");
+    s.setClockTo("Tue 01:00");
+    await reviewer.decide(evidenceId, { kind: "approve" });
+
+    await s.advanceTo("Tue 03:00");
+
+    expect(statusOn(owner, gym, s.date("Mon"))).toBe("satisfied");
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
+  });
+
   test("evidence approved while Monday is open is judged Satisfied when Monday ends", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
@@ -183,7 +201,7 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
     expect(owner.today()).toEqual({
       ...nothingOnToday,
-      yesterday: gymMonday({ kind: "satisfied", approvedBy: "reviewer" }),
+      yesterday: gymMonday({ kind: "satisfied", cover: null, phase: "past-due", approvedBy: "reviewer" }),
     });
   });
 });

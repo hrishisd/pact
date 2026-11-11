@@ -3,12 +3,62 @@ import { UnknownAccountError } from "./rows.ts";
 import { scenario } from "./testing/scenario.ts";
 
 describe("sign-in", () => {
-  test("the operator's first sign-in creates their account, with no timezone confirmed yet", async () => {
+  test("the operator's first sign-in creates their account, with the browser's timezone", async () => {
     const s = scenario();
 
-    const owner = await s.signIn("owner");
+    const owner = await s.signIn("owner", { timezone: "Europe/London" });
 
-    expect(owner.profile()).toEqual({ email: "owner@example.test", name: "owner", timezone: null, connections: [] });
+    expect(owner.profile()).toEqual({
+      email: "owner@example.test",
+      name: "owner",
+      timezone: "Europe/London",
+      connections: [],
+    });
+  });
+
+  test("the timezone is stored under its canonical name", async () => {
+    const s = scenario();
+
+    const owner = await s.signIn("owner", { timezone: "america/new_york" });
+
+    expect(owner.profile().timezone).toBe("America/New_York");
+  });
+
+  test.each([
+    ["missing", undefined],
+    ["blank", ""],
+    ["unrecognised", "Mars/Olympus_Mons"],
+    ["UTC-offset", "+05:00"],
+  ])("a sign-in with a %s timezone is not refused, and the account gets UTC", async (_, timezone) => {
+    const s = scenario();
+
+    const result = await s.core.signIn(
+      { email: "owner@example.test", name: "owner" },
+      timezone === undefined ? {} : { timezone },
+    );
+
+    if (!result.ok) throw new Error(result.reason);
+    expect(s.core.as(result.accountId).profile().timezone).toBe("UTC");
+  });
+
+  test("an invited person's new account gets their browser's timezone", async () => {
+    const s = scenario();
+    const owner = await s.signIn("owner");
+    const { token } = await owner.createInvite();
+
+    const friend = await s.signIn("friend", { inviteToken: token, timezone: "Asia/Tokyo" });
+
+    expect(friend.profile().timezone).toBe("Asia/Tokyo");
+  });
+
+  test("signing in again keeps the account's timezone, whatever the browser's", async () => {
+    const s = scenario();
+    const owner = await s.signIn("owner", { timezone: "Europe/London" });
+    await owner.setTimezone("America/Chicago");
+
+    await s.signIn("owner", { timezone: "Asia/Tokyo" });
+
+    expect(owner.profile().timezone).toBe("America/Chicago");
   });
 
   test("signing in again returns the same account", async () => {

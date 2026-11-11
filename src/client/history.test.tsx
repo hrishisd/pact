@@ -1,20 +1,35 @@
 import { screen, within } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import type { Json } from "../shared/api.ts";
+import { addDays } from "../shared/calendar.ts";
 import type { HeatMapDay, HeatMapWeek, OccurrenceRecord } from "../shared/types.ts";
-import { HeatMap } from "./history.tsx";
+import { HeatMap, monthLabels, weeksOf } from "./history.tsx";
 import { cameraPact, renderWithUser } from "./testing/render.tsx";
 
 const NOW = Date.parse("2026-01-12T17:00:00Z");
 const VACATION = { from: "2026-01-07", to: "2026-01-10" };
 
-const satisfied: Json<OccurrenceRecord> = { status: { kind: "satisfied", approvedBy: "Ana" }, detail: null };
+const satisfied: Json<OccurrenceRecord> = {
+  status: { kind: "satisfied", approvedBy: "Ana", cover: null, phase: "past-due" },
+  detail: null,
+};
 const excused: Json<OccurrenceRecord> = {
-  status: { kind: "excused", excuseApproval: { reviewerName: "Ana", reason: "Red-eye flight back" } },
+  status: {
+    kind: "excused",
+    excuseApproval: { reviewerName: "Ana", reason: "Red-eye flight back" },
+    cover: { kind: "excuse", state: "approved" },
+    phase: "past-due",
+  },
   detail: null,
 };
 const onVacation: Json<OccurrenceRecord> = {
-  status: { kind: "excused", excuseApproval: null, vacation: VACATION },
+  status: {
+    kind: "excused",
+    excuseApproval: null,
+    vacation: VACATION,
+    cover: { kind: "vacation", state: "approved" },
+    phase: "past-due",
+  },
   detail: null,
 };
 
@@ -73,7 +88,7 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
   const weeks: Json<HeatMapWeek>[] = [
     {
       date: "2025-12-29",
-      occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null } },
+      occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" } },
       progress: { sessions: 3, waiting: 0, target: 3 },
     },
     { date: "2026-01-05", occurrence: onVacation, progress: { sessions: 0, waiting: 0, target: 3 } },
@@ -82,6 +97,8 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
     <HeatMap
       pact={{
         ...cameraPact(),
+        evidenceKind: "camera",
+        dueBy: null,
         schedule: { kind: "weekly-count", target: 3 },
         history: { kind: "weekly-count", weeks },
       }}
@@ -98,4 +115,73 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
   const detail = screen.getByRole("status");
   expect(within(detail).getByText("Vacation").className).toBe("chip c-vac");
   expect(within(detail).getByText("Vacation, Jan 7 – 10. Excused, no penalty.")).toBeTruthy();
+});
+
+test("a day with an excuse waiting for approval has a square and a chip that say the same", async () => {
+  const waiting: Json<OccurrenceRecord> = {
+    status: {
+      kind: "not-judged",
+      opensAt: "2026-01-12T05:00:00Z",
+      dueAt: "2026-01-13T05:00:00Z",
+      evidenceWaiting: false,
+      cover: { kind: "excuse", state: "waiting" },
+      phase: "open",
+      excuseApproval: null,
+    },
+    detail: null,
+  };
+  const { user } = renderWithUser(
+    <HeatMap
+      pact={{ ...cameraPact(), history: { kind: "fixed-days", days: [{ date: "2026-01-12", occurrence: waiting }] } }}
+      timezone="America/New_York"
+      now={NOW}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "Mon Jan 12: Excuse waiting for approval" }));
+
+  const detail = screen.getByRole("status");
+  expect(within(detail).getByText("Excuse waiting for approval").className).toBe("chip c-wait");
+});
+
+/** `count` heat map days from `first`, none with an occurrence. */
+function days(first: string, count: number) {
+  return Array.from({ length: count }, (_, i) => ({ date: addDays(first, i), occurrence: null }));
+}
+
+describe("the daily heat map's weeks", () => {
+  test("start on the Monday before the first day, with blanks for the days before it", () => {
+    const weeks = weeksOf(days("2026-01-01", 11));
+    expect(weeks.map((week) => week.monday)).toEqual(["2025-12-29", "2026-01-05"]);
+    expect(weeks[0]!.days.map((day) => day?.date ?? null)).toEqual([
+      null,
+      null,
+      null,
+      "2026-01-01",
+      "2026-01-02",
+      "2026-01-03",
+      "2026-01-04",
+    ]);
+    expect(weeks[1]!.days.map((day) => day?.date)).toEqual(days("2026-01-05", 7).map((day) => day.date));
+  });
+
+  test("none without days", () => {
+    expect(weeksOf([])).toEqual([]);
+  });
+});
+
+describe("the daily heat map's month labels", () => {
+  test.each([
+    // A week whose Monday is in a month's first 7 days is labelled with it, across a year's end.
+    ["2025-12-10", 63, ["Dec", "", "", "", "Jan", "", "", "", "Feb", ""]],
+    // The 7th still counts; the first week stays blank when the next one is labelled.
+    ["2026-09-01", 14, ["", "Sep", ""]],
+    // The first week's Monday, not its first day, is what's labelled.
+    ["2026-07-08", 14, ["Jul", "", ""]],
+    // An unlabelled first week takes its Monday's month when the next one has none either.
+    ["2026-01-14", 7, ["Jan", ""]],
+    ["2026-01-21", 14, ["Jan", "", "Feb"]],
+  ])("from %s for %d days: %j", (first, count, labels) => {
+    expect(monthLabels(weeksOf(days(first, count)))).toEqual(labels);
+  });
 });

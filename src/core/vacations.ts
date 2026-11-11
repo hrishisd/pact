@@ -21,7 +21,6 @@ import {
   type WithdrawVacationResult,
   type VacationOccurrence,
   type VacationOptions,
-  type VacationOptionsResult,
   type VacationPactOption,
   type VacationPactPreview,
   type VacationPacts,
@@ -32,11 +31,13 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { excuseApprovedDays } from "./excuses.ts";
-import { dueAfterEnd, excuseOn, occurrenceSpan, vacationOn } from "./occurrence-state.ts";
+import { coverOn, coversOn } from "./covers.ts";
+import type { AnkiChecksRunning } from "./judging.ts";
+import { dueAfterEnd, occurrenceSpan } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { isLocalDate } from "./pact-rules.ts";
+import { settleCoverDays } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
@@ -46,7 +47,6 @@ import {
   friendsSortedByName,
   occurrencesOf,
   recordDecision,
-  timezoneOf,
   reviewersOf,
   scheduleOf,
   thread,
@@ -55,10 +55,9 @@ import {
   type ReviewOutcome,
 } from "./rows.ts";
 
-export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptionsResult {
+export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
   const now = ctx.clock.now();
   const { timezone } = accountRow(ctx, ownerId);
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   const offered = offeredPacts(ctx, ownerId, timezone, now).map((pact): VacationPactOption => ({
     ...pact,
     reviewers: friendsSortedByName(ctx, reviewersOf(ctx, pact.id)),
@@ -69,13 +68,12 @@ export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationO
       ownerId,
       editWindowCutoff(ctx, now),
     ) !== undefined;
-  const options: VacationOptions = {
+  return {
     today: localDateOf(now, timezone),
     recurring: offered.filter((pact) => pact.schedule.kind !== "one-time"),
     oneTime: offered.filter((pact) => pact.schedule.kind === "one-time"),
     inEditWindow,
   };
-  return { ok: true, options };
 }
 
 /** The owner's Active pacts whose edit window has closed at `now`: recurring ones first, then One-time, each oldest first. */
@@ -108,7 +106,6 @@ function offeredPacts(
 
 export function previewVacation(ctx: CoreContext, ownerId: AccountId, request: VacationRequest): VacationPreviewResult {
   const { timezone } = accountRow(ctx, ownerId);
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   return vacationPreview(ctx, ownerId, timezone, request, ctx.clock.now());
 }
 
@@ -191,11 +188,10 @@ function vacationSkipReason(
   now: Date,
 ): VacationSkipReason | null {
   if (occurrence.opensAt.getTime() <= now.getTime()) return "already-open";
-  // Before excuseOn, which counts an approved vacation as an approved excuse.
-  if (vacationOn(ctx, pactId, occurrence.date) !== null) return "on-vacation";
-  const excuse = excuseOn(ctx, pactId, occurrence.date);
-  if (excuse === "waiting") return "on-waiting-excuse";
-  return excuse === "approved" ? "excused" : null;
+  if (coversOn(ctx, pactId, occurrence.date).some((c) => c.kind === "vacation")) return "on-vacation";
+  const cover = coverOn(ctx, pactId, occurrence.date);
+  if (cover?.state === "waiting") return "on-waiting-excuse";
+  return cover?.state === "approved" ? "excused" : null;
 }
 
 /**
@@ -223,7 +219,6 @@ function summaryOf(
 export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: NewVacation): FileVacationResult {
   const now = ctx.clock.now();
   const { timezone } = accountRow(ctx, ownerId);
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   const pactIds = [...new Set(vacation.pactIds)];
   const reviewerIds = [...new Set(vacation.reviewerIds)];
   if (pactIds.length === 0) return { ok: false, reason: "no-pacts" };
@@ -289,7 +284,7 @@ const VACATION_COLUMNS = `vacation.id, vacation.owner_account_id, vacation.first
  * approved whose last day hasn't passed, soonest first.
  */
 export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCard[] {
-  const today = localDateOf(ctx.clock.now(), timezoneOf(ctx, ownerId));
+  const today = localDateOf(ctx.clock.now(), accountRow(ctx, ownerId).timezone);
   const rows = ctx.all<VacationRow>(
     `SELECT ${VACATION_COLUMNS} FROM vacation
      WHERE owner_account_id = ? AND withdrawn_at IS NULL
@@ -307,7 +302,7 @@ export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCar
 
 /** The owner's approved vacation whose last day passed most recently, or null when none has. */
 export function lastVacation(ctx: CoreContext, ownerId: AccountId): LastVacation | null {
-  const today = localDateOf(ctx.clock.now(), timezoneOf(ctx, ownerId));
+  const today = localDateOf(ctx.clock.now(), accountRow(ctx, ownerId).timezone);
   const row = ctx.one<{ first_day: LocalDate; last_day: LocalDate }>(
     `SELECT first_day, last_day FROM vacation
      WHERE owner_account_id = ? AND decision = 'approved' AND last_day < ?
@@ -548,29 +543,22 @@ export function vacationToDecide(
 
 /**
  * Records a picked reviewer's decision on a vacation waiting for approval
- * and tells the owner. Approved: every covered day of every pact is
- * excused at once, as an approved excuse's are (`excuseApprovedDays`).
- * Rejected: its held penalties are owed by no longer waiting, its days are
- * judged as usual, and Today raises an alert (`rejectedVacationAlerts`).
+ * and tells the owner, and settles every covered day of every pact
+ * (`settleCoverDays`). Approved: they're excused at once, as an approved
+ * excuse's are. Rejected: its held penalties are owed by no longer waiting,
+ * its days are judged as usual, and Today raises an alert
+ * (`rejectedVacationAlerts`).
  */
 export function decideVacation(
   ctx: CoreContext,
   vacation: VacationToDecide,
   decided: Decided,
   reviewerId: AccountId,
+  ankiChecksRunning: AnkiChecksRunning,
 ): void {
   const now = ctx.clock.now();
   recordDecision(ctx, "vacation", vacation.id, decided, reviewerId, now);
-  if (decided.outcome === "approved") {
-    const days = ctx.all<{ pact_id: string; date: LocalDate }>(
-      `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
-      vacation.id,
-    );
-    for (const pactId of new Set(days.map((day) => day.pact_id))) {
-      const dates = days.filter((day) => day.pact_id === pactId).map((day) => day.date);
-      excuseApprovedDays(ctx, pactId, dates, now);
-    }
-  }
+  settleVacationDays(ctx, vacation.id, now, ankiChecksRunning);
   const { first_day: from, last_day: to } = vacation;
   ctx.enqueue({
     recipient: vacation.owner_account_id,
@@ -588,7 +576,12 @@ export function decideVacation(
 }
 
 /** The owner withdraws their vacation `vacationId` while it waits for approval. */
-export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationId: string): WithdrawVacationResult {
+export function withdrawVacation(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  vacationId: string,
+  ankiChecksRunning: AnkiChecksRunning,
+): WithdrawVacationResult {
   const row = ctx.one<{ decision: string | null; withdrawn_at: string | null }>(
     `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
     vacationId,
@@ -596,8 +589,22 @@ export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationI
   );
   if (!row) return { ok: false, reason: "vacation-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
-  ctx.db.prepare(`UPDATE vacation SET withdrawn_at = ? WHERE id = ?`).run(ctx.clock.now().toISOString(), vacationId);
+  const now = ctx.clock.now();
+  ctx.db.prepare(`UPDATE vacation SET withdrawn_at = ? WHERE id = ?`).run(now.toISOString(), vacationId);
+  settleVacationDays(ctx, vacationId, now, ankiChecksRunning);
   return { ok: true };
+}
+
+/** Settles every day the vacation covers, pact by pact (`settleCoverDays`). */
+function settleVacationDays(ctx: CoreContext, vacationId: string, now: Date, anki: AnkiChecksRunning): void {
+  const days = ctx.all<{ pact_id: string; date: LocalDate }>(
+    `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
+    vacationId,
+  );
+  for (const pactId of new Set(days.map((day) => day.pact_id))) {
+    const dates = days.filter((day) => day.pact_id === pactId).map((day) => day.date);
+    settleCoverDays(ctx, pactId, dates, now, anki);
+  }
 }
 
 /**
@@ -605,12 +612,9 @@ export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationI
  * its days. A rejected vacation's alert stands only while this holds.
  */
 export function noLaterFilingSql(alias: string): string {
-  return `NOT EXISTS (SELECT 1 FROM vacation_day AS mine
-    WHERE mine.vacation_id = ${alias}.id
-      AND (EXISTS (SELECT 1 FROM vacation_day AS other JOIN vacation AS later ON later.id = other.vacation_id
-                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)
-        OR EXISTS (SELECT 1 FROM excuse_day AS other JOIN excuse AS later ON later.id = other.excuse_id
-                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)))`;
+  return `NOT EXISTS (SELECT 1 FROM cover_day_v AS mine
+    JOIN cover_day_v AS later ON later.pact_id = mine.pact_id AND later.date = mine.date
+    WHERE mine.kind = 'vacation' AND mine.id = ${alias}.id AND later.filed_at > ${alias}.filed_at)`;
 }
 
 /**

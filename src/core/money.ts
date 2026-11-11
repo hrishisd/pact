@@ -35,7 +35,8 @@ import {
 } from "./bill-math.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { excuseCoversSql, rejection, vacationCoversSql, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
+import { coveredSql } from "./covers.ts";
+import { rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
 import { settingIsOff, tellAll } from "./outbox.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
@@ -47,13 +48,11 @@ import {
   decisionDetails,
   friendsSortedByName,
   mergeByTime,
-  ownerZone,
   recipientName,
   recordDecision,
   reviewStateColumns,
   reviewStateOf,
   thread,
-  timezoneOf,
   type Decided,
   type ReviewOutcome,
   type ReviewStateRow,
@@ -83,12 +82,13 @@ function paymentReviewersSql(owner: string, recipient: string): string {
 /** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
 const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
 /** SQL: the `penalty` row is held: an excuse or vacation waiting for approval covers its occurrence. */
-const PENALTY_HELD = excuseCoversSql("penalty.pact_id", "penalty.occurrence_date", "excuse.decision IS NULL");
+const PENALTY_HELD = coveredSql("penalty.pact_id", "penalty.occurrence_date", "waiting");
 /** SQL: what holds the `penalty` row is a vacation waiting for approval. */
-const PENALTY_HELD_BY_VACATION = vacationCoversSql(
+const PENALTY_HELD_BY_VACATION = coveredSql(
   "penalty.pact_id",
   "penalty.occurrence_date",
-  "excuse.decision IS NULL",
+  "waiting",
+  "cover.kind = 'vacation'",
 );
 
 export async function recordPayment(
@@ -185,12 +185,7 @@ export function ledgerPage(ctx: CoreContext, accountId: AccountId, recipientId: 
 }
 
 /** The owner's penalties for `recipientId`, newest first, each with what's paid and the bill it's on or will make. */
-function ledgerPenalties(
-  ctx: CoreContext,
-  ownerId: AccountId,
-  recipientId: string,
-  timezone: string | null,
-): LedgerPenalty[] {
+function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: string, timezone: string): LedgerPenalty[] {
   const penaltyRows = ctx.all<{
     id: string;
     pact_id: string;
@@ -236,7 +231,7 @@ function ledgerPenalties(
         : {
             // A rejected excuse or vacation releases it to the next bill it can make, as if it had never been held.
             kind: !held ? "next-bill" : row.held_by_vacation === 1 ? "if-vacation-rejected" : "if-excuse-rejected",
-            billedOn: nextBillDay(new Date(row.added_at), ctx.clock.now(), ownerZone(timezone, ownerId)),
+            billedOn: nextBillDay(new Date(row.added_at), ctx.clock.now(), timezone),
           },
     };
   });
@@ -380,8 +375,7 @@ export function makeBills(ctx: CoreContext, t: Date): void {
     timezone: string;
     created_at: string;
     billed_through: string | null;
-  }>(`SELECT id, timezone, created_at, billed_through FROM account WHERE timezone IS NOT NULL
-              ORDER BY created_at, id`);
+  }>(`SELECT id, timezone, created_at, billed_through FROM account ORDER BY created_at, id`);
   for (const account of accounts) {
     const from = new Date(account.billed_through ?? account.created_at);
     if (from.getTime() >= t.getTime()) continue;
@@ -443,14 +437,25 @@ function billOwner(ctx: CoreContext, ownerId: AccountId, wednesday: LocalDate, t
  * payment awaiting approval just pauses it, so a rejected one resumes it.
  */
 export function remindOverdue(ctx: CoreContext, t: Date): void {
-  const ledgers = ctx.all<{ owner_account_id: AccountId; recipient_id: string; owner_name: string }>(
-    `SELECT DISTINCT bill.owner_account_id, bill.recipient_id, account.name AS owner_name
+  const ledgers = ctx.all<{
+    owner_account_id: AccountId;
+    recipient_id: string;
+    owner_name: string;
+    owner_timezone: string;
+  }>(
+    `SELECT DISTINCT bill.owner_account_id, bill.recipient_id, account.name AS owner_name,
+              account.timezone AS owner_timezone
        FROM bill JOIN account ON account.id = bill.owner_account_id
        WHERE bill.due_at <= ?
        ORDER BY bill.owner_account_id, bill.recipient_id`,
     t.toISOString(),
   );
-  for (const { owner_account_id: ownerId, recipient_id: recipientId, owner_name: ownerName } of ledgers) {
+  for (const {
+    owner_account_id: ownerId,
+    recipient_id: recipientId,
+    owner_name: ownerName,
+    owner_timezone: timezone,
+  } of ledgers) {
     const overdue = overdueOf(billsOf(ctx, ownerId, recipientId), t);
     if (overdue === null) continue;
     const notice = overdueNotice(ctx, ownerId, recipientId, overdue.spellStartedAt);
@@ -465,7 +470,7 @@ export function remindOverdue(ctx: CoreContext, t: Date): void {
         payload: {
           recipientId,
           title: `${money(overdue.cents)} overdue to ${name}`,
-          body: `Your ${formatDate(overdue.billedOn)} bill was due ${formatDate(localDateOf(overdue.dueAt, timezoneOf(ctx, ownerId)))}. Record your payment.`,
+          body: `Your ${formatDate(overdue.billedOn)} bill was due ${formatDate(localDateOf(overdue.dueAt, timezone))}. Record your payment.`,
           url: APP_PATHS.ledger(recipientId),
         },
       });
@@ -478,7 +483,7 @@ export function remindOverdue(ctx: CoreContext, t: Date): void {
           payload: {
             recipientId,
             title: `${ownerName} is overdue`,
-            body: `${money(overdue.cents)} to ${name}, due ${formatDate(localDateOf(overdue.dueAt, timezoneOf(ctx, ownerId)))}`,
+            body: `${money(overdue.cents)} to ${name}, due ${formatDate(localDateOf(overdue.dueAt, timezone))}`,
             url: APP_PATHS.today,
           },
         });

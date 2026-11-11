@@ -138,3 +138,61 @@ test("a vacation holding penalties lists each held day, and approving and reject
     screen.getByText("Rejecting makes $15 owed again and leaves the days not judged yet to be judged as usual."),
   ).toBeTruthy();
 });
+
+type ChangeRequestItem = Extract<ReviewQueueResponse[number], { kind: "change-request" }>;
+
+function endRequest(ending: Extract<ChangeRequestItem, { endsPact: true }>["ending"]): ChangeRequestItem {
+  return {
+    kind: "change-request",
+    id: "c1",
+    ownerName: "Jordan Lee",
+    thread: { comments: [], waitingOnReply: false },
+    pactId: "gym",
+    pactName: "Gym",
+    note: null,
+    requestedAt: "2026-01-17T17:00:00.000Z",
+    current: {
+      name: "Gym",
+      description: "Me at the gym",
+      evidenceKind: "camera",
+      schedule: { kind: "weekly-count", target: 3 },
+      dueBy: null,
+      startDate: null,
+      endDate: null,
+      penaltyCents: 500,
+      recipient: { id: "sam", name: "Sam" },
+      reviewers: [{ id: "ana", name: "Ana" }],
+    },
+    endsPact: true,
+    ending,
+  };
+}
+
+test("an end request says the pact ends once the week open now is judged", async () => {
+  stubApi({
+    reviewQueue: answers<ReviewQueueResponse>([endRequest({ kind: "after", lastDay: "2026-01-18" })]),
+    waitingOnReply: answers<ReviewQueueResponse>([]),
+  });
+  renderWithUser(<Review timezone="America/New_York" onQueue={vi.fn()} />);
+
+  const card = await screen.findByRole("article");
+  expect(within(card).getByRole("heading", { name: "End Gym" })).toBeTruthy();
+  expect(
+    within(card).getByText(
+      "Approving ends Gym after Sun Jan 18, once this week is judged. Penalties already judged stay on Jordan Lee's ledger.",
+    ),
+  ).toBeTruthy();
+});
+
+test("an end request with nothing open says approving ends the pact now", async () => {
+  stubApi({
+    reviewQueue: answers<ReviewQueueResponse>([endRequest({ kind: "at-once" })]),
+    waitingOnReply: answers<ReviewQueueResponse>([]),
+  });
+  renderWithUser(<Review timezone="America/New_York" onQueue={vi.fn()} />);
+
+  const card = await screen.findByRole("article");
+  expect(
+    within(card).getByText("Approving ends Gym now. Penalties already judged stay on Jordan Lee's ledger."),
+  ).toBeTruthy();
+});

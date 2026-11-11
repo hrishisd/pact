@@ -1,7 +1,8 @@
 import { screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
-import type { ChangePreviewResponse } from "../shared/api.ts";
-import { ChangePact } from "./ChangePact.tsx";
+import type { ChangePreviewResponse, FriendsResponse, RecipientsResponse } from "../shared/api.ts";
+import type { AppliesNow } from "../shared/types.ts";
+import { ChangePact, nowLine } from "./ChangePact.tsx";
 import { answers, cameraPact, onOurSide, renderWithUser, stubApi } from "./testing/render.tsx";
 
 const APPLIES_NOW: ChangePreviewResponse = { ok: true, preview: { changes: [], outcome: { kind: "at-once" } } };
@@ -13,8 +14,8 @@ function renderChangePact(onDone = vi.fn()) {
 test("friends and recipients that didn't load say so in the Reviewers sheet, rather than No friends yet", async () => {
   stubApi({
     pact: answers({ ok: true, pact: cameraPact() }),
-    friends: answers(onOurSide),
-    recipients: answers(onOurSide),
+    friends: answers<FriendsResponse>(onOurSide),
+    recipients: answers<RecipientsResponse>(onOurSide),
     changePreview: answers(APPLIES_NOW),
   });
   const { user } = renderChangePact();
@@ -63,4 +64,16 @@ test("a refused change offers its button again, with why", async () => {
   expect(await screen.findByText("This pact has Ended.")).toBeTruthy();
   expect(onDone).not.toHaveBeenCalled();
   expect((apply as HTMLButtonElement).disabled).toBe(false);
+});
+
+test.each<[AppliesNow[], string]>([
+  [[], ""],
+  [["name"], " The name changes now."],
+  [["reminders"], " The reminders change now."],
+  [["new-reviewer"], " The new reviewer changes now."],
+  [["new-reviewers"], " The new reviewers change now."],
+  [["name", "new-reviewer"], " The name and the new reviewer change now."],
+  [["name", "reminders", "new-reviewers"], " The name, the reminders and the new reviewers change now."],
+])("what applies now inside %j reads %j", (appliesNow, text) => {
+  expect(nowLine(appliesNow)).toBe(text);
 });

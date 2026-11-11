@@ -179,7 +179,7 @@ describe("signing in with an invite", () => {
     expect(reviewer.profile()).toEqual({
       email: "reviewer@example.test",
       name: "reviewer",
-      timezone: null,
+      timezone: "America/New_York",
       connections: [],
     });
     expect(reviewer.friends()).toEqual([]);

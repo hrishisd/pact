@@ -348,7 +348,8 @@ export function createApp({
   // curl (docs/agents/local-dev.md). Never mounted in production, and refused
   // unless the browser is on this machine (so a phone on the Wi-Fi can't use
   // it). The core decides, as for Google: the operator, or a usable invite
-  // token, which this claims.
+  // token, which this claims. A new account gets `timezone`, as the browser's
+  // would arrive from Google's sign-in; America/New_York when it's left out.
   if (!production) {
     app.get(DEV_SIGN_IN_PATH, async (c, next) => {
       if (!fromThisMachine(c)) return next();
@@ -357,9 +358,10 @@ export function createApp({
       if (!email) return apiError(c, 400, "invalid-request");
       const name = c.req.query("name") ?? email.split("@")[0]!;
       const inviteToken = c.req.query("invite");
+      const timezone = c.req.query("timezone") ?? "America/New_York";
       try {
         const { headers } = await auth.api.devSignIn({
-          body: { email, name, ...(inviteToken !== undefined && { inviteToken }) },
+          body: { email, name, timezone, ...(inviteToken !== undefined && { inviteToken }) },
           returnHeaders: true,
         });
         for (const cookie of headers.getSetCookie()) c.header("Set-Cookie", cookie, { append: true });

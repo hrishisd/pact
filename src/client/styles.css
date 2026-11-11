@@ -135,10 +135,6 @@ p {
   margin-top: 4px;
   font-size: 17px;
 }
-.tz-name {
-  font-family: var(--f-display);
-  font-size: 20px;
-}
 
 /* ---------- app shell ---------- */
 .app {
