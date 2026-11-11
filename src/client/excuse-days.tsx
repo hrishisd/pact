@@ -72,7 +72,10 @@ export function presentOccurrence(status: Status, now: number, options: PresentO
       };
     }
     case "not-judged": {
-      const phase = Date.parse(status.opensAt) > now ? "ahead" : Date.parse(status.dueAt) > now ? "open" : "past-due";
+      // The core's phase, moved on by the browser clock while the screen is open, never back.
+      const clockPhase =
+        Date.parse(status.opensAt) > now ? "ahead" : Date.parse(status.dueAt) > now ? "open" : "past-due";
+      const phase = PHASES.indexOf(clockPhase) > PHASES.indexOf(status.phase) ? clockPhase : status.phase;
       const square: Square = phase === "ahead" ? "ahead" : phase === "open" ? "open" : "not-judged";
       const note =
         phase === "ahead"
@@ -104,6 +107,9 @@ export function presentOccurrence(status: Status, now: number, options: PresentO
     }
   }
 }
+
+/** A day not judged yet's phases, in the order time moves it through them. */
+const PHASES: Status["phase"][] = ["ahead", "open", "past-due"];
 
 /** An occurrence's chip, as `presentOccurrence` words it, or nothing. */
 export function DayChip({ status, now, ...options }: { status: Status; now: number } & PresentOptions) {

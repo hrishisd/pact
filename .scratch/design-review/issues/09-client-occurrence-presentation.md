@@ -1,6 +1,6 @@
 # 09 One client presentation of an occurrence
 
-Status: ready-for-agent
+Status: done
 Blocked by: 08
 
 Closes: C1 (`../code-structure-review.md`, section 1); the client half of architecture ranked item 1; the layer import check from W4.
@@ -32,7 +32,7 @@ So the heat map square and the chip beside it can disagree: a day with a waiting
 
 ## Acceptance criteria
 
-- [ ] The six functions are gone or are thin calls to `presentOccurrence`.
+- [x] The six functions are gone or are thin calls to `presentOccurrence`.
 - [x] New `excuse-days.test.tsx` cases: a waiting excuse and a waiting vacation on a day not judged yet give the same square and different chip text; a Missed day under a waiting vacation reads "Missed · vacation waiting for approval".
 - [x] New `history.test.tsx` case: the square and the chip agree for a day with a waiting excuse.
 - [x] Existing client tests pass, changed only where the copy is fixed on purpose.
@@ -50,3 +50,7 @@ So the heat map square and the chip beside it can disagree: a day with a waiting
 - `squareOf`, `OccurrenceChip` and `dayNote` are gone; `DayChip` and `recentNote` are thin calls to `presentOccurrence`; `DayCard` takes its week from the core (the excuse preview's skipped days now carry `through`, as covered ones do). `missedLine` (`Today.tsx`) is unchanged: it formats a Today Missed card's detail, which carries no `OccurrenceStatus`, and decides nothing about where the occurrence stands. Left for the owner to call; the first criterion stays unticked for it.
 - `history.test.tsx` fixtures gained `cover` and `phase`, which the type requires; the file wasn't type-checked (ticket 25).
 - Copy changes on purpose: heat map square labels are now the chip's words ("Coming up" not "Not open yet", and they name waiting covers and evidence); a waiting vacation on a day not judged yet reads "Vacation waiting for approval" (on One-time History too, where it read "Due <date>"); a day an approved vacation covers reads "Vacation" on the excuse screens, as it already did on History.
+
+Owner decision (2026-11-11): `missedLine` in `Today.tsx` stays as it is, because the Missed card has no occurrence status to present. The criterion counts as met. The review should confirm that `missedLine` repeats no wording `presentOccurrence` decides.
+
+Review (2026-11-11): `missedLine` repeats no wording `presentOccurrence` decides (it formats the Missed card's detail: due time, week progress, Anki and Oura lines). `presentOccurrence` ignored the core's `phase` and placed a day not judged yet by the browser clock alone; it now starts from the core's `phase` and the clock only moves it on (test in `excuse-days.test.tsx`). The excuse preview's skipped weeks carrying `through` gained a core test (`weekly-count.test.ts`).

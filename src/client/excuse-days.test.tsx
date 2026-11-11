@@ -53,3 +53,28 @@ describe("presentOccurrence", () => {
     expect(presented.chip?.text).toBe("Missed · vacation waiting for approval");
   });
 });
+
+describe("where a day not judged yet is in time", () => {
+  const status = {
+    kind: "not-judged",
+    opensAt: "2026-01-21T05:00:00.000Z",
+    dueAt: "2026-01-22T05:00:00.000Z",
+    evidenceWaiting: false,
+    cover: null,
+  } as const;
+  const options = { timezone: "America/New_York" };
+
+  test("starts where the core says, even with the browser clock behind", () => {
+    const presented = presentOccurrence({ ...status, phase: "open" }, Date.parse("2026-01-21T04:00:00.000Z"), options);
+
+    expect(presented.chip?.text).toBe("Due today");
+    expect(presented.square).toBe("open");
+  });
+
+  test("moves on with the browser clock while the screen is open", () => {
+    const presented = presentOccurrence({ ...status, phase: "ahead" }, Date.parse("2026-01-22T06:00:00.000Z"), options);
+
+    expect(presented.chip?.text).toBe("Not judged yet");
+    expect(presented.square).toBe("not-judged");
+  });
+});

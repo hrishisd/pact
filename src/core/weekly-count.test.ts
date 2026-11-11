@@ -497,6 +497,23 @@ describe("excuses", () => {
     expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
   });
 
+  test("a week an excuse can't cover is skipped by its Monday, through its Sunday", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(3));
+    s.setClockTo("Tue+1 10:00");
+    await owner.fileExcuse(piano, { from: s.date("Wed+1"), to: s.date("Wed+1"), reason: "Recital" }, []);
+
+    expect(owner.excusePreview(piano, { from: s.date("Thu+1"), to: s.date("Thu+1") })).toEqual({
+      ok: true,
+      preview: {
+        covered: [],
+        skipped: [{ date: s.date("Mon+1"), through: s.date("Sun+1"), reason: "on-waiting-excuse" }],
+        heldCents: 0,
+      },
+    });
+  });
+
   test("a short week can be excused within 48 hours, which removes all its penalties", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
