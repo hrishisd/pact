@@ -677,7 +677,7 @@ export function createApp({
   app.post(API_PATHS.decide(":id"), async (c) => {
     const decision = await readJson(c, parseDecision);
     if (!decision) return apiError(c, 400, "invalid-request");
-    return c.json<DecideResponse>(await account(c).decide(c.req.param("id"), decision));
+    return c.json<DecideResponse>(json(await account(c).decide(c.req.param("id"), decision)));
   });
 
   app.get(API_PATHS.waitingOnReply, (c) => c.json<WaitingOnReplyResponse>(json(account(c).waitingOnReply())));

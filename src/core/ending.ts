@@ -18,9 +18,9 @@ export type EndCause = "end-date" | "one-time-judged" | "end-request";
 
 /**
  * Makes an Active pact Ended as of `at`, for `cause`. A change request still
- * waiting for it is withdrawn, silently: there's nothing left for it to
- * change. Every cause does the same for now; withdrawal reasons (design
- * review ticket 20) will record `cause`.
+ * waiting for it is withdrawn, silently, for `pact-ended` (R8): there's
+ * nothing left for it to change. Every cause does the same. Other items the
+ * end leaves moot go after the command (`withdrawMoot`).
  */
 export function endPact(ctx: CoreContext, pactId: string, cause: EndCause, at: Date): void {
   const ended = ctx.db
@@ -29,7 +29,8 @@ export function endPact(ctx: CoreContext, pactId: string, cause: EndCause, at: D
   if (ended.changes === 0) return;
   ctx.db
     .prepare(
-      `UPDATE change_request SET withdrawn_at = ? WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`,
+      `UPDATE change_request SET withdrawn_at = ?, withdrawn_reason = 'pact-ended'
+         WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`,
     )
     .run(at.toISOString(), pactId);
 }

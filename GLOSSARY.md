@@ -105,6 +105,9 @@ _Avoid_: Contact, connection, follower, buddy
 The list of items waiting for a reviewer's decision.
 _Avoid_: Inbox, to-do list
 
+**Withdrawn**:
+A review item no one can decide any more. Its owner withdrew it (a change request or a vacation), or the system did because it was **moot**: deciding it either way could no longer change any outcome, penalty or terms, as for a change request when its pact Ended or an excuse whose every day approved evidence made Satisfied. The reason is recorded and shown; nobody is notified. A payment is never withdrawn.
+
 **Question**:
 A reviewer's comment on a review item (evidence, an excuse, a payment, a change request or a vacation), asking its owner about it instead of deciding it. The item is then **waiting on the owner's reply**: it leaves every reviewer's Review Queue until the owner replies, though any reviewer can still decide it.
 

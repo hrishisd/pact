@@ -10,7 +10,6 @@ import {
   type EvidenceResult,
   type EvidenceView,
   type LocalDate,
-  type ReviewItem,
   type SubmitEvidenceRefusal,
   type SubmitEvidenceResult,
   type TodayAlert,
@@ -18,7 +17,7 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { coveredSql } from "./covers.ts";
+import { coveredSql, excusableUntil, excuseWindowOpensSql } from "./covers.ts";
 import {
   evidenceDecision,
   isJudged,
@@ -29,30 +28,38 @@ import {
 } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
-import { editWindowClosesAt, EXCUSE_WINDOW_MS } from "./pact-rules.ts";
+import { editWindowClosesAt } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
 import {
   accountName,
   accountRow,
-  decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
   occurrencesOf,
   ownPact,
   pactName,
   recipientName,
-  recordDecision,
   reviewersOf,
-  reviewStateColumns,
-  reviewStateOf,
   scheduleOf,
   termsOn,
-  thread,
-  type Decided,
   type PactRow,
+} from "./rows.ts";
+import { mootReason } from "./moot.ts";
+import {
+  decisionDetails,
+  itemStateOf,
+  recordDecision,
+  reviewStateColumns,
+  thread,
+  withdrawalOf,
+  type Decided,
+  type MootReason,
+  type QueuedItem,
+  type RequestKindHandler,
+  type RequestRow,
   type ReviewOutcome,
   type ReviewStateRow,
-} from "./rows.ts";
+} from "./requests.ts";
 import { settle } from "./settle.ts";
 
 export async function submitEvidence(
@@ -126,9 +133,9 @@ export function acceptMiss(
 
 export function evidencePage(ctx: CoreContext, accountId: AccountId, evidenceId: string): EvidenceResult {
   accountRow(ctx, accountId);
-  const row = ctx.one<ReviewStateRow & EvidenceViewRow>(
+  const row = ctx.one<ReviewStateRow & EvidenceViewRow & Pick<RequestRow, "withdrawn_at" | "withdrawn_reason">>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date, evidence.day,
-              evidence.submitted_at, ${reviewStateColumns("evidence")}
+              evidence.submitted_at, evidence.withdrawn_at, evidence.withdrawn_reason, ${reviewStateColumns("evidence")}
        FROM evidence
        JOIN pact ON pact.id = evidence.pact_id
        LEFT JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
@@ -141,9 +148,12 @@ export function evidencePage(ctx: CoreContext, accountId: AccountId, evidenceId:
     ok: true,
     evidence: {
       ...evidenceView(ctx, row),
-      state: reviewStateOf(row),
+      state: itemStateOf(
+        row,
+        withdrawalOf(row, () => [row.pact_name]),
+      ),
       reviewerNames: friendsSortedByName(ctx, reviewersOf(ctx, row.pact_id)).map((friend) => friend.name),
-      thread: thread(ctx, row.id, row.decision === null),
+      thread: thread(ctx, row.id, row.decision === null && row.withdrawn_at === null),
     },
   };
 }
@@ -161,7 +171,14 @@ export interface EvidenceViewRow {
 /** Evidence a reviewer is deciding on, as `decide` reads it. */
 export interface EvidenceToDecide {
   id: string;
+  kind: "evidence";
+  /** When the system withdrew it, moot (R8); its owner can't. */
+  withdrawn_at: string | null;
+  withdrawn_reason: MootReason | null;
   pact_id: string;
+  pact_name: string;
+  /** When the pact was created: its reviewers may decide its evidence once its edit window has closed. */
+  created_at: string;
   occurrence_date: LocalDate;
   /** The day it counts for: on Weekly count, the day of the week. */
   day: LocalDate;
@@ -189,7 +206,7 @@ export function evidenceView(
 }
 
 /** Evidence waiting for approval that `reviewerId` may decide: for pacts they review, past the edit window. */
-export function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<EvidenceViewRow & { owner_name: string; weekly: 0 | 1 }>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
               evidence.submitted_at, evidence.occurrence_date, evidence.day, ${WEEKLY_COUNT_PACT} AS weekly
@@ -197,22 +214,25 @@ export function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): Revie
        JOIN pact ON pact.id = evidence.pact_id
        JOIN account AS owner ON owner.id = pact.owner_account_id
        JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-       WHERE evidence.decision IS NULL AND pact.created_at <= ?
+       WHERE evidence.decision IS NULL AND evidence.withdrawn_at IS NULL AND pact.created_at <= ?
        ORDER BY evidence.submitted_at, evidence.id`,
     reviewerId,
     editWindowCutoff(ctx),
   );
-  return rows.map((row): ReviewItem => {
+  return rows.map((row) => {
     // What counts, and what rejecting costs: the terms of the occurrence's day.
     const terms = termsOn(ctx, row.pact_id, row.occurrence_date);
     return {
-      kind: "evidence",
-      ...evidenceView(ctx, row, terms),
-      ownerName: row.owner_name,
-      penaltyCents: terms.penalty_cents,
-      recipientName: recipientName(ctx, terms.recipient_id),
-      ...(row.weekly === 1 && { week: weekProgress(ctx, row.pact_id, row.occurrence_date) }),
-      thread: thread(ctx, row.id, true),
+      item: {
+        kind: "evidence",
+        ...evidenceView(ctx, row, terms),
+        ownerName: row.owner_name,
+        penaltyCents: terms.penalty_cents,
+        recipientName: recipientName(ctx, terms.recipient_id),
+        ...(row.weekly === 1 && { week: weekProgress(ctx, row.pact_id, row.occurrence_date) }),
+        thread: thread(ctx, row.id, true),
+      },
+      since: new Date(row.submitted_at),
     };
   });
 }
@@ -250,6 +270,57 @@ export function decideEvidence(
   // After the decision's push, so a Missed push it causes comes second.
   settle(ctx, evidence.pact_id, evidence.occurrence_date, now);
 }
+
+/**
+ * Evidence as a review item: decided by the pact's reviewers once its edit
+ * window has closed.
+ */
+export const evidenceKind: RequestKindHandler<EvidenceToDecide> = {
+  kind: "evidence",
+  load: (ctx, id) =>
+    ctx.one<EvidenceToDecide>(
+      `SELECT evidence.id, 'evidence' AS kind, evidence.withdrawn_at, evidence.withdrawn_reason, evidence.pact_id,
+              pact.name AS pact_name,
+              pact.created_at, evidence.occurrence_date, evidence.day, evidence.decision, pact.owner_account_id,
+              owner.timezone
+         FROM evidence
+         JOIN pact ON pact.id = evidence.pact_id
+         JOIN account AS owner ON owner.id = pact.owner_account_id
+         WHERE evidence.id = ?`,
+      id,
+    ),
+  deciders: (ctx, evidence) => reviewersOf(ctx, evidence.pact_id),
+  reviewable: (ctx, evidence) => evidence.created_at <= editWindowCutoff(ctx),
+  apply: (ctx, evidence, decided, reviewerId) => decideEvidence(ctx, evidence, decided, reviewerId),
+  describe: (_ctx, evidence) => ({
+    what: `evidence for ${evidence.pact_name}`,
+    ownerPath: APP_PATHS.evidence(evidence.id),
+  }),
+  queue: evidenceToReview,
+  waiting: waitingEvidence,
+  itemsWithPhoto: (ctx, photoId) =>
+    ctx
+      .all<{ evidence_id: string }>(`SELECT evidence_id FROM evidence_photo WHERE photo_id = ?`, photoId)
+      .map((row) => row.evidence_id),
+  pactNames: (_ctx, evidence) => [evidence.pact_name],
+  moot: {
+    waitingIds: (ctx) =>
+      ctx
+        .all<{ id: string }>(
+          `SELECT id FROM evidence WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY submitted_at, id`,
+        )
+        .map((row) => row.id),
+    reason: (ctx, evidence, now) =>
+      mootReason(ctx, evidence.id, [{ pact_id: evidence.pact_id, date: evidence.occurrence_date }], now),
+    withdraw: (ctx, evidence, reason, now) => {
+      ctx.db
+        .prepare(`UPDATE evidence SET withdrawn_at = ?, withdrawn_reason = ? WHERE id = ?`)
+        .run(now.toISOString(), reason, evidence.id);
+      // It no longer holds judging up, though either decision would have judged the occurrence the same.
+      settle(ctx, evidence.pact_id, evidence.occurrence_date, now);
+    },
+  },
+};
 
 /** The photos of some evidence, in the order taken. */
 export function evidencePhotoIds(ctx: CoreContext, evidenceId: string): string[] {
@@ -308,7 +379,7 @@ export function evidenceAcceptance(
 }
 
 /** The owner's evidence still waiting for a decision (or just that for `pactId`), newest first. */
-export function waitingEvidence(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+function waitingEvidence(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
   const rows = ctx.all<{
     id: string;
     pact_id: string;
@@ -318,7 +389,8 @@ export function waitingEvidence(ctx: CoreContext, ownerId: AccountId, pactId?: s
   }>(
     `SELECT evidence.id, evidence.pact_id, pact.name, evidence.day AS occurrence_date, evidence.submitted_at
        FROM evidence JOIN pact ON pact.id = evidence.pact_id
-       WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND (? IS NULL OR pact.id = ?)
+       WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND evidence.withdrawn_at IS NULL
+         AND (? IS NULL OR pact.id = ?)
        ORDER BY evidence.submitted_at DESC, evidence.id`,
     ownerId,
     pactId ?? null,
@@ -347,10 +419,13 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
     name: string;
     date: LocalDate;
     judged_at: string;
+    excuse_window_opens: string;
     amount_cents: number;
     recipient_name: string;
   }>(
-    `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at, penalty.amount_cents,
+    `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at,
+            ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} AS excuse_window_opens,
+            penalty.amount_cents,
               recipient.name AS recipient_name
        FROM occurrence
        JOIN pact ON pact.id = occurrence.pact_id
@@ -381,7 +456,7 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
         occurrenceDate: row.date,
         penaltyCents: row.amount_cents,
         recipientName: row.recipient_name,
-        excusableUntil: new Date(judgedAt.getTime() + EXCUSE_WINDOW_MS),
+        excusableUntil: excusableUntil(row.excuse_window_opens),
         week: false,
       },
     };

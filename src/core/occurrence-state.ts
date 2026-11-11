@@ -12,10 +12,10 @@ import type {
   WeekProgress,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
-import { coverOn, keepsToDo } from "./covers.ts";
+import { coverOn, excusableUntil, excuseWindowOpensSql, keepsToDo } from "./covers.ts";
 import { lastDayOf, type Occurrence } from "./occurrences.ts";
-import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
-import { occurrencesOf, scheduleOf, termsOn, type PactRow, type ReviewOutcome } from "./rows.ts";
+import type { ReviewOutcome } from "./requests.ts";
+import { occurrencesOf, scheduleOf, termsOn, type PactRow } from "./rows.ts";
 
 /** SQL: what judging reads of a `pact` row and its owner's `account` row (PactToJudge). */
 const PACT_TO_JUDGE_COLUMNS = `pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
@@ -65,7 +65,7 @@ export function evidenceDecision(
   const decisions = ctx
     .all<{
       decision: ReviewOutcome | null;
-    }>(`SELECT decision FROM evidence WHERE pact_id = ? AND ${by} = ?`, pactId, date)
+    }>(`SELECT decision FROM evidence WHERE pact_id = ? AND ${by} = ? AND withdrawn_at IS NULL`, pactId, date)
     .map((row) => row.decision ?? "waiting");
   if (decisions.includes("waiting")) return "waiting";
   if (decisions.includes("approved")) return "approved";
@@ -78,7 +78,7 @@ export function weekProgress(ctx: CoreContext, pactId: string, monday: LocalDate
   const counts = ctx.db
     .prepare(
       `SELECT COUNT(DISTINCT CASE WHEN decision = 'approved' THEN day END) AS sessions,
-              COUNT(DISTINCT CASE WHEN decision IS NULL THEN day END) AS waiting
+              COUNT(DISTINCT CASE WHEN decision IS NULL AND withdrawn_at IS NULL THEN day END) AS waiting
        FROM evidence WHERE pact_id = ? AND occurrence_date = ?`,
     )
     .get(pactId, monday) as { sessions: number; waiting: number };
@@ -117,10 +117,12 @@ export function occurrenceView(ctx: CoreContext, pactId: string, occurrence: Occ
   const now = ctx.clock.now().getTime();
   const row = ctx.one<{
     outcome: "satisfied" | "missed" | "excused" | null;
-    judged_at: string | null;
+    excuse_window_opens: string | null;
     amount_cents: number | null;
   }>(
-    `SELECT occurrence.outcome, occurrence.judged_at, penalty.amount_cents
+    `SELECT occurrence.outcome,
+            ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} AS excuse_window_opens,
+            penalty.amount_cents
        FROM occurrence
        LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
        WHERE occurrence.pact_id = ? AND occurrence.date = ?`,
@@ -151,7 +153,7 @@ export function occurrenceView(ctx: CoreContext, pactId: string, occurrence: Occ
     return {
       kind: "missed",
       penaltyCents: row!.amount_cents!,
-      excusableUntil: new Date(new Date(row!.judged_at!).getTime() + EXCUSE_WINDOW_MS),
+      excusableUntil: excusableUntil(row!.excuse_window_opens!),
       ...standing,
     };
   }

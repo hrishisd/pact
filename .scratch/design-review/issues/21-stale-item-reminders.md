@@ -1,6 +1,6 @@
 # 21 Stale-item reminders
 
-Status: ready-for-agent
+Status: done
 Blocked by: 17, 22
 
 Closes: F2 and rule R2 (`../interaction-audit.md` finding 2); the remainder of F6; H1 step 6.
@@ -39,16 +39,23 @@ F6, as the audit wrote it ("a $1 payment against a $200 bill pauses Overdue fore
 
 ## Acceptance criteria
 
-- [ ] Scenario: evidence filed Monday 10:00 and not decided; the reviewer gets one reminder at the first 09:00 after Tuesday 10:00 (Wednesday 09:00), one a day after, and none once it is decided.
-- [ ] Scenario: three items, the oldest 2 days old; the push says 3 and 2 days.
-- [ ] Scenario: an item waiting on the owner's reply is not counted for the reviewer; the owner gets the daily reply reminder until they reply.
-- [ ] Scenario: with the "review-item" setting off, the reviewer gets none; with "comment" off, the owner gets none.
-- [ ] Scenario: no second reminder the same day across a restart.
-- [ ] F6 regression in `bills.test.ts`: a $1 payment waiting against a $15 overdue bill leaves the owner's daily overdue reminder running for $14.
-- [ ] Update `docs/behaviour.md`, including the future idea.
-- [ ] `npm run check` passes.
+- [x] Scenario: evidence filed Monday 10:00 and not decided; the reviewer gets one reminder at the first 09:00 after Tuesday 10:00 (Wednesday 09:00), one a day after, and none once it is decided.
+- [x] Scenario: three items, the oldest 2 days old; the push says 3 and 2 days.
+- [x] Scenario: an item waiting on the owner's reply is not counted for the reviewer; the owner gets the daily reply reminder until they reply.
+- [x] Scenario: with the "review-item" setting off, the reviewer gets none; with "comment" off, the owner gets none.
+- [x] Scenario: no second reminder the same day across a restart.
+- [x] F6 regression in `bills.test.ts`: a $1 payment waiting against a $15 overdue bill leaves the owner's daily overdue reminder running for $14.
+- [x] Update `docs/behaviour.md`, including the future idea.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - Default decisions or expiry.
 - Email or SMS (v0 Future Ideas).
+
+## Notes from the implementing agent
+
+- Built as `remindStale` in `src/core/stale-items.ts`, run in the tick after `remindOverdue`; kinds `stale-review-items` (setting "review-item") and `unanswered-question` (setting "comment"); `stale_notice` table (migration 34). Tests: `stale-items.test.ts`, and the F6 scenario in `bills.test.ts`.
+- `reviewItemSince` never measured "filed, or the owner's latest reply": it was the filing time only, and ticket 17 replaced it with each handler's `since`. The ticket's intent is built: `reviewQueueWaits` (`review.ts`) takes the later of `since` and the owner's latest reply, so an item a reply sent back counts from the reply.
+- A reminder goes only if an item had waited more than 24 hours by the day's 09:00, so evidence filed Monday 10:00 is first reminded Wednesday 09:00. The count is the whole Review Queue; ages are calendar days in the recipient's timezone. With several unanswered questions, the owner's push names the oldest.
+- The owner's push opens the item's own page (each handler's `describe().ownerPath`, the same as the "reviewer-question" push); a vacation's is the Profile sheet.

@@ -3,14 +3,15 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
-import { dateSpan } from "../shared/format.ts";
+import { dateSpan, excusableText } from "../shared/format.ts";
 import {
   MAX_EXCUSE_SPAN_DAYS,
   type AcceptVacationRejectionResult,
   type AccountId,
-  type ReviewItem,
+  type ExcusableDays,
   type TodayAlert,
   type TodayVacation,
+  type TodayWaitingItem,
   type VacationCover,
   type VacationState,
   type FileVacationResult,
@@ -28,32 +29,38 @@ import {
   type VacationPreviewResult,
   type VacationRequest,
   type VacationSkipReason,
+  type WithdrawnReason,
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { coverOn, coversOn } from "./covers.ts";
+import { coveredSql, coverOn, coversOn, excusableUntil, excuseWindowOpensSql } from "./covers.ts";
 import type { AnkiChecksRunning } from "./judging.ts";
 import { dueAfterEnd, occurrenceSpan } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { isLocalDate } from "./pact-rules.ts";
+import { assertHoldsNoPenalty, mootReason, type TouchedOccurrence } from "./moot.ts";
 import { settleCoverDays } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
   accountRow,
-  decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
   occurrencesOf,
-  recordDecision,
   reviewersOf,
   scheduleOf,
+  type PactRow,
+} from "./rows.ts";
+import {
+  decisionDetails,
+  recordDecision,
   thread,
   type Decided,
-  type PactRow,
+  type QueuedItem,
+  type RequestKindHandler,
   type ReviewOutcome,
-} from "./rows.ts";
+} from "./requests.ts";
 
 export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
   const now = ctx.clock.now();
@@ -253,12 +260,11 @@ export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: New
         .run(vacationId, pact.pactId, date);
     }
   }
-  tellAll(ctx, reviewerIds, "review-item", {
-    itemKind: "vacation",
-    itemId: vacationId,
-    title: `${accountName(ctx, ownerId)} asked for a vacation`,
-    body: dateSpan(vacation.from, vacation.to),
-    url: APP_PATHS.review,
+  tellVacationFiled(ctx, vacationDeciders(ctx, vacationId), {
+    id: vacationId,
+    owner_account_id: ownerId,
+    first_day: vacation.from,
+    last_day: vacation.to,
   });
   return { ok: true, vacationId };
 }
@@ -296,7 +302,7 @@ export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCar
   return rows.map((row) => ({
     ...vacationSummary(ctx, row),
     state: vacationState(ctx, row, today),
-    ...heldTotal(coveredPenalties(ctx, row.id)),
+    ...heldTotal(coveredPenalties(ctx, row.id), true),
   }));
 }
 
@@ -382,7 +388,58 @@ function vacationState(ctx: CoreContext, row: VacationRow, today: LocalDate): Va
     : { kind: "waiting" };
 }
 
-/** The reviewers the owner picked for the vacation: only they may decide it. */
+/**
+ * Who may decide the vacation (rule R5): the reviewers picked at filing who
+ * still review at least one of its pacts, or with none left, every current
+ * reviewer of one of them.
+ */
+export function vacationDeciders(ctx: CoreContext, vacationId: string): AccountId[] {
+  const pactIds = ctx
+    .all<{ pact_id: string }>(`SELECT pact_id FROM vacation_pact WHERE vacation_id = ?`, vacationId)
+    .map((row) => row.pact_id);
+  const current = new Set(pactIds.flatMap((pactId) => reviewersOf(ctx, pactId)));
+  const stillPicked = pickedReviewers(ctx, vacationId).filter((id) => current.has(id));
+  return stillPicked.length > 0 ? stillPicked : [...current].sort();
+}
+
+/**
+ * Runs `removeReviewers`, which takes reviewers off `pactId`, and tells each
+ * account it makes a decider of a waiting vacation covering the pact about
+ * that vacation, as filing told the picked reviewers: the last picked
+ * reviewer gone, a current reviewer decides it (rule R5).
+ */
+export function tellNewVacationDeciders(ctx: CoreContext, pactId: string, removeReviewers: () => void): void {
+  const waiting = ctx.all<{ id: string; owner_account_id: AccountId; first_day: LocalDate; last_day: LocalDate }>(
+    `SELECT vacation.id, vacation.owner_account_id, vacation.first_day, vacation.last_day FROM vacation
+     JOIN vacation_pact ON vacation_pact.vacation_id = vacation.id AND vacation_pact.pact_id = ?
+     WHERE vacation.decision IS NULL AND vacation.withdrawn_at IS NULL
+     ORDER BY vacation.filed_at, vacation.id`,
+    pactId,
+  );
+  const before = new Map(waiting.map((row) => [row.id, vacationDeciders(ctx, row.id)]));
+  removeReviewers();
+  for (const row of waiting) {
+    const added = vacationDeciders(ctx, row.id).filter((id) => !before.get(row.id)!.includes(id));
+    tellVacationFiled(ctx, added, row);
+  }
+}
+
+/** Tells `reviewerIds` the vacation waits for their decision. */
+function tellVacationFiled(
+  ctx: CoreContext,
+  reviewerIds: AccountId[],
+  vacation: { id: string; owner_account_id: AccountId; first_day: LocalDate; last_day: LocalDate },
+): void {
+  tellAll(ctx, reviewerIds, "review-item", {
+    itemKind: "vacation",
+    itemId: vacation.id,
+    title: `${accountName(ctx, vacation.owner_account_id)} asked for a vacation`,
+    body: dateSpan(vacation.first_day, vacation.last_day),
+    url: APP_PATHS.review,
+  });
+}
+
+/** The reviewers the owner picked for the vacation when filing it. */
 export function pickedReviewers(ctx: CoreContext, vacationId: string): AccountId[] {
   return ctx
     .all<{ reviewer_account_id: AccountId }>(
@@ -461,88 +518,142 @@ interface CoveredPenalty {
   added_at: string;
 }
 
-/** The total of the vacation's held penalties, as `heldCents`, left out when none are held. */
-function heldTotal(held: CoveredPenalty[]): { heldCents?: number } {
+/**
+ * The total of the vacation's held penalties, as `heldCents`, and with
+ * `dates`, their first and last day; left out when none are held.
+ */
+function heldTotal(held: CoveredPenalty[], dates = false): Pick<VacationCard, "heldCents" | "heldDates"> {
   const cents = held.reduce((sum, penalty) => sum + penalty.amount_cents, 0);
-  return cents > 0 ? { heldCents: cents } : {};
+  if (cents === 0) return {};
+  const days = held.map((penalty) => penalty.date).toSorted();
+  return {
+    heldCents: cents,
+    ...(dates && { heldDates: { firstDate: days[0]!, lastDate: days.at(-1)! } }),
+  };
 }
 
-/** Vacations waiting for approval that `reviewerId` was picked for, oldest first. */
-export function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+/** Vacations waiting for approval that `reviewerId` may decide (`vacationDeciders`), oldest first. */
+function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<VacationRow & { owner_name: string; timezone: string }>(
     `SELECT ${VACATION_COLUMNS}, owner.name AS owner_name, owner.timezone
      FROM vacation
-     JOIN vacation_reviewer ON vacation_reviewer.vacation_id = vacation.id
-                           AND vacation_reviewer.reviewer_account_id = ?
      JOIN account AS owner ON owner.id = vacation.owner_account_id
      WHERE vacation.decision IS NULL AND vacation.withdrawn_at IS NULL
+       AND EXISTS (SELECT 1 FROM vacation_pact JOIN pact_reviewer ON pact_reviewer.pact_id = vacation_pact.pact_id
+                   WHERE vacation_pact.vacation_id = vacation.id AND pact_reviewer.reviewer_account_id = ?)
      ORDER BY vacation.filed_at, vacation.id`,
     reviewerId,
   );
-  return rows.map((row): ReviewItem => {
-    const held = coveredPenalties(ctx, row.id);
-    return {
-      kind: "vacation",
-      ...vacationSummary(ctx, row),
-      ownerName: row.owner_name,
-      covers: vacationCovers(ctx, row.id, row.timezone, held),
-      ...heldTotal(held),
-      filedAt: new Date(row.filed_at),
-      thread: thread(ctx, row.id, true),
-    };
-  });
+  return rows
+    .filter((row) => vacationDeciders(ctx, row.id).includes(reviewerId))
+    .map((row) => {
+      const held = coveredPenalties(ctx, row.id);
+      const filedAt = new Date(row.filed_at);
+      return {
+        item: {
+          kind: "vacation",
+          ...vacationSummary(ctx, row),
+          ownerName: row.owner_name,
+          covers: vacationCovers(ctx, row.id, row.timezone, held),
+          ...heldTotal(held),
+          filedAt,
+          thread: thread(ctx, row.id, true),
+        },
+        since: filedAt,
+      };
+    });
 }
 
 /** A vacation a reviewer is deciding on, as `decide` reads it. */
 export interface VacationToDecide {
   id: string;
+  kind: "vacation";
   decision: ReviewOutcome | null;
+  withdrawn_at: string | null;
+  withdrawn_reason: WithdrawnReason | null;
   owner_account_id: AccountId;
   first_day: LocalDate;
   last_day: LocalDate;
 }
 
 /**
- * The owner's vacation `vacationId`, for a reply to a question about it:
- * whether it still waits for a decision, and its picked reviewers.
+ * The owner's vacations waiting for a decision (or those covering a day of
+ * `pactId`), newest first.
  */
-export function ownVacation(
-  ctx: CoreContext,
-  ownerId: AccountId,
-  vacationId: string,
-): { waiting: boolean; reviewerIds: AccountId[] } | undefined {
-  const vacation = ctx.one<{ decision: ReviewOutcome | null; withdrawn_at: string | null }>(
-    `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
-    vacationId,
+function waitingVacations(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+  const rows = ctx.all<{ id: string; first_day: LocalDate; last_day: LocalDate; filed_at: string }>(
+    `SELECT id, first_day, last_day, filed_at FROM vacation
+     WHERE owner_account_id = ? AND decision IS NULL AND withdrawn_at IS NULL
+       AND (? IS NULL OR EXISTS (SELECT 1 FROM vacation_day
+                                 WHERE vacation_day.vacation_id = vacation.id AND vacation_day.pact_id = ?))
+     ORDER BY filed_at DESC, id`,
     ownerId,
+    pactId ?? null,
+    pactId ?? null,
   );
-  return (
-    vacation && {
-      waiting: vacation.decision === null && vacation.withdrawn_at === null,
-      reviewerIds: pickedReviewers(ctx, vacationId),
-    }
-  );
+  return rows.map((row) => ({
+    kind: "vacation",
+    id: row.id,
+    firstDate: row.first_day,
+    lastDate: row.last_day,
+    filedAt: new Date(row.filed_at),
+  }));
 }
 
-/** The vacation `vacationId`, decided or not, if `reviewerId` was picked for it and it wasn't withdrawn. */
-export function vacationToDecide(
-  ctx: CoreContext,
-  reviewerId: AccountId,
-  vacationId: string,
-): VacationToDecide | undefined {
-  return ctx.one<VacationToDecide>(
-    `SELECT vacation.id, vacation.decision, vacation.owner_account_id, vacation.first_day, vacation.last_day
-     FROM vacation
-     JOIN vacation_reviewer ON vacation_reviewer.vacation_id = vacation.id
-                           AND vacation_reviewer.reviewer_account_id = ?
-     WHERE vacation.id = ? AND vacation.withdrawn_at IS NULL`,
-    reviewerId,
+/**
+ * Vacations as review items: decided by the picked reviewers who still
+ * review a covered pact, else any current reviewer of one (rule R5). The owner's waiting list has it, and the page of each pact it
+ * covers a day of.
+ */
+export const vacationKind: RequestKindHandler<VacationToDecide> = {
+  kind: "vacation",
+  load: (ctx, id) =>
+    ctx.one<VacationToDecide>(
+      `SELECT id, 'vacation' AS kind, decision, withdrawn_at, withdrawn_reason, owner_account_id, first_day, last_day
+         FROM vacation WHERE id = ?`,
+      id,
+    ),
+  deciders: (ctx, vacation) => vacationDeciders(ctx, vacation.id),
+  apply: decideVacation,
+  describe: () => ({ what: "vacation", ownerPath: APP_PATHS.profile }),
+  queue: vacationsToReview,
+  waiting: waitingVacations,
+  pactNames: (ctx, vacation) =>
+    ctx
+      .all<{ name: string }>(
+        `SELECT pact.name FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
+         WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
+        vacation.id,
+      )
+      .map((pact) => pact.name),
+  moot: {
+    waitingIds: (ctx) =>
+      ctx
+        .all<{ id: string }>(
+          `SELECT id FROM vacation WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY filed_at, id`,
+        )
+        .map((row) => row.id),
+    // Only when no covered day left on any pact could still be excused by it.
+    reason: (ctx, vacation, now) => mootReason(ctx, vacation.id, vacationOccurrences(ctx, vacation.id), now),
+    withdraw: (ctx, vacation, reason, now) => {
+      assertHoldsNoPenalty(ctx, vacation.id, vacationOccurrences(ctx, vacation.id));
+      ctx.db
+        .prepare(`UPDATE vacation SET withdrawn_at = ?, withdrawn_reason = ? WHERE id = ?`)
+        .run(now.toISOString(), reason, vacation.id);
+    },
+  },
+};
+
+/** The occurrences a vacation covers on every pact, by date. */
+function vacationOccurrences(ctx: CoreContext, vacationId: string): TouchedOccurrence[] {
+  return ctx.all<TouchedOccurrence>(
+    `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
     vacationId,
   );
 }
 
 /**
- * Records a picked reviewer's decision on a vacation waiting for approval
+ * Records a decider's decision on a vacation waiting for approval
  * and tells the owner, and settles every covered day of every pact
  * (`settleCoverDays`). Approved: they're excused at once, as an approved
  * excuse's are. Rejected: its held penalties are owed by no longer waiting,
@@ -560,6 +671,8 @@ export function decideVacation(
   recordDecision(ctx, "vacation", vacation.id, decided, reviewerId, now);
   settleVacationDays(ctx, vacation.id, now, ankiChecksRunning);
   const { first_day: from, last_day: to } = vacation;
+  const released = decided.outcome === "rejected" ? releasedDays(ctx, vacation.id, now.toISOString(), now) : null;
+  const { timezone } = accountRow(ctx, vacation.owner_account_id);
   ctx.enqueue({
     recipient: vacation.owner_account_id,
     kind: "vacation-decided",
@@ -568,7 +681,12 @@ export function decideVacation(
       itemId: vacation.id,
       ...decisionDetails(decided),
       title: `${accountName(ctx, reviewerId)} ${decided.outcome} your vacation`,
-      body: decided.reason === null ? dateSpan(from, to) : `“${decided.reason}”`,
+      body:
+        decided.reason === null
+          ? dateSpan(from, to)
+          : released === null
+            ? `“${decided.reason}”`
+            : `“${decided.reason}” · ${excusableText(released.firstDate, released.lastDate, released.until.toISOString(), timezone)}`,
       // A rejection shows as an alert on Today; an approval on the vacation's Profile card.
       url: decided.outcome === "approved" ? APP_PATHS.profile : APP_PATHS.today,
     },
@@ -590,7 +708,9 @@ export function withdrawVacation(
   if (!row) return { ok: false, reason: "vacation-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
   const now = ctx.clock.now();
-  ctx.db.prepare(`UPDATE vacation SET withdrawn_at = ? WHERE id = ?`).run(now.toISOString(), vacationId);
+  ctx.db
+    .prepare(`UPDATE vacation SET withdrawn_at = ?, withdrawn_reason = 'owner' WHERE id = ?`)
+    .run(now.toISOString(), vacationId);
   settleVacationDays(ctx, vacationId, now, ankiChecksRunning);
   return { ok: true };
 }
@@ -624,6 +744,7 @@ export function noLaterFilingSql(alias: string): string {
  * the alerts.
  */
 export function rejectedVacationAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
+  const now = ctx.clock.now();
   const rows = ctx.all<{
     id: string;
     first_day: LocalDate;
@@ -654,8 +775,39 @@ export function rejectedVacationAlerts(ctx: CoreContext, ownerId: AccountId): { 
       owedAgainCents: coveredPenalties(ctx, row.id)
         .filter((penalty) => penalty.added_at <= row.decided_at)
         .reduce((sum, penalty) => sum + penalty.amount_cents, 0),
+      excusable: releasedDays(ctx, row.id, row.decided_at, now),
     },
   }));
+}
+
+/**
+ * The vacation's covered days already Missed when it was rejected or
+ * withdrawn at `releasedAt` whose excuse window, reopened then, is still
+ * open at `now` and that no other excuse or vacation waits over, and when
+ * the first of those windows closes (R3); null when there are none. Days
+ * judged later have their own windows and cards.
+ */
+function releasedDays(ctx: CoreContext, vacationId: string, releasedAt: string, now: Date): ExcusableDays | null {
+  const rows = ctx.all<{ date: LocalDate; excuse_window_opens: string }>(
+    `SELECT occurrence.date,
+            ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} AS excuse_window_opens
+     FROM vacation_day
+     JOIN occurrence ON occurrence.pact_id = vacation_day.pact_id AND occurrence.date = vacation_day.date
+     WHERE vacation_day.vacation_id = ? AND occurrence.outcome = 'missed' AND occurrence.judged_at <= ?
+       AND NOT ${coveredSql("occurrence.pact_id", "occurrence.date", "waiting")}
+     ORDER BY occurrence.date`,
+    vacationId,
+    releasedAt,
+  );
+  const open = rows
+    .map((row) => ({ date: row.date, until: excusableUntil(row.excuse_window_opens) }))
+    .filter((day) => day.until.getTime() > now.getTime());
+  if (open.length === 0) return null;
+  return {
+    firstDate: open[0]!.date,
+    lastDate: open.at(-1)!.date,
+    until: new Date(Math.min(...open.map((day) => day.until.getTime()))),
+  };
 }
 
 /**

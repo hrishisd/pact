@@ -67,6 +67,8 @@ const SAM_LEDGER: LedgerResponse = {
       awaitingCount: 0,
       paidCents: 0,
       suggestedPaymentCents: 1000,
+      creditCents: 0,
+      creditWaitsOn: [],
       overdueCents: 0,
       billDue: { amountCents: 1000, dueAt: "2026-01-08T05:00:00Z" },
     },
@@ -75,6 +77,13 @@ const SAM_LEDGER: LedgerResponse = {
 };
 
 const onOpenPact = vi.fn<(id: string, name: string) => void>();
+const openers = {
+  evidence: vi.fn<(id: string) => void>(),
+  excuse: vi.fn<(id: string) => void>(),
+  payment: vi.fn<(id: string) => void>(),
+  "change-request": vi.fn<(id: string) => void>(),
+  vacation: vi.fn<(id: string) => void>(),
+};
 
 function renderToday() {
   return renderWithUser(
@@ -82,10 +91,7 @@ function renderToday() {
       timezone="America/New_York"
       onOpenPact={onOpenPact}
       onOpenLedger={vi.fn()}
-      onOpenExcuse={vi.fn()}
-      onOpenChangeRequest={vi.fn()}
-      onOpenEvidence={vi.fn()}
-      onOpenPayment={vi.fn()}
+      openers={openers}
       onCreate={vi.fn()}
       onInvite={vi.fn()}
     />,
@@ -100,6 +106,7 @@ async function card(name: string): Promise<HTMLElement> {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], now: new Date(NOW) });
   onOpenPact.mockReset();
+  for (const open of Object.values(openers)) open.mockReset();
 });
 
 describe("a Today card's own buttons", () => {
@@ -169,7 +176,10 @@ test("a reload that fails keeps the cards shown, and says what failed above them
 });
 
 describe("a rejected vacation's alert", () => {
-  const rejected = (owedAgainCents: number): TodayResponse => ({
+  const rejected = (
+    owedAgainCents: number,
+    excusable: { firstDate: string; lastDate: string; until: string } | null = null,
+  ): TodayResponse => ({
     hasPacts: true,
     alerts: [
       {
@@ -180,6 +190,7 @@ describe("a rejected vacation's alert", () => {
         firstDate: "2026-12-20",
         lastDate: "2027-01-02",
         owedAgainCents,
+        excusable,
       },
     ],
     sections: [],
@@ -209,6 +220,21 @@ describe("a rejected vacation's alert", () => {
 
     expect(spies.acceptVacationRejection).toHaveBeenCalledWith("v1");
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
+  test("with Missed days it released, says until when they can be excused", async () => {
+    const excusable = { firstDate: "2026-12-21", lastDate: "2026-12-23", until: "2026-12-26T13:00:00.000Z" };
+    stubApi({ today: answers(rejected(1000, excusable)) });
+    renderToday();
+    const alert = await screen.findByRole("status");
+    expect(alert.textContent).toContain("Mon Dec 21 to Wed Dec 23 can be excused until Sat Dec 26, 8:00am.");
+  });
+
+  test("with none it can release, says nothing of excuses", async () => {
+    stubApi({ today: answers(rejected(1000)) });
+    renderToday();
+    const alert = await screen.findByRole("status");
+    expect(alert.textContent).not.toContain("can be excused");
   });
 });
 
@@ -283,5 +309,55 @@ describe("the vacation banner", () => {
     expect(
       within(banner).getByText("Your pacts are Excused on these days, with no reminders and no penalties."),
     ).toBeTruthy();
+  });
+});
+
+describe("Waiting for approval", () => {
+  const waiting: TodayResponse = {
+    hasPacts: true,
+    alerts: [
+      {
+        kind: "reviewer-question",
+        item: { kind: "vacation", id: "trip", firstDate: "2026-01-12", lastDate: "2026-01-18", filedAt: NOW },
+        reviewerName: "Sam",
+        question: "When does your flight leave?",
+        askedAt: NOW,
+      },
+    ],
+    sections: [],
+    waiting: [
+      { kind: "vacation", id: "trip", firstDate: "2026-01-12", lastDate: "2026-01-18", filedAt: NOW },
+      {
+        kind: "evidence",
+        id: "photo-1",
+        pactId: "gym",
+        name: "Gym",
+        occurrenceDate: "2026-01-05",
+        submittedAt: "2026-01-05T14:00:00Z",
+      },
+    ],
+    yesterday: [],
+  };
+
+  beforeEach(() => stubApi({ today: answers(waiting) }));
+
+  test("a waiting evidence row opens its evidence page, not the pact", async () => {
+    const { user } = renderToday();
+    await user.click(await screen.findByRole("button", { name: /Gym\s*Evidence · Mon Jan 5/ }));
+    expect(openers.evidence).toHaveBeenCalledWith("photo-1");
+    expect(onOpenPact).not.toHaveBeenCalled();
+  });
+
+  test("a waiting vacation row opens the vacation", async () => {
+    const { user } = renderToday();
+    await user.click(await screen.findByRole("button", { name: /Mon Jan 12 – Sun Jan 18\s*Vacation/ }));
+    expect(openers.vacation).toHaveBeenCalledWith("trip");
+  });
+
+  test("a question about a vacation shows as an alert, and Reply opens the vacation", async () => {
+    const { user } = renderToday();
+    expect(await screen.findByText("Sam asked about your vacation, Mon Jan 12 – Sun Jan 18")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Reply" }));
+    expect(openers.vacation).toHaveBeenCalledWith("trip");
   });
 });

@@ -286,7 +286,7 @@ interface PactPageTerms {
    * is an occurrence on the old terms with another penalty.
    */
   newTerms: ChangeStart | null;
-  /** The pact's evidence, excuses and change request waiting for a reviewer's decision, newest first. */
+  /** The pact's change request, evidence, excuses and vacations covering it, waiting for a reviewer's decision, newest first. */
   waiting: PactWaitingItem[];
   /** What its heat map shows. */
   history: PactHistory;
@@ -488,8 +488,11 @@ export interface AnkiCheck {
   checkedAt: Date;
 }
 
-/** What the pact page's "Waiting on" list holds: never payments, which belong to a recipient. */
-export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" | "change-request" }>;
+/**
+ * What the pact page's "Waiting on" list holds: never payments, which belong
+ * to a recipient; a vacation when it covers the pact.
+ */
+export type PactWaitingItem = Exclude<TodayWaitingItem, { kind: "payment" }>;
 
 export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "pact-not-found" };
 
@@ -637,7 +640,7 @@ export interface PaymentView {
 
 /** What an item's page adds for its owner: where it stands, who may decide it, and its questions. */
 export interface ReviewedItem {
-  state: ReviewState;
+  state: ItemState;
   /** Who may decide it, sorted by name. */
   reviewerNames: string[];
   thread: QuestionThread;
@@ -690,11 +693,28 @@ export type ReplyResult =
         | TextTooLong;
     };
 
-/** Where a review item of the owner's stands. */
+/** Where a review item of the owner's stands, as its reviewers decide it. */
 export type ReviewState =
   | { kind: "waiting" }
   | { kind: "approved"; reviewerName: string; decidedAt: Date }
   | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+
+/**
+ * Why a review item was withdrawn (R8): its owner withdrew it (`owner`: a
+ * change request or a vacation), or the system did because deciding it
+ * either way could no longer change any outcome, penalty or terms: its pact
+ * Ended (`pact-ended`), or for another reason (`no-longer-needed`). A
+ * payment is never withdrawn.
+ */
+export type WithdrawnReason = "owner" | "pact-ended" | "no-longer-needed";
+
+/** When and why an item was withdrawn; for `pact-ended`, the pacts that Ended, oldest first. */
+export type Withdrawal =
+  | { reason: "owner" | "no-longer-needed"; withdrawnAt: Date }
+  | { reason: "pact-ended"; withdrawnAt: Date; pactNames: string[] };
+
+/** Where a review item of the owner's stands: decided, waiting, or withdrawn. */
+export type ItemState = ReviewState | ({ kind: "withdrawn" } & Withdrawal);
 
 /** Evidence's page, for its owner. Its reviewers are the pact's. */
 export type EvidenceDetail = EvidenceView & ReviewedItem;
@@ -722,7 +742,11 @@ export type DecideRefusal =
   /** Approving a change to a One-time pact whose new deadline is less than an hour away: it can only be rejected. */
   | "deadline-too-soon";
 
-export type DecideResult = { ok: true } | { ok: false; reason: DecideRefusal };
+export type DecideResult =
+  | { ok: true }
+  | { ok: false; reason: DecideRefusal }
+  /** It was withdrawn before the decision: by its owner, or because deciding it could no longer change anything. */
+  | { ok: false; reason: "withdrawn"; withdrawal: Withdrawal };
 
 export type SetTimezoneResult =
   /** `timezone` is the zone's canonical IANA name, as stored. */
@@ -869,7 +893,8 @@ export type TodayAlert =
       recipientName: string;
       /**
        * Until when an excuse for the day is accepted: 48 hours after the
-       * rejection. Null on Weekly count: the week isn't judged yet, so no 48
+       * rejection, or after a vacation that covered it was rejected or
+       * withdrawn, if later. Null on Weekly count: the week isn't judged yet, so no 48
        * hours are running.
        */
       excusableUntil: Date | null;
@@ -920,6 +945,12 @@ export type TodayAlert =
       lastDate: LocalDate;
       /** The penalties it held, owed again now. */
       owedAgainCents: number;
+      /**
+       * Its days Missed when it was rejected that can still be excused, and
+       * when their window closes: 48 hours from the rejection (R3). Null
+       * when none can.
+       */
+      excusable: ExcusableDays | null;
     }
   /**
    * Bills to one recipient are past their due time and not all paid, and
@@ -1034,7 +1065,11 @@ export interface TodayMissedCard extends TodayPactCard {
   occurrenceDate: LocalDate;
   /** When it was judged Missed. */
   missedAt: Date;
-  /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+  /**
+   * Until when an excuse for it is accepted: 48 hours after it was judged
+   * Missed, or after a vacation that covered it was rejected or withdrawn,
+   * if later (R3).
+   */
   excusableUntil: Date;
   /** What else its line says, or null for a plain Missed day. */
   detail: MissedDetail | null;
@@ -1129,6 +1164,16 @@ export type TodayWaitingItem =
       /** It asks to end the pact, rather than change its terms. */
       endsPact: boolean;
       requestedAt: Date;
+    }
+  /** A vacation no picked reviewer has decided yet, and the owner hasn't withdrawn. */
+  | {
+      kind: "vacation";
+      /** The vacation's id. */
+      id: string;
+      /** Its first and last days. */
+      firstDate: LocalDate;
+      lastDate: LocalDate;
+      filedAt: Date;
     };
 /** One pact due yesterday, and how it did. Weekly count pacts are never in it. */
 export interface TodayYesterdayEntry {
@@ -1173,6 +1218,18 @@ export interface LedgerSummary {
    * cover: that part, and the soonest due time. Null when there's none.
    */
   billDue: { amountCents: number; dueAt: Date } | null;
+  /**
+   * Approved payments beyond the penalties not held, when there are more of
+   * them: an excuse approved after its penalty was paid leaves this. It pays
+   * the next penalties as they're added (rule R12). Zero when there's none.
+   */
+  creditCents: number;
+  /**
+   * The kinds of waiting cover that hold penalties this credit would pay if
+   * rejected: the credit lasts only if they're approved. Empty when there's
+   * no credit or nothing held could use it.
+   */
+  creditWaitsOn: ("excuse" | "vacation")[];
 }
 
 /** A payment the owner made to a recipient outside the app, to record with its screenshot. */
@@ -1310,7 +1367,11 @@ export type OccurrenceStatus = OccurrenceStanding &
         kind: "missed";
         /** Its penalty, held while `cover` waits for approval. */
         penaltyCents: number;
-        /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+        /**
+         * Until when an excuse for it is accepted: 48 hours after it was
+         * judged Missed, or after a vacation that covered it was rejected or
+         * withdrawn, if later (R3).
+         */
         excusableUntil: Date;
       }
     | {
@@ -1526,6 +1587,11 @@ export interface VacationCard {
   state: VacationState;
   /** The penalties it holds while it waits, left out when none: withdrawing makes them owed. */
   heldCents?: number;
+  /**
+   * The first and last day whose penalty it holds, there exactly when
+   * `heldCents` is: withdrawing gives them 48 hours to be excused (R3).
+   */
+  heldDates?: { firstDate: LocalDate; lastDate: LocalDate };
 }
 
 /**
@@ -1538,6 +1604,13 @@ export type VacationState =
   | { kind: "waiting-on-reply"; askedBy: string; question: string }
   | { kind: "approved"; reviewerName: string }
   | { kind: "on-now" };
+
+/** Days a rejected or withdrawn vacation released, oldest and newest, and when their excuse window closes. */
+export interface ExcusableDays {
+  firstDate: LocalDate;
+  lastDate: LocalDate;
+  until: Date;
+}
 
 /** The dates of the owner's last approved vacation that has ended, as Profile's "Last one" shows them. */
 export interface LastVacation {
@@ -1751,12 +1824,9 @@ export interface ChangeStart {
   todayKeepsCents: number | null;
 }
 
-/** Where a change request stands. */
-export type ChangeRequestState = ReviewState | { kind: "withdrawn"; withdrawnAt: Date };
-
 /** The change request's page, for its owner. */
 export type ChangeRequestDetail = ChangeRequestView & {
-  state: ChangeRequestState;
+  state: ItemState;
   /** The pact's reviewers, sorted by name: who may decide it. */
   reviewerNames: string[];
   thread: QuestionThread;

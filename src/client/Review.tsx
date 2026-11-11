@@ -5,7 +5,7 @@
 // reviewer can still open and decide.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Json, ReviewQueueResponse } from "../shared/api.ts";
+import type { DecideResponse, Json, ReviewQueueResponse } from "../shared/api.ts";
 import { MAX_TEXT_CHARS, type DecideRefusal, type ReviewDecision, type ReviewItem } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { dateSpan, formatDate, formatDayTime, money, weekdayName } from "./format.ts";
@@ -45,8 +45,8 @@ export function Review({
     reload();
     reloadWaiting();
   };
-  const decided = (refusal: DecideRefusal | null) => {
-    setNotice(refusal === null ? null : REFUSAL_TEXT[refusal]);
+  const decided = (refusal: string | null) => {
+    setNotice(refusal);
     // The decided item leaves the queue, so the next one takes its place.
     refresh();
   };
@@ -251,8 +251,22 @@ type PaymentReviewItem = Extract<Json<ReviewItem>, { kind: "payment" }>;
 type ChangeReviewItem = Extract<Json<ReviewItem>, { kind: "change-request" }>;
 type VacationReviewItem = Extract<Json<ReviewItem>, { kind: "vacation" }>;
 
-/** After the core answered: null when the decision went through. */
-type OnDecided = (refusal: DecideRefusal | null) => void;
+/** Why a decision didn't go through: the item was withdrawn, or another refusal. */
+function refusalText(result: Extract<DecideResponse, { ok: false }>): string {
+  if (result.reason !== "withdrawn") return REFUSAL_TEXT[result.reason];
+  const { withdrawal } = result;
+  switch (withdrawal.reason) {
+    case "owner":
+      return "Its owner withdrew it.";
+    case "pact-ended":
+      return `Withdrawn: ${listNames(withdrawal.pactNames)} Ended.`;
+    case "no-longer-needed":
+      return "Withdrawn: no longer needed.";
+  }
+}
+
+/** After the core answered: what to tell the reviewer, or null when the decision went through. */
+type OnDecided = (refusal: string | null) => void;
 
 /** What every item gets: the timezone for its thread, and what its buttons do. */
 interface ItemProps {
@@ -547,7 +561,7 @@ function Decision({
   } = useSend(
     async (decision: ReviewDecision) => {
       const result = await api.decide(itemId, decision);
-      onDecided(result.ok ? null : result.reason);
+      onDecided(result.ok ? null : refusalText(result));
     },
     (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
   );

@@ -588,7 +588,14 @@ describe("holds and payments", () => {
     await reviewer.decide(await fileExcuse(owner, gym, sick(s.date("Mon"))), { kind: "approve" });
 
     expect(owner.ledgers()).toEqual([
-      expect.objectContaining({ owedCents: 0, payableCents: 0, paidCents: 500, overdueCents: 0, billDue: null }),
+      expect.objectContaining({
+        owedCents: 0,
+        payableCents: 0,
+        paidCents: 500,
+        overdueCents: 0,
+        billDue: null,
+        creditCents: 500,
+      }),
     ]);
     expect(await owner.recordPayment({ recipientId: sam.id, amountCents: 1 }, photo())).toEqual({
       ok: false,
@@ -597,7 +604,7 @@ describe("holds and payments", () => {
 
     // Wednesday's miss is paid already; Friday's is owed.
     await s.advanceTo("Thu 00:00");
-    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0 })]);
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0, creditCents: 0 })]);
     expect(ledgerHistory(owner).filter((entry) => entry.kind === "penalty")).toEqual([
       expect.objectContaining({ occurrenceDate: s.date("Wed"), paidCents: 500 }),
     ]);
@@ -829,7 +836,7 @@ describe("a change that removes a covered day", () => {
     });
   });
 
-  test("an excuse whose only day was removed shows no days on its page and in the Review Queue, and still waits", async () => {
+  test("an excuse whose only day was removed shows no days on its page, and is withdrawn as no longer needed", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
@@ -839,7 +846,9 @@ describe("a change that removes a covered day", () => {
     await changeDays(owner, reviewer, gym, ["mon", "fri"]);
     await changeDays(owner, reviewer, gym, MON_WED_FRI);
 
-    expect(owner.excuse(excuseId)).toMatchObject({ excuse: { days: [] } });
-    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId, days: [] })]);
+    expect(owner.excuse(excuseId)).toMatchObject({
+      excuse: { days: [], state: { kind: "withdrawn", reason: "no-longer-needed" } },
+    });
+    expect(reviewer.reviewQueue()).toEqual([]);
   });
 });

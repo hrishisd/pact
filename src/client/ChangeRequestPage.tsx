@@ -9,7 +9,7 @@ import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { DiffList, endsWhenText, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { formatDayTime } from "./format.ts";
-import { ItemKindHeader, ItemStateChip, OwnerThread, RejectionLine } from "./item-page.tsx";
+import { ItemKindHeader, ItemStateChip, OwnerThread, StateLine } from "./item-page.tsx";
 import { LoadedFound, useLoad, useSend } from "./ui.tsx";
 
 export function ChangeRequestPage({
@@ -84,7 +84,7 @@ function ChangeRequestView({
           <span className="meta">Sent {formatDayTime(request.requestedAt, timezone)}</span>
         </div>
         {request.note !== null && <span className="quote">“{request.note}”</span>}
-        <RejectionLine state={request.state} />
+        <StateLine state={request.state} timezone={timezone} />
         {request.endsPact ? (
           <p className="small muted">
             {request.ending &&

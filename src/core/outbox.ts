@@ -27,6 +27,8 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "vacation-decided": "decision",
   "reviewer-question": "comment",
   "owner-replied": "comment",
+  "stale-review-items": "review-item",
+  "unanswered-question": "comment",
   "new-bill": "new-bill",
   "overdue-bill": "overdue-bill",
   "connection-problem": "connection-problem",

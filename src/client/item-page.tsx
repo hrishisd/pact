@@ -4,9 +4,11 @@
 
 import type { ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
-import type { ChangeRequestState, QuestionThread, ReviewItem } from "../shared/types.ts";
+import { formatDate, formatDay } from "../shared/format.ts";
+import type { ItemState, QuestionThread, ReviewItem, TodayWaitingItem, Withdrawal } from "../shared/types.ts";
 import { listNames } from "./change-terms.tsx";
-import { formatDayTime } from "./format.ts";
+import { datesText } from "./excuse-days.tsx";
+import { formatDayTime, money } from "./format.ts";
 import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon, SuitcaseIcon } from "./icons.tsx";
 import { ReplyBox, Thread } from "./questions.tsx";
 
@@ -37,14 +39,14 @@ export function ItemKindHeader({ kind, children }: { kind: ItemKind; children: R
 
 /**
  * Where one of the owner's items stands: waiting on their reply or for
- * approval, approved or rejected and by whom, or withdrawn (a change request).
+ * approval, approved or rejected and by whom, or withdrawn.
  */
 export function ItemStateChip({
   state,
   thread,
   approvedClass = "c-ok",
 }: {
-  state: Json<ChangeRequestState>;
+  state: Json<ItemState>;
   thread: Json<QuestionThread>;
   /** The approved chip's colour: an approved excuse is Excused's. */
   approvedClass?: string;
@@ -65,14 +67,36 @@ export function ItemStateChip({
   }
 }
 
-/** Under a rejected item: Sam said “why”. Nothing otherwise. */
-export function RejectionLine({ state }: { state: Json<ChangeRequestState> }) {
+/**
+ * Under a rejected item: Sam said “why”. Under a withdrawn one, who withdrew
+ * it or why, and when. Nothing otherwise.
+ */
+export function StateLine({ state, timezone }: { state: Json<ItemState>; timezone: string }) {
+  if (state.kind === "withdrawn") {
+    return (
+      <p className="small">
+        {withdrawnText(state)} · {formatDay(state.withdrawnAt, timezone)}
+      </p>
+    );
+  }
   if (state.kind !== "rejected") return null;
   return (
     <p className="small">
       {state.reviewerName} said “{state.reason}”
     </p>
   );
+}
+
+/** Who withdrew an item, or why it was: "You withdrew it", "Withdrawn when Gym Ended", "Withdrawn: no longer needed". */
+export function withdrawnText(withdrawal: Json<Withdrawal>): string {
+  switch (withdrawal.reason) {
+    case "owner":
+      return "You withdrew it";
+    case "pact-ended":
+      return `Withdrawn when ${listNames(withdrawal.pactNames)} Ended`;
+    case "no-longer-needed":
+      return "Withdrawn: no longer needed";
+  }
 }
 
 /** An item's photos, each opening full size in a new tab. */
@@ -132,6 +156,35 @@ export function SentTo({
       Sent to {listNames(reviewerNames)} · {formatDayTime(sentAt, timezone)}
     </p>
   );
+}
+
+/** One of the owner's items still waiting for a decision, as Today and a pact page list it. */
+type WaitingItem = Json<TodayWaitingItem>;
+
+/** How each kind opens its own page (a vacation: its Profile card), from the item's id. */
+export type ItemOpeners = { readonly [K in ItemKind]: (id: string) => void };
+
+/** Opens the page of one of the owner's waiting items, from any list or alert that shows it. */
+export function openItem(item: WaitingItem, open: ItemOpeners): void {
+  open[item.kind](item.id);
+}
+
+/** Each kind's row in a waiting list: its title, and what follows the kind's name. */
+const WAITING_ROWS: {
+  readonly [K in ItemKind]: (item: Extract<WaitingItem, { kind: K }>) => { title: string; detail?: string };
+} = {
+  evidence: (item) => ({ title: item.name, detail: formatDate(item.occurrenceDate) }),
+  excuse: (item) => ({ title: item.name, detail: datesText(item.firstDate, item.lastDate) }),
+  payment: (item) => ({ title: `${money(item.amountCents)} to ${item.recipientName}` }),
+  "change-request": (item) => ({ title: item.name, ...(item.endsPact && { detail: "End this pact" }) }),
+  vacation: (item) => ({ title: datesText(item.firstDate, item.lastDate) }),
+};
+
+/** One of the owner's waiting items, the same row wherever it's listed; it opens the item's page. */
+export function WaitingItemRow<T extends WaitingItem>({ item, onOpen }: { item: T; onOpen: (item: T) => void }) {
+  const row = WAITING_ROWS[item.kind] as (item: WaitingItem) => { title: string; detail?: string };
+  const { title, detail } = row(item);
+  return <WaitingRow kind={item.kind} title={title} detail={detail} onOpen={() => onOpen(item)} />;
 }
 
 /**

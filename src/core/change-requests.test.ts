@@ -548,8 +548,12 @@ describe("one change request at a time", () => {
 
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(owner.today().waiting).toEqual([]);
-    expect(owner.changeRequest(id)).toMatchObject({ ok: true, changeRequest: { state: { kind: "withdrawn" } } });
-    expect(await reviewer.decide(id, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    const withdrawal = { reason: "owner", withdrawnAt: s.at("Thu 15:00") };
+    expect(owner.changeRequest(id)).toMatchObject({
+      ok: true,
+      changeRequest: { state: { kind: "withdrawn", ...withdrawal } },
+    });
+    expect(await reviewer.decide(id, { kind: "approve" })).toEqual({ ok: false, reason: "withdrawn", withdrawal });
     expect(await owner.withdrawChangeRequest(id)).toEqual({ ok: false, reason: "not-waiting" });
     expect(ok(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 1000 })))).toMatchObject({
       outcome: { kind: "stricter" },
@@ -875,13 +879,16 @@ describe("once a pact has Ended", () => {
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(reviewer.waitingOnReply()).toEqual([]);
     expect(owner.today().alerts.filter((alert) => alert.kind === "reviewer-question")).toEqual([]);
+    // Withdrawn when the pact Ended, at Fri 00:00, with that reason on its page and in a reviewer's refusal.
+    const withdrawal = { reason: "pact-ended", withdrawnAt: s.at("Fri 00:00"), pactNames: ["Gym"] };
     expect(owner.changeRequest(changeRequestIdOf(sent))).toMatchObject({
       ok: true,
-      changeRequest: { state: { kind: "withdrawn" } },
+      changeRequest: { state: { kind: "withdrawn", ...withdrawal } },
     });
     expect(await reviewer.decide(changeRequestIdOf(sent), { kind: "approve" })).toEqual({
       ok: false,
-      reason: "item-not-found",
+      reason: "withdrawn",
+      withdrawal,
     });
     expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endDate: s.date("Thu"), penaltyCents: 500 });
     expect(await owner.submitEvidence(gym, [photo()])).toEqual({ ok: false, reason: "not-open" });
@@ -897,10 +904,16 @@ describe("once a pact has Ended", () => {
     const ended = pactOf(owner, gym);
     if (ended.stage !== "ended") throw new Error("not ended");
     const { endedAt } = ended;
+    const withdrawal = { reason: "pact-ended", withdrawnAt: endedAt, pactNames: ["Gym"] };
 
+    expect(owner.changeRequest(end.changeRequestId)).toMatchObject({
+      ok: true,
+      changeRequest: { state: { kind: "withdrawn", ...withdrawal } },
+    });
     expect(await reviewer.decide(end.changeRequestId, { kind: "approve" })).toEqual({
       ok: false,
-      reason: "item-not-found",
+      reason: "withdrawn",
+      withdrawal,
     });
     expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endedAt });
     expect(s.notifier.sentTo(owner, "change-request-decided")).toEqual([]);

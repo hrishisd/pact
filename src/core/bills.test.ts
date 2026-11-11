@@ -307,6 +307,23 @@ describe("Overdue", () => {
     expect(owner.today().alerts).toMatchObject([{ kind: "bill-overdue", overdueCents: 500 }]);
   });
 
+  test("F6: a $1 payment waiting against a $15 overdue bill leaves the daily reminder running for $14", async () => {
+    const s = scenario();
+    const { owner, sam } = await fifteenOwed(s);
+    await s.advanceTo("Wed+2 18:00");
+    s.setClockTo("Wed+2 19:00");
+    await recordPayment(owner, { recipientId: sam.id, amountCents: 100 });
+
+    await s.advanceTo("Thu+2 18:00");
+    await s.advanceTo("Fri+2 18:00");
+
+    expect(s.notifier.sentTo(owner, "overdue-bill").map((n) => n.payload.title)).toEqual([
+      "$15 overdue to Sam",
+      "$14 overdue to Sam",
+      "$14 overdue to Sam",
+    ]);
+  });
+
   test("the alert names the reviewers only once the core has told them", async () => {
     const s = scenario();
     const { owner } = await fifteenOwed(s);

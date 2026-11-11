@@ -1,7 +1,6 @@
 // Reads the other parts of the core share: pact rows and the terms an
 // occurrence follows, accounts, names, friends, reviewers and recipients, each
-// pact's occurrences, connections and Anki decks, and question threads. Also
-// the one write every review decision makes, `recordDecision`.
+// pact's occurrences, connections and Anki decks.
 
 import type {
   AccountId,
@@ -16,14 +15,10 @@ import type {
   Friend,
   LocalDate,
   PactTerms,
-  QuestionThread,
   Recipient,
-  ReviewState,
   Schedule,
-  TodayWaitingItem,
 } from "../shared/types.ts";
 import { zoneOffsetAt } from "./calendar.ts";
-import type { ChangeableTerms } from "./changes.ts";
 import type { CoreContext } from "./context.ts";
 import {
   hasSchedule,
@@ -116,29 +111,6 @@ export function remindersOf(json: string): string[] {
  */
 export function byName(a: { id: string; name: string }, b: { id: string; name: string }): number {
   return a.name.localeCompare(b.name, "en-US") || a.id.localeCompare(b.id, "en-US");
-}
-
-/** A reviewer's decision on some evidence or a payment, as stored. */
-export type ReviewOutcome = "approved" | "rejected";
-
-/** SQL: the columns `reviewStateOf` reads from `table`, joined to its deciding reviewer as `reviewer`. */
-export function reviewStateColumns(table: "evidence" | "excuse" | "payment"): string {
-  return `${table}.decision, ${table}.decided_at, ${table}.reject_reason, reviewer.name AS reviewer_name`;
-}
-
-export interface ReviewStateRow {
-  decision: ReviewOutcome | null;
-  decided_at: string | null;
-  reject_reason: string | null;
-  reviewer_name: string | null;
-}
-
-export function reviewStateOf(row: ReviewStateRow): ReviewState {
-  if (row.decision === null) return { kind: "waiting" };
-  const decided = { reviewerName: row.reviewer_name!, decidedAt: new Date(row.decided_at!) };
-  return row.decision === "approved"
-    ? { kind: "approved", ...decided }
-    : { kind: "rejected", ...decided, reason: row.reject_reason! };
 }
 
 /** `ownerId`'s pact `pactId`, if it is one. */
@@ -299,14 +271,6 @@ export function friendshipPair(a: AccountId, b: AccountId): [AccountId, AccountI
   return a < b ? [a, b] : [b, a];
 }
 
-/** A checked review decision, as `decide` hands it on: a rejection's reason is trimmed and never blank. */
-export type Decided = { outcome: "approved"; reason: null } | { outcome: "rejected"; reason: string };
-
-/** A decision as its notification's details carry it: a rejection with its reason. */
-export function decisionDetails(decided: Decided): { decision: "approved" } | { decision: "rejected"; reason: string } {
-  return decided.outcome === "approved" ? { decision: "approved" } : { decision: "rejected", reason: decided.reason };
-}
-
 /**
  * `lists` merged into one sorted by `at`, oldest or newest first. Ties keep
  * the order they have in `lists`, as the sort is stable.
@@ -407,27 +371,6 @@ export function ankiTerms(
   };
 }
 
-/**
- * An item's questions and replies, oldest first. `waiting` says the item is
- * still waiting for a decision; only then can it be waiting on a reply.
- */
-export function thread(ctx: CoreContext, itemId: string, waiting: boolean): QuestionThread {
-  const comments = ctx
-    .all<{ from_owner: 0 | 1; name: string; text: string; sent_at: string }>(
-      `SELECT comment.from_owner, account.name, comment.text, comment.sent_at
-         FROM comment JOIN account ON account.id = comment.author_account_id
-         WHERE comment.item_id = ? ORDER BY comment.id`,
-      itemId,
-    )
-    .map((row) => ({
-      fromOwner: row.from_owner === 1,
-      authorName: row.name,
-      text: row.text,
-      sentAt: new Date(row.sent_at),
-    }));
-  return { comments, waitingOnReply: waiting && comments.at(-1)?.fromOwner === false };
-}
-
 /** Whether the pact's schedule is Weekly count. It keeps its kind once its edit window has closed. */
 export function isWeekly(ctx: CoreContext, pactId: string): boolean {
   const row = ctx.db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
@@ -437,64 +380,4 @@ export function isWeekly(ctx: CoreContext, pactId: string): boolean {
 /** Pacts created by this time, as an ISO string, are past their edit window: for comparing in SQL. */
 export function editWindowCutoff(ctx: CoreContext, at = ctx.clock.now()): string {
   return new Date(at.getTime() - EDIT_WINDOW_MS).toISOString();
-}
-
-/** The penalty the occurrence of `occurrences` open `today` keeps, when it differs from `after`'s; else null. */
-export function todayKeeps(
-  ctx: CoreContext,
-  pactId: string,
-  occurrences: Occurrences,
-  today: LocalDate,
-  after: Pick<ChangeableTerms, "penaltyCents">,
-): number | null {
-  const open = occurrences.covering(today);
-  if (!open) return null;
-  const { penalty_cents: penalty } = termsOn(ctx, pactId, open.date);
-  return penalty !== after.penaltyCents ? penalty : null;
-}
-
-/** The owner's change requests waiting for a decision (or just that for `pactId`), newest first. */
-export function waitingChangeRequests(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
-  const rows = ctx.all<{
-    id: string;
-    pact_id: string;
-    name: string;
-    ends_pact: 0 | 1;
-    requested_at: string;
-  }>(
-    `SELECT change_request.id, change_request.pact_id, pact.name, change_request.ends_pact,
-              change_request.requested_at
-       FROM change_request JOIN pact ON pact.id = change_request.pact_id
-       WHERE pact.owner_account_id = ? AND change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
-         AND (? IS NULL OR pact.id = ?)
-       ORDER BY change_request.requested_at DESC, change_request.id`,
-    ownerId,
-    pactId ?? null,
-    pactId ?? null,
-  );
-  return rows.map((row) => ({
-    kind: "change-request",
-    id: row.id,
-    pactId: row.pact_id,
-    name: row.name,
-    endsPact: row.ends_pact === 1,
-    requestedAt: new Date(row.requested_at),
-  }));
-}
-
-/** Stores a reviewer's decision on the review item `id` in `table`. */
-export function recordDecision(
-  ctx: CoreContext,
-  table: "evidence" | "excuse" | "payment" | "change_request" | "vacation",
-  id: string,
-  { outcome, reason }: Decided,
-  reviewerId: AccountId,
-  at: Date,
-): void {
-  ctx.db
-    .prepare(
-      `UPDATE ${table} SET decision = ?, decided_by_account_id = ?, decided_at = ?, reject_reason = ?
-       WHERE id = ?`,
-    )
-    .run(outcome, reviewerId, at.toISOString(), reason, id);
 }

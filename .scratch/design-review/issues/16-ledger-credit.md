@@ -1,6 +1,6 @@
 # 16 Show the ledger's credit
 
-Status: ready-for-agent
+Status: done
 Blocked by: 12
 
 Closes: F13 and rule R12 (`../interaction-audit.md` finding 13). Low priority.
@@ -33,14 +33,19 @@ Current behaviour, exactly:
 
 ## Acceptance criteria
 
-- [ ] New scenario in `ledgers.test.ts`: $5 paid, an excuse then filed and approved for that penalty; the ledger shows owed $0 and credit $5; the next $5 penalty shows as paid and the credit is gone.
-- [ ] New scenario: the same excuse rejected instead; the credit is gone and the payment pays the penalty again.
-- [ ] `excuses.test.ts:577` passes, with an added assertion on `creditCents`.
-- [ ] A client test for the credit line in `Ledgers`.
-- [ ] Update `docs/behaviour.md`.
-- [ ] `npm run check` passes.
+- [x] New scenario in `ledgers.test.ts`: $5 paid, an excuse then filed and approved for that penalty; the ledger shows owed $0 and credit $5; the next $5 penalty shows as paid and the credit is gone.
+- [x] New scenario: the same excuse rejected instead; the credit is gone and the payment pays the penalty again.
+- [x] `excuses.test.ts:577` passes, with an added assertion on `creditCents`.
+- [x] A client test for the credit line in `Ledgers`.
+- [x] Update `docs/behaviour.md`.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - Refunds, or letting an owner pay ahead beyond owed.
 - The billed-penalty guard (ticket 12).
+
+## Comments
+
+- Built 2026-11-11. `LedgerSummary` gained `creditCents` and `creditWaitsOn` (the kinds of waiting cover holding a penalty the credit would pay if rejected). The view can tell when the credit is provisional, so the card says "$5 credit if the excuse is approved" (or "vacation", or "excuse and vacation") while one waits, and "$5 credit · pays your next penalties" otherwise. The copy says "the excuse" even when several wait.
+- The ticket's line references have drifted: the owed-at-zero test is now `excuses.test.ts:586`, and there was no `Ledgers` client test before; `src/client/Ledgers.test.tsx` is new.

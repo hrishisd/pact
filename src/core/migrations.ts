@@ -834,4 +834,56 @@ export const migrations: readonly Migration[] = [
   -- migration keep null: they Ended at approval.
   ALTER TABLE pact ADD COLUMN end_approved_at TEXT;
   `,
+  // 33: withdrawal reasons, and evidence and excuses the system withdraws
+  `
+  -- Why a review item was withdrawn (R8): its owner withdrew it ('owner'), or
+  -- deciding it could no longer change anything, because its pact Ended
+  -- ('pact-ended') or for another reason ('no-longer-needed'). The system
+  -- withdraws evidence and excuses too now; their owners still can't. A
+  -- payment is never withdrawn.
+  ALTER TABLE evidence ADD COLUMN withdrawn_at TEXT;
+  ALTER TABLE evidence ADD COLUMN withdrawn_reason TEXT
+    CHECK (withdrawn_reason IS NULL OR (withdrawn_reason IN ('pact-ended', 'no-longer-needed') AND withdrawn_at IS NOT NULL));
+  ALTER TABLE excuse ADD COLUMN withdrawn_at TEXT;
+  ALTER TABLE excuse ADD COLUMN withdrawn_reason TEXT
+    CHECK (withdrawn_reason IS NULL OR (withdrawn_reason IN ('pact-ended', 'no-longer-needed') AND withdrawn_at IS NOT NULL));
+  ALTER TABLE change_request ADD COLUMN withdrawn_reason TEXT
+    CHECK (withdrawn_reason IS NULL OR (withdrawn_reason IN ('owner', 'pact-ended') AND withdrawn_at IS NOT NULL));
+  ALTER TABLE vacation ADD COLUMN withdrawn_reason TEXT
+    CHECK (withdrawn_reason IS NULL OR (withdrawn_reason IN ('owner', 'pact-ended', 'no-longer-needed') AND withdrawn_at IS NOT NULL));
+
+  -- A change request withdrawn when its pact Ended was withdrawn at the end;
+  -- every other withdrawal so far was its owner's.
+  UPDATE change_request SET withdrawn_reason =
+      CASE WHEN withdrawn_at = (SELECT ended_at FROM pact WHERE pact.id = change_request.pact_id)
+           THEN 'pact-ended' ELSE 'owner' END
+    WHERE withdrawn_at IS NOT NULL;
+  UPDATE vacation SET withdrawn_reason = 'owner' WHERE withdrawn_at IS NOT NULL;
+
+  -- Withdrawn evidence doesn't wait: the day takes new evidence.
+  DROP INDEX evidence_one_waiting;
+  CREATE UNIQUE INDEX evidence_one_waiting ON evidence (pact_id, day) WHERE decision IS NULL AND withdrawn_at IS NULL;
+
+  -- A withdrawn excuse covers nothing, as a withdrawn vacation doesn't.
+  DROP VIEW cover_day_v;
+  CREATE VIEW cover_day_v AS
+    SELECT 'excuse' AS kind, excuse.id, excuse_day.pact_id, excuse_day.date, excuse.filed_at, excuse.decision,
+           excuse.decided_at, excuse.withdrawn_at
+      FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+    UNION ALL
+    SELECT 'vacation', vacation.id, vacation_day.pact_id, vacation_day.date, vacation.filed_at, vacation.decision,
+           vacation.decided_at, vacation.withdrawn_at
+      FROM vacation_day JOIN vacation ON vacation.id = vacation_day.vacation_id;
+  `,
+  // 34: stale-item reminders
+  `
+  -- When the account was last pushed about items waiting more than 24 hours
+  -- in its Review Queue, and about reviewers' questions it hasn't answered
+  -- in 24 hours (R2): at most one of each a day, restart or not.
+  CREATE TABLE stale_notice (
+    account_id TEXT PRIMARY KEY REFERENCES account (id),
+    reviewer_reminded_at TEXT,
+    owner_reminded_at TEXT
+  );
+  `,
 ];

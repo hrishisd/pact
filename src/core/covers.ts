@@ -13,6 +13,7 @@
 
 import type { LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
+import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 
 export type CoverKind = "excuse" | "vacation";
 
@@ -54,14 +55,29 @@ export function coversOn(ctx: CoreContext, pactId: string, date: LocalDate): Cov
     .map((row) => ({ id: row.id, kind: row.kind, state: row.decision === null ? "waiting" : "approved" }));
 }
 
+/** A decision on a waiting excuse or vacation, supposed made: approved it counts as approved, rejected it covers nothing. */
+export interface SupposedCoverDecision {
+  id: string;
+  decision: "approved" | "rejected";
+}
+
 /**
  * The one cover that counts for the pact's occurrence on `date`, or null:
  * an excuse waiting for approval, else an approved excuse, else an approved
  * vacation, else a vacation waiting for approval. An approved vacation
- * counts exactly as an approved excuse does.
+ * counts exactly as an approved excuse does. With `supposing`, as if that
+ * decision had been made.
  */
-export function coverOn(ctx: CoreContext, pactId: string, date: LocalDate): Cover | null {
-  const covers = coversOn(ctx, pactId, date);
+export function coverOn(
+  ctx: CoreContext,
+  pactId: string,
+  date: LocalDate,
+  supposing?: SupposedCoverDecision,
+): Cover | null {
+  const covers = coversOn(ctx, pactId, date).flatMap((cover): Cover[] => {
+    if (supposing === undefined || cover.id !== supposing.id) return [cover];
+    return supposing.decision === "approved" ? [{ ...cover, state: "approved" }] : [];
+  });
   return (
     covers.find((c) => c.kind === "excuse" && c.state === "waiting") ??
     covers.find((c) => c.kind === "excuse") ??
@@ -103,6 +119,31 @@ export function coveredSql(pact: string, date: string, state: "waiting" | "appro
 }
 
 /**
+ * SQL: when the 48-hour excuse window of the occurrence of pact `pact` on
+ * `date`, judged at `judgedAt` (SQL expressions; ISO strings), opens: the
+ * later of its judging and the rejection or withdrawal of a vacation that
+ * covered it while it waited (R3). A rejected or withdrawn excuse doesn't
+ * move it (v0:256), and nothing reopens it once its penalty is on a bill: a
+ * billed penalty can't be excused (`settle`). Bills now wait out a reopened
+ * window, but bills made before R3 may hold a released penalty. Every read
+ * of the window goes through here or `excusableUntil`.
+ */
+export function excuseWindowOpensSql(pact: string, date: string, judgedAt: string): string {
+  return `MAX(${judgedAt}, COALESCE((SELECT MAX(COALESCE(released.withdrawn_at, released.decided_at))
+    FROM cover_day_v AS released
+    WHERE released.kind = 'vacation' AND released.pact_id = ${pact} AND released.date = ${date}
+      AND (released.withdrawn_at IS NOT NULL OR released.decision = 'rejected')
+      AND NOT EXISTS (SELECT 1 FROM penalty AS billed
+                      WHERE billed.pact_id = ${pact} AND billed.occurrence_date = ${date} AND billed.bill_id IS NOT NULL)),
+    ${judgedAt}))`;
+}
+
+/** When the excuse window that opens at `opensAt` (from `excuseWindowOpensSql`) closes. */
+export function excusableUntil(opensAt: string): Date {
+  return new Date(new Date(opensAt).getTime() + EXCUSE_WINDOW_MS);
+}
+
+/**
  * Moves the covers on the pact's occurrence dated `from` to `to`, as a
  * One-time deadline's new date. An excuse moves with it; a vacation only if
  * its dates take in `to`, else it no longer covers the occurrence.
@@ -122,7 +163,8 @@ export function moveCovers(ctx: CoreContext, pactId: string, from: LocalDate, to
  * Deletes the excuse and vacation days on the pact's occurrences dated
  * `from` onward that its schedule no longer has (`scheduled` says which it
  * has), unless judged: a change took the day off, and one that adds it back
- * finds it not covered (vac:61). A cover left with no days still waits.
+ * finds it not covered (vac:61). A cover left with no days is moot, and the
+ * command's `withdrawMoot` withdraws it (R8).
  */
 export function uncoverRemovedDays(
   ctx: CoreContext,

@@ -7,7 +7,7 @@ import type { Json } from "../shared/api.ts";
 import type { EvidenceDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { formatDate } from "./format.ts";
-import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, RejectionLine, SentTo } from "./item-page.tsx";
+import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, StateLine, SentTo } from "./item-page.tsx";
 import { LoadedFound, useLoad } from "./ui.tsx";
 
 export function EvidencePage({
@@ -60,7 +60,7 @@ function EvidenceView({
           <span className="label">What counts</span>
           <span>{evidence.description}</span>
         </div>
-        <RejectionLine state={evidence.state} />
+        <StateLine state={evidence.state} timezone={timezone} />
         <PhotoLinks photoIds={evidence.photoIds} />
       </article>
       <OwnerThread itemId={evidence.id} thread={evidence.thread} timezone={timezone} onReplied={onReplied} />

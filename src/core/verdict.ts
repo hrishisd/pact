@@ -16,7 +16,8 @@ import { coverOn, type Cover } from "./covers.ts";
 import { ANKI_CHECK_HOLDS_JUDGING_MS } from "./judging.ts";
 import type { Occurrence, Occurrences } from "./occurrences.ts";
 import { deadlineWallClock, wallClock } from "./oura-clock.ts";
-import { ankiDeckOn, occurrencesOf, scheduleOf, termsOn, type ReviewOutcome } from "./rows.ts";
+import type { ReviewOutcome } from "./requests.ts";
+import { ankiDeckOn, occurrencesOf, scheduleOf, termsOn } from "./rows.ts";
 
 /** One submission of evidence for the occurrence (a Weekly count week: for one of its days). */
 export interface EvidenceFact {
@@ -277,7 +278,7 @@ export function occurrenceFacts(
   ctx: CoreContext,
   pactId: string,
   date: LocalDate,
-  known: { ankiChecks?: AnkiCheckRun[]; occurrences?: Occurrences } = {},
+  known: { ankiChecks?: AnkiCheckRun[]; occurrences?: Occurrences; supposing?: SupposedDecision } = {},
 ): OccurrenceFacts | null {
   const pact = ctx.one<{ timezone: string; ended_at: string | null; evidence_kind: string; owner: string }>(
     `SELECT account.timezone, pact.ended_at, pact.evidence_kind, pact.owner_account_id AS owner
@@ -289,23 +290,41 @@ export function occurrenceFacts(
   const occurrence = occurrences.includes(date) ? occurrences.covering(date) : null;
   if (occurrence === null || occurrence.date !== date) return null;
   const terms = termsOn(ctx, pactId, date);
+  const { supposing } = known;
+  // Withdrawn evidence was moot: it never counts.
   const evidence = ctx
-    .all<{ day: LocalDate; submitted_at: string; decision: ReviewOutcome | null; decided_at: string | null }>(
-      `SELECT day, submitted_at, decision, decided_at FROM evidence WHERE pact_id = ? AND occurrence_date = ?
+    .all<{
+      id: string;
+      day: LocalDate;
+      submitted_at: string;
+      decision: ReviewOutcome | null;
+      decided_at: string | null;
+    }>(
+      `SELECT id, day, submitted_at, decision, decided_at FROM evidence
+         WHERE pact_id = ? AND occurrence_date = ? AND withdrawn_at IS NULL
          ORDER BY submitted_at, id`,
       pactId,
       date,
     )
-    .map((row) => ({
-      day: row.day,
-      submittedAt: new Date(row.submitted_at),
-      decision: row.decision,
-      decidedAt: row.decided_at === null ? null : new Date(row.decided_at),
-    }));
-  const found = coverOn(ctx, pactId, date);
+    .map((row) => {
+      const supposed = row.id === supposing?.id && row.decision === null ? supposing : null;
+      const decidedAt = supposed?.at ?? (row.decided_at === null ? null : new Date(row.decided_at));
+      return {
+        day: row.day,
+        submittedAt: new Date(row.submitted_at),
+        decision: supposed?.decision ?? row.decision,
+        decidedAt,
+      };
+    });
+  const found = coverOn(ctx, pactId, date, supposing);
   const cover: CoverFact | null = found && {
     ...found,
-    approvedAt: found.state === "approved" ? new Date(coverDecidedAt(ctx, found.id)) : null,
+    approvedAt:
+      found.state !== "approved"
+        ? null
+        : found.id === supposing?.id
+          ? supposing.at
+          : new Date(coverDecidedAt(ctx, found.id)),
   };
   let automatic: OuraFact | AnkiFact | null = null;
   if (pact.evidence_kind === "oura") {
@@ -352,6 +371,45 @@ export function occurrenceFacts(
     automatic,
     cover,
   };
+}
+
+/**
+ * A decision not made yet on waiting evidence or a waiting excuse or
+ * vacation (`id`), supposed made at `at`: to judge what deciding it would do.
+ */
+export interface SupposedDecision {
+  id: string;
+  decision: ReviewOutcome;
+  at: Date;
+}
+
+/**
+ * What deciding the waiting evidence, excuse or vacation `itemId` at `now`
+ * would do to the pact's occurrence dated `date` (R8): `matters` while
+ * approving and rejecting it give different verdicts or penalties, or a
+ * verdict that isn't final yet; else `not-the-pacts` when it's due after the
+ * pact Ended, and `settled` otherwise. `gone` when the pact has no occurrence
+ * that day any more.
+ */
+export function decisionEffect(
+  ctx: CoreContext,
+  pactId: string,
+  date: LocalDate,
+  itemId: string,
+  now: Date,
+): "matters" | "settled" | "not-the-pacts" | "gone" {
+  const [approved, rejected] = (["approved", "rejected"] as const).map((decision) => {
+    const facts = occurrenceFacts(ctx, pactId, date, { supposing: { id: itemId, decision, at: now } });
+    return facts && verdictOf(facts, now);
+  });
+  if (!approved || !rejected) return "gone";
+  if (approved.kind === "not-the-pacts" && rejected.kind === "not-the-pacts") return "not-the-pacts";
+  if (!("at" in approved) || !("at" in rejected) || approved.kind !== rejected.kind) return "matters";
+  if (approved.kind === "missed" && rejected.kind === "missed") {
+    const same = approved.penaltyCents === rejected.penaltyCents && approved.recipientId === rejected.recipientId;
+    if (!same) return "matters";
+  }
+  return "settled";
 }
 
 function coverDecidedAt(ctx: CoreContext, coverId: string): string {

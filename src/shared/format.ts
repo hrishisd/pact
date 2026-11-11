@@ -43,6 +43,34 @@ export function formatDay(instant: string, timeZone: string): string {
   return `${part("weekday")} ${part("month")} ${part("day")}`;
 }
 
+/** An instant, as an ISO string, as its day and time in `timeZone` (the profile's): "Thu Oct 22, 9:05pm". */
+export function formatDayTime(instant: string, timeZone: string): string {
+  return `${formatDay(instant, timeZone)}, ${clockTime(instant, timeZone)}`;
+}
+
+/**
+ * An instant, as an ISO string, as a time in `timeZone` (the profile's):
+ * "2:24pm". Undefined reads it on this device's clock.
+ */
+export function clockTime(instant: string, timeZone: string | undefined): string {
+  const part = partsIn(instant, timeZone, { hour: "numeric", minute: "2-digit" });
+  return `${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
+}
+
+/**
+ * Days whose excuse window a rejected or withdrawn vacation reopened, and
+ * when it closes: "Mon Jan 5 to Wed Jan 7 can be excused until Fri Jan 9,
+ * 8:00am." `until` is an ISO string, written in `timeZone` (the owner's).
+ */
+export function excusableText(firstDate: LocalDate, lastDate: LocalDate, until: string, timeZone: string): string {
+  return `${daysText(firstDate, lastDate)} can be excused until ${formatDayTime(until, timeZone)}.`;
+}
+
+/** The days from `firstDate` to `lastDate`: "Mon Jan 5 to Wed Jan 7", or "Mon Jan 5" for one. */
+export function daysText(firstDate: LocalDate, lastDate: LocalDate): string {
+  return firstDate === lastDate ? formatDate(firstDate) : `${formatDate(firstDate)} to ${formatDate(lastDate)}`;
+}
+
 /**
  * `instant` (an ISO string, or ms) formatted in `timeZone` with `options`, as
  * a lookup of its parts: `part("hour")`, or "" for a part it doesn't have.

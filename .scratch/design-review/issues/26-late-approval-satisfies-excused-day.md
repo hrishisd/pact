@@ -29,3 +29,7 @@ The vacation spec (vac:78) says approved evidence still makes a covered occurren
 ## Comments
 
 - From ticket 11's review (2026-11-11): `settle` (`src/core/settle.ts`) now does the judging in `decideEvidence`, but it returns early for an occurrence already judged (`isJudged`), so a late approval on an Excused day still changes nothing. This ticket has to let `settle` rewrite a stored Excused outcome as Satisfied when `verdictOf` says so, unless ticket 12 has already widened `settle` to rewrite judged occurrences when it moves cover approvals onto it.
+
+## Criterion moved from ticket 20 (owner decision, 2026-11-11)
+
+- [ ] Case 5: a scenario where evidence for a day judged Excused stays in the queue and its approval makes the day Satisfied with no penalty.

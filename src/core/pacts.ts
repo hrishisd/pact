@@ -21,17 +21,14 @@ import type {
   PactSummary,
   PactTerms,
   PactTiming,
-  PactWaitingItem,
   Schedule,
   TermsByKind,
-  TodayWaitingItem,
 } from "../shared/types.ts";
 import { laterDate, localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { moveCovers } from "./covers.ts";
 import { endingOf } from "./ending.ts";
-import { enqueueEvidenceReviewItems, waitingEvidence } from "./evidence.ts";
-import { waitingExcuses } from "./excuses.ts";
+import { enqueueEvidenceReviewItems } from "./evidence.ts";
 import { pactHistory } from "./history.ts";
 import {
   ankiDueByFits,
@@ -62,7 +59,6 @@ import {
   editWindowCutoff,
   friendsSortedByName,
   hasConnection,
-  mergeByTime,
   occurrencesOf,
   occurrenceTermsOf,
   ownPact,
@@ -70,10 +66,10 @@ import {
   reviewersOf,
   scheduleOf,
   selectRecipients,
-  todayKeeps,
-  waitingChangeRequests,
   type PactRow,
 } from "./rows.ts";
+import { todayKeeps } from "./change-requests.ts";
+import type { waitingFor } from "./waiting.ts";
 
 export function createPact(ctx: CoreContext, accountId: AccountId, pact: NewPact): CreatePactResult {
   const { timezone } = accountRow(ctx, accountId);
@@ -239,7 +235,16 @@ export function pactList(ctx: CoreContext, accountId: AccountId): PactSummary[] 
   ];
 }
 
-export function pactPage(ctx: CoreContext, accountId: AccountId, pactId: string): PactResult {
+/**
+ * The owner's pact `pactId`. `waiting` is `waitingFor` (waiting.ts), passed
+ * in because this module can't import the registry it reads.
+ */
+export function pactPage(
+  ctx: CoreContext,
+  accountId: AccountId,
+  pactId: string,
+  waiting: typeof waitingFor,
+): PactResult {
   const { timezone } = accountRow(ctx, accountId);
   const row = ownPact(ctx, accountId, pactId);
   if (!row) return { ok: false, reason: "pact-not-found" };
@@ -253,13 +258,7 @@ export function pactPage(ctx: CoreContext, accountId: AccountId, pactId: string)
     firstOccurrence: { date: first.date, dueAt: first.dueAt },
     editWindowClosesAt: editWindowClosesAt(row, now),
     newTerms: newTerms(ctx, row, timezone, now),
-    waiting: mergeByTime(
-      waitingSince,
-      "newest-first",
-      waitingChangeRequests(ctx, accountId, pactId),
-      waitingEvidence(ctx, accountId, pactId),
-      waitingExcuses(ctx, accountId, pactId),
-    ) as PactWaitingItem[],
+    waiting: waiting(ctx, accountId, { pactId }),
     history: pactHistory(ctx, row, timezone, first, now),
     connectionProblem: row.stage === "active" && service !== null ? connectionProblem(ctx, accountId, service) : null,
     ending: endingOf(row),
@@ -330,20 +329,6 @@ export function stageOf(
   if (row.stage === "active") return { stage: "active" };
   if (row.ended_at === null) throw new Error(`pact ${row.id} ended with no ended_at`);
   return { stage: "ended", endedAt: new Date(row.ended_at) };
-}
-
-/** When a waiting item was sent for a decision: for ordering them. */
-export function waitingSince(item: TodayWaitingItem): Date {
-  switch (item.kind) {
-    case "evidence":
-      return item.submittedAt;
-    case "excuse":
-      return item.filedAt;
-    case "payment":
-      return item.recordedAt;
-    case "change-request":
-      return item.requestedAt;
-  }
 }
 
 /**
@@ -579,7 +564,7 @@ export function closeEditWindows(ctx: CoreContext, t: Date): void {
     const closedAt = editWindowEnd(pact).toISOString();
     const held = ctx.all<{ id: string; day: LocalDate }>(
       `SELECT id, day FROM evidence
-         WHERE pact_id = ? AND decision IS NULL AND submitted_at < ?
+         WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL AND submitted_at < ?
          ORDER BY submitted_at, id`,
       pact.id,
       closedAt,
