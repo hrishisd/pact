@@ -1,5 +1,5 @@
 // An excuse's page, pushed on the current tab: where its review stands, its
-// pact and dates, the reason and photos, each day it covers as it stands now,
+// pact and dates, the reason and photos, each day it still covers as it stands now,
 // who it was sent to, and any questions about it, with the reply box while
 // one waits on the owner's reply. It opens from Today, a pact's page, an
 // approved excuse's push and a reviewer's question.
@@ -58,25 +58,28 @@ function ExcuseView({
               {excuse.pactName}
             </button>
           </h3>
-          <span className="meta">{excuseDatesText(excuse.days)}</span>
+          {excuse.days.length > 0 && <span className="meta">{excuseDatesText(excuse.days)}</span>}
         </div>
         <span className="excuse-reason">“{excuse.reason}”</span>
         <StateLine state={excuse.state} timezone={timezone} />
         <PhotoLinks photoIds={excuse.photoIds} />
       </article>
-      <section className="stack">
-        <div className="label">Days</div>
-        <div className="list">
-          {excuse.days.map((day) => (
-            <div key={day.date} className="covrow">
-              <span className="rt">
-                <b>{excuseDayText(day)}</b>
-              </span>
-              <DayChip status={day.status} now={now} timezone={timezone} week={day.through !== undefined} />
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* A change can take every day off, or an approved end leave them all past the pact's end: none is left to list. */}
+      {excuse.days.length > 0 && (
+        <section className="stack">
+          <div className="label">Days</div>
+          <div className="list">
+            {excuse.days.map((day) => (
+              <div key={day.date} className="covrow">
+                <span className="rt">
+                  <b>{excuseDayText(day)}</b>
+                </span>
+                <DayChip status={day.status} now={now} timezone={timezone} week={day.through !== undefined} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <OwnerThread itemId={excuse.id} thread={excuse.thread} timezone={timezone} onReplied={onReplied} />
       <SentTo reviewerNames={excuse.reviewerNames} sentAt={excuse.filedAt} timezone={timezone} />
     </>

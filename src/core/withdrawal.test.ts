@@ -47,6 +47,7 @@ describe("moot items are withdrawn with their reason, silently", () => {
 
     expect(queued(reviewer)).not.toContain(excuseId);
     expect(waiting(owner)).not.toContain(excuseId);
+    expect(pactOf(owner, gym).waiting.map((item) => item.id)).not.toContain(excuseId);
     expect(owner.excuse(excuseId)).toMatchObject({
       ok: true,
       excuse: { state: { kind: "withdrawn", reason: "no-longer-needed", withdrawnAt: s.at("Tue 12:00") } },
@@ -226,6 +227,31 @@ describe("items whose decision still matters stay", () => {
       expect(queued(reviewer)).toContain(id);
       expect(waiting(owner)).toContain(id);
     }
+  });
+
+  test("a vacation with one pact's day Satisfied and another's Missed stays: approving it would excuse the miss", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    const read = await createPact("Read", EVERY_DAY);
+    s.setClockTo("Tue 12:00");
+    const { vacationId } = ok(
+      await owner.fileVacation({
+        from: s.date("Wed"),
+        to: s.date("Wed"),
+        pactIds: [gym, read],
+        reviewerIds: [reviewer.id],
+      }),
+    );
+    await s.advanceTo("Wed 10:00");
+    ok(await reviewer.decide(await submit(owner, gym), { kind: "approve" }));
+
+    await s.advanceTo("Thu 01:00");
+
+    expect(statusOn(owner, gym, s.date("Wed"))).toBe("satisfied");
+    expect(statusOn(owner, read, s.date("Wed"))).toBe("missed");
+    expect(queued(reviewer)).toContain(vacationId);
+    expect(waiting(owner)).toContain(vacationId);
   });
 
   test("a change request on an Active pact stays", async () => {

@@ -1,6 +1,6 @@
 # 20 Withdrawal reasons and moot items
 
-Status: ready-for-agent
+Status: done
 Blocked by: 10, 13, 14, 17
 
 Closes: F8, F10 and rule R8 (`../interaction-audit.md` findings 8 and 10, probes P5a to P5c); H1 steps 3 and 4 (`../architecture-review.md`); the empty-cover half of R9.
@@ -56,7 +56,7 @@ Cases, checked against that definition with the code as it will be after tickets
 
 - [x] Scenarios for each "Yes" case above (1 to 4, and 6 if constructible): the item leaves the queue and the waiting list, carries its reason, and no push is sent.
 - [x] Scenarios for cases 7, 8 and 9: the item stays.
-- [ ] Case 5: a scenario where evidence for a day judged Excused stays in the queue and its approval makes the day Satisfied with no penalty.
+- [x] Case 5: moved to ticket 26 by the owner (2026-11-11), because it needs 26's fix to pass.
 - [x] `change-requests.test.ts:771` and `:803` extended to assert the `pact-ended` reason on the change request's page.
 - [x] A reviewer deciding a withdrawn item gets the reason in the refusal (core scenario and `Review.test.tsx`).
 - [x] Update `docs/behaviour.md`.
@@ -74,3 +74,4 @@ Cases, checked against that definition with the code as it will be after tickets
 - Case 5: ticket 26 exists for the late approval, so this ticket only keeps the evidence out of withdrawal; the scenario checks it stays in the queue and the waiting list. Its approval making the day Satisfied is ticket 26's criterion; the third box stays unticked for it.
 - Differs from the ticket: a vacation has no page of its own, so its withdrawal reason shows only in a reviewer's refusal; the owner's Profile card goes, as for an owner's withdrawal. A cover whose days an approved end left past the end is withdrawn `pact-ended` at the approval, before the pact actually Ends.
 - Filed ticket 31: at the exact due instant `verdictOf` lets a cover approval beat approved evidence, so a vacation made moot by approved evidence is withdrawn at the first tick after the due time, not at it.
+- Review of ac56282 (2026-11-11): migration 33 marks no excuse or evidence withdrawn (only change requests and vacations get a reason), so every cover and waiting evidence counts as before; the migration test now checks that too. The moot rule compares final verdicts and penalties both ways, so a cover with a day Missed, not judged yet or still open, and evidence on a week not judged yet, stay; it runs once per command, so it can't loop, and a moot item holds no penalty, so settle's billed-penalty guard isn't reached. Added scenarios: a vacation moot on one pact but covering a Missed day on another stays; a withdrawn excuse leaves the pact page's waiting list. Fixed: an excuse with no day left (all past the end, or removed) showed an empty Days heading and dates line on its page; both are hidden now (`ExcusePage.test.tsx`). Added **Withdrawn** (and moot) to `GLOSSARY.md`.

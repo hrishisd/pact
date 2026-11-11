@@ -452,7 +452,7 @@ test("migration 31: a bedtime night judged from a sleep period keeps when that p
 
 test("migration 33: a change request withdrawn when its pact Ended records pact-ended, other withdrawals the owner", () => {
   // At migration 32: an Ended pact with a change request withdrawn at its end, an Active one with one its
-  // owner withdrew and one waiting, and a vacation its owner withdrew.
+  // owner withdrew and one waiting, a vacation its owner withdrew, and a waiting excuse and evidence.
   const seeded = openDatabase(path, migrations.slice(0, 32));
   seeded.exec(`
     INSERT INTO account (id, email, email_key, name, timezone, created_at)
@@ -472,6 +472,11 @@ test("migration 33: a change request withdrawn when its pact Ended records pact-
              ('waiting', 'read', 1, '{}', NULL, '2026-01-08T12:00:00Z', NULL);
     INSERT INTO vacation (id, owner_account_id, first_day, last_day, pacts_summary, filed_at, withdrawn_at)
       VALUES ('trip', 'owner', '2026-01-12', '2026-01-13', 'all', '2026-01-06T12:00:00Z', '2026-01-07T12:00:00Z');
+    INSERT INTO excuse (id, pact_id, reason, filed_at) VALUES ('sick', 'read', 'Sick', '2026-01-12T20:00:00Z');
+    INSERT INTO excuse_day (excuse_id, pact_id, date) VALUES ('sick', 'read', '2026-01-12'); -- conventions-ok: data as it stood
+    INSERT INTO occurrence (pact_id, date) VALUES ('read', '2026-01-19');
+    INSERT INTO evidence (id, pact_id, occurrence_date, day, submitted_at)
+      VALUES ('photo', 'read', '2026-01-19', '2026-01-19', '2026-01-19T15:00:00Z');
   `);
   seeded.close();
 
@@ -483,6 +488,13 @@ test("migration 33: a change request withdrawn when its pact Ended records pact-
     { id: "withdrew", withdrawn_reason: "owner" },
   ]);
   expect(db.prepare("SELECT withdrawn_reason FROM vacation").all()).toEqual([{ withdrawn_reason: "owner" }]);
+  // No excuse or evidence is withdrawn by the migration: the excuse still covers its day, the evidence still waits.
+  expect(db.prepare("SELECT kind, id, withdrawn_at FROM cover_day_v WHERE kind = 'excuse'").all()).toEqual([
+    { kind: "excuse", id: "sick", withdrawn_at: null },
+  ]);
+  expect(db.prepare("SELECT id, withdrawn_at, withdrawn_reason FROM evidence").all()).toEqual([
+    { id: "photo", withdrawn_at: null, withdrawn_reason: null },
+  ]);
   db.close();
 });
 
