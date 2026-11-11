@@ -1,6 +1,6 @@
 # 27 What a pact takes while an approved end waits
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: 13
 
 Found while building ticket 13.
@@ -21,3 +21,7 @@ Since ticket 13, an approved end request waits for the occurrence or week open a
 
 - [ ] Decided, built through `scenario()` tests, and `docs/behaviour.md` updated.
 - [ ] `npm run check` passes.
+
+## Owner decision (2026-11-11)
+
+Ready for an agent. While an approved end waits, hide "End pact" on the pact page and have the core refuse new end and change requests for that pact. Runs right after ticket 13, before 14.
