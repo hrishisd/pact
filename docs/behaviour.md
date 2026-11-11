@@ -72,6 +72,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
   4. Otherwise: Missed, with the penalty.
 - The owner gets a Missed push only when no excuse or vacation covers the day, waiting or approved (`judging.ts:138`; decided in pact-v0 ticket 07).
 - A Weekly count week is Satisfied when its days of approved evidence reach the target. Otherwise an approved cover makes it Excused, waiting evidence holds it, and else it is Missed with one penalty of days short × penalty (`judgeWeek`, `judging.ts:149`; `judge`, `judging.ts:189`). Test: `weekly-count.test.ts`.
+- The judging rules are also stated once, unused in production, in `verdictOf` (`src/core/verdict.ts`); every scenario checks the stored outcomes against it (design review ticket 10).
 - The penalty uses the terms that applied to the occurrence, including its recipient (`termsOn`, in `judge`).
 - A One-time occurrence with approved evidence is Satisfied at the deadline (decided in pact-v0 ticket 15).
 
@@ -87,6 +88,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - One piece of evidence per day may wait or be approved. On a Weekly count, a day with rejected evidence takes no more (decided in pact-v0 ticket 14). Evidence is refused once the occurrence is judged or the pact has Ended.
 - A rejection judges the occurrence Missed at once, unless the day was excused ahead, which leaves it Excused (`decideEvidence`, `evidence.ts:231`; decided in pact-v0 ticket 07). Test: `rejection.test.ts`.
 - An approval judges the occurrence Satisfied at once if judging has already reached the day.
+- **Known bug:** an approval of evidence that was still waiting when an approved excuse or vacation made the day Excused changes nothing; the vacation spec (vac:78) says it makes the day Satisfied. See [ticket 26](../.scratch/design-review/issues/26-late-approval-satisfies-excused-day.md).
 - A late decision on a Weekly count week judges the week but does not tell the owner it was Missed (`decideEvidence` passes `tell = false` to `judgeWeek`). **Known bug:** the owner should be told whenever a week becomes Missed. See [ticket 11](../.scratch/design-review/issues/11-settle-tick-and-evidence.md).
 - The owner is told each decision (`evidence-decided`). A rejection shows an alert until the owner takes the L or files an excuse (`rejectedEvidenceAlerts`, `evidence.ts:366`). On a Weekly count, the rejected-day alert appears when the week is judged (`rejectedDayAlerts`, `evidence.ts:419`).
 - Take the L accepts a miss and clears its alert (`acceptMiss`, `evidence.ts:103`). Test: `accept-miss.test.ts`.

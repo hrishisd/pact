@@ -1,6 +1,6 @@
 # 10 A pure verdict function
 
-Status: ready-for-agent
+Status: done
 Blocked by: 08
 
 Closes: architecture ranked item 2, H3 step 1 (`../architecture-review.md`, H3). No behaviour change.
@@ -41,13 +41,20 @@ One mismatch is expected. The vacation spec (vac:78) says approved evidence stil
 
 ## Acceptance criteria
 
-- [ ] `verdictOf` and its table test exist and pass.
-- [ ] The scenario hook runs in every core test and the suite passes, with every known mismatch listed and linked to a new ticket.
-- [ ] No production code path calls `verdictOf` yet.
-- [ ] The `CODING_STANDARDS.md` sentence is added.
-- [ ] `npm run check` passes.
+- [x] `verdictOf` and its table test exist and pass.
+- [x] The scenario hook runs in every core test and the suite passes, with every known mismatch listed and linked to a new ticket.
+- [x] No production code path calls `verdictOf` yet.
+- [x] The `CODING_STANDARDS.md` sentence is added.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - Writing outcomes or penalties from the verdict (tickets 11 to 13).
 - Fixing any mismatch it finds.
+
+## Comments
+
+- Mismatches found: one, the expected vac:78 case, filed as [ticket 26](26-late-approval-satisfies-excused-day.md) and listed in `KNOWN_MISMATCHES` (`src/core/testing/verdict-check.ts`). No existing scenario reaches it; `verdict-check.test.ts` shows the check finds it.
+- `verdictOf` keeps the current end rule (an occurrence due after the pact Ended is not the pact's unless judged before the end); ticket 13 changes it.
+- The check skips a run when nothing it reads has changed and no due time, close or Anki hold has passed since the last one, so hourly-ticking scenarios stay fast.
+- Gaps in stored facts (bedtime sleep arrival, Anki answer time) are noted on ticket 12.

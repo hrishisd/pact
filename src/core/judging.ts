@@ -17,7 +17,7 @@ import { lastAnkiCheck, occurrencesOf, recipientName, scheduleOf, termsOn, type 
  * Anki days due after it started: the adapter gives up after 2 minutes
  * (anki.ts), plus a margin.
  */
-const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
+export const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
 
 /**
  * When each check of AnkiWeb still running started, by account. `Core` keeps

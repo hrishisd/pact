@@ -40,3 +40,10 @@ Separately, the rule "an excuse never reaches a billed penalty" rests on 48-hour
 
 - Ending a pact (ticket 13).
 - Any rule change, including decision 4's rule that approved evidence turns a day already Excused into Satisfied (ticket 20, or the ticket filed from ticket 10).
+
+## Comments
+
+From ticket 10 (2026-11-11): two facts `verdictOf` needs are not stored, so the scenario check (`src/core/testing/verdict-check.ts`, `SourceWatch`) watches them itself and `occurrenceFacts` reads only what's stored:
+
+- A bedtime night's first long_sleep period and when it arrived. `occurrence.bedtime_start` is written only when a period judges the night Satisfied or Missed, so a night judged Excused by a late period reads as having none. Store it when it arrives.
+- When an Anki check's answer was recorded. `anki_check.checked_at` is when the check started; a check answered after judging gave up on it (`ANKI_CHECK_HOLDS_JUDGING_MS`) doesn't count, which the stored row can't show. The running checks are in memory, passed in as `ankiChecks`.

@@ -30,6 +30,7 @@ import { addDays } from "../../shared/calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
 import type { AccountId, ChangePactResult, LocalDate, SignInResult } from "../../shared/types.ts";
 import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
+import { SourceWatch, VerdictCheck } from "./verdict-check.ts";
 
 /** A named account. Every AccountView query and command, plus its id. */
 export type AccountHandle = AccountView & { readonly id: AccountId; readonly name: string };
@@ -103,6 +104,9 @@ export function scenario(): Scenario {
   const ankiSource = new FakeAnkiSource();
   const photoStore = new InMemoryPhotoStore(clock);
   const logs: string[] = [];
+  // After every command and tick, judging's stored outcomes must be what verdictOf says (verdict-check.ts).
+  const watch = new SourceWatch(clock);
+  const verdicts = new VerdictCheck(dbPath, clock, watch);
   // UUID-shaped ids in creation order, so a tie broken by id breaks the same way
   // every run. Shared across restart(), as the database is.
   let idCount = 0;
@@ -113,8 +117,8 @@ export function scenario(): Scenario {
       dbPath,
       clock,
       notifier,
-      ouraSource,
-      ankiSource,
+      ouraSource: watch.oura(ouraSource),
+      ankiSource: watch.anki(ankiSource),
       photoStore,
       operatorEmail: emailFor(OPERATOR),
       log: (line) => logs.push(line),
@@ -123,6 +127,7 @@ export function scenario(): Scenario {
   let core = build();
 
   onTestFinished(async () => {
+    verdicts.close();
     await core.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -139,7 +144,13 @@ export function scenario(): Scenario {
         // Commands don't wait for delivery; a scenario's next line may assert on it.
         return (...args: unknown[]) => {
           const result = value.apply(view, args);
-          return result instanceof Promise ? result.finally(() => core.deliveriesSettled()) : result;
+          if (!(result instanceof Promise)) return result;
+          return result
+            .finally(() => core.deliveriesSettled())
+            .then((value: unknown) => {
+              verdicts.check();
+              return value;
+            });
         };
       },
     });
@@ -173,7 +184,9 @@ export function scenario(): Scenario {
     },
     async advanceTo(when) {
       clock.set(at(when));
+      watch.tick(clock.now());
       await core.advanceTo(clock.now());
+      verdicts.check();
     },
     setClockTo(when) {
       clock.set(at(when));
