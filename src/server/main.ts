@@ -10,6 +10,7 @@ import {
   devAnki,
   devOura,
   localDiskPhotoStore,
+  offsetClock,
   ouraAdapter,
   r2PhotoStore,
   systemClock,
@@ -28,6 +29,10 @@ import { startScheduler } from "./scheduler.ts";
 import { API_PATHS } from "../shared/api.ts";
 
 const config = loadConfig();
+// Development with PACT_DEV_CLOCK=1 (the browser smoke test): a clock POST
+// /api/dev/advance moves forward. loadConfig refuses it in production.
+const devClock = config.devClock ? offsetClock() : null;
+const clock = devClock ?? systemClock;
 const dataDir = dirname(config.dbPath);
 mkdirSync(dataDir, { recursive: true });
 
@@ -60,7 +65,7 @@ const oura: OuraAdapter | null = config.oura
   ? ouraAdapter(
       config.dbPath,
       { ...config.oura, redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString() },
-      systemClock,
+      clock,
     )
   : config.production
     ? null
@@ -69,23 +74,21 @@ const oura: OuraAdapter | null = config.oura
 // As for Oura: production without an Anki token key gets no connector and nothing to check;
 // only development falls back to the stand-in. Collection copies live on the volume, outside pact.db.
 const anki: AnkiAdapter | null = config.anki
-  ? ankiAdapter(config.dbPath, { tokenKey: config.anki.tokenKey, collectionsDir: join(dataDir, "anki") }, systemClock, {
+  ? ankiAdapter(config.dbPath, { tokenKey: config.anki.tokenKey, collectionsDir: join(dataDir, "anki") }, clock, {
       python: config.anki.python,
     })
   : config.production
     ? null
-    : devAnki(dataDir, systemClock);
+    : devAnki(dataDir, clock);
 
 const core = createPactCore({
   dbPath: config.dbPath,
-  clock: systemClock,
-  notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, systemClock),
+  clock,
+  notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, clock),
   ouraSource: oura ?? unavailableOura,
   ankiSource: anki ?? unavailableAnki,
   photoStore:
-    config.photos.kind === "r2"
-      ? r2PhotoStore(config.photos, systemClock)
-      : localDiskPhotoStore(config.photos.dir, systemClock),
+    config.photos.kind === "r2" ? r2PhotoStore(config.photos, clock) : localDiskPhotoStore(config.photos.dir, clock),
   operatorEmail: config.operatorEmail,
 });
 
@@ -105,7 +108,7 @@ await migrate();
 // Before the first tick, so the alert reports the restored database's last tick, not this boot's.
 if (config.restored) await core.raiseRestoreAlert();
 
-const scheduler = startScheduler(core, systemClock);
+const scheduler = startScheduler(core, clock);
 
 const app = createApp({
   core,
@@ -119,6 +122,7 @@ const app = createApp({
   vapidPublicKey: config.vapid.publicKey,
   oura,
   anki,
+  devClock,
 });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(

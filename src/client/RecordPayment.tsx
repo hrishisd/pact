@@ -4,8 +4,8 @@
 
 import { useState } from "react";
 import type { Json, RecordPaymentRequest } from "../shared/api.ts";
-import type { LedgerSummary, RecordPaymentRefusal } from "../shared/types.ts";
-import { api, uploadFailureText } from "./api.ts";
+import { MAX_TEXT_CHARS, type LedgerSummary, type RecordPaymentRefusal } from "../shared/types.ts";
+import { api, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
 import { centsInputText, money, parseCents } from "./format.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useSend } from "./ui.tsx";
@@ -90,6 +90,7 @@ export function RecordPaymentSheet({
         <span>Note (optional)</span>
         <input
           className="inp"
+          maxLength={MAX_TEXT_CHARS}
           value={note}
           placeholder="e.g. Sent on Venmo"
           onChange={(e) => setNote(e.target.value)}
@@ -110,6 +111,7 @@ const REFUSAL_TEXT: Record<Exclude<RecordPaymentRefusal, "payment-exceeds-owed">
   "recipient-not-found": "This ledger wasn't found.",
   "invalid-amount": "Enter an amount above $0.",
   "no-screenshot": "Choose a screenshot of the payment.",
+  "text-too-long": TEXT_TOO_LONG_TEXT,
 };
 
 /** An amount over the ledger's `payableCents`: more than owed, or, with payments awaiting approval, more than what's left. */

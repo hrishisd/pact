@@ -10,7 +10,8 @@ import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { AccountId, AnkiConnector, OuraConnector, PactCore, Photo, Schedule } from "../core/index.ts";
+import { matchedRoutes } from "hono/route";
+import type { AccountId, AnkiConnector, DevClock, OuraConnector, PactCore, Photo, Schedule } from "../core/index.ts";
 import {
   EVIDENCE_KINDS,
   MAX_EVIDENCE_PHOTOS,
@@ -23,7 +24,9 @@ import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  DEV_ADVANCE_PATH,
   DEV_SIGN_IN_PATH,
+  type DevAdvanceRequest,
   EVIDENCE_PHOTO_FIELD,
   EXCUSE_FROM_FIELD,
   EXCUSE_REASON_FIELD,
@@ -149,6 +152,11 @@ export interface AppOptions {
   anki: AnkiConnector | null;
   /** Where the app writes log lines. Default: console.log. */
   log?: (line: string) => void;
+  /**
+   * DEVELOPMENT ONLY (PACT_DEV_CLOCK=1): the clock the core runs on, which
+   * POST /api/dev/advance moves forward. Null or absent: no such route.
+   */
+  devClock?: DevClock | null;
 }
 
 /** A parsed multipart form: each field's value, or values when it repeats. */
@@ -169,6 +177,19 @@ function ouraReturnPath(then: OuraReturn, result: OuraResult): string {
 
 /** Room for the multipart boundaries and headers around the photos. */
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+
+/**
+ * The most an /api request body may be, photo uploads apart: well above any
+ * request whose text is within MAX_NAME_CHARS and MAX_TEXT_CHARS.
+ */
+const MAX_JSON_BODY_BYTES = 64 * 1024;
+
+/** The routes that take photos: each has its own, larger body limit (`photoBodyLimit`). */
+const PHOTO_UPLOAD_ROUTES = new Set<string>([
+  API_PATHS.evidence(":id"),
+  API_PATHS.payments(":id"),
+  API_PATHS.excuses(":id"),
+]);
 
 /** /health fails once the volume is fuller than this (ADR 0003). */
 const MAX_DISK_USED_FRACTION = 0.8;
@@ -193,6 +214,7 @@ export function createApp({
   oura,
   anki,
   log = (line) => console.log(line),
+  devClock = null,
 }: AppOptions) {
   const app = new Hono<Env>();
 
@@ -350,6 +372,21 @@ export function createApp({
     });
   }
 
+  // DEVELOPMENT ONLY, with PACT_DEV_CLOCK=1: moves the server's clock forward
+  // and runs the scheduler's tick up to the new time, for the browser smoke
+  // test (e2e/). From this machine only, as the dev sign-in.
+  if (!production && devClock) {
+    app.post(DEV_ADVANCE_PATH, async (c, next) => {
+      if (!fromThisMachine(c)) return next();
+      const request = await readJson(c, parseDevAdvance);
+      if (!request || !(request.minutes > 0)) return apiError(c, 400, "invalid-request");
+      devClock.advance(request.minutes);
+      const now = devClock.now();
+      await core.advanceTo(now);
+      return c.json({ now: now.toISOString() });
+    });
+  }
+
   // The invite page shows to signed-out visitors, so its lookup needs no
   // session; with one, it's the account's view (a claimed invite is open to
   // the account that claimed it).
@@ -359,6 +396,19 @@ export function createApp({
     const token = c.req.param("token");
     return c.json<InviteLookupResponse>(json(accountId ? core.as(accountId).invite(token) : core.invite(token)));
   });
+
+  // Every other /api body is read only up to MAX_JSON_BODY_BYTES; past it,
+  // a 413 before the session is even looked up. The photo upload routes have
+  // their own, larger limits.
+  const jsonBodyLimit = bodyLimit({
+    maxSize: MAX_JSON_BODY_BYTES,
+    onError: (c) => apiError(c, 413, "body-too-large"),
+  });
+  app.use("/api/*", (c, next) =>
+    matchedRoutes(c).some((route) => route.method === "POST" && PHOTO_UPLOAD_ROUTES.has(route.path))
+      ? next()
+      : jsonBodyLimit(c, next),
+  );
 
   // Every other /api route is made as the signed-in account. Better Auth
   // creates a user only after the core has made the account (see auth.ts), so
@@ -725,7 +775,7 @@ function fromThisMachine(c: Context<Env>): boolean {
   );
 }
 
-function apiError(c: Context, status: 400 | 401 | 404, error: ApiErrorResponse["error"]) {
+function apiError(c: Context, status: 400 | 401 | 404 | 413, error: ApiErrorResponse["error"]) {
   const body: ApiErrorResponse = { error };
   return c.json(body, status);
 }
@@ -762,6 +812,7 @@ const schedule = union<Schedule>({
   "one-time": object({ deadline: string, submitAnytime: boolean }),
 });
 
+const parseDevAdvance = object<DevAdvanceRequest>({ minutes: number });
 const parseSetTimezone = object<SetTimezoneRequest>({ timezone: string });
 const parseConnectAnki = object<ConnectAnkiRequest>({ email: string, password: string });
 const parseNewRecipient = object<AddRecipientRequest>({ name: string });

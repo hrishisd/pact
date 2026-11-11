@@ -6,15 +6,15 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { VacationOptionsResponse, VacationPreviewRequest, VacationPreviewResponse } from "../shared/api.ts";
 import { dayCount } from "../shared/calendar.ts";
-import { MAX_EXCUSE_SPAN_DAYS, type FileVacationRefusal } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import { MAX_EXCUSE_SPAN_DAYS, MAX_TEXT_CHARS, type FileVacationRefusal } from "../shared/types.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { dateSpan, formatDate, money, scheduleText } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { coveredText, firstName, occurrenceNames, pactsText, plural, weekOf } from "./vacation-text.ts";
-import { Loaded, settleUnlessDropped, useLoad, useSend } from "./ui.tsx";
+import { LoadedFound, settleUnlessDropped, useLoad, useSend } from "./ui.tsx";
 
-type Options = VacationOptionsResponse;
+type Options = Extract<VacationOptionsResponse, { ok: true }>["options"];
 type PactOption = Options["recurring"][number];
 type Preview = Extract<VacationPreviewResponse, { ok: true }>["preview"];
 type PactPreview = Preview["pacts"][number];
@@ -32,9 +32,13 @@ export function PlanVacation({
 }) {
   const { state } = useLoad(() => api.vacationOptions());
   return (
-    <Loaded state={state} what="Your pacts">
-      {(options) => <VacationSteps options={options} onCancel={onCancel} onSent={onSent} />}
-    </Loaded>
+    <LoadedFound
+      state={state}
+      what="Your pacts"
+      notFound={{ title: "No timezone yet", body: "Confirm your timezone first: vacation days are counted in it." }}
+    >
+      {({ options }) => <VacationSteps options={options} onCancel={onCancel} onSent={onSent} />}
+    </LoadedFound>
   );
 }
 
@@ -128,6 +132,7 @@ function VacationSteps({
               className="inp"
               type="text"
               placeholder="Going to Portugal"
+              maxLength={MAX_TEXT_CHARS}
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
@@ -464,5 +469,9 @@ function refusalText(reason: FileVacationRefusal, from: string, to: string): str
       return "A reviewer you ticked doesn't review any of these pacts.";
     case "nothing-to-cover":
       return "There's nothing left for this vacation to cover.";
+    case "no-timezone":
+      return "Confirm your timezone first.";
+    case "text-too-long":
+      return TEXT_TOO_LONG_TEXT;
   }
 }

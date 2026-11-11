@@ -1,15 +1,12 @@
-# Triage Labels
+# Status values
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+A ticket's `Status:` line uses one of these. `scripts/check-conventions.ts` refuses any other.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+- `needs-triage`: the maintainer needs to evaluate it.
+- `needs-info`: waiting on the owner for a decision or information.
+- `ready-for-agent`: fully specified; an agent can build it.
+- `ready-for-human`: needs the human to do it.
+- `done`: every acceptance criterion is checked and the work is on `main`. Checks only the human can do are in the feature's `manual-checks.md`.
+- `wontfix`: will not be done.
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
-
-Edit the "Label in our tracker" column to match whatever vocabulary you actually use.
+Skills that speak of `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human` and `wontfix` mean these values.

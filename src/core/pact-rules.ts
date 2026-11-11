@@ -4,6 +4,8 @@
 
 import { addDays, parseDatedReminder } from "../shared/calendar.ts";
 import {
+  EDIT_WINDOW_MINUTES,
+  EXCUSE_WINDOW_HOURS,
   MAX_REMINDERS,
   MAX_WEEKLY_TARGET,
   WEEKDAYS,
@@ -31,15 +33,16 @@ import {
   type NewTerms,
   type OccurrenceTerms,
 } from "./occurrences.ts";
+import { nameTooLong, textTooLong } from "./text-limits.ts";
 
 /** How long after creation the owner can edit or delete a pact freely. */
-export const EDIT_WINDOW_MS = 10 * 60 * 1000;
+export const EDIT_WINDOW_MS = EDIT_WINDOW_MINUTES * 60 * 1000;
 
 /**
  * How long after it's judged Missed (a rejection judges it then) an
  * occurrence can be excused. A Missed card stays on Today that long.
  */
-export const EXCUSE_WINDOW_MS = 48 * 60 * 60 * 1000;
+export const EXCUSE_WINDOW_MS = EXCUSE_WINDOW_HOURS * 60 * 60 * 1000;
 
 /** Whether `text` is a clock time, "HH:MM" on a 24-hour clock. */
 export function isClockTime(text: string): boolean {
@@ -134,6 +137,7 @@ export function checkedTerms(
   const description = oura || anki ? "" : pact.description.trim();
   if (name === "") return { ok: false, reason: "blank-name" };
   if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
+  if (nameTooLong(name) || textTooLong(description)) return { ok: false, reason: "text-too-long" };
   if (timezone === null) return { ok: false, reason: "no-timezone" };
   const dueBy = pact.dueBy ?? null;
   // The day clock is for Fixed days: Oura Ring and Anki pacts were refused any other schedule above.

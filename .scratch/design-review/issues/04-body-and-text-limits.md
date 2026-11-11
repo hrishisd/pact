@@ -1,6 +1,6 @@
 # 04 Body size and text length limits
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: S2 and the vacation preview 500 (`../code-structure-review.md`, section 2).
@@ -24,11 +24,11 @@ Closes: S2 and the vacation preview 500 (`../code-structure-review.md`, section 
 
 ## Acceptance criteria
 
-- [ ] Route test: a 65 KB JSON body to a JSON route gets 413; a photo upload over 64 KB still works.
-- [ ] Core scenarios: a reject reason, a question and an excuse reason one character over the cap are refused with `text-too-long`; at the cap they are accepted.
-- [ ] Core scenario: `previewVacation` for an account with no timezone returns the refusal, not a throw.
-- [ ] Update `docs/behaviour.md` with the limits.
-- [ ] `npm run check` passes.
+- [x] Route test: a 65 KB JSON body to a JSON route gets 413; a photo upload over 64 KB still works.
+- [x] Core scenarios: a reject reason, a question and an excuse reason one character over the cap are refused with `text-too-long`; at the cap they are accepted.
+- [x] Core scenario: `previewVacation` for an account with no timezone returns the refusal, not a throw.
+- [x] Update `docs/behaviour.md` with the limits.
+- [x] `npm run check` passes.
 
 ## Out of scope
 

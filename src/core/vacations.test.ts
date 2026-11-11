@@ -60,7 +60,7 @@ describe("what the Pacts and Reviewers steps offer", () => {
     // Still in its edit window: not offered.
     await createPact("Read", MON_WED_FRI);
 
-    expect(owner.vacationOptions()).toEqual({
+    expect(ok(owner.vacationOptions()).options).toEqual({
       today: s.date("Wed"),
       recurring: [
         expect.objectContaining({
@@ -222,7 +222,9 @@ describe("what a vacation covers", () => {
       const s = scenario();
       const { owner, anytime } = await withOneTimePacts(s);
 
-      expect(owner.vacationOptions().oneTime.find((pact) => pact.id === anytime)).toMatchObject({ alreadyOpen: true });
+      expect(ok(owner.vacationOptions()).options.oneTime.find((pact) => pact.id === anytime)).toMatchObject({
+        alreadyOpen: true,
+      });
       expect(forPact(owner, s.date("Mon+1"), s.date("Sun+1"), [], anytime)).toMatchObject({
         ticked: false,
         covered: [],

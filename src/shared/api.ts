@@ -56,7 +56,7 @@ import type {
   LastVacation,
   NewVacation,
   VacationCard,
-  VacationOptions,
+  VacationOptionsResult,
   VacationPreviewResult,
   VacationRequest,
   WithdrawVacationResult,
@@ -86,6 +86,17 @@ export const AUTH_ERROR_PATH = "/auth-error";
  * `?as=operator`, or `?email=…&name=…&invite=<token>` for anyone else.
  */
 export const DEV_SIGN_IN_PATH = "/api/dev/sign-in";
+
+/**
+ * Development only, with PACT_DEV_CLOCK=1: `POST { minutes }` moves the
+ * server's clock that far forward and runs the scheduler's tick up to the new
+ * time. Answers `{ now }`, an ISO 8601 time. See docs/agents/local-dev.md.
+ */
+export const DEV_ADVANCE_PATH = "/api/dev/advance";
+
+export interface DevAdvanceRequest {
+  minutes: number;
+}
 
 /** The plain page for a Google account that has no invite. */
 export const INVITE_REQUIRED_PATH = "/invite-required";
@@ -369,8 +380,8 @@ export type ExcuseResponse = Json<ExcuseResult>;
 /** POST /api/excuses/:id/accept-rejection (no body). */
 export type AcceptExcuseRejectionResponse = Json<AcceptExcuseRejectionResult>;
 
-/** GET /api/vacations/options */
-export type VacationOptionsResponse = Json<VacationOptions>;
+/** GET /api/vacations/options. An account with no timezone is a 200 refusal. */
+export type VacationOptionsResponse = Json<VacationOptionsResult>;
 
 /** POST /api/vacations/preview. A body of another shape is a 400; the core's refusals are 200s. */
 export type VacationPreviewRequest = VacationRequest;
@@ -535,5 +546,5 @@ export interface HealthResponse {
 
 /** Body of every non-2xx /api response. */
 export interface ApiErrorResponse {
-  error: "unauthenticated" | "invalid-request" | "not-found" | "photo-too-large";
+  error: "unauthenticated" | "invalid-request" | "not-found" | "photo-too-large" | "body-too-large";
 }

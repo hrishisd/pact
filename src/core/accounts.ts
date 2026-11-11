@@ -22,6 +22,7 @@ import type { CoreContext } from "./context.ts";
 import { notificationSettings } from "./outbox.ts";
 import { isPushDevice } from "./push-devices.ts";
 import { accountRow, areFriends, byName, friendshipPair, selectRecipients } from "./rows.ts";
+import { nameTooLong } from "./text-limits.ts";
 
 export function signIn(
   ctx: CoreContext,
@@ -116,6 +117,7 @@ export function addRecipient(ctx: CoreContext, accountId: AccountId, recipient: 
   accountRow(ctx, accountId);
   const name = recipient.name.trim();
   if (name === "") return { ok: false, reason: "blank-name" };
+  if (nameTooLong(name)) return { ok: false, reason: "text-too-long" };
   const id = ctx.newId();
   ctx.db
     .prepare(`INSERT INTO recipient (id, owner_account_id, name, created_at) VALUES (?, ?, ?, ?)`)

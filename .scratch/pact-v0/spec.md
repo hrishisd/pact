@@ -1,5 +1,7 @@
 # Pact v0
 
+Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
+
 Status: done
 
 Note (2026-11-10): Anki pacts and vacations have their own specs, `../anki-evidence/spec.md` and `../vacation/spec.md`, which add to and in places change this one. Review items now have five kinds: vacation joined evidence, excuses, payments and change requests. The Review item entry under "Domain model (schema level)" is corrected for that; other lists of four kinds in this spec are as originally written.

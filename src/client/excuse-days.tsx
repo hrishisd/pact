@@ -4,7 +4,7 @@
 
 import type { Json } from "../shared/api.ts";
 import type { ExcuseDay, ExcuseSkipReason, OccurrenceStatus } from "../shared/types.ts";
-import { dueClockText, formatDate, money } from "./format.ts";
+import { dueClockText, EXCUSE_WINDOW_TEXT, formatDate, money } from "./format.ts";
 
 type Status = Json<OccurrenceStatus>;
 
@@ -88,7 +88,7 @@ export const SKIP_REASON_TEXT: Record<ExcuseSkipReason, string> = {
   excused: "Already Excused",
   "on-waiting-excuse": "Already on an excuse waiting for approval",
   "on-waiting-vacation": "On a vacation waiting for approval",
-  "window-closed": "Missed more than 48 hours ago",
+  "window-closed": `Missed more than ${EXCUSE_WINDOW_TEXT} ago`,
 };
 
 /** "Mon Nov 2", or "Mon Nov 2 – Wed Nov 4" when the first and last days differ. */

@@ -16,7 +16,16 @@ import type {
 import { addDays, parseLocalDate } from "../shared/calendar.ts";
 import { DayChip } from "./excuse-days.tsx";
 import { listNames } from "./change-terms.tsx";
-import { ankiMissText, clockText, clockTime, dateIn, dateSpan, formatDate, money } from "./format.ts";
+import {
+  ankiMissText,
+  clockText,
+  clockTime,
+  dateIn,
+  dateSpan,
+  formatDate,
+  money,
+  NIGHT_CLOSES_TEXT,
+} from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
@@ -75,7 +84,7 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
   const bed =
     detail?.kind === "night"
       ? detail.inBedAt === null
-        ? "No sleep data by 6pm."
+        ? `No sleep data by ${NIGHT_CLOSES_TEXT}.`
         : `In bed at ${clockText(detail.inBedAt)}.`
       : undefined;
   switch (status.kind) {

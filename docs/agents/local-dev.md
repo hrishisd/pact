@@ -1,5 +1,7 @@
 # Local development
 
+The `fnm` and iCloud notes apply to the owner's Mac. A cloud session has Node on its path and the repo checked out locally.
+
 ## Dev server
 
 - `npm run dev` runs the API server on :3000 (`node --watch`, restarts on server edits) and Vite on :5173, which proxies `/api/` to :3000. Use http://localhost:5173.
@@ -14,6 +16,18 @@
 ## Checking a change
 
 `npm run check` runs typecheck, lint, test and build in that order, stopping at the first failure. CI's `test` job runs the same command, so passing it locally means the same four steps pass there.
+
+## Browser smoke test
+
+`npm run test:e2e` runs one Playwright flow (`e2e/smoke.spec.ts`) across screens as two people: invite and become friends, create a Camera pact, submit evidence, approve it, a day Missed, file an excuse from the Missed card and open it from Waiting for approval, reject it, record a payment. It asserts on what a user sees (text and roles), not on CSS classes. About 10 seconds; not part of `npm run check` or CI.
+
+- `playwright.config.ts` builds the client and starts the server in development (`npm start`) on port 3100 with a fresh database in the system temp directory (`pact-e2e/`), so it doesn't touch the dev database or a dev server on 3000 and 5173.
+- `@playwright/test` is pinned to the machine's Playwright (1.63.0), whose Chromium is preinstalled. Elsewhere, `npx playwright install chromium` once.
+- A failure keeps a trace in `test-results/`: `npx playwright show-trace test-results/<test>/trace.zip`.
+
+### Moving the dev server's clock
+
+With `PACT_DEV_CLOCK=1` (the smoke test sets it), the server runs on a clock that can be moved forward: `POST /api/dev/advance` with `{ "minutes": N }` moves it N minutes ahead, runs the scheduler's tick up to the new time, and answers `{ "now": "<ISO time>" }`. Time keeps running between advances, and never goes back. Like the dev sign-in it answers only to this machine, and production refuses to start with `PACT_DEV_CLOCK` set. The browser's clock doesn't move with it: the smoke test moves each page's clock too (`page.clock.setSystemTime`), so screens and server agree on the time. Restart the server to return to the real time; data written at a later time stays later.
 
 ## Signing in without Google
 

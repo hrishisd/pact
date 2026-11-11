@@ -72,7 +72,7 @@ import type {
   NewVacation,
   LastVacation,
   VacationCard,
-  VacationOptions,
+  VacationOptionsResult,
   VacationPreviewResult,
   VacationRequest,
   WithdrawChangeRequestResult,
@@ -330,8 +330,9 @@ export interface AccountView {
   /**
    * What Plan a vacation offers: the owner's Active pacts whose edit window
    * has closed, recurring and One-time apart, each with its reviewers.
+   * Refused for an account with no timezone, as are the preview and filing.
    */
-  vacationOptions(): VacationOptions;
+  vacationOptions(): VacationOptionsResult;
   /**
    * What a vacation with `request`'s dates and ticked pacts would cover if
    * filed now, for every offered pact, and what it would skip and why: what

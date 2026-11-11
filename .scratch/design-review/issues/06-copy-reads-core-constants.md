@@ -1,6 +1,6 @@
 # 06 Copy reads the core's time constants
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: C4 (`../code-structure-review.md`, section 1).
@@ -21,9 +21,9 @@ The edit window and excuse window are `EDIT_WINDOW_MS` and `EXCUSE_WINDOW_MS` in
 
 ## Acceptance criteria
 
-- [ ] No client file contains the literal "10 minutes", "48 hours" or "6pm" as window copy.
-- [ ] Existing client tests pass unchanged (the copy reads the same).
-- [ ] `npm run check` passes.
+- [x] No client file contains the literal "10 minutes", "48 hours" or "6pm" as window copy.
+- [x] Existing client tests pass unchanged (the copy reads the same).
+- [x] `npm run check` passes.
 
 ## Out of scope
 

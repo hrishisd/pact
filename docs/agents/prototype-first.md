@@ -10,7 +10,7 @@ Before writing any real code for a user-facing change, ask the human one questio
 
 ## Steps
 
-1. **Settle the open questions.** Grill the design (`/grill-with-docs`) until the options worth comparing are clear. Done when you can name 2–3 concrete options, or one design with the moments that matter.
+1. **Settle the open questions.** Grill the design (the `grilling` skill) until the options worth comparing are clear. Done when you can name 2–3 concrete options, or one design with the moments that matter.
 2. **Build the prototype.** Use `/prototype`. A throwaway, self-contained HTML file on its own branch `prototype/<topic>`, cut from main in a git worktree, so the main checkout and the human's dev server stay untouched. Commit it there; never push.
    - Copy main's real styles and markup (`src/client/`), so it looks like the app, not a mock-up. Glossary words in all copy.
    - Realistic data, phone width, options side by side, and each moment that matters clickable (e.g. before / after a tap, day open / day closed).

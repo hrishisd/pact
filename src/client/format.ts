@@ -3,7 +3,15 @@
 import { parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
 import { clockText, formatDate, formatDay, partsIn } from "../shared/format.ts";
 import type { Json } from "../shared/api.ts";
-import type { AnkiCheck, ClockTime, DatedReminder, LocalDate } from "../shared/types.ts";
+import {
+  EDIT_WINDOW_MINUTES,
+  EXCUSE_WINDOW_HOURS,
+  NIGHT_CLOSES_AT,
+  type AnkiCheck,
+  type ClockTime,
+  type DatedReminder,
+  type LocalDate,
+} from "../shared/types.ts";
 
 export {
   clockText,
@@ -15,6 +23,15 @@ export {
   money,
   scheduleText,
 } from "../shared/format.ts";
+
+/** A pact's edit window, as copy says it: "10 minutes". */
+export const EDIT_WINDOW_TEXT = `${EDIT_WINDOW_MINUTES} minutes`;
+
+/** The excuse window, as copy says it: "48 hours". */
+export const EXCUSE_WINDOW_TEXT = `${EXCUSE_WINDOW_HOURS} hours`;
+
+/** The hour a bedtime night closes, as copy says it: "6pm". */
+export const NIGHT_CLOSES_TEXT = clockText(`${String(NIGHT_CLOSES_AT).padStart(2, "0")}:00`).replace(":00", "");
 
 /** Dollars as typed ("5", "$2.50", "0.5", ".50") in whole cents, or null when it isn't an amount. */
 export function parseCents(text: string): number | null {

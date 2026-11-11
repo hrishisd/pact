@@ -1,5 +1,7 @@
 # Vacation
 
+Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
+
 Status: done
 
 Designed in a grilling session on 2026-11-08, with four prototype rounds. Vocabulary follows `GLOSSARY.md`. Every decision below is settled; the tickets under `issues/` build it.

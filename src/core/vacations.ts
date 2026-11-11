@@ -21,6 +21,7 @@ import {
   type WithdrawVacationResult,
   type VacationOccurrence,
   type VacationOptions,
+  type VacationOptionsResult,
   type VacationPactOption,
   type VacationPactPreview,
   type VacationPacts,
@@ -36,8 +37,10 @@ import { dueAfterEnd, excuseOn, occurrenceSpan, vacationOn } from "./occurrence-
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { isLocalDate } from "./pact-rules.ts";
+import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
+  accountRow,
   decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
@@ -52,9 +55,10 @@ import {
   type ReviewOutcome,
 } from "./rows.ts";
 
-export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
+export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptionsResult {
   const now = ctx.clock.now();
-  const timezone = timezoneOf(ctx, ownerId);
+  const { timezone } = accountRow(ctx, ownerId);
+  if (timezone === null) return { ok: false, reason: "no-timezone" };
   const offered = offeredPacts(ctx, ownerId, timezone, now).map((pact): VacationPactOption => ({
     ...pact,
     reviewers: friendsSortedByName(ctx, reviewersOf(ctx, pact.id)),
@@ -65,12 +69,13 @@ export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationO
       ownerId,
       editWindowCutoff(ctx, now),
     ) !== undefined;
-  return {
+  const options: VacationOptions = {
     today: localDateOf(now, timezone),
     recurring: offered.filter((pact) => pact.schedule.kind !== "one-time"),
     oneTime: offered.filter((pact) => pact.schedule.kind === "one-time"),
     inEditWindow,
   };
+  return { ok: true, options };
 }
 
 /** The owner's Active pacts whose edit window has closed at `now`: recurring ones first, then One-time, each oldest first. */
@@ -102,7 +107,8 @@ function offeredPacts(
 }
 
 export function previewVacation(ctx: CoreContext, ownerId: AccountId, request: VacationRequest): VacationPreviewResult {
-  const timezone = timezoneOf(ctx, ownerId);
+  const { timezone } = accountRow(ctx, ownerId);
+  if (timezone === null) return { ok: false, reason: "no-timezone" };
   return vacationPreview(ctx, ownerId, timezone, request, ctx.clock.now());
 }
 
@@ -216,7 +222,8 @@ function summaryOf(
 
 export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: NewVacation): FileVacationResult {
   const now = ctx.clock.now();
-  const timezone = timezoneOf(ctx, ownerId);
+  const { timezone } = accountRow(ctx, ownerId);
+  if (timezone === null) return { ok: false, reason: "no-timezone" };
   const pactIds = [...new Set(vacation.pactIds)];
   const reviewerIds = [...new Set(vacation.reviewerIds)];
   if (pactIds.length === 0) return { ok: false, reason: "no-pacts" };
@@ -226,6 +233,7 @@ export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: New
   const offered = new Set(pactIds.flatMap((pactId) => reviewersOf(ctx, pactId)));
   if (reviewerIds.some((id) => !offered.has(id))) return { ok: false, reason: "reviewer-not-offered" };
   if (checked.preview.coversNothing) return { ok: false, reason: "nothing-to-cover" };
+  if (textTooLong(vacation.note)) return { ok: false, reason: "text-too-long" };
   const note = vacation.note?.trim() || null;
   const vacationId = ctx.newId();
   ctx.db

@@ -5,6 +5,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  MAX_NAME_CHARS,
+  MAX_TEXT_CHARS,
   MAX_WEEKLY_TARGET,
   WEEKDAYS,
   type AnkiDeck,
@@ -15,8 +17,8 @@ import {
   type Schedule,
   type Weekday,
 } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
-import { clockText, inBedByName, initial } from "./format.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
+import { clockText, EDIT_WINDOW_TEXT, inBedByName, initial, NIGHT_CLOSES_TEXT } from "./format.ts";
 import { remindersAs, scheduleKindOf, termsOfFormKind, type Form } from "./pact-form.ts";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { loadFailure, loadedData, useLoad, useSend } from "./ui.tsx";
@@ -49,6 +51,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "invalid-in-bed-by": "Pick a time.",
   "blank-name": "Give it a name.",
   "blank-description": "Say what your photo will show.",
+  "text-too-long": TEXT_TOO_LONG_TEXT,
   "no-days": "Pick at least one day.",
   "no-deadline": "Pick a deadline.",
   "deadline-too-soon": "The deadline must be at least an hour after you create the pact. Pick a later one.",
@@ -66,7 +69,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "not-a-friend": "Only friends can be reviewers.",
   "no-timezone": "Confirm your timezone first.",
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-closed": "The 10 minutes are up.",
+  "edit-window-closed": `The ${EDIT_WINDOW_TEXT} are up.`,
   "evidence-kind-fixed": "A pact's evidence kind can't change.",
 };
 
@@ -205,6 +208,7 @@ function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>
         <span>What will your photo show?</span>
         <textarea
           className="inp"
+          maxLength={MAX_TEXT_CHARS}
           value={form.description}
           placeholder="e.g. Me at the gym with the equipment visible"
           onChange={(e) => update({ description: e.target.value })}
@@ -259,7 +263,7 @@ function AnkiGoalStep({ form, update }: { form: Form; update: (change: Partial<F
               update({
                 ankiDeckId: deck.id,
                 ankiDeckName: deck.name,
-                ...(!form.named && { name: deckLeaf(deck.name) }),
+                ...(!form.named && { name: deckLeaf(deck.name).slice(0, MAX_NAME_CHARS) }),
               })
             }
           >
@@ -314,6 +318,7 @@ function NameField({
       <span>Name</span>
       <input
         className="inp"
+        maxLength={MAX_NAME_CHARS}
         value={form.name}
         placeholder={placeholder}
         onChange={(e) => update({ name: e.target.value, named: e.target.value.trim() !== "" })}
@@ -441,7 +446,7 @@ function ScheduleStep({
       )}
       <small className="muted">
         {oura
-          ? "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed."
+          ? `Each night is judged when your ring syncs. A night with no sleep data by ${NIGHT_CLOSES_TEXT} the next day counts as missed.`
           : anki
             ? `Each day is judged from AnkiWeb. Finish the deck and sync before ${until}. A day Pact hasn't seen finished by then counts as missed.`
             : oneTime
@@ -677,7 +682,7 @@ function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipien
   } = useSend(
     async () => {
       const result = await api.addRecipient({ name });
-      if (!result.ok) return "Enter a name.";
+      if (!result.ok) return result.reason === "text-too-long" ? TEXT_TOO_LONG_TEXT : "Enter a name.";
       onSaved(result.recipient);
     },
     (error) => `Couldn't save it. ${failureText(error, "Check your connection and try again.")}`,
@@ -689,6 +694,7 @@ function NewRecipientForm({ onSaved, onCancel }: { onSaved: (recipient: Recipien
         <span>Name</span>
         <input
           className="inp"
+          maxLength={MAX_NAME_CHARS}
           value={name}
           placeholder="e.g. Sam, or City Food Bank"
           onChange={(e) => setName(e.target.value)}

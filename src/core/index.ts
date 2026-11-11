@@ -1,7 +1,7 @@
 // The Pact core's public surface, for the server.
 
 export { createPactCore, type PactCore } from "./core.ts";
-export { systemClock } from "./adapters.ts";
+export { offsetClock, systemClock, type DevClock } from "./adapters.ts";
 export { devOura, ouraAdapter, unavailableOura, type OuraAdapter, type OuraConnector } from "./oura.ts";
 export { ankiAdapter, devAnki, unavailableAnki, type AnkiAdapter, type AnkiConnector } from "./anki.ts";
 export { webPushNotifier } from "./web-push.ts";

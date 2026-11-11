@@ -8,8 +8,15 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Json } from "../shared/api.ts";
 import { termsOf } from "../shared/terms.ts";
-import type { ChangePactRefusal, Friend, PactChange, PactTerms, PactWaitingItem } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import {
+  MAX_NAME_CHARS,
+  MAX_TEXT_CHARS,
+  type ChangePactRefusal,
+  type PactChange,
+  type PactTerms,
+  type PactWaitingItem,
+} from "../shared/types.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { datesText } from "./excuse-days.tsx";
@@ -18,11 +25,11 @@ import { HeatMap } from "./history.tsx";
 import { listNames, openOccurrenceText } from "./change-terms.tsx";
 import { formOf } from "./pact-form.ts";
 import { PROBLEMS, ReviewersStep } from "./pact-form-steps.tsx";
-import { clockText, formatDate, formatDay, minutesLeft, money } from "./format.ts";
+import { clockText, EDIT_WINDOW_TEXT, formatDate, formatDay, minutesLeft, money } from "./format.ts";
 import { WaitingRow } from "./item-page.tsx";
 import { TermsList } from "./terms-list.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
-import { LoadedFound, Sheet, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
+import { LoadedFound, Sheet, loadFailure, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
 
@@ -140,7 +147,7 @@ function EditWindowBar({
     async () => {
       const result = await api.deletePact(pact.id);
       if (!result.ok)
-        return result.reason === "edit-window-closed" ? "The 10 minutes are up." : "This pact wasn't found.";
+        return result.reason === "edit-window-closed" ? `The ${EDIT_WINDOW_TEXT} are up.` : "This pact wasn't found.";
       onDeleted();
     },
     (failure) => `Couldn't delete it. ${failureText(failure, "Check your connection and try again.")}`,
@@ -287,6 +294,7 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
     async () => {
       const result = await api.endPact(pact.id, note.trim() === "" ? {} : { note });
       if (!result.ok) {
+        if (result.reason === "text-too-long") return TEXT_TOO_LONG_TEXT;
         return result.reason === "change-request-waiting"
           ? "A change request is already waiting. Withdraw it first."
           : "This pact can't be ended now. Reopen it to see where it stands.";
@@ -313,6 +321,7 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
             <span>Why? (optional)</span>
             <textarea
               className="inp"
+              maxLength={MAX_TEXT_CHARS}
               value={note}
               placeholder="e.g. I've moved and the gym is too far"
               onChange={(e) => setNote(e.target.value)}
@@ -493,6 +502,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
         <span>Name</span>
         <input
           className="inp"
+          maxLength={MAX_NAME_CHARS}
           value={name}
           placeholder={pact.evidenceKind === "oura" ? "e.g. In bed by midnight" : "e.g. Gym"}
           onChange={(e) => setName(e.target.value)}
@@ -525,10 +535,10 @@ function AddReviewerSheet({
   onSaved: () => void;
   onInvite: () => void;
 }) {
-  const [friends, setFriends] = useState<Friend[] | null>(null);
+  const { state: friendsLoad, reload: loadFriends } = useLoad(api.friends);
+  const friends = loadedData(friendsLoad);
+  const failed = loadFailure(friendsLoad);
   const [picked, setPicked] = useState<string[]>([]);
-  const loadFriends = useCallback(() => api.friends().then(setFriends, () => setFriends([])), []);
-  useEffect(() => void loadFriends(), [loadFriends]);
 
   const current = pact.reviewers.map((r) => r.id);
   const others = friends?.filter((f) => !current.includes(f.id)) ?? null;
@@ -548,7 +558,18 @@ function AddReviewerSheet({
   });
 
   let body: ReactNode = null;
-  if (others !== null && others.length === 0) {
+  if (others === null && failed) {
+    body = (
+      <>
+        <p className="error">
+          Your friends couldn't load. {failureText(failed.error, "Check your connection and try again.")}
+        </p>
+        <button className="btn block" onClick={loadFriends}>
+          Try again
+        </button>
+      </>
+    );
+  } else if (others !== null && others.length === 0) {
     body = (
       <>
         <p className="muted">
@@ -559,7 +580,7 @@ function AddReviewerSheet({
           <button className="btn primary" onClick={onInvite}>
             Invite a friend
           </button>
-          <button className="btn" onClick={() => void loadFriends()}>
+          <button className="btn" onClick={loadFriends}>
             Check again
           </button>
         </div>
@@ -579,7 +600,7 @@ function AddReviewerSheet({
             kind={pact.evidenceKind}
             hint={hint}
             onInvite={onInvite}
-            onCheckAgain={() => void loadFriends()}
+            onCheckAgain={loadFriends}
           />
         </div>
         {error && <p className="error">{error}</p>}

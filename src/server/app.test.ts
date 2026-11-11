@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
+import { offsetClock } from "../core/adapters.ts";
 import { scenario } from "../core/testing/scenario.ts";
 import { EVIDENCE_KINDS, MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
 import { termsOf } from "../shared/terms.ts";
@@ -17,6 +18,7 @@ import {
   APP_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  DEV_ADVANCE_PATH,
   DEV_SIGN_IN_PATH,
   EVIDENCE_PHOTO_FIELD,
   INVITE_REQUIRED_PATH,
@@ -113,6 +115,7 @@ async function server({
   production = false,
   ouraSetUp = true,
   ankiSetUp = true,
+  devClock = false,
 }: {
   canonicalOrigin?: string | null;
   commit?: string | null;
@@ -120,6 +123,7 @@ async function server({
   production?: boolean;
   ouraSetUp?: boolean;
   ankiSetUp?: boolean;
+  devClock?: boolean;
 } = {}) {
   const s = scenario();
   const ouraConnects: { account: string; code: string }[] = [];
@@ -172,6 +176,8 @@ async function server({
         }
       : null,
     log: (line) => s.logs.push(line),
+    // On the scenario's clock, so the core and the route agree on the time.
+    devClock: devClock ? offsetClock(s.clock) : null,
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
   onTestFinished(() => close());
@@ -235,6 +241,8 @@ async function server({
     logs: s.logs,
     photoStore: s.photoStore,
     staticDir,
+    /** The app's registered routes and middleware, as Hono lists them. */
+    routes: app.routes,
     request,
     api,
     /**
@@ -699,6 +707,42 @@ describe("dev sign-in", () => {
     expect(again.status).toBe(302);
     expect(s.authRows()).toEqual({ user: 1, account: 0, session: 2 });
     expect((await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(again) })).status).toBe(200);
+  });
+});
+
+describe("dev clock", () => {
+  test("with the dev clock on, advance moves the server's time forward and ticks up to it", async () => {
+    const s = await server({ devClock: true });
+    const before = s.clock.now();
+
+    const response = await s.api(DEV_ADVANCE_PATH, { method: "POST", body: { minutes: 11 } });
+
+    const now = new Date(before.getTime() + 11 * 60_000).toISOString();
+    expect(response).toEqual({ status: 200, body: { now } });
+    expect(s.core.lastTick()?.toISOString()).toBe(now);
+  });
+
+  test("a shape other than a positive number of minutes is refused with 400", async () => {
+    const s = await server({ devClock: true });
+
+    for (const body of [{}, { minutes: -5 }, { minutes: 0 }, { minutes: "11" }]) {
+      expect((await s.api(DEV_ADVANCE_PATH, { method: "POST", body })).status).toBe(400);
+    }
+  });
+
+  test("without the dev clock, or from another machine, the route doesn't exist", async () => {
+    const off = await server();
+    expect((await off.api(DEV_ADVANCE_PATH, { method: "POST", body: { minutes: 11 } })).status).toBe(401);
+
+    const on = await server({ devClock: true });
+    const remote = await on.request(DEV_ADVANCE_PATH, {
+      origin: "http://192.168.1.20:5173",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ minutes: 11 }),
+    });
+    expect(remote.status).toBe(401);
+    expect(on.core.lastTick()).toBeNull();
   });
 });
 
@@ -1376,9 +1420,12 @@ describe("vacations", () => {
 
     const options = await owner.get<VacationOptionsResponse>(API_PATHS.vacationOptions);
     expect(options.body).toMatchObject({
-      today: s.date("Mon"),
-      recurring: [{ id: pactId, reviewers: [{ id: friendId, name: "friend" }] }],
-      oneTime: [],
+      ok: true,
+      options: {
+        today: s.date("Mon"),
+        recurring: [{ id: pactId, reviewers: [{ id: friendId, name: "friend" }] }],
+        oneTime: [],
+      },
     });
     const preview = await owner.post<VacationPreviewResponse>(API_PATHS.vacationPreview, request);
     expect(preview.body).toMatchObject({ ok: true, preview: { days: 7, summary: { kind: "all" } } });
@@ -1925,41 +1972,51 @@ describe("payments", () => {
 describe("api", () => {
   test("every API route needs a session", async () => {
     const s = await server();
+    // The API_PATHS entries that answer without a session, each on purpose.
+    // (The auth handler under AUTH_BASE_PATH is public too, but isn't in API_PATHS.)
+    const publicPaths: Partial<Record<keyof typeof API_PATHS, string>> = {
+      invite: "the invite page shows to signed-out visitors, so its lookup can't need a session",
+    };
 
-    const reads = [
-      API_PATHS.me,
-      API_PATHS.today,
-      API_PATHS.friends,
-      API_PATHS.recipients,
-      API_PATHS.pacts,
-      API_PATHS.pact("some-pact"),
-      API_PATHS.photo("some-photo"),
-      API_PATHS.reviewQueue,
-      API_PATHS.waitingOnReply,
-      API_PATHS.evidenceItem("some-evidence"),
-      API_PATHS.paymentItem("some-payment"),
-    ];
-    for (const path of reads) {
-      const response = await s.request(path);
-      expect(response.status).toBe(401);
-      expect(await response.json()).toEqual({ error: "unauthenticated" });
+    // A route's shape with its parameters' names dropped, so "/api/pacts/:pactId"
+    // matches the ":p0" placeholder the test calls API_PATHS.pact with.
+    const shape = (path: string) => path.replace(/:[^/]+/g, ":");
+    const registered = (path: string) =>
+      s.routes
+        .filter((route) => route.method !== "ALL" && shape(route.path) === shape(path))
+        .map((route) => route.method);
+
+    for (const [name, entry] of Object.entries(API_PATHS)) {
+      if (name in publicPaths) continue;
+      const path = entry as string | ((...ids: string[]) => string);
+      const [pattern, concrete] =
+        typeof path === "string"
+          ? [path, path]
+          : [
+              path(...Array.from({ length: path.length }, (_, i) => `:p${i}`)),
+              path(...Array.from({ length: path.length }, (_, i) => `some-id-${i}`)),
+            ];
+      const methods = registered(pattern);
+      expect(methods, `${name} has no registered route`).not.toEqual([]);
+      for (const method of methods) {
+        const response = await s.request(concrete, { method });
+        const answer = { name, method, status: response.status, body: await response.json() };
+        expect(answer).toEqual({ name, method, status: 401, body: { error: "unauthenticated" } });
+      }
     }
-    const writes = [
-      API_PATHS.invites,
-      API_PATHS.acceptInvite("some-token"),
-      API_PATHS.recipients,
-      API_PATHS.pacts,
-      API_PATHS.firstOccurrence,
-      API_PATHS.evidence("some-pact"),
-      API_PATHS.decide("some-item"),
-      API_PATHS.askOwner("some-item"),
-      API_PATHS.reply("some-item"),
-      API_PATHS.acceptMiss("some-pact", "2026-01-05"),
-      API_PATHS.payments("some-recipient"),
-    ];
-    for (const path of writes) {
-      expect((await s.request(path, { method: "POST" })).status).toBe(401);
-    }
+  });
+
+  test("a JSON body over 64 KB is refused with 413 before the core sees it; a photo upload over 64 KB still goes through", async () => {
+    const { owner, pactId } = await ownerWithPact();
+
+    const huge = await owner.post(API_PATHS.recipients, { name: "x".repeat(65 * 1024) });
+
+    expect(huge).toEqual({ status: 413, body: { error: "body-too-large" } });
+    expect((await owner.get<RecipientsResponse>(API_PATHS.recipients)).body).toEqual([
+      expect.objectContaining({ name: "Sam" }),
+    ]);
+    const photo = await owner.postForm(API_PATHS.evidence(pactId), [[EVIDENCE_PHOTO_FIELD, jpeg(200 * 1024)]]);
+    expect(photo).toEqual({ status: 200, body: expect.objectContaining({ ok: true }) });
   });
 
   test("a timezone request without a timezone is an invalid request", async () => {

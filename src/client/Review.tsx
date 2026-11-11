@@ -6,8 +6,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Json, ReviewQueueResponse } from "../shared/api.ts";
-import type { DecideRefusal, ReviewDecision, ReviewItem } from "../shared/types.ts";
-import { api, failureText } from "./api.ts";
+import { MAX_TEXT_CHARS, type DecideRefusal, type ReviewDecision, type ReviewItem } from "../shared/types.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { dateSpan, formatDate, formatDayTime, money, weekdayName } from "./format.ts";
 import { DayChip, dayNote, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
 import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
@@ -241,6 +241,7 @@ const REFUSAL_TEXT: Record<DecideRefusal, string> = {
   "item-not-found": "That item isn't in your queue any more.",
   "already-decided": "Another reviewer already decided that one.",
   "blank-reason": "Say why you're rejecting it.",
+  "text-too-long": TEXT_TOO_LONG_TEXT,
   "deadline-too-soon": "The new deadline is less than an hour away now, so it can only be rejected.",
 };
 
@@ -566,6 +567,7 @@ function Decision({
             <textarea
               className="inp"
               ref={reasonField}
+              maxLength={MAX_TEXT_CHARS}
               value={reason}
               placeholder={placeholder}
               onChange={(e) => setReason(e.target.value)}

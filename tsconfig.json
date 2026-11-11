@@ -17,5 +17,5 @@
     "types": ["node"],
     "jsx": "react-jsx"
   },
-  "include": ["src", "scripts", "vitest.config.ts", "vite.config.ts"]
+  "include": ["src", "scripts", "e2e", "vitest.config.ts", "vite.config.ts", "playwright.config.ts"]
 }

@@ -2,7 +2,14 @@
 // the pact's schedule, its first occurrence and the owner's timezone. Whether
 // an occurrence is Satisfied, Missed or Excused is judging's to decide.
 
-import { WEEKDAYS, type ClockTime, type DatedReminder, type LocalDate, type Schedule } from "../shared/types.ts";
+import {
+  NIGHT_CLOSES_AT,
+  WEEKDAYS,
+  type ClockTime,
+  type DatedReminder,
+  type LocalDate,
+  type Schedule,
+} from "../shared/types.ts";
 import { addDays, parseClockTime, parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
 import { localDateOf, mondayOf, startOfDay, wallTime, weekdayOf } from "./calendar.ts";
 
@@ -387,7 +394,7 @@ function weekOccurrence(date: LocalDate, timezone: string): Occurrence {
 }
 
 /** A bedtime night starts, and the night before closes, at this hour. */
-export const NIGHT_STARTS_HOUR = 18;
+export const NIGHT_STARTS_HOUR = NIGHT_CLOSES_AT;
 
 /** An Anki day can't be due on its own day before this hour. */
 const ANKI_EVENING_HOUR = 12;

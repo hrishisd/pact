@@ -10,6 +10,7 @@ import { addDays } from "../shared/calendar.ts";
 import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
+  MAX_TEXT_CHARS,
   type ExcuseDatesRefusal,
   type ExcuseDay,
   type ExcuseOptions,
@@ -17,10 +18,10 @@ import {
   type FileExcuseRefusal,
   type PactTerms,
 } from "../shared/types.ts";
-import { api, failureText, uploadFailureText } from "./api.ts";
+import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { DayChip, SKIP_REASON_TEXT, dayNote, excuseDayText } from "./excuse-days.tsx";
-import { formatDate, money, scheduleText, hoursLeft } from "./format.ts";
+import { EDIT_WINDOW_TEXT, formatDate, hoursLeft, money, scheduleText } from "./format.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useNow, useSend } from "./ui.tsx";
 
@@ -102,7 +103,7 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
 
 const OPEN_REFUSAL_TEXT: Record<"pact-not-found" | "edit-window-open", string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": "Excuses open once the 10 minutes are up.",
+  "edit-window-open": `Excuses open once the ${EDIT_WINDOW_TEXT} are up.`,
 };
 
 /** The preview for some dates: `key` says which, so a stale one isn't taken for the current. */
@@ -231,6 +232,7 @@ function ExcuseForm({
         <span>Reason</span>
         <textarea
           className="inp"
+          maxLength={MAX_TEXT_CHARS}
           value={reason}
           placeholder="e.g. Sick with the flu"
           onChange={(e) => setReason(e.target.value)}
@@ -593,7 +595,7 @@ function onlyAfter(preview: Preview, day: string): Preview {
 
 const DATES_REFUSAL_TEXT: Record<ExcuseDatesRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": "Excuses open once the 10 minutes are up.",
+  "edit-window-open": `Excuses open once the ${EDIT_WINDOW_TEXT} are up.`,
   "invalid-dates": "The last day is before the first. Pick the dates again.",
   "too-many-days": `One excuse can cover at most ${MAX_EXCUSE_SPAN_DAYS} days. Pick fewer.`,
 };
@@ -601,6 +603,7 @@ const DATES_REFUSAL_TEXT: Record<ExcuseDatesRefusal, string> = {
 const FILE_REFUSAL_TEXT: Record<FileExcuseRefusal, string> = {
   ...DATES_REFUSAL_TEXT,
   "blank-reason": "Write a reason first.",
+  "text-too-long": TEXT_TOO_LONG_TEXT,
   "too-many-photos": `An excuse can have at most ${MAX_EXCUSE_PHOTOS} photos. Remove some.`,
   "nothing-to-excuse": "None of these days can be excused now.",
 };
