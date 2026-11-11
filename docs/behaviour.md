@@ -74,6 +74,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
   2. An approved excuse or vacation: Excused.
   3. Evidence waiting for a reviewer: wait.
   4. Otherwise: Missed, with the penalty.
+- A cover approved at the due instant itself, before the tick, judges the occurrence in the same order: approved evidence still makes it Satisfied, not Excused (`verdictOf`; design review ticket 31). Test: `verdict.test.ts`, "a cover approved at it".
 - The owner gets a Missed push whenever an occurrence or week becomes Missed, whatever judged it: the due time or a late evidence decision (rule R4, design review ticket 11). Two exceptions: nobody is told about a day an excuse or vacation covers, waiting or approved (decided in pact-v0 ticket 07), and a rejection that judges a Fixed day or One-time occurrence Missed tells the owner through the rejection push alone (v0:324). A Missed push caused by a decision comes after the decision's push (`settle`). Test: `weekly-count.test.ts` "a week judged by a late decision", `rejection.test.ts`.
 - A Weekly count week is Satisfied when its days of approved evidence reach the target. Otherwise an approved cover makes it Excused, waiting evidence holds it, and else it is Missed with one penalty of days short × penalty (`verdictOf`). Test: `weekly-count.test.ts`.
 - The judging rules are stated once in `verdictOf` (`src/core/verdict.ts`); every scenario checks the stored outcomes against it (design review ticket 10).

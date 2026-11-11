@@ -216,8 +216,11 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
         }
         break;
       case "cover-approved":
-        if (outcome?.kind === "missed" || (outcome === null && past && automatic?.kind !== "oura")) {
-          outcome = excused(step.at);
+        if (outcome?.kind === "missed") outcome = excused(step.at);
+        else if (outcome === null && past && automatic?.kind !== "oura") {
+          // Judged as the due time would: approved evidence still beats the cover at the due instant itself.
+          if (weekly) outcome = judgeWeek(step.at);
+          else outcome = approvedDays(step.at) > 0 ? satisfied(step.at) : excused(step.at);
         }
         break;
       case "anki-finished":
