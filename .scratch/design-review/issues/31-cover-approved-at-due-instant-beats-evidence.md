@@ -1,6 +1,6 @@
 # A cover approved at the exact due instant beats approved evidence
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 ## Problem
@@ -19,3 +19,7 @@ In the `cover-approved` step, judge an occurrence not judged yet as the `due` st
 
 - [ ] `verdict.test.ts`: approved evidence before the due time and a cover approved at the due instant give Satisfied.
 - [ ] `npm run check` passes.
+
+## Owner decision (2026-11-11)
+
+Ready for an agent.

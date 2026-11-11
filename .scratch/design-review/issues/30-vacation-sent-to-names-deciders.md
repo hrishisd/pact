@@ -1,6 +1,6 @@
 # A vacation's "Sent to" names who decides it now
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 ## Problem
@@ -20,3 +20,7 @@ Whether `reviewerNames` should name the current deciders (`vacationDeciders`), o
 
 - [ ] A scenario: after the last picked reviewer is removed, the owner's vacation card names the current deciders (or whatever is decided).
 - [ ] `docs/behaviour.md` matches.
+
+## Owner decision (2026-11-11)
+
+Ready for an agent.
