@@ -1,6 +1,6 @@
 # 03 Session coverage test built from `API_PATHS`
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: S1 (`../code-structure-review.md`, section 2).
@@ -23,9 +23,9 @@ Whether an API route needs a session depends only on whether it is registered af
 
 ## Acceptance criteria
 
-- [ ] "every API route needs a session" enumerates `API_PATHS` and the registered methods, with the public exceptions listed and explained.
-- [ ] Shown to fail: temporarily register one of the vacation routes above the middleware, see the test fail, and revert.
-- [ ] `npm run check` passes.
+- [x] "every API route needs a session" enumerates `API_PATHS` and the registered methods, with the public exceptions listed and explained.
+- [x] Shown to fail: temporarily register one of the vacation routes above the middleware, see the test fail, and revert.
+- [x] `npm run check` passes.
 
 ## Out of scope
 

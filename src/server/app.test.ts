@@ -235,6 +235,8 @@ async function server({
     logs: s.logs,
     photoStore: s.photoStore,
     staticDir,
+    /** The app's registered routes and middleware, as Hono lists them. */
+    routes: app.routes,
     request,
     api,
     /**
@@ -1925,40 +1927,37 @@ describe("payments", () => {
 describe("api", () => {
   test("every API route needs a session", async () => {
     const s = await server();
+    // The API_PATHS entries that answer without a session, each on purpose.
+    // (The auth handler under AUTH_BASE_PATH is public too, but isn't in API_PATHS.)
+    const publicPaths: Partial<Record<keyof typeof API_PATHS, string>> = {
+      invite: "the invite page shows to signed-out visitors, so its lookup can't need a session",
+    };
 
-    const reads = [
-      API_PATHS.me,
-      API_PATHS.today,
-      API_PATHS.friends,
-      API_PATHS.recipients,
-      API_PATHS.pacts,
-      API_PATHS.pact("some-pact"),
-      API_PATHS.photo("some-photo"),
-      API_PATHS.reviewQueue,
-      API_PATHS.waitingOnReply,
-      API_PATHS.evidenceItem("some-evidence"),
-      API_PATHS.paymentItem("some-payment"),
-    ];
-    for (const path of reads) {
-      const response = await s.request(path);
-      expect(response.status).toBe(401);
-      expect(await response.json()).toEqual({ error: "unauthenticated" });
-    }
-    const writes = [
-      API_PATHS.invites,
-      API_PATHS.acceptInvite("some-token"),
-      API_PATHS.recipients,
-      API_PATHS.pacts,
-      API_PATHS.firstOccurrence,
-      API_PATHS.evidence("some-pact"),
-      API_PATHS.decide("some-item"),
-      API_PATHS.askOwner("some-item"),
-      API_PATHS.reply("some-item"),
-      API_PATHS.acceptMiss("some-pact", "2026-01-05"),
-      API_PATHS.payments("some-recipient"),
-    ];
-    for (const path of writes) {
-      expect((await s.request(path, { method: "POST" })).status).toBe(401);
+    // A route's shape with its parameters' names dropped, so "/api/pacts/:pactId"
+    // matches the ":p0" placeholder the test calls API_PATHS.pact with.
+    const shape = (path: string) => path.replace(/:[^/]+/g, ":");
+    const registered = (path: string) =>
+      s.routes
+        .filter((route) => route.method !== "ALL" && shape(route.path) === shape(path))
+        .map((route) => route.method);
+
+    for (const [name, entry] of Object.entries(API_PATHS)) {
+      if (name in publicPaths) continue;
+      const path = entry as string | ((...ids: string[]) => string);
+      const [pattern, concrete] =
+        typeof path === "string"
+          ? [path, path]
+          : [
+              path(...Array.from({ length: path.length }, (_, i) => `:p${i}`)),
+              path(...Array.from({ length: path.length }, (_, i) => `some-id-${i}`)),
+            ];
+      const methods = registered(pattern);
+      expect(methods, `${name} has no registered route`).not.toEqual([]);
+      for (const method of methods) {
+        const response = await s.request(concrete, { method });
+        const answer = { name, method, status: response.status, body: await response.json() };
+        expect(answer).toEqual({ name, method, status: 401, body: { error: "unauthenticated" } });
+      }
     }
   });
 
