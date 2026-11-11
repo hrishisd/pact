@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { dayNote } from "./excuse-days.tsx";
+import { presentOccurrence } from "./excuse-days.tsx";
 
 describe("a covered day's note while it's open", () => {
   const now = Date.parse("2026-01-21T15:00:00.000Z");
@@ -18,10 +18,12 @@ describe("a covered day's note while it's open", () => {
     ["2026-01-22T04:30:00.000Z", "Due at 11:30pm"],
     ["2026-01-22T06:00:00.000Z", "Due at 1:00am"],
   ])("due %s reads %s in New York", (dueAt, note) => {
-    expect(dayNote(open(dueAt), now, "America/New_York")).toBe(note);
+    expect(presentOccurrence(open(dueAt), now, { timezone: "America/New_York" }).note).toBe(note);
   });
 
   test("a Weekly count week is due by Sunday", () => {
-    expect(dayNote(open("2026-01-26T05:00:00.000Z"), now, "America/New_York", true)).toBe("Due by Sunday");
+    expect(
+      presentOccurrence(open("2026-01-26T05:00:00.000Z"), now, { timezone: "America/New_York", week: true }).note,
+    ).toBe("Due by Sunday");
   });
 });

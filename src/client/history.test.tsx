@@ -8,13 +8,27 @@ import { cameraPact, renderWithUser } from "./testing/render.tsx";
 const NOW = Date.parse("2026-01-12T17:00:00Z");
 const VACATION = { from: "2026-01-07", to: "2026-01-10" };
 
-const satisfied: Json<OccurrenceRecord> = { status: { kind: "satisfied", approvedBy: "Ana" }, detail: null };
+const satisfied: Json<OccurrenceRecord> = {
+  status: { kind: "satisfied", approvedBy: "Ana", cover: null, phase: "past-due" },
+  detail: null,
+};
 const excused: Json<OccurrenceRecord> = {
-  status: { kind: "excused", excuseApproval: { reviewerName: "Ana", reason: "Red-eye flight back" } },
+  status: {
+    kind: "excused",
+    excuseApproval: { reviewerName: "Ana", reason: "Red-eye flight back" },
+    cover: { kind: "excuse", state: "approved" },
+    phase: "past-due",
+  },
   detail: null,
 };
 const onVacation: Json<OccurrenceRecord> = {
-  status: { kind: "excused", excuseApproval: null, vacation: VACATION },
+  status: {
+    kind: "excused",
+    excuseApproval: null,
+    vacation: VACATION,
+    cover: { kind: "vacation", state: "approved" },
+    phase: "past-due",
+  },
   detail: null,
 };
 
@@ -73,7 +87,7 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
   const weeks: Json<HeatMapWeek>[] = [
     {
       date: "2025-12-29",
-      occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null } },
+      occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" } },
       progress: { sessions: 3, waiting: 0, target: 3 },
     },
     { date: "2026-01-05", occurrence: onVacation, progress: { sessions: 0, waiting: 0, target: 3 } },
@@ -98,4 +112,31 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
   const detail = screen.getByRole("status");
   expect(within(detail).getByText("Vacation").className).toBe("chip c-vac");
   expect(within(detail).getByText("Vacation, Jan 7 – 10. Excused, no penalty.")).toBeTruthy();
+});
+
+test("a day with an excuse waiting for approval has a square and a chip that say the same", async () => {
+  const waiting: Json<OccurrenceRecord> = {
+    status: {
+      kind: "not-judged",
+      opensAt: "2026-01-12T05:00:00Z",
+      dueAt: "2026-01-13T05:00:00Z",
+      evidenceWaiting: false,
+      cover: { kind: "excuse", state: "waiting" },
+      phase: "open",
+      excuseApproval: null,
+    },
+    detail: null,
+  };
+  const { user } = renderWithUser(
+    <HeatMap
+      pact={{ ...cameraPact(), history: { kind: "fixed-days", days: [{ date: "2026-01-12", occurrence: waiting }] } }}
+      timezone="America/New_York"
+      now={NOW}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "Mon Jan 12: Excuse waiting for approval" }));
+
+  const detail = screen.getByRole("status");
+  expect(within(detail).getByText("Excuse waiting for approval").className).toBe("chip c-wait");
 });

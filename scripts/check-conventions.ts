@@ -9,12 +9,14 @@
 //   - every localeCompare names its locale, so an order is the same on every machine;
 //   - what covers an occurrence is read only through covers.ts and occurrence-state.ts:
 //     the old cover predicates are gone, and a cover table's rows are touched only
-//     there, in migrations, and by the module that files and decides that kind.
+//     there, in migrations, and by the module that files and decides that kind;
+//   - the layers import only what they may: src/client/ imports only src/client/
+//     and src/shared/, and src/core/ never imports src/server/ or src/client/.
 // And over .scratch/: every `Status:` line uses a value docs/agents/triage-labels.md lists.
 // A line with a `conventions-ok` comment is skipped. Exits 1 on any finding.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 // Avoided words that are fine in their everyday sense, so checking them
 // would mostly flag correct code ("every day", "integration test"). Kept,
@@ -84,6 +86,14 @@ const COVER_TABLES: [RegExp, string][] = [
   [/\bvacation_day\b/, "src/core/vacations.ts"],
 ];
 
+// A relative import or export's path: `from "../x.ts"`, `import "./x.css"` or `import("./x.ts")`.
+const importPattern = /\b(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g;
+// The src/ folders each layer may import from, by the folder its file is in.
+const LAYER_IMPORTS: Record<string, (folder: string) => boolean> = {
+  client: (folder) => folder === "client" || folder === "shared",
+  core: (folder) => folder !== "server" && folder !== "client",
+};
+
 const findings: string[] = [];
 for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
   const isTest = /\.test\.tsx?$/.test(file) || file.startsWith("src/core/testing/");
@@ -119,6 +129,13 @@ for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
       for (const [table, owner] of COVER_TABLES)
         if (file.startsWith("src/") && !COVER_READERS.has(file) && file !== owner && table.test(line))
           findings.push(`${where}: read an occurrence's cover through covers.ts (coverOn, coveredSql, cover_day_v)`);
+      const layer = file.split("/")[1] ?? "";
+      const mayImport = file.startsWith("src/") ? LAYER_IMPORTS[layer] : undefined;
+      if (mayImport)
+        for (const [, path] of line.matchAll(importPattern)) {
+          const folder = relative("src", join(dirname(file), path ?? "")).split("/")[0] ?? "";
+          if (!mayImport(folder)) findings.push(`${where}: src/${layer}/ doesn't import src/${folder}/`);
+        }
       if (file.startsWith("src/") && localeComparePattern.test(line))
         findings.push(`${where}: give localeCompare a locale ("en-US"), or the machine's decides the order`);
     });

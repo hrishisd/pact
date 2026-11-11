@@ -1340,8 +1340,8 @@ export type ExcuseSkipReason = "satisfied" | "excused" | "on-waiting-excuse" | "
 export interface ExcusePreview {
   /** Oldest first, as they stand before filing. */
   covered: ExcuseDay[];
-  /** Oldest first. */
-  skipped: { date: LocalDate; reason: ExcuseSkipReason }[];
+  /** Oldest first, dated as `ExcuseDay`s are: a Weekly count week by its Monday, through its Sunday. */
+  skipped: (Pick<ExcuseDay, "date" | "through"> & { reason: ExcuseSkipReason })[];
   /** The penalties filing would hold: those of the covered Missed days. */
   heldCents: number;
 }

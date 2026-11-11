@@ -33,14 +33,20 @@ So the heat map square and the chip beside it can disagree: a day with a waiting
 ## Acceptance criteria
 
 - [ ] The six functions are gone or are thin calls to `presentOccurrence`.
-- [ ] New `excuse-days.test.tsx` cases: a waiting excuse and a waiting vacation on a day not judged yet give the same square and different chip text; a Missed day under a waiting vacation reads "Missed · vacation waiting for approval".
-- [ ] New `history.test.tsx` case: the square and the chip agree for a day with a waiting excuse.
-- [ ] Existing client tests pass, changed only where the copy is fixed on purpose.
-- [ ] The import check refuses an import of `src/core/` from `src/client/`; shown by trying it.
-- [ ] Update `docs/behaviour.md` if any label changes.
-- [ ] `npm run check` passes.
+- [x] New `excuse-days.test.tsx` cases: a waiting excuse and a waiting vacation on a day not judged yet give the same square and different chip text; a Missed day under a waiting vacation reads "Missed · vacation waiting for approval".
+- [x] New `history.test.tsx` case: the square and the chip agree for a day with a waiting excuse.
+- [x] Existing client tests pass, changed only where the copy is fixed on purpose.
+- [x] The import check refuses an import of `src/core/` from `src/client/`; shown by trying it.
+- [x] Update `docs/behaviour.md` if any label changes.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - The waiting list rows (ticket 18).
 - Visual redesign of the chips or squares.
+
+## Comments
+
+- `squareOf`, `OccurrenceChip` and `dayNote` are gone; `DayChip` and `recentNote` are thin calls to `presentOccurrence`; `DayCard` takes its week from the core (the excuse preview's skipped days now carry `through`, as covered ones do). `missedLine` (`Today.tsx`) is unchanged: it formats a Today Missed card's detail, which carries no `OccurrenceStatus`, and decides nothing about where the occurrence stands. Left for the owner to call; the first criterion stays unticked for it.
+- `history.test.tsx` fixtures gained `cover` and `phase`, which the type requires; the file wasn't type-checked (ticket 25).
+- Copy changes on purpose: heat map square labels are now the chip's words ("Coming up" not "Not open yet", and they name waiting covers and evidence); a waiting vacation on a day not judged yet reads "Vacation waiting for approval" (on One-time History too, where it read "Due <date>"); a day an approved vacation covers reads "Vacation" on the excuse screens, as it already did on History.

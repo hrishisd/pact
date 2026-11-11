@@ -247,7 +247,7 @@ function excusePreview(
     const day = excuseDay(ctx, pactId, occurrence);
     const skipped = excuseSkipReason(ctx, pactId, day, now);
     if (skipped !== null) {
-      preview.skipped.push({ date: occurrence.date, reason: skipped });
+      preview.skipped.push({ ...occurrenceSpan(ctx, pactId, occurrence), reason: skipped });
       continue;
     }
     preview.covered.push(day);

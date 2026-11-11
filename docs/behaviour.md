@@ -75,6 +75,12 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - The penalty uses the terms that applied to the occurrence, including its recipient (`termsOn`, in `judge`).
 - A One-time occurrence with approved evidence is Satisfied at the deadline (decided in pact-v0 ticket 15).
 
+### How an occurrence is shown
+
+- Every screen that shows an occurrence (the heat map's squares and chip, Yesterday, the excuse sheet, the excuse page and the Excuse review item) words it through one function, `presentOccurrence` (`src/client/excuse-days.tsx`), in one order. Satisfied, Excused (Vacation when an approved vacation covers it) or Missed. A Missed day under a waiting cover reads "Missed · excuse waiting for approval" or "Missed · vacation waiting for approval". A day not judged yet reads, first match wins: Excused or Vacation under an approved cover; "Excuse waiting for approval" or "Vacation waiting for approval"; "Waiting for approval" while its evidence waits; then Coming up, Due today ("This week" for a Weekly count week; "Due Mon Jan 12" for a One-time pact open before its date) or Not judged yet ("No Oura data" for a bedtime night). Test: `excuse-days.test.tsx`.
+- A heat map square's colour is its outcome, Vacation, or for a day not judged yet whether it is ahead, open or past due. Its label is the chip's words, so the square and the chip agree. Test: `history.test.tsx`.
+- The browser clock only moves a day not judged yet from Coming up to Due today to Not judged yet while a screen is open; the core decides everything else.
+
 ### Evidence
 
 - Camera only. One to 10 photos (`MAX_EVIDENCE_PHOTOS`), for the occurrence open now and before its due time. The received time is the latest photo's receipt (`submitEvidence`, `evidence.ts:62`; `evidenceAcceptance`, `evidence.ts:294`). Test: `evidence.test.ts`.
