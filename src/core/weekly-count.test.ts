@@ -12,7 +12,7 @@ import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
 import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import type { AccountHandle, Scenario } from "./testing/scenario.ts";
 import { scenario } from "./testing/scenario.ts";
-import { cards, changed, ledgerHistory, ok, owed, pactOf } from "./testing/queries.ts";
+import { cards, changed, ledgerHistory, ok, owed, pactOf, penalties } from "./testing/queries.ts";
 
 // The pact is made in the reference week; its first week is the next one,
 // "Mon+1".
@@ -360,6 +360,69 @@ describe("evidence", () => {
       approvedBy: null,
     });
     expect(owed(owner)).toBe(0);
+  });
+});
+
+describe("a week judged by a late decision", () => {
+  /** The owner's pushes about Piano, as kind and title, in delivery order. */
+  const pushes = (s: Scenario, owner: AccountHandle) =>
+    s.notifier.sentTo(owner).map((n) => [n.kind, n.payload.title] as const);
+
+  test("a 3× week whose third session is approved after Sunday is Satisfied, with no Missed push", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(3), { penaltyCents: 1000 });
+    await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
+    await sessionAt(s, "Tue+1 10:00", owner, reviewer, piano);
+    s.setClockTo("Sun+1 22:00");
+    const late = await submit(owner, piano);
+    await s.advanceTo("Mon+2 10:00");
+
+    ok(await reviewer.decide(late, { kind: "approve" }));
+
+    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status.kind).toBe("satisfied");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+    expect(owed(owner)).toBe(0);
+  });
+
+  test("with two sessions in all, a late approval of the second leaves the week Missed and says so after the decision", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(3), { penaltyCents: 1000 });
+    await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
+    s.setClockTo("Sun+1 22:00");
+    const late = await submit(owner, piano);
+    await s.advanceTo("Mon+2 10:00");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+
+    ok(await reviewer.decide(late, { kind: "approve" }));
+
+    expect(pushes(s, owner).slice(-2)).toEqual([
+      ["evidence-decided", "reviewer approved your evidence"],
+      ["missed-occurrence", "Piano is Missed"],
+    ]);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toHaveLength(1);
+    expect(penalties(owner).map((p) => [p.date, p.cents])).toEqual([[s.date("Mon+1"), 1000]]);
+    await s.advanceTo("Tue+2 10:00");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toHaveLength(1);
+  });
+
+  test("a late rejection that leaves the week short says it's Missed", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(2));
+    await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
+    s.setClockTo("Sun+1 22:00");
+    const late = await submit(owner, piano);
+    await s.advanceTo("Mon+2 10:00");
+
+    ok(await reviewer.decide(late, { kind: "reject", reason: "Blurry" }));
+
+    expect(pushes(s, owner).slice(-2)).toEqual([
+      ["evidence-decided", "reviewer rejected your evidence"],
+      ["missed-occurrence", "Piano is Missed"],
+    ]);
+    expect(owed(owner)).toBe(500);
   });
 });
 

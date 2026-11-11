@@ -1,10 +1,10 @@
 // The judging rules stated once: what an occurrence's outcome is, given the
 // facts about it and the time. Pure, with no database and no clock: the
-// facts loader (`occurrenceFacts`) reads the facts, and nothing in production
-// calls `verdictOf` yet. Until `settle` replaces them (design review tickets
-// 11 to 13), the seven judging call sites keep their own copies of these
+// facts loader (`occurrenceFacts`) reads the facts. The tick and evidence
+// decisions judge through it (`settle`); until design review tickets 12 and
+// 13 move them there, covers, bedtime and Anki keep their own copies of these
 // rules, and the scenario harness checks after every command and tick that
-// what they stored is what `verdictOf` says (`testing/verdict-check.ts`).
+// what was stored is what `verdictOf` says (`testing/verdict-check.ts`).
 //
 // The verdict is replayed from the facts in time order, because a stored
 // outcome is history: an occurrence judged Missed at its due time stays

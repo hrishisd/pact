@@ -18,13 +18,10 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { coveredSql, coverOn } from "./covers.ts";
-import { judge, judgeWeek } from "./judging.ts";
+import { coveredSql } from "./covers.ts";
 import {
-  dueAfterEnd,
   evidenceDecision,
   isJudged,
-  judgingReached,
   MISSED_THROUGH_REJECTION,
   rejection,
   WEEKLY_COUNT_PACT,
@@ -40,7 +37,6 @@ import {
   decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
-  isWeekly,
   occurrencesOf,
   ownPact,
   pactName,
@@ -57,6 +53,7 @@ import {
   type ReviewOutcome,
   type ReviewStateRow,
 } from "./rows.ts";
+import { settle } from "./settle.ts";
 
 export async function submitEvidence(
   ctx: CoreContext,
@@ -221,11 +218,11 @@ export function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): Revie
 }
 
 /**
- * Records a reviewer's decision on waiting evidence and tells the owner.
- * A rejection is final: it judges the occurrence Missed as of now, open or
- * not. An approval judges it Satisfied as of now once judging has reached it,
- * since it was waiting on this decision; before that, judging at the due
- * time will.
+ * Records a reviewer's decision on waiting evidence, tells the owner, and
+ * settles the occurrence (`verdictOf` has the rules): a rejection of a Fixed
+ * day or One-time occurrence judges it Missed as of now, open or not; a
+ * decision on an occurrence past its due time that was waiting on it judges
+ * it as of now.
  */
 export function decideEvidence(
   ctx: CoreContext,
@@ -236,26 +233,6 @@ export function decideEvidence(
   const { outcome, reason } = decided;
   const now = ctx.clock.now();
   recordDecision(ctx, "evidence", evidence.id, decided, reviewerId, now);
-  // A day ahead with an approved excuse or vacation stays for judging at its due time, which makes it Excused.
-  const excusedAhead = coverOn(ctx, evidence.pact_id, evidence.occurrence_date)?.state === "approved";
-  const occurrence = occurrencesOf(ctx, evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date);
-  if (occurrence === null || dueAfterEnd(ctx, evidence.pact_id, occurrence)) {
-    // The pact Ended before the day fell due: it's never judged.
-  } else if (isWeekly(ctx, evidence.pact_id)) {
-    // A week waiting on this decision past its due time is judged now; the decision told the owner.
-    if (
-      !isJudged(ctx, evidence.pact_id, evidence.occurrence_date) &&
-      judgingReached(ctx, evidence.pact_id, evidence.occurrence_date, now)
-    ) {
-      judgeWeek(ctx, evidence.pact_id, occurrence, now, false);
-    }
-  } else if (
-    !isJudged(ctx, evidence.pact_id, evidence.occurrence_date) &&
-    ((outcome === "rejected" && !excusedAhead) || judgingReached(ctx, evidence.pact_id, evidence.occurrence_date, now))
-  ) {
-    const judged = outcome === "approved" ? "satisfied" : excusedAhead ? "excused" : "missed";
-    judge(ctx, evidence.pact_id, evidence.occurrence_date, judged, now);
-  }
   ctx.enqueue({
     recipient: evidence.owner_account_id,
     kind: "evidence-decided",
@@ -270,6 +247,8 @@ export function decideEvidence(
       url: outcome === "approved" ? APP_PATHS.pact(evidence.pact_id) : APP_PATHS.today,
     },
   });
+  // After the decision's push, so a Missed push it causes comes second.
+  settle(ctx, evidence.pact_id, evidence.occurrence_date, now);
 }
 
 /** The photos of some evidence, in the order taken. */

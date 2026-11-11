@@ -22,7 +22,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 - For the first 10 minutes after creation the owner can edit or delete the pact freely (`EDIT_WINDOW_MS`, `pact-rules.ts:36`; `editPact`, `pacts.ts:116`; `deletePact`, `pacts.ts:160`). An edit does not restart the window. Test: `edit-window.test.ts`.
 - An edit that drops days from the schedule removes evidence for those days. An edit to a One-time deadline moves its occurrence with its evidence (`editPact`, `moveOneTimeOccurrence`, `pacts.ts:528`).
-- Reviewers are told they were picked only when the window closes, and evidence submitted inside the window goes to them then (`closeEditWindows`, `pacts.ts:571`). Until then a reviewer cannot see or decide the pact's evidence (`evidence.ts:204`; `itemToDecide` in `review.ts:177`).
+- Reviewers are told they were picked only when the window closes, and evidence submitted inside the window goes to them then (`closeEditWindows`, `pacts.ts:571`). Until then a reviewer cannot see or decide the pact's evidence (`evidence.ts:200`; `itemToDecide` in `review.ts:182`).
 - No excuse can be filed while the window is open (`edit-window-open`, `excuseOptions`, `excuses.ts:66`), and vacations offer only pacts past it (`offeredPacts`, `vacations.ts:77`).
 
 ### Change requests
@@ -46,9 +46,9 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 ### Ending
 
-- A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `judging.ts:94`). Test: `due-by-and-dates.test.ts`.
-- A One-time pact Ends when its occurrence is judged (`judge`, `judging.ts:189`).
-- Ending withdraws a waiting change request, silently (`endPact`, `judging.ts:234`).
+- A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `judging.ts:51`). Test: `due-by-and-dates.test.ts`.
+- A One-time pact Ends when its occurrence is judged (`settle`, `settle.ts:32`; `judge`, `judging.ts:103`, for covers).
+- Ending withdraws a waiting change request, silently (`endPact`, `judging.ts:148`).
 - Only Active pacts are judged and reminded (`pactsToJudge`, `occurrence-state.ts:233`; `remind`, `reminders.ts:37`). An occurrence due after the end is ignored (`dueAfterEnd`, `occurrence-state.ts:205`).
 - The pact list shows pacts in the edit window first, then Active, then Ended (`pactList`, `pacts.ts:207`).
 
@@ -64,16 +64,17 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 ### Judging
 
-- The tick judges each Active pact's occurrences in due order, and keeps a `judged_through` cursor (`judgePactDueBy`, `judging.ts:49`). Test: `judging.test.ts`.
-- At the due time an occurrence is judged in this order (`judgeAtDueTime`, `judging.ts:124`):
+- The tick and evidence decisions judge through `settle` (`settle.ts:32`): it reads the occurrence's facts, asks `verdictOf` (`src/core/verdict.ts`) for its outcome, and stores it with its penalty if the occurrence isn't judged yet. Covers, bedtime nights and Anki checks still judge for themselves (design review ticket 12).
+- The tick settles each Active pact's occurrences in due order, and keeps a `judged_through` cursor (`settlePactDueBy`, `settle.ts:92`). It also settles days behind the cursor that evidence still holds: an owner's move west can put a due time the cursor passed back ahead, and a decision before then leaves the day for the tick (`settleBehindCursor`, `settle.ts:120`). Test: `judging.test.ts`.
+- At the due time an occurrence is judged in this order:
   1. Approved evidence: Satisfied.
   2. An approved excuse or vacation: Excused.
   3. Evidence waiting for a reviewer: wait.
   4. Otherwise: Missed, with the penalty.
-- The owner gets a Missed push only when no excuse or vacation covers the day, waiting or approved (`judging.ts:138`; decided in pact-v0 ticket 07).
-- A Weekly count week is Satisfied when its days of approved evidence reach the target. Otherwise an approved cover makes it Excused, waiting evidence holds it, and else it is Missed with one penalty of days short × penalty (`judgeWeek`, `judging.ts:149`; `judge`, `judging.ts:189`). Test: `weekly-count.test.ts`.
-- The judging rules are also stated once, unused in production, in `verdictOf` (`src/core/verdict.ts`); every scenario checks the stored outcomes against it (design review ticket 10).
-- The penalty uses the terms that applied to the occurrence, including its recipient (`termsOn`, in `judge`).
+- The owner gets a Missed push whenever an occurrence or week becomes Missed, whatever judged it: the due time or a late evidence decision (rule R4, design review ticket 11). Two exceptions: nobody is told about a day an excuse or vacation covers, waiting or approved (decided in pact-v0 ticket 07), and a rejection that judges a Fixed day or One-time occurrence Missed tells the owner through the rejection push alone (v0:324). A Missed push caused by a decision comes after the decision's push (`settle`). Test: `weekly-count.test.ts` "a week judged by a late decision", `rejection.test.ts`.
+- A Weekly count week is Satisfied when its days of approved evidence reach the target. Otherwise an approved cover makes it Excused, waiting evidence holds it, and else it is Missed with one penalty of days short × penalty (`verdictOf`). Test: `weekly-count.test.ts`.
+- The judging rules are stated once in `verdictOf` (`src/core/verdict.ts`); every scenario checks the stored outcomes against it (design review ticket 10).
+- The penalty uses the terms that applied to the occurrence, including its recipient (`termsOn`, read by `occurrenceFacts`).
 - A One-time occurrence with approved evidence is Satisfied at the deadline (decided in pact-v0 ticket 15).
 
 ### How an occurrence is shown
@@ -84,14 +85,13 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 ### Evidence
 
-- Camera only. One to 10 photos (`MAX_EVIDENCE_PHOTOS`), for the occurrence open now and before its due time. The received time is the latest photo's receipt (`submitEvidence`, `evidence.ts:62`; `evidenceAcceptance`, `evidence.ts:294`). Test: `evidence.test.ts`.
+- Camera only. One to 10 photos (`MAX_EVIDENCE_PHOTOS`), for the occurrence open now and before its due time. The received time is the latest photo's receipt (`submitEvidence`, `evidence.ts:58`; `evidenceAcceptance`, `evidence.ts:272`). Test: `evidence.test.ts`.
 - One piece of evidence per day may wait or be approved. On a Weekly count, a day with rejected evidence takes no more (decided in pact-v0 ticket 14). Evidence is refused once the occurrence is judged or the pact has Ended.
-- A rejection judges the occurrence Missed at once, unless the day was excused ahead, which leaves it Excused (`decideEvidence`, `evidence.ts:231`; decided in pact-v0 ticket 07). Test: `rejection.test.ts`.
-- An approval judges the occurrence Satisfied at once if judging has already reached the day.
+- A rejection judges the occurrence Missed at once, unless the day was excused ahead, which leaves it Excused (`decideEvidence`, `evidence.ts:227`; decided in pact-v0 ticket 07). Test: `rejection.test.ts`.
+- An approval judges the occurrence Satisfied at once if it is past its due time. A late decision on a Weekly count week judges the week at once: Satisfied if its approved days reach the target, else Missed, with the Missed push.
 - **Known bug:** an approval of evidence that was still waiting when an approved excuse or vacation made the day Excused changes nothing; the vacation spec (vac:78) says it makes the day Satisfied. See [ticket 26](../.scratch/design-review/issues/26-late-approval-satisfies-excused-day.md).
-- A late decision on a Weekly count week judges the week but does not tell the owner it was Missed (`decideEvidence` passes `tell = false` to `judgeWeek`). **Known bug:** the owner should be told whenever a week becomes Missed. See [ticket 11](../.scratch/design-review/issues/11-settle-tick-and-evidence.md).
-- The owner is told each decision (`evidence-decided`). A rejection shows an alert until the owner takes the L or files an excuse (`rejectedEvidenceAlerts`, `evidence.ts:366`). On a Weekly count, the rejected-day alert appears when the week is judged (`rejectedDayAlerts`, `evidence.ts:419`).
-- Take the L accepts a miss and clears its alert (`acceptMiss`, `evidence.ts:103`). Test: `accept-miss.test.ts`.
+- The owner is told each decision (`evidence-decided`). A rejection shows an alert until the owner takes the L or files an excuse (`rejectedEvidenceAlerts`, `evidence.ts:344`). On a Weekly count, the rejected-day alert appears when the week is judged (`rejectedDayAlerts`, `evidence.ts:398`).
+- Take the L accepts a miss and clears its alert (`acceptMiss`, `evidence.ts:99`). Test: `accept-miss.test.ts`.
 
 ### Oura Ring
 
@@ -104,7 +104,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 - An Anki day is Satisfied at the first check showing 0 new, 0 learning and 0 review cards left (`recordAnkiChecks`, `anki-days.ts:170`). Test: `anki-days.test.ts`.
 - Days still to do are polled every 10 minutes, and the owner can check now at most every 15 seconds (`ANKI_POLL_INTERVAL_MS`, `anki-days.ts:15`; `ankiDaysWaiting`, `anki-days.ts:91`).
-- A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts:26`).
+- A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts:20`).
 - Losing the connection marks it Needs reconnecting (`markDisconnected`, `connections.ts:91`). A deck that no longer exists raises an alert (`anki_pact_deck`).
 
 ## Covers: excuses, vacations and holds
@@ -142,7 +142,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 The five kinds are evidence, excuses, vacations, payments and change requests.
 
-- Who decides (`itemToDecide`, `review.ts:177`):
+- Who decides (`itemToDecide`, `review.ts:182`):
   - Evidence and excuses: the pact's current reviewers.
   - Payments: anyone who reviews one of the owner's pacts with that recipient, now, in earlier terms, or through a penalty to it (`paymentReviewersSql`, `money.ts:72`).
   - Vacations: the picked reviewers.

@@ -105,13 +105,14 @@ import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { acceptMiss, evidencePage, submitEvidence } from "./evidence.ts";
 import { acceptExcuseRejection, excuseOptions, excusePage, fileExcuse, previewExcuse } from "./excuses.ts";
-import { endPastEndDate, judgeDueBy } from "./judging.ts";
+import { endPastEndDate } from "./judging.ts";
 import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOverdue } from "./money.ts";
 import { deliverPending, enqueue } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
 import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
 import { askOwner, decide, ownerReply, reviewQueue, viewPhoto, waitingOnReply, type PhotoResult } from "./review.ts";
+import { settleAll } from "./settle.ts";
 import { todayPage } from "./today.ts";
 import {
   acceptVacationRejection,
@@ -612,7 +613,7 @@ class Core implements PactCore {
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
         recordAnkiChecks(this.#ctx, checked);
-        judgeDueBy(this.#ctx, t, this.#ankiPolling.checksRunning);
+        settleAll(this.#ctx, t, this.#ankiPolling.checksRunning);
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
         noteOuraClock(this.#ctx, fetched.sleep);
         judgeNights(this.#ctx, t, fetched.sleep);

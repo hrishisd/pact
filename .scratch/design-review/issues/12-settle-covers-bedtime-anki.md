@@ -47,3 +47,5 @@ From ticket 10 (2026-11-11): two facts `verdictOf` needs are not stored, so the 
 
 - A bedtime night's first long_sleep period and when it arrived. `occurrence.bedtime_start` is written only when a period judges the night Satisfied or Missed, so a night judged Excused by a late period reads as having none. Store it when it arrives.
 - When an Anki check's answer was recorded. `anki_check.checked_at` is when the check started; a check answered after judging gave up on it (`ANKI_CHECK_HOLDS_JUDGING_MS`) doesn't count, which the stored row can't show. The running checks are in memory, passed in as `ankiChecks`.
+
+From ticket 11 (2026-11-11): `settle` writes only an occurrence that isn't judged yet (`isJudged` returns early). Moving `excuseApprovedDays` onto it means letting it rewrite a stored Missed outcome as Excused and delete the penalty. Keep Excused to Satisfied out (ticket 26).

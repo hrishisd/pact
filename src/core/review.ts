@@ -22,7 +22,8 @@ import {
 import type { CoreContext } from "./context.ts";
 import { decideEvidence, evidenceToReview, type EvidenceToDecide } from "./evidence.ts";
 import { decideExcuse, excusesToReview, type ExcuseToDecide } from "./excuses.ts";
-import { judgePactDueBy, type AnkiChecksRunning } from "./judging.ts";
+import type { AnkiChecksRunning } from "./judging.ts";
+import { settlePactDueBy } from "./settle.ts";
 import {
   decidePayment,
   mayViewPaymentPhoto,
@@ -157,7 +158,7 @@ export function decide(
         // Judging catches up on the pact first, as the scheduler would have: a change never
         // rescues an occurrence already due. Judging may End it, which withdraws the request.
         const [pact] = pactsToJudge(ctx, item.row.pact_id);
-        judgePactDueBy(ctx, pact!, ctx.clock.now(), ankiChecksRunning);
+        settlePactDueBy(ctx, pact!, ctx.clock.now(), ankiChecksRunning);
         if (waitingChangeRequestId(ctx, item.row.pact_id) !== item.row.id) {
           return { ok: false, reason: "item-not-found" };
         }
