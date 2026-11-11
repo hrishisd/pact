@@ -30,8 +30,9 @@ const REMINDER_LATE_MS = 15 * 60 * 1000;
  * tells the operator. A reminder goes off before its occurrence's due time
  * and only while it's useful: a Camera day with no evidence and not judged
  * (on Weekly count, any day of the week while its target isn't met or
- * waiting for approval), any scheduled bedtime night (the app can't know the owner is in bed until
- * the ring syncs), an Anki day not judged yet, never one an approved excuse or vacation covers.
+ * waiting for approval), a scheduled bedtime night Oura hasn't judged yet (usually every
+ * night, as the ring syncs the next morning), an Anki day not judged yet, never one an
+ * approved excuse or vacation covers.
  */
 export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
   const pacts = ctx.all<

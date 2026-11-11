@@ -100,7 +100,7 @@ export type OccurrenceView = OccurrenceStatus & {
   /**
    * Its reminders still fire (at their times, before its due time): the same
    * cover rule as `toDo` (R7), so a waiting excuse stops both and a waiting
-   * vacation keeps both. A bedtime night is reminded even once judged.
+   * vacation keeps both. A bedtime night Oura has already judged gets none.
    */
   remind: boolean;
 };
@@ -143,8 +143,7 @@ export function occurrenceView(ctx: CoreContext, pactId: string, occurrence: Occ
     cover,
     phase,
     toDo: owed && inWindow,
-    // A bedtime night is reminded even once Oura has judged it, as the owner may already be in bed.
-    remind: evidenceKind === "oura" ? keepsToDo(found) : owed,
+    remind: owed,
   } satisfies OccurrenceStanding & Pick<OccurrenceView, "toDo" | "remind">;
   if (outcome === "satisfied") return { kind: "satisfied", ...standing };
   if (outcome === "excused") return { kind: "excused", ...standing };

@@ -167,7 +167,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 - Pushes are written to an outbox and sent after the change commits.
 - Reminders go at their times in the account's timezone, once each (`remind`, `reminders.ts:37`; `reminder_sent`). One more than 15 minutes late is dropped with an operator alert (`REMINDER_LATE_MS`, `reminders.ts:25`). Test: `reminders.test.ts`.
 - A reminder fires for an occurrence if and only if Today shows it as the owner's to do (a To do card, or for a bedtime night the Automatic or No Oura data card), as far as cover, judging and evidence go: one view decides both (`toDo` and `remind`, `occurrenceView`, `occurrence-state.ts:115`; rule R7 in `.scratch/design-review/spec.md`). An approved cover or a waiting excuse removes both; a waiting vacation keeps both. Reminders keep their own timing: each goes at its time, before the due time. Otherwise (`worthReminding`, `reminders.ts:111`):
-  - Oura Ring: always sent, even once Oura has judged the night (the owner may already be in bed), so a night judged early is reminded with no Automatic card.
+  - Oura Ring: sent every scheduled night until Oura has judged it. The ring usually syncs the next morning, so most nights are reminded even when the owner is already in bed; a night judged before its reminder gets none (ticket 24 in `.scratch/design-review/issues/`).
   - Anki: sent until the day is judged.
   - Camera: sent while no evidence is in for the occurrence and it is not judged.
   - Weekly count: sent on a day with no evidence, while approved and waiting days are fewer than the target. Test: `reminders.test.ts`.

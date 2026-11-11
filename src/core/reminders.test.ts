@@ -243,24 +243,25 @@ describe("reminders on a Fixed days Camera pact", () => {
 });
 
 describe("reminders on a bedtime pact", () => {
-  test("fire every scheduled night, even when the owner is already in bed", async () => {
+  test("fire every scheduled night Oura hasn't judged yet, but not one it already has (R7)", async () => {
     const s = scenario();
     const { owner, bed } = await bedtimeWithReminders(s, "00:00", ["23:30"], ["mon", "tue", "wed"]);
-    // In bed at 22:00, and the ring synced before the reminder.
+    // In bed at 22:00 on Monday, and the ring synced before the reminder.
     s.ouraSource.addSleep(owner.id, sleep("Mon 22:00"));
 
+    await s.advanceTo("Mon 23:00");
+    expect(cards(owner, "automatic")).toEqual([]);
     for (const day of ["Mon", "Tue", "Wed", "Thu"]) await s.advanceTo(`${day} 23:30`);
 
     expect(s.notifier.sentTo(owner, "reminder")).toMatchObject([
       {
         payload: {
           pactId: bed,
-          occurrenceDate: s.date("Mon"),
+          occurrenceDate: s.date("Tue"),
           title: "In bed by midnight",
           body: "In bed by 12:00am tonight.",
         },
       },
-      { payload: { pactId: bed, occurrenceDate: s.date("Tue") } },
       { payload: { pactId: bed, occurrenceDate: s.date("Wed") } },
     ]);
   });

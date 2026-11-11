@@ -1,6 +1,6 @@
 # 24 A bedtime night judged before its reminder: R7 or "always reminded"?
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Found while building ticket 08.
@@ -20,8 +20,8 @@ Either:
 
 ## Acceptance criteria
 
-- [ ] The owner picks 1 or 2.
-- [ ] `../spec.md` R7 and `docs/behaviour.md` say the same thing as the code.
+- [x] The owner picks 1 or 2.
+- [x] `../spec.md` R7 and `docs/behaviour.md` say the same thing as the code.
 
 ## Owner decision (2026-11-11)
 

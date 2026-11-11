@@ -267,7 +267,7 @@ interface PactPageTerms {
    * they go off. On a Camera pact: that time on each scheduled day, before
    * the day's due time, while it has no evidence. On an Oura Ring pact: each
    * scheduled night (from 18:00 that evening, else the morning after), before
-   * the in-bed-by time, even if the owner is already in bed. Neither fires on
+   * the in-bed-by time, unless Oura has already judged the night. Neither fires on
    * an occurrence an approved excuse covers. On a One-time pact each is
    * dated and goes off once, before the deadline, unless evidence was
    * already submitted.
