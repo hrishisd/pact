@@ -19,7 +19,7 @@ The `fnm` and iCloud notes apply to the owner's Mac. A cloud session has Node on
 
 ## Browser smoke test
 
-`npm run test:e2e` runs one Playwright flow (`e2e/smoke.spec.ts`) across screens as two people: invite and become friends, create a Camera pact, submit evidence, approve it, a day Missed, file an excuse from the Missed card and open it from Waiting for approval, reject it, record a payment. It asserts on what a user sees (text and roles), not on CSS classes. About 10 seconds; not part of `npm run check` or CI.
+`npm run test:e2e` runs one Playwright flow (`e2e/smoke.spec.ts`) across screens as two people: invite and become friends, create a Camera pact, submit evidence, approve it, a day Missed, file an excuse from the Missed card and open it from Waiting for approval, reject it, record a payment. It asserts on what a user sees (text and roles), not on CSS classes. About 10 seconds. Not part of `npm run check`; CI runs it as its own job (`e2e` in `.github/workflows/ci.yml`), in parallel with the check, and a failure there keeps the trace as the `playwright-traces` artifact.
 
 - `playwright.config.ts` builds the client and starts the server in development (`npm start`) on port 3100 with a fresh database in the system temp directory (`pact-e2e/`), so it doesn't touch the dev database or a dev server on 3000 and 5173.
 - `@playwright/test` is pinned to the machine's Playwright (1.63.0), whose Chromium is preinstalled. Elsewhere, `npx playwright install chromium` once.
