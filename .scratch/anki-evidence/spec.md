@@ -1,5 +1,7 @@
 # Anki evidence kind
 
+Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
+
 Settled in a grilling session on 2026-11-05. It replaces the "Anki evidence kind" entry in `.scratch/pact-v0/spec.md`'s Future Ideas.
 
 ## Problem statement

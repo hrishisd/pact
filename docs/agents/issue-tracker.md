@@ -18,6 +18,7 @@ Checks an agent can't do (a signed-in `flyctl`, a real Oura Ring, a phone, real 
 
 - A finished ticket gets `Status: done` once every acceptance criterion is checked and the work is on `main`
 - A ticket is unblocked when every ticket in its `Blocked by:` line is `done`
+- A ticket that adds or changes a rule updates `docs/behaviour.md` in the same change, including removing any known-bug note it fixes.
 
 ## When a skill says "publish to the issue tracker"
 

@@ -30,12 +30,12 @@ Sources to read: the three feature specs, every ticket's Notes and Comments unde
 
 ## Acceptance criteria
 
-- [ ] `docs/behaviour.md` exists, organised by concept, with a citation on every rule.
-- [ ] Every confirmed decision in `.scratch/pact-v0/manual-checks.md` and every "decided while building" note in the tickets is either in it or deliberately left out with a reason in this ticket's Comments.
-- [ ] The four known bugs (R1, R4, R7, R9 in `../spec.md`) are marked with links to tickets 13, 11, 08 and 14.
-- [ ] The three feature specs carry the pointer line at the top.
-- [ ] `docs/agents/issue-tracker.md` "Closing a ticket" has the new step.
-- [ ] `npm run lint` passes (Prettier formats Markdown).
+- [x] `docs/behaviour.md` exists, organised by concept, with a citation on every rule.
+- [x] Every confirmed decision in `.scratch/pact-v0/manual-checks.md` and every "decided while building" note in the tickets is either in it or deliberately left out with a reason in this ticket's Comments.
+- [x] The four known bugs (R1, R4, R7, R9 in `../spec.md`) are marked with links to tickets 13, 11, 08 and 14.
+- [x] The three feature specs carry the pointer line at the top.
+- [x] `docs/agents/issue-tracker.md` "Closing a ticket" has the new step.
+- [x] `npm run lint` passes (Prettier formats Markdown).
 - [ ] The human is asked to skim it; note in Comments that they were.
 
 ## Out of scope
@@ -43,3 +43,13 @@ Sources to read: the three feature specs, every ticket's Notes and Comments unde
 - Changing any behaviour or any file under `src/`.
 - Rewriting the feature specs.
 - Rules proposed in `../spec.md` that are not built yet. Only R6 and R11, which are current behaviour, go in now.
+
+## Comments
+
+2026-11-11 (agent): Wrote `docs/behaviour.md`, added the pointer line to the three feature specs and the step to `docs/agents/issue-tracker.md`. Left out on purpose:
+
+- The open One-time start-date question in `.scratch/pact-v0/manual-checks.md` "Decisions to confirm": it is not confirmed, so it is not a rule yet.
+- Decisions about copy, layout and screens (card wording, button labels, prototype choices) in the manual checks and ticket notes: they belong to the specs and the client, not to the core's rules.
+- Operational decisions (deploys, logging, photo storage, sign-in plumbing): they are covered by `docs/agents/production.md` and `docs/agents/local-dev.md`.
+
+The human has not been asked to skim it yet: this was done by a subagent, which cannot ask. The last criterion stays open until they are.
