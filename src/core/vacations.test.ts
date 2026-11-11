@@ -756,6 +756,21 @@ describe("who decides a vacation when a covered pact's reviewers change", () => 
     expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
   });
 
+  // Design review ticket 30: the card and review item name who decides it now.
+  test("the owner's card and the review item name who decides it now, not who it was sent to", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer, second] });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, reviewerNames: ["reviewer"] }]);
+
+    await changeReviewers(owner, second, gym, [second]);
+
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, reviewerNames: ["second"] }]);
+    expect(second.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId, reviewerNames: ["second"] })]);
+  });
+
   test("a reviewer added to a covered pact while a picked reviewer remains doesn't see it", async () => {
     const s = scenario();
     const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
