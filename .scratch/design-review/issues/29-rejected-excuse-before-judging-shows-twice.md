@@ -1,6 +1,6 @@
 # A day on an excuse rejected before its judging shows twice on Today
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 ## Problem
@@ -19,3 +19,7 @@ Which of the two shows the day: hide the Missed card while any rejected excuse's
 
 - [ ] A scenario: an excuse rejected before its day is judged; once Missed, Today shows the day once.
 - [ ] `docs/behaviour.md` matches.
+
+## Owner decision (2026-11-11)
+
+Ready for an agent.
