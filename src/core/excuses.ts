@@ -48,15 +48,19 @@ import {
   reviewersOf,
   type PactRow,
 } from "./rows.ts";
+import { assertHoldsNoPenalty, mootReason, type TouchedOccurrence } from "./moot.ts";
 import {
   decisionDetails,
+  itemStateOf,
   recordDecision,
   reviewStateColumns,
-  reviewStateOf,
   thread,
+  withdrawalOf,
   type Decided,
+  type MootReason,
   type QueuedItem,
   type RequestKindHandler,
+  type RequestRow,
   type ReviewOutcome,
   type ReviewStateRow,
 } from "./requests.ts";
@@ -151,11 +155,13 @@ export function excusePage(ctx: CoreContext, accountId: AccountId, excuseId: str
   if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
   const row = ctx.db
     .prepare(
-      `SELECT excuse.reason, excuse.filed_at, ${reviewStateColumns("excuse")}
+      `SELECT excuse.reason, excuse.filed_at, excuse.withdrawn_at, excuse.withdrawn_reason,
+              ${reviewStateColumns("excuse")}
        FROM excuse LEFT JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
        WHERE excuse.id = ?`,
     )
-    .get(excuseId) as ReviewStateRow & { reason: string; filed_at: string };
+    .get(excuseId) as ReviewStateRow &
+    Pick<RequestRow, "withdrawn_at" | "withdrawn_reason"> & { reason: string; filed_at: string };
   const reviewerNames = friendsSortedByName(ctx, reviewersOf(ctx, pact.id)).map((friend) => friend.name);
   const excuse: ExcuseDetail = {
     ...excuseView(ctx, {
@@ -165,9 +171,12 @@ export function excusePage(ctx: CoreContext, accountId: AccountId, excuseId: str
       pact_name: pact.name,
       timezone: pact.timezone,
     }),
-    state: reviewStateOf(row),
+    state: itemStateOf(
+      row,
+      withdrawalOf(row, () => [pact.name]),
+    ),
     reviewerNames,
-    thread: thread(ctx, excuseId, row.decision === null),
+    thread: thread(ctx, excuseId, row.decision === null && row.withdrawn_at === null),
   };
   return { ok: true, excuse };
 }
@@ -212,8 +221,9 @@ export interface ExcuseViewRow {
 export interface ExcuseToDecide {
   id: string;
   kind: "excuse";
-  /** An excuse is never withdrawn. */
-  withdrawn_at: null;
+  /** When the system withdrew it, moot (R8); its owner can't. */
+  withdrawn_at: string | null;
+  withdrawn_reason: MootReason | null;
   pact_id: string;
   pact_name: string;
   decision: ReviewOutcome | null;
@@ -377,7 +387,7 @@ function excusesToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] 
        JOIN account AS owner ON owner.id = pact.owner_account_id
        JOIN recipient ON recipient.id = pact.recipient_id
        JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-       WHERE excuse.decision IS NULL
+       WHERE excuse.decision IS NULL AND excuse.withdrawn_at IS NULL
        ORDER BY excuse.filed_at, excuse.id`,
     reviewerId,
   );
@@ -405,7 +415,8 @@ export const excuseKind: RequestKindHandler<ExcuseToDecide> = {
   kind: "excuse",
   load: (ctx, id) =>
     ctx.one<ExcuseToDecide>(
-      `SELECT excuse.id, 'excuse' AS kind, NULL AS withdrawn_at, excuse.pact_id, pact.name AS pact_name,
+      `SELECT excuse.id, 'excuse' AS kind, excuse.withdrawn_at, excuse.withdrawn_reason, excuse.pact_id,
+              pact.name AS pact_name,
               excuse.decision, pact.owner_account_id
          FROM excuse JOIN pact ON pact.id = excuse.pact_id
          WHERE excuse.id = ?`,
@@ -420,7 +431,28 @@ export const excuseKind: RequestKindHandler<ExcuseToDecide> = {
     ctx
       .all<{ excuse_id: string }>(`SELECT excuse_id FROM excuse_photo WHERE photo_id = ?`, photoId)
       .map((row) => row.excuse_id),
+  pactNames: (_ctx, excuse) => [excuse.pact_name],
+  moot: {
+    waitingIds: (ctx) =>
+      ctx
+        .all<{ id: string }>(
+          `SELECT id FROM excuse WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY filed_at, id`,
+        )
+        .map((row) => row.id),
+    reason: (ctx, excuse, now) => mootReason(ctx, excuse.id, excuseOccurrences(ctx, excuse.id), now),
+    withdraw: (ctx, excuse, reason, now) => {
+      assertHoldsNoPenalty(ctx, excuse.id, excuseOccurrences(ctx, excuse.id));
+      ctx.db
+        .prepare(`UPDATE excuse SET withdrawn_at = ?, withdrawn_reason = ? WHERE id = ?`)
+        .run(now.toISOString(), reason, excuse.id);
+    },
+  },
 };
+
+/** The occurrences an excuse covers, by date. */
+function excuseOccurrences(ctx: CoreContext, excuseId: string): TouchedOccurrence[] {
+  return ctx.all<TouchedOccurrence>(`SELECT pact_id, date FROM excuse_day WHERE excuse_id = ? ORDER BY date`, excuseId);
+}
 
 /** The owner's excuses waiting for a decision (or just those for `pactId`), newest first. */
 function waitingExcuses(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
@@ -436,7 +468,8 @@ function waitingExcuses(ctx: CoreContext, ownerId: AccountId, pactId?: string): 
               (SELECT MIN(date) FROM excuse_day WHERE excuse_id = excuse.id) AS first_date,
               (SELECT MAX(date) FROM excuse_day WHERE excuse_id = excuse.id) AS last_date
        FROM excuse JOIN pact ON pact.id = excuse.pact_id
-       WHERE pact.owner_account_id = ? AND excuse.decision IS NULL AND (? IS NULL OR pact.id = ?)
+       WHERE pact.owner_account_id = ? AND excuse.decision IS NULL AND excuse.withdrawn_at IS NULL
+         AND (? IS NULL OR pact.id = ?)
        ORDER BY excuse.filed_at DESC, excuse.id`,
     ownerId,
     pactId ?? null,

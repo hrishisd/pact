@@ -450,6 +450,42 @@ test("migration 31: a bedtime night judged from a sleep period keeps when that p
   db.close();
 });
 
+test("migration 33: a change request withdrawn when its pact Ended records pact-ended, other withdrawals the owner", () => {
+  // At migration 32: an Ended pact with a change request withdrawn at its end, an Active one with one its
+  // owner withdrew and one waiting, and a vacation its owner withdrew.
+  const seeded = openDatabase(path, migrations.slice(0, 32));
+  seeded.exec(`
+    INSERT INTO account (id, email, email_key, name, timezone, created_at)
+      VALUES ('owner', 'owner@example.test', 'owner@example.test', 'owner', 'America/New_York', '2026-01-01T00:00:00Z');
+    INSERT INTO recipient (id, owner_account_id, name, created_at)
+      VALUES ('sam', 'owner', 'Sam', '2026-01-01T00:00:00Z');
+    INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                      recipient_id, stage, first_occurrence, created_at, ended_at)
+      VALUES ('gym', 'owner', 'Gym', 'A photo of Gym', 'camera',
+              '{"kind":"fixed-days","days":["mon"]}', 500, 'sam', 'ended', '2026-01-05', '2026-01-01T00:00:00Z',
+              '2026-01-10T05:00:00.000Z'),
+             ('read', 'owner', 'Read', 'A photo of Read', 'camera',
+              '{"kind":"fixed-days","days":["mon"]}', 500, 'sam', 'active', '2026-01-05', '2026-01-01T00:00:00Z', NULL);
+    INSERT INTO change_request (id, pact_id, ends_pact, before_terms, after_terms, requested_at, withdrawn_at)
+      VALUES ('ended', 'gym', 1, '{}', NULL, '2026-01-06T12:00:00Z', '2026-01-10T05:00:00.000Z'),
+             ('withdrew', 'read', 1, '{}', NULL, '2026-01-06T12:00:00Z', '2026-01-07T12:00:00Z'),
+             ('waiting', 'read', 1, '{}', NULL, '2026-01-08T12:00:00Z', NULL);
+    INSERT INTO vacation (id, owner_account_id, first_day, last_day, pacts_summary, filed_at, withdrawn_at)
+      VALUES ('trip', 'owner', '2026-01-12', '2026-01-13', 'all', '2026-01-06T12:00:00Z', '2026-01-07T12:00:00Z');
+  `);
+  seeded.close();
+
+  const db = openDatabase(path, migrations.slice(0, 33));
+
+  expect(db.prepare("SELECT id, withdrawn_reason FROM change_request ORDER BY id").all()).toEqual([
+    { id: "ended", withdrawn_reason: "pact-ended" },
+    { id: "waiting", withdrawn_reason: null },
+    { id: "withdrew", withdrawn_reason: "owner" },
+  ]);
+  expect(db.prepare("SELECT withdrawn_reason FROM vacation").all()).toEqual([{ withdrawn_reason: "owner" }]);
+  db.close();
+});
+
 /** Every occurrence row, in date order. */
 function occurrences(db: ReturnType<typeof openDatabase>): Record<string, unknown>[] {
   return db.prepare("SELECT * FROM occurrence ORDER BY date").all() as Record<string, unknown>[];

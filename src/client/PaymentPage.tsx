@@ -7,7 +7,7 @@ import type { Json } from "../shared/api.ts";
 import type { PaymentDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { money } from "./format.ts";
-import { ItemKindHeader, ItemStateChip, OwnerThread, RejectionLine, ScreenshotLink, SentTo } from "./item-page.tsx";
+import { ItemKindHeader, ItemStateChip, OwnerThread, StateLine, ScreenshotLink, SentTo } from "./item-page.tsx";
 import { LoadedFound, useLoad } from "./ui.tsx";
 
 export function PaymentPage({
@@ -59,7 +59,7 @@ function PaymentView({
           </button>
         </h3>
         {payment.note !== null && <span className="quote">“{payment.note}”</span>}
-        <RejectionLine state={payment.state} />
+        <StateLine state={payment.state} timezone={timezone} />
         <ScreenshotLink photoId={payment.photoId} />
       </article>
       <OwnerThread itemId={payment.id} thread={payment.thread} timezone={timezone} onReplied={onReplied} />

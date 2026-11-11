@@ -564,7 +564,7 @@ export function closeEditWindows(ctx: CoreContext, t: Date): void {
     const closedAt = editWindowEnd(pact).toISOString();
     const held = ctx.all<{ id: string; day: LocalDate }>(
       `SELECT id, day FROM evidence
-         WHERE pact_id = ? AND decision IS NULL AND submitted_at < ?
+         WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL AND submitted_at < ?
          ORDER BY submitted_at, id`,
       pact.id,
       closedAt,

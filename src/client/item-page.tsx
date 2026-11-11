@@ -4,8 +4,8 @@
 
 import type { ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
-import { formatDate } from "../shared/format.ts";
-import type { ChangeRequestState, QuestionThread, ReviewItem, TodayWaitingItem } from "../shared/types.ts";
+import { formatDate, formatDay } from "../shared/format.ts";
+import type { ItemState, QuestionThread, ReviewItem, TodayWaitingItem, Withdrawal } from "../shared/types.ts";
 import { listNames } from "./change-terms.tsx";
 import { datesText } from "./excuse-days.tsx";
 import { formatDayTime, money } from "./format.ts";
@@ -39,14 +39,14 @@ export function ItemKindHeader({ kind, children }: { kind: ItemKind; children: R
 
 /**
  * Where one of the owner's items stands: waiting on their reply or for
- * approval, approved or rejected and by whom, or withdrawn (a change request).
+ * approval, approved or rejected and by whom, or withdrawn.
  */
 export function ItemStateChip({
   state,
   thread,
   approvedClass = "c-ok",
 }: {
-  state: Json<ChangeRequestState>;
+  state: Json<ItemState>;
   thread: Json<QuestionThread>;
   /** The approved chip's colour: an approved excuse is Excused's. */
   approvedClass?: string;
@@ -67,14 +67,36 @@ export function ItemStateChip({
   }
 }
 
-/** Under a rejected item: Sam said “why”. Nothing otherwise. */
-export function RejectionLine({ state }: { state: Json<ChangeRequestState> }) {
+/**
+ * Under a rejected item: Sam said “why”. Under a withdrawn one, who withdrew
+ * it or why, and when. Nothing otherwise.
+ */
+export function StateLine({ state, timezone }: { state: Json<ItemState>; timezone: string }) {
+  if (state.kind === "withdrawn") {
+    return (
+      <p className="small">
+        {withdrawnText(state)} · {formatDay(state.withdrawnAt, timezone)}
+      </p>
+    );
+  }
   if (state.kind !== "rejected") return null;
   return (
     <p className="small">
       {state.reviewerName} said “{state.reason}”
     </p>
   );
+}
+
+/** Who withdrew an item, or why it was: "You withdrew it", "Withdrawn when Gym Ended", "Withdrawn: no longer needed". */
+export function withdrawnText(withdrawal: Json<Withdrawal>): string {
+  switch (withdrawal.reason) {
+    case "owner":
+      return "You withdrew it";
+    case "pact-ended":
+      return `Withdrawn when ${listNames(withdrawal.pactNames)} Ended`;
+    case "no-longer-needed":
+      return "Withdrawn: no longer needed";
+  }
 }
 
 /** An item's photos, each opening full size in a new tab. */

@@ -8,7 +8,7 @@ import type { Json } from "../shared/api.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
-import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, RejectionLine, SentTo } from "./item-page.tsx";
+import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, StateLine, SentTo } from "./item-page.tsx";
 import { LoadedFound, useLoad, useNow } from "./ui.tsx";
 
 export function ExcusePage({
@@ -61,7 +61,7 @@ function ExcuseView({
           <span className="meta">{excuseDatesText(excuse.days)}</span>
         </div>
         <span className="excuse-reason">“{excuse.reason}”</span>
-        <RejectionLine state={excuse.state} />
+        <StateLine state={excuse.state} timezone={timezone} />
         <PhotoLinks photoIds={excuse.photoIds} />
       </article>
       <section className="stack">

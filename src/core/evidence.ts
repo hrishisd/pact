@@ -44,15 +44,19 @@ import {
   termsOn,
   type PactRow,
 } from "./rows.ts";
+import { mootReason } from "./moot.ts";
 import {
   decisionDetails,
+  itemStateOf,
   recordDecision,
   reviewStateColumns,
-  reviewStateOf,
   thread,
+  withdrawalOf,
   type Decided,
+  type MootReason,
   type QueuedItem,
   type RequestKindHandler,
+  type RequestRow,
   type ReviewOutcome,
   type ReviewStateRow,
 } from "./requests.ts";
@@ -129,9 +133,9 @@ export function acceptMiss(
 
 export function evidencePage(ctx: CoreContext, accountId: AccountId, evidenceId: string): EvidenceResult {
   accountRow(ctx, accountId);
-  const row = ctx.one<ReviewStateRow & EvidenceViewRow>(
+  const row = ctx.one<ReviewStateRow & EvidenceViewRow & Pick<RequestRow, "withdrawn_at" | "withdrawn_reason">>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date, evidence.day,
-              evidence.submitted_at, ${reviewStateColumns("evidence")}
+              evidence.submitted_at, evidence.withdrawn_at, evidence.withdrawn_reason, ${reviewStateColumns("evidence")}
        FROM evidence
        JOIN pact ON pact.id = evidence.pact_id
        LEFT JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
@@ -144,9 +148,12 @@ export function evidencePage(ctx: CoreContext, accountId: AccountId, evidenceId:
     ok: true,
     evidence: {
       ...evidenceView(ctx, row),
-      state: reviewStateOf(row),
+      state: itemStateOf(
+        row,
+        withdrawalOf(row, () => [row.pact_name]),
+      ),
       reviewerNames: friendsSortedByName(ctx, reviewersOf(ctx, row.pact_id)).map((friend) => friend.name),
-      thread: thread(ctx, row.id, row.decision === null),
+      thread: thread(ctx, row.id, row.decision === null && row.withdrawn_at === null),
     },
   };
 }
@@ -165,8 +172,9 @@ export interface EvidenceViewRow {
 export interface EvidenceToDecide {
   id: string;
   kind: "evidence";
-  /** Evidence is never withdrawn. */
-  withdrawn_at: null;
+  /** When the system withdrew it, moot (R8); its owner can't. */
+  withdrawn_at: string | null;
+  withdrawn_reason: MootReason | null;
   pact_id: string;
   pact_name: string;
   /** When the pact was created: its reviewers may decide its evidence once its edit window has closed. */
@@ -206,7 +214,7 @@ function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[]
        JOIN pact ON pact.id = evidence.pact_id
        JOIN account AS owner ON owner.id = pact.owner_account_id
        JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-       WHERE evidence.decision IS NULL AND pact.created_at <= ?
+       WHERE evidence.decision IS NULL AND evidence.withdrawn_at IS NULL AND pact.created_at <= ?
        ORDER BY evidence.submitted_at, evidence.id`,
     reviewerId,
     editWindowCutoff(ctx),
@@ -271,7 +279,8 @@ export const evidenceKind: RequestKindHandler<EvidenceToDecide> = {
   kind: "evidence",
   load: (ctx, id) =>
     ctx.one<EvidenceToDecide>(
-      `SELECT evidence.id, 'evidence' AS kind, NULL AS withdrawn_at, evidence.pact_id, pact.name AS pact_name,
+      `SELECT evidence.id, 'evidence' AS kind, evidence.withdrawn_at, evidence.withdrawn_reason, evidence.pact_id,
+              pact.name AS pact_name,
               pact.created_at, evidence.occurrence_date, evidence.day, evidence.decision, pact.owner_account_id,
               owner.timezone
          FROM evidence
@@ -293,6 +302,24 @@ export const evidenceKind: RequestKindHandler<EvidenceToDecide> = {
     ctx
       .all<{ evidence_id: string }>(`SELECT evidence_id FROM evidence_photo WHERE photo_id = ?`, photoId)
       .map((row) => row.evidence_id),
+  pactNames: (_ctx, evidence) => [evidence.pact_name],
+  moot: {
+    waitingIds: (ctx) =>
+      ctx
+        .all<{ id: string }>(
+          `SELECT id FROM evidence WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY submitted_at, id`,
+        )
+        .map((row) => row.id),
+    reason: (ctx, evidence, now) =>
+      mootReason(ctx, evidence.id, [{ pact_id: evidence.pact_id, date: evidence.occurrence_date }], now),
+    withdraw: (ctx, evidence, reason, now) => {
+      ctx.db
+        .prepare(`UPDATE evidence SET withdrawn_at = ?, withdrawn_reason = ? WHERE id = ?`)
+        .run(now.toISOString(), reason, evidence.id);
+      // It no longer holds judging up, though either decision would have judged the occurrence the same.
+      settle(ctx, evidence.pact_id, evidence.occurrence_date, now);
+    },
+  },
 };
 
 /** The photos of some evidence, in the order taken. */
@@ -362,7 +389,8 @@ function waitingEvidence(ctx: CoreContext, ownerId: AccountId, pactId?: string):
   }>(
     `SELECT evidence.id, evidence.pact_id, pact.name, evidence.day AS occurrence_date, evidence.submitted_at
        FROM evidence JOIN pact ON pact.id = evidence.pact_id
-       WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND (? IS NULL OR pact.id = ?)
+       WHERE pact.owner_account_id = ? AND evidence.decision IS NULL AND evidence.withdrawn_at IS NULL
+         AND (? IS NULL OR pact.id = ?)
        ORDER BY evidence.submitted_at DESC, evidence.id`,
     ownerId,
     pactId ?? null,

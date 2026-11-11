@@ -111,7 +111,16 @@ import { deliverPending, enqueue } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
 import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
-import { askOwner, decide, ownerReply, reviewQueue, viewPhoto, waitingOnReply, type PhotoResult } from "./review.ts";
+import {
+  askOwner,
+  decide,
+  ownerReply,
+  reviewQueue,
+  viewPhoto,
+  waitingOnReply,
+  withdrawMoot,
+  type PhotoResult,
+} from "./review.ts";
 import { settleAll } from "./settle.ts";
 import { todayPage } from "./today.ts";
 import { waitingFor } from "./waiting.ts";
@@ -500,12 +509,20 @@ class Core implements PactCore {
 
   /**
    * Runs `change` as one transaction: all of it commits or none of it does.
-   * Then runs `afterCommit` and starts delivering the outbox, without waiting:
-   * a slow push service never holds up the person who tapped. A delivery failure
+   * In it, after `change`, the review items it left moot are withdrawn as of
+   * `at` (now unless given: a tick's time), silently (R8). Then runs
+   * `afterCommit` and starts delivering the outbox, without waiting: a slow
+   * push service never holds up the person who tapped. A delivery failure
    * doesn't fail the command; the notification waits for the next attempt.
    */
-  async #command<T>(change: () => T, afterCommit?: (result: T) => void): Promise<T> {
-    const result = this.#ctx.db.transaction(change).immediate();
+  async #command<T>(change: () => T, afterCommit?: (result: T) => void, at?: Date): Promise<T> {
+    const result = this.#ctx.db
+      .transaction(() => {
+        const changed = change();
+        withdrawMoot(this.#ctx, at ?? this.#ctx.clock.now());
+        return changed;
+      })
+      .immediate();
     afterCommit?.(result);
     void this.#deliverOutbox();
     return result;
@@ -642,6 +659,7 @@ class Core implements PactCore {
         }
         if (dropped.length > 0) this.#ctx.log(`OPERATOR_ALERT ${droppedText(dropped.length)} after downtime`);
       },
+      t,
     );
     await this.#delivery;
   }

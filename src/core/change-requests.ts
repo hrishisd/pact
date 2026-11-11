@@ -13,7 +13,6 @@ import type {
   ChangePreview,
   ChangePreviewResult,
   ChangeRequestResult,
-  ChangeRequestState,
   ChangeRequestView,
   ChangeStart,
   CurrentTerms,
@@ -77,9 +76,10 @@ import {
 } from "./rows.ts";
 import {
   decisionDetails,
+  itemStateOf,
   recordDecision,
-  reviewStateOf,
   thread,
+  withdrawalOf,
   type Decided,
   type QueuedItem,
   type RequestKindHandler,
@@ -162,11 +162,10 @@ export function changeRequestPage(
   accountRow(ctx, accountId);
   const row = changeRequestRow(ctx, changeRequestId);
   if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
-  // A decision outranks a withdrawal.
-  const state: ChangeRequestState =
-    row.withdrawn_at !== null && row.decision === null
-      ? { kind: "withdrawn", withdrawnAt: new Date(row.withdrawn_at) }
-      : reviewStateOf(row);
+  const state = itemStateOf(
+    row,
+    withdrawalOf(row, () => [pactName(ctx, row.pact_id)]),
+  );
   const changeRequest = {
     ...changeRequestView(ctx, row),
     state,
@@ -186,7 +185,7 @@ export function withdrawChangeRequest(
   if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
   ctx.db
-    .prepare(`UPDATE change_request SET withdrawn_at = ? WHERE id = ?`)
+    .prepare(`UPDATE change_request SET withdrawn_at = ?, withdrawn_reason = 'owner' WHERE id = ?`)
     .run(ctx.clock.now().toISOString(), changeRequestId);
   return { ok: true };
 }
@@ -210,6 +209,7 @@ export interface ChangeRequestRow extends ReviewStateRow {
   requested_at: string;
   decided_by_account_id: AccountId | null;
   withdrawn_at: string | null;
+  withdrawn_reason: "owner" | "pact-ended" | null;
   owner_account_id: AccountId;
   owner_name: string;
   timezone: string;
@@ -780,6 +780,23 @@ export const changeRequestKind: RequestKindHandler<StoredChangeRequest> = {
   queue: changeRequestsToReview,
   queueFirst: true,
   waiting: waitingChangeRequests,
+  pactNames: (ctx, row) => [pactName(ctx, row.pact_id)],
+  // Ending a pact withdraws its waiting change request (`endPact`); this is the same rule, read.
+  moot: {
+    waitingIds: (ctx) =>
+      ctx
+        .all<{ id: string }>(
+          `SELECT id FROM change_request WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY requested_at, id`,
+        )
+        .map((row) => row.id),
+    reason: (ctx, row) =>
+      ctx.one(`SELECT 1 FROM pact WHERE id = ? AND stage = 'ended'`, row.pact_id) ? "pact-ended" : null,
+    withdraw: (ctx, row, reason, now) => {
+      ctx.db
+        .prepare(`UPDATE change_request SET withdrawn_at = ?, withdrawn_reason = ? WHERE id = ?`)
+        .run(now.toISOString(), reason, row.id);
+    },
+  },
 };
 
 /**

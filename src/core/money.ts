@@ -729,7 +729,8 @@ export const paymentKind: RequestKindHandler<PaymentToDecide> = {
   kind: "payment",
   load: (ctx, id) =>
     ctx.one<PaymentToDecide>(
-      `SELECT id, 'payment' AS kind, NULL AS withdrawn_at, owner_account_id, recipient_id, amount_cents, decision
+      `SELECT id, 'payment' AS kind, NULL AS withdrawn_at, NULL AS withdrawn_reason, owner_account_id, recipient_id,
+              amount_cents, decision
          FROM payment WHERE id = ?`,
       id,
     ),
@@ -743,6 +744,8 @@ export const paymentKind: RequestKindHandler<PaymentToDecide> = {
   waiting: (ctx, ownerId, pactId) => (pactId === undefined ? waitingPayments(ctx, ownerId) : []),
   itemsWithPhoto: (ctx, photoId) =>
     ctx.all<{ id: string }>(`SELECT id FROM payment WHERE photo_id = ?`, photoId).map((row) => row.id),
+  // A payment belongs to a recipient, not a pact; and it's never moot: approving one always changes the ledger.
+  pactNames: () => [],
 };
 
 /** The owner's payments still waiting for a decision, newest first. */
@@ -800,6 +803,7 @@ export interface PaymentToDecide {
   kind: "payment";
   /** A payment is never withdrawn. */
   withdrawn_at: null;
+  withdrawn_reason: null;
   owner_account_id: AccountId;
   recipient_id: string;
   amount_cents: number;

@@ -604,7 +604,8 @@ describe("changing a One-time pact", () => {
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "approve" })).toEqual({
       ok: false,
-      reason: "item-not-found",
+      reason: "withdrawn",
+      withdrawal: { reason: "pact-ended", withdrawnAt: s.at("Fri 00:00"), pactNames: ["Taxes"] },
     });
 
     expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(s.date("Thu"), true), waiting: [] });
@@ -624,9 +625,11 @@ describe("changing a One-time pact", () => {
     if (!sent.ok || sent.outcome.kind !== "needs-approval") throw new Error("not sent");
     s.setClockTo("Fri 00:00");
 
+    // Catching judging up judges Thursday, which Ends the pact and withdraws the request.
     expect(await reviewer.decide(sent.outcome.changeRequestId, { kind: "approve" })).toEqual({
       ok: false,
-      reason: "item-not-found",
+      reason: "withdrawn",
+      withdrawal: { reason: "pact-ended", withdrawnAt: s.at("Fri 00:00"), pactNames: ["Taxes"] },
     });
 
     expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", schedule: oneTime(s.date("Thu"), true) });

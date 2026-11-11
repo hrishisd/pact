@@ -668,7 +668,11 @@ describe("the review item", () => {
     ok(await owner.withdrawVacation(vacationId));
 
     expect(reviewer.reviewQueue()).toEqual([]);
-    expect(await reviewer.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    expect(await reviewer.decide(vacationId, { kind: "approve" })).toEqual({
+      ok: false,
+      reason: "withdrawn",
+      withdrawal: { reason: "owner", withdrawnAt: s.at("Wed 12:00") },
+    });
   });
 });
 

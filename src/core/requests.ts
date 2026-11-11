@@ -9,10 +9,13 @@
 import type {
   AccountId,
   DecideRefusal,
+  ItemState,
   QuestionThread,
   ReviewItem,
   ReviewState,
   TodayWaitingItem,
+  Withdrawal,
+  WithdrawnReason,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import type { AnkiChecksRunning } from "./judging.ts";
@@ -28,9 +31,13 @@ export interface RequestRow {
   kind: RequestKind;
   owner_account_id: AccountId;
   decision: ReviewOutcome | null;
-  /** When the owner withdrew it; always null for a kind that can't be withdrawn. */
+  /** When it was withdrawn (by its owner, or because it was moot); always null for a payment. */
   withdrawn_at: string | null;
+  withdrawn_reason: WithdrawnReason | null;
 }
+
+/** Why the system withdraws a moot item (R8): the owner's own withdrawal is never the system's. */
+export type MootReason = Exclude<WithdrawnReason, "owner">;
 
 /** A waiting review item in a reviewer's queue, with when it was sent for a decision. */
 export interface QueuedItem {
@@ -75,6 +82,23 @@ export interface RequestKindHandler<P extends RequestRow> {
   waiting(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[];
   /** The ids of the items of this kind with the photo `photoId`; omitted for a kind without photos. */
   itemsWithPhoto?(ctx: CoreContext, photoId: string): string[];
+  /** The names of the pacts the item concerns, oldest first: those a `pact-ended` withdrawal names. */
+  pactNames(ctx: CoreContext, item: P): string[];
+  /**
+   * How the system withdraws the kind's items that are moot (R8); omitted for
+   * a kind that never is (a payment: approving one always changes the ledger).
+   */
+  moot?: {
+    /** The ids of every item of this kind still waiting for a decision. */
+    waitingIds(ctx: CoreContext): string[];
+    /**
+     * Why deciding the waiting item either way at `now` could no longer
+     * change any outcome, penalty or terms, or null while it could.
+     */
+    reason(ctx: CoreContext, item: P, now: Date): MootReason | null;
+    /** Withdraws the item at `now` for `reason`, telling nobody, and settles what it held up. */
+    withdraw(ctx: CoreContext, item: P, reason: MootReason, now: Date): void;
+  };
 }
 
 /** Whether a review item still waits for a decision: not decided, nor withdrawn. */
@@ -117,6 +141,24 @@ export interface ReviewStateRow {
   decided_at: string | null;
   reject_reason: string | null;
   reviewer_name: string | null;
+}
+
+/** When and why the item was withdrawn, or null if it wasn't. `pactNames` names its pacts, for `pact-ended`. */
+export function withdrawalOf(
+  item: Pick<RequestRow, "withdrawn_at" | "withdrawn_reason">,
+  pactNames: () => string[],
+): Withdrawal | null {
+  if (item.withdrawn_at === null) return null;
+  const withdrawnAt = new Date(item.withdrawn_at);
+  const reason = item.withdrawn_reason ?? "owner";
+  return reason === "pact-ended" ? { reason, withdrawnAt, pactNames: pactNames() } : { reason, withdrawnAt };
+}
+
+/** Where an item of the owner's stands on its page: withdrawn (`withdrawal`), else as decided. */
+export function itemStateOf(row: ReviewStateRow, withdrawal: Withdrawal | null): ItemState {
+  // A decision outranks a withdrawal.
+  if (withdrawal !== null && row.decision === null) return { kind: "withdrawn", ...withdrawal };
+  return reviewStateOf(row);
 }
 
 export function reviewStateOf(row: ReviewStateRow): ReviewState {

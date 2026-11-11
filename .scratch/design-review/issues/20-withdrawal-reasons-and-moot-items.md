@@ -54,15 +54,23 @@ Cases, checked against that definition with the code as it will be after tickets
 
 ## Acceptance criteria
 
-- [ ] Scenarios for each "Yes" case above (1 to 4, and 6 if constructible): the item leaves the queue and the waiting list, carries its reason, and no push is sent.
-- [ ] Scenarios for cases 7, 8 and 9: the item stays.
+- [x] Scenarios for each "Yes" case above (1 to 4, and 6 if constructible): the item leaves the queue and the waiting list, carries its reason, and no push is sent.
+- [x] Scenarios for cases 7, 8 and 9: the item stays.
 - [ ] Case 5: a scenario where evidence for a day judged Excused stays in the queue and its approval makes the day Satisfied with no penalty.
-- [ ] `change-requests.test.ts:771` and `:803` extended to assert the `pact-ended` reason on the change request's page.
-- [ ] A reviewer deciding a withdrawn item gets the reason in the refusal (core scenario and `Review.test.tsx`).
-- [ ] Update `docs/behaviour.md`.
-- [ ] `npm run check` passes.
+- [x] `change-requests.test.ts:771` and `:803` extended to assert the `pact-ended` reason on the change request's page.
+- [x] A reviewer deciding a withdrawn item gets the reason in the refusal (core scenario and `Review.test.tsx`).
+- [x] Update `docs/behaviour.md`.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - Owner withdrawal for evidence, excuses or payments (not requested).
 - Pushes for system withdrawals.
+
+## Comments
+
+- Built. Migration 33 adds the columns and backfills (`migrations.test.ts`, "migration 33"); it also rebuilds `cover_day_v` with the excuse's `withdrawn_at` and makes `evidence_one_waiting` skip withdrawn evidence. `withdrawMoot` (`review.ts`) runs inside the core's `#command` after every command, and in the tick at the tick's time, rather than only after the commands that change a fact. Each handler has an optional `moot` (`waitingIds`, `reason`, `withdraw`) and a `pactNames`; payments have no `moot`. Evidence, excuses and vacations ask `mootReason` (`moot.ts`), which judges each touched occurrence both ways through `decisionEffect` (`verdict.ts`; `occurrenceFacts` takes a supposed decision, `coverOn` a supposed cover decision). Withdrawn evidence is left out of the verdict's facts.
+- Scenarios: `withdrawal.test.ts`. Case 1 both ways (a change removing the only day; an approved end leaving the days after it), case 2 for an excuse (with its question alert going, case 11) and a vacation, case 4, and cases 5, 7, 8, 9 and 10 staying. Case 6 is not constructible after ticket 13: the open occurrence stays the pact's (`change-requests.test.ts`, "evidence waiting for the day open when the end was approved, rejected afterwards, adds the penalty").
+- Case 5: ticket 26 exists for the late approval, so this ticket only keeps the evidence out of withdrawal; the scenario checks it stays in the queue and the waiting list. Its approval making the day Satisfied is ticket 26's criterion; the third box stays unticked for it.
+- Differs from the ticket: a vacation has no page of its own, so its withdrawal reason shows only in a reviewer's refusal; the owner's Profile card goes, as for an owner's withdrawal. A cover whose days an approved end left past the end is withdrawn `pact-ended` at the approval, before the pact actually Ends.
+- Filed ticket 31: at the exact due instant `verdictOf` lets a cover approval beat approved evidence, so a vacation made moot by approved evidence is withdrawn at the first tick after the due time, not at it.

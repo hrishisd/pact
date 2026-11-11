@@ -9,13 +9,14 @@ import type {
   ReplyResult,
   ReviewDecision,
   ReviewItem,
+  Withdrawal,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import type { AnkiChecksRunning } from "./judging.ts";
 import { tellAll } from "./outbox.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
 import { REQUEST_HANDLERS } from "./request-kinds.ts";
-import { isWaiting, thread, type Decided, type RequestKindHandler, type RequestRow } from "./requests.ts";
+import { isWaiting, thread, withdrawalOf, type Decided, type RequestKindHandler, type RequestRow } from "./requests.ts";
 import { textTooLong } from "./text-limits.ts";
 import { accountRow } from "./rows.ts";
 
@@ -103,6 +104,9 @@ export function decide(
   ankiChecksRunning: AnkiChecksRunning,
 ): DecideResult {
   accountRow(ctx, accountId);
+  const found = findItem(ctx, itemId);
+  const withdrawn = found && mayDecide(ctx, accountId, found) ? withdrawalOfItem(ctx, found) : null;
+  if (withdrawn) return { ok: false, reason: "withdrawn", withdrawal: withdrawn };
   const item = itemToDecide(ctx, accountId, itemId);
   if (!item) return { ok: false, reason: "item-not-found" };
   if (item.row.decision !== null) return { ok: false, reason: "already-decided" };
@@ -111,7 +115,12 @@ export function decide(
   if (reason !== null && textTooLong(reason)) return { ok: false, reason: "text-too-long" };
   const decided: Decided = reason === null ? { outcome: "approved", reason: null } : { outcome: "rejected", reason };
   const refusal = item.handler.checkDecision?.(ctx, item.row, decided, ankiChecksRunning) ?? null;
-  if (refusal !== null) return { ok: false, reason: refusal };
+  if (refusal !== null) {
+    // Catching judging up may have Ended the pact, which withdrew the item.
+    const reloaded = findItem(ctx, itemId);
+    const withdrawal = reloaded ? withdrawalOfItem(ctx, reloaded) : null;
+    return withdrawal ? { ok: false, reason: "withdrawn", withdrawal } : { ok: false, reason: refusal };
+  }
   item.handler.apply(ctx, item.row, decided, accountId, ankiChecksRunning);
   return { ok: true };
 }
@@ -138,10 +147,35 @@ function findItem(ctx: CoreContext, itemId: string): FoundItem | undefined {
  */
 function itemToDecide(ctx: CoreContext, reviewerId: AccountId, itemId: string): FoundItem | undefined {
   const item = findItem(ctx, itemId);
-  if (!item || item.row.withdrawn_at !== null) return undefined;
-  const { handler, row } = item;
-  if (!handler.deciders(ctx, row).includes(reviewerId)) return undefined;
-  return (handler.reviewable?.(ctx, row) ?? true) ? item : undefined;
+  if (!item || item.row.withdrawn_at !== null || !mayDecide(ctx, reviewerId, item)) return undefined;
+  return (item.handler.reviewable?.(ctx, item.row) ?? true) ? item : undefined;
+}
+
+/** Whether `reviewerId` is one of the item's deciders. */
+function mayDecide(ctx: CoreContext, reviewerId: AccountId, { handler, row }: FoundItem): boolean {
+  return handler.deciders(ctx, row).includes(reviewerId);
+}
+
+/** When and why the item was withdrawn, or null if it wasn't. */
+function withdrawalOfItem(ctx: CoreContext, { handler, row }: FoundItem): Withdrawal | null {
+  return withdrawalOf(row, () => handler.pactNames(ctx, row));
+}
+
+/**
+ * Withdraws every waiting review item that's moot at `now` (R8): deciding it
+ * either way could no longer change any outcome, penalty or terms. Each
+ * records its reason, and nobody is told; it leaves every queue and waiting
+ * list, and its question alert goes. Run after every command and tick.
+ */
+export function withdrawMoot(ctx: CoreContext, now: Date): void {
+  for (const handler of REQUEST_HANDLERS) {
+    if (!handler.moot) continue;
+    for (const id of handler.moot.waitingIds(ctx)) {
+      const row = handler.load(ctx, id)!;
+      const reason = handler.moot.reason(ctx, row, now);
+      if (reason !== null) handler.moot.withdraw(ctx, row, reason, now);
+    }
+  }
 }
 
 /** One of `ownerId`'s review items. */

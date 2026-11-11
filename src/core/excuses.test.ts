@@ -836,7 +836,7 @@ describe("a change that removes a covered day", () => {
     });
   });
 
-  test("an excuse whose only day was removed shows no days on its page and in the Review Queue, and still waits", async () => {
+  test("an excuse whose only day was removed shows no days on its page, and is withdrawn as no longer needed", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
@@ -846,7 +846,9 @@ describe("a change that removes a covered day", () => {
     await changeDays(owner, reviewer, gym, ["mon", "fri"]);
     await changeDays(owner, reviewer, gym, MON_WED_FRI);
 
-    expect(owner.excuse(excuseId)).toMatchObject({ excuse: { days: [] } });
-    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ kind: "excuse", id: excuseId, days: [] })]);
+    expect(owner.excuse(excuseId)).toMatchObject({
+      excuse: { days: [], state: { kind: "withdrawn", reason: "no-longer-needed" } },
+    });
+    expect(reviewer.reviewQueue()).toEqual([]);
   });
 });

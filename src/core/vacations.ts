@@ -29,6 +29,7 @@ import {
   type VacationPreviewResult,
   type VacationRequest,
   type VacationSkipReason,
+  type WithdrawnReason,
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
@@ -38,6 +39,7 @@ import { dueAfterEnd, occurrenceSpan } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { isLocalDate } from "./pact-rules.ts";
+import { assertHoldsNoPenalty, mootReason, type TouchedOccurrence } from "./moot.ts";
 import { settleCoverDays } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
 import {
@@ -568,6 +570,7 @@ export interface VacationToDecide {
   kind: "vacation";
   decision: ReviewOutcome | null;
   withdrawn_at: string | null;
+  withdrawn_reason: WithdrawnReason | null;
   owner_account_id: AccountId;
   first_day: LocalDate;
   last_day: LocalDate;
@@ -606,7 +609,7 @@ export const vacationKind: RequestKindHandler<VacationToDecide> = {
   kind: "vacation",
   load: (ctx, id) =>
     ctx.one<VacationToDecide>(
-      `SELECT id, 'vacation' AS kind, decision, withdrawn_at, owner_account_id, first_day, last_day
+      `SELECT id, 'vacation' AS kind, decision, withdrawn_at, withdrawn_reason, owner_account_id, first_day, last_day
          FROM vacation WHERE id = ?`,
       id,
     ),
@@ -615,7 +618,39 @@ export const vacationKind: RequestKindHandler<VacationToDecide> = {
   describe: () => ({ what: "vacation", ownerPath: APP_PATHS.profile }),
   queue: vacationsToReview,
   waiting: waitingVacations,
+  pactNames: (ctx, vacation) =>
+    ctx
+      .all<{ name: string }>(
+        `SELECT pact.name FROM vacation_pact JOIN pact ON pact.id = vacation_pact.pact_id
+         WHERE vacation_pact.vacation_id = ? ORDER BY pact.created_at, pact.id`,
+        vacation.id,
+      )
+      .map((pact) => pact.name),
+  moot: {
+    waitingIds: (ctx) =>
+      ctx
+        .all<{ id: string }>(
+          `SELECT id FROM vacation WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY filed_at, id`,
+        )
+        .map((row) => row.id),
+    // Only when no covered day left on any pact could still be excused by it.
+    reason: (ctx, vacation, now) => mootReason(ctx, vacation.id, vacationOccurrences(ctx, vacation.id), now),
+    withdraw: (ctx, vacation, reason, now) => {
+      assertHoldsNoPenalty(ctx, vacation.id, vacationOccurrences(ctx, vacation.id));
+      ctx.db
+        .prepare(`UPDATE vacation SET withdrawn_at = ?, withdrawn_reason = ? WHERE id = ?`)
+        .run(now.toISOString(), reason, vacation.id);
+    },
+  },
 };
+
+/** The occurrences a vacation covers on every pact, by date. */
+function vacationOccurrences(ctx: CoreContext, vacationId: string): TouchedOccurrence[] {
+  return ctx.all<TouchedOccurrence>(
+    `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
+    vacationId,
+  );
+}
 
 /**
  * Records a decider's decision on a vacation waiting for approval
@@ -673,7 +708,9 @@ export function withdrawVacation(
   if (!row) return { ok: false, reason: "vacation-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
   const now = ctx.clock.now();
-  ctx.db.prepare(`UPDATE vacation SET withdrawn_at = ? WHERE id = ?`).run(now.toISOString(), vacationId);
+  ctx.db
+    .prepare(`UPDATE vacation SET withdrawn_at = ?, withdrawn_reason = 'owner' WHERE id = ?`)
+    .run(now.toISOString(), vacationId);
   settleVacationDays(ctx, vacationId, now, ankiChecksRunning);
   return { ok: true };
 }

@@ -640,7 +640,7 @@ export interface PaymentView {
 
 /** What an item's page adds for its owner: where it stands, who may decide it, and its questions. */
 export interface ReviewedItem {
-  state: ReviewState;
+  state: ItemState;
   /** Who may decide it, sorted by name. */
   reviewerNames: string[];
   thread: QuestionThread;
@@ -693,11 +693,28 @@ export type ReplyResult =
         | TextTooLong;
     };
 
-/** Where a review item of the owner's stands. */
+/** Where a review item of the owner's stands, as its reviewers decide it. */
 export type ReviewState =
   | { kind: "waiting" }
   | { kind: "approved"; reviewerName: string; decidedAt: Date }
   | { kind: "rejected"; reviewerName: string; decidedAt: Date; reason: string };
+
+/**
+ * Why a review item was withdrawn (R8): its owner withdrew it (`owner`: a
+ * change request or a vacation), or the system did because deciding it
+ * either way could no longer change any outcome, penalty or terms: its pact
+ * Ended (`pact-ended`), or for another reason (`no-longer-needed`). A
+ * payment is never withdrawn.
+ */
+export type WithdrawnReason = "owner" | "pact-ended" | "no-longer-needed";
+
+/** When and why an item was withdrawn; for `pact-ended`, the pacts that Ended, oldest first. */
+export type Withdrawal =
+  | { reason: "owner" | "no-longer-needed"; withdrawnAt: Date }
+  | { reason: "pact-ended"; withdrawnAt: Date; pactNames: string[] };
+
+/** Where a review item of the owner's stands: decided, waiting, or withdrawn. */
+export type ItemState = ReviewState | ({ kind: "withdrawn" } & Withdrawal);
 
 /** Evidence's page, for its owner. Its reviewers are the pact's. */
 export type EvidenceDetail = EvidenceView & ReviewedItem;
@@ -725,7 +742,11 @@ export type DecideRefusal =
   /** Approving a change to a One-time pact whose new deadline is less than an hour away: it can only be rejected. */
   | "deadline-too-soon";
 
-export type DecideResult = { ok: true } | { ok: false; reason: DecideRefusal };
+export type DecideResult =
+  | { ok: true }
+  | { ok: false; reason: DecideRefusal }
+  /** It was withdrawn before the decision: by its owner, or because deciding it could no longer change anything. */
+  | { ok: false; reason: "withdrawn"; withdrawal: Withdrawal };
 
 export type SetTimezoneResult =
   /** `timezone` is the zone's canonical IANA name, as stored. */
@@ -1803,12 +1824,9 @@ export interface ChangeStart {
   todayKeepsCents: number | null;
 }
 
-/** Where a change request stands. */
-export type ChangeRequestState = ReviewState | { kind: "withdrawn"; withdrawnAt: Date };
-
 /** The change request's page, for its owner. */
 export type ChangeRequestDetail = ChangeRequestView & {
-  state: ChangeRequestState;
+  state: ItemState;
   /** The pact's reviewers, sorted by name: who may decide it. */
   reviewerNames: string[];
   thread: QuestionThread;

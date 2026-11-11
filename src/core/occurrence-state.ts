@@ -65,7 +65,7 @@ export function evidenceDecision(
   const decisions = ctx
     .all<{
       decision: ReviewOutcome | null;
-    }>(`SELECT decision FROM evidence WHERE pact_id = ? AND ${by} = ?`, pactId, date)
+    }>(`SELECT decision FROM evidence WHERE pact_id = ? AND ${by} = ? AND withdrawn_at IS NULL`, pactId, date)
     .map((row) => row.decision ?? "waiting");
   if (decisions.includes("waiting")) return "waiting";
   if (decisions.includes("approved")) return "approved";
@@ -78,7 +78,7 @@ export function weekProgress(ctx: CoreContext, pactId: string, monday: LocalDate
   const counts = ctx.db
     .prepare(
       `SELECT COUNT(DISTINCT CASE WHEN decision = 'approved' THEN day END) AS sessions,
-              COUNT(DISTINCT CASE WHEN decision IS NULL THEN day END) AS waiting
+              COUNT(DISTINCT CASE WHEN decision IS NULL AND withdrawn_at IS NULL THEN day END) AS waiting
        FROM evidence WHERE pact_id = ? AND occurrence_date = ?`,
     )
     .get(pactId, monday) as { sessions: number; waiting: number };

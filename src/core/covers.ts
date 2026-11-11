@@ -55,14 +55,29 @@ export function coversOn(ctx: CoreContext, pactId: string, date: LocalDate): Cov
     .map((row) => ({ id: row.id, kind: row.kind, state: row.decision === null ? "waiting" : "approved" }));
 }
 
+/** A decision on a waiting excuse or vacation, supposed made: approved it counts as approved, rejected it covers nothing. */
+export interface SupposedCoverDecision {
+  id: string;
+  decision: "approved" | "rejected";
+}
+
 /**
  * The one cover that counts for the pact's occurrence on `date`, or null:
  * an excuse waiting for approval, else an approved excuse, else an approved
  * vacation, else a vacation waiting for approval. An approved vacation
- * counts exactly as an approved excuse does.
+ * counts exactly as an approved excuse does. With `supposing`, as if that
+ * decision had been made.
  */
-export function coverOn(ctx: CoreContext, pactId: string, date: LocalDate): Cover | null {
-  const covers = coversOn(ctx, pactId, date);
+export function coverOn(
+  ctx: CoreContext,
+  pactId: string,
+  date: LocalDate,
+  supposing?: SupposedCoverDecision,
+): Cover | null {
+  const covers = coversOn(ctx, pactId, date).flatMap((cover): Cover[] => {
+    if (supposing === undefined || cover.id !== supposing.id) return [cover];
+    return supposing.decision === "approved" ? [{ ...cover, state: "approved" }] : [];
+  });
   return (
     covers.find((c) => c.kind === "excuse" && c.state === "waiting") ??
     covers.find((c) => c.kind === "excuse") ??
@@ -148,7 +163,8 @@ export function moveCovers(ctx: CoreContext, pactId: string, from: LocalDate, to
  * Deletes the excuse and vacation days on the pact's occurrences dated
  * `from` onward that its schedule no longer has (`scheduled` says which it
  * has), unless judged: a change took the day off, and one that adds it back
- * finds it not covered (vac:61). A cover left with no days still waits.
+ * finds it not covered (vac:61). A cover left with no days is moot, and the
+ * command's `withdrawMoot` withdraws it (R8).
  */
 export function uncoverRemovedDays(
   ctx: CoreContext,

@@ -1,6 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
-import type { ReviewQueueResponse } from "../shared/api.ts";
+import type { DecideResponse, ReviewQueueResponse } from "../shared/api.ts";
 import { Review } from "./Review.tsx";
 import { answers, renderWithUser, stubApi } from "./testing/render.tsx";
 
@@ -84,6 +84,25 @@ test("rejecting a vacation needs a reason and says Jordan's pacts keep every day
 
   expect(spies.decide).toHaveBeenCalledWith("v1", { kind: "reject", reason: "Not now" });
   expect(await screen.findByText("Nothing to review")).toBeTruthy();
+});
+
+test("approving an item the system withdrew says why it was withdrawn", async () => {
+  const spies = stubApi({
+    reviewQueue: answers<ReviewQueueResponse>([VACATION], []),
+    waitingOnReply: answers<ReviewQueueResponse>([]),
+    decide: answers<DecideResponse>({
+      ok: false,
+      reason: "withdrawn",
+      withdrawal: { reason: "pact-ended", withdrawnAt: "2026-12-10T05:00:00.000Z", pactNames: ["Gym"] },
+    }),
+  });
+  const { user } = renderWithUser(<Review timezone="America/New_York" onQueue={vi.fn()} />);
+
+  await user.click(await screen.findByRole("button", { name: "Approve" }));
+
+  expect(spies.decide).toHaveBeenCalledWith("v1", { kind: "approve" });
+  expect(await screen.findByText("Withdrawn: Gym Ended.")).toBeTruthy();
+  expect(screen.queryByText("That item isn't in your queue any more.")).toBeNull();
 });
 
 test("a vacation waiting on Jordan's reply is listed by its dates, under Jordan's name", async () => {
