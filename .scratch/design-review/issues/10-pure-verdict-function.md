@@ -32,7 +32,7 @@ Before replacing them (tickets 11 to 13), state the rules once and find where th
 
 Run the full suite with the check on. Each mismatch is either a current bug or a rule the function has wrong. Do not fix a bug here. For each real bug, file a new ticket in `.scratch/design-review/issues/` (numbered after the last one), add an entry to the known mismatches list the check skips, and link it here under Comments. Fix the function when it is the function that is wrong.
 
-One mismatch is expected. The vacation spec (vac:78) says approved evidence still makes a covered occurrence Satisfied. The code judges a day with waiting evidence Excused as soon as an approved cover exists (`judging.ts:132-133`, and `excuses.ts:389-395` for a cover approved later), and a later evidence approval then changes nothing because the day is judged (`evidence.ts:254-258`). Probe P5a in `../probes/audit-probes.test.ts.txt` shows it. Write the function to the spec and file the ticket; whether the code or the spec changes is decision 4's sub-question in `../spec.md`.
+One mismatch is expected. The vacation spec (vac:78) says approved evidence still makes a covered occurrence Satisfied. The code judges a day with waiting evidence Excused as soon as an approved cover exists (`judging.ts:132-133`, and `excuses.ts:389-395` for a cover approved later), and a later evidence approval then changes nothing because the day is judged (`evidence.ts:254-258`). Probe P5a in `../probes/audit-probes.test.ts.txt` shows it. Write the function to the spec and file the ticket. Decision 4 in `../spec.md` (2026-11-11) keeps the spec: the filed ticket changes the code so that a late evidence approval turns an Excused occurrence into Satisfied.
 
 ## Where to start
 

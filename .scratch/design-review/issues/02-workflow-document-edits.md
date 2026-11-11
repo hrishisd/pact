@@ -1,13 +1,13 @@
-# 02 Workflow document edits for the owner to approve
+# 02 Workflow document edits
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 01
 
 Closes: W3, W5, T2, and W1's status check (`../code-structure-review.md`, section 4).
 
-## Decision needed
+## Decision
 
-Decision 7 in `../spec.md`: the owner approves, edits or rejects each block of text below. Once approved, apply it exactly. `CLAUDE.md` is the owner's file, so no session changes it without this approval.
+Decision 7 in `../spec.md`, decided 2026-11-11: the owner approved every block of text below as written. Apply it word for word to `CLAUDE.md`, `CODING_STANDARDS.md` and the `docs/agents/` files. `CLAUDE.md` is the owner's file, so make no other change to it.
 
 ## Problem
 
@@ -16,7 +16,7 @@ Decision 7 in `../spec.md`: the owner approves, edits or rejects each block of t
 - T2: server tests re-walk domain flows the core tests own (`src/server/app.test.ts:1373-1450`, `1281-1334`, `1519-1555`, `1591-1630`).
 - W1: nothing checks that a `Status:` line uses a known value.
 
-## Proposed text
+## Approved text
 
 ### `CLAUDE.md`: add after "# pact"
 
@@ -77,9 +77,9 @@ Line 13: replace `/grill-with-docs` with the `grilling` skill.
 
 Add under its first heading: "The `fnm` and iCloud notes apply to the owner's Mac. A cloud session has Node on its path and the repo checked out locally."
 
-## What to build once approved
+## What to build
 
-- Apply the approved text.
+- Apply the text under "Approved text" to each file, as written.
 - Add a check to `scripts/check-conventions.ts`: every `Status:` line in `.scratch/**/*.md` is one of the values above (W1). A spec's `Status:` line counts too.
 
 ## Where to start

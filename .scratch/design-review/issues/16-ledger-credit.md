@@ -1,13 +1,13 @@
 # 16 Show the ledger's credit
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 12
 
 Closes: F13 and rule R12 (`../interaction-audit.md` finding 13). Low priority.
 
-## Decision needed
+## Decision
 
-Decision 6 in `../spec.md` (rule R12). The owner confirmed the current behaviour on 2026-11-08 (`.scratch/pact-v0/manual-checks.md`, "Confirmed", Money: "an excuse approved after its penalty was paid leaves owed at $0, and the payment pays the next penalty to that recipient"). This ticket keeps that and adds a visible credit line.
+Decision 6 in `../spec.md` (rule R12), decided 2026-11-11: when approved payments exceed the penalties owed, the surplus keeps paying the next penalties, as the owner confirmed on 2026-11-08 (`.scratch/pact-v0/manual-checks.md`, "Confirmed", Money), and the ledger shows the credit until it is used up.
 
 ## Problem
 

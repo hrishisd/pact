@@ -1,13 +1,13 @@
 # 19 Vacation deciders follow the pacts
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 17
 
 Closes: F5 and rule R5 (`../interaction-audit.md` finding 5). Low priority.
 
-## Decision needed
+## Decision
 
-Decision 3 in `../spec.md` (rule R5). It changes vac:69 ("The picked reviewers are fixed when the vacation is filed") and vac:70.
+Decision 3 in `../spec.md` (rule R5), decided 2026-11-11: a vacation is decided by the reviewers picked at filing who still review at least one covered pact. If none remain, any current reviewer of a covered pact may decide it. This changes vac:69 ("The picked reviewers are fixed when the vacation is filed") and vac:70.
 
 ## Problem
 

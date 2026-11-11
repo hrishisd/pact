@@ -1,16 +1,18 @@
 # 21 Stale-item reminders
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 17
 
 Closes: F2 and rule R2 (`../interaction-audit.md` finding 2); the remainder of F6; H1 step 6.
 
-## Decision needed
+## Decision
 
-Decision 1 in `../spec.md` (rule R2). Two details to confirm with it, with the recommended answers:
+Decision 1 in `../spec.md` (rule R2), decided 2026-11-11: no item decides itself. A reviewer gets one push a day while any item in their Review Queue has waited more than 24 hours, and an owner gets one push a day while a reviewer's question to them has gone unanswered for more than 24 hours.
 
-- When: once a day at 18:00 in the recipient's timezone (the bill time), or in the oldest item owner's timezone if the recipient has none.
-- Settings: the reviewer's reminder follows the existing "Review item" notification setting and the owner's follows "Comment", so no new setting appears on the settings screen.
+Default chosen by the reviewer (of this design review, not a pact reviewer), the owner can change it:
+
+- When: once a day at 09:00 in the recipient's own timezone. A reviewer may have no timezone yet (only an account that owns a pact must have one); then use the timezone of the owner of their oldest waiting item.
+- Settings: the reviewer's reminder follows the "review-item" setting ("New review item" on the settings screen), the same as the existing "review-item" push that tells a reviewer about a new item. The owner's reminder follows the "comment" setting ("Comment"), the same as the existing "reviewer-question" push (`SETTING_OF_KIND`, `src/core/outbox.ts:18-34`). No new setting appears on the settings screen.
 
 Future idea, not planned: an item decided by default after N days. Rejected for now because between two friends either default is wrong: automatic approval is exploitable and automatic rejection is unfair.
 
@@ -37,10 +39,11 @@ F6, as the audit wrote it ("a $1 payment against a $200 bill pauses Overdue fore
 
 ## Acceptance criteria
 
-- [ ] Scenario: evidence filed Monday 10:00 and not decided; the reviewer gets one reminder at the first 18:00 after Tuesday 10:00, one a day after, and none once it is decided.
+- [ ] Scenario: evidence filed Monday 10:00 and not decided; the reviewer gets one reminder at the first 09:00 after Tuesday 10:00 (Wednesday 09:00), one a day after, and none once it is decided.
 - [ ] Scenario: three items, the oldest 2 days old; the push says 3 and 2 days.
 - [ ] Scenario: an item waiting on the owner's reply is not counted for the reviewer; the owner gets the daily reply reminder until they reply.
-- [ ] Scenario: with the "Review item" setting off, the reviewer gets none; with "Comment" off, the owner gets none.
+- [ ] Scenario: with the "review-item" setting off, the reviewer gets none; with "comment" off, the owner gets none.
+- [ ] Scenario: a reviewer with no timezone is reminded at 09:00 in the timezone of the owner of their oldest waiting item.
 - [ ] Scenario: no second reminder the same day across a restart.
 - [ ] F6 regression in `bills.test.ts`: a $1 payment waiting against a $15 overdue bill leaves the owner's daily overdue reminder running for $14.
 - [ ] Update `docs/behaviour.md`, including the future idea.

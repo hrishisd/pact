@@ -39,4 +39,4 @@ Separately, the rule "an excuse never reaches a billed penalty" rests on 48-hour
 ## Out of scope
 
 - Ending a pact (ticket 13).
-- Any rule change, including decision 4's sub-question about evidence for a day already Excused (ticket 20, or the ticket filed from ticket 10).
+- Any rule change, including decision 4's rule that approved evidence turns a day already Excused into Satisfied (ticket 20, or the ticket filed from ticket 10).

@@ -1,13 +1,13 @@
 # 18 One waiting list and one row
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 17
 
 Closes: F11, C2 and rule R10 (`../interaction-audit.md` finding 11, `../code-structure-review.md` C2); H1 step 2; the exhaustive-kinds part of W4.
 
-## Decision needed
+## Decision
 
-Decision 5 in `../spec.md` (rule R10). It overrides the vacation spec's choice to keep waiting vacations, and questions about them, off Today (vac:104, vac:145, and vac:71 "The question shows on the vacation's Profile card, not on Today"). Reason: a waiting vacation holds penalties, so it belongs where the owner looks for things that are unresolved. Because Today's question alerts are built from the waiting list (`src/core/today.ts:81-99`), a question about a vacation will also appear on Today; the Profile card keeps its Reply too.
+Decision 5 in `../spec.md` (rule R10), decided 2026-11-11: the owner has one waiting list with the same rows everywhere, covering all five kinds, vacations included. Today shows all of them and a pact page those that concern the pact, and every row opens the item's own page. This overrides the vacation spec's choice to keep waiting vacations, and questions about them, off Today (vac:104, vac:145, and vac:71 "The question shows on the vacation's Profile card, not on Today"). Because Today's question alerts are built from the waiting list (`src/core/today.ts:81-99`), a question about a vacation also appears on Today; the Profile card keeps its Reply too.
 
 ## Problem
 
