@@ -7,8 +7,9 @@
 // penalties. Ticket 04: Today's banner and covered occurrences left off
 // Today, vacation days on the heat map, and Profile on now and after.
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, onTestFinished, test } from "vitest";
 import { formatDate } from "../shared/format.ts";
+import { openWithPragmas } from "./db.ts";
 import type { NewVacation, PactChange, Schedule } from "../shared/types.ts";
 import { ownerWithAnki } from "./testing/anki-pact.ts";
 import { bedtimePact, sleep } from "./testing/bedtime-pact.ts";
@@ -1203,6 +1204,41 @@ describe("the excuse window a rejected or withdrawn vacation reopens (R3)", () =
     expect(s.notifier.sentTo(owner, "vacation-decided")).toEqual([
       expect.objectContaining({ payload: expect.objectContaining({ body: "“Not that week”" }) }),
     ]);
+  });
+
+  test("a penalty already on a bill keeps its window: the rejection reopens nothing, and Mon+1 has no Missed card", async () => {
+    const s = scenario();
+    const { owner, gym } = await rejectedAfterMonday(s);
+    // Bills never take a held penalty, and a release now waits out its window, but bills made before R3 took
+    // a penalty 48 hours after its judging even when a rejection came later. Written straight to the database.
+    const db = openWithPragmas(s.dbPath);
+    onTestFinished(() => {
+      db.close();
+    });
+    const penalty = db.prepare(`SELECT id, owner_account_id, recipient_id FROM penalty`).get() as {
+      id: string;
+      owner_account_id: string;
+      recipient_id: string;
+    };
+    db.prepare(
+      `INSERT INTO bill (id, owner_account_id, recipient_id, billed_on, created_at, due_at) VALUES ('old', ?, ?, ?, ?, ?)`,
+    ).run(
+      penalty.owner_account_id,
+      penalty.recipient_id,
+      s.date("Wed+1"),
+      s.at("Wed+1 18:00").toISOString(),
+      s.at("Wed+2 18:00").toISOString(),
+    );
+    db.prepare(`UPDATE penalty SET bill_id = 'old' WHERE id = ?`).run(penalty.id);
+    // Past Mon+1's own 48 hours, inside the 48 hours from the rejection.
+    s.setClockTo("Thu+1 04:00");
+    const monday = { from: s.date("Mon+1"), to: s.date("Mon+1") };
+
+    expect(owner.excusePreview(gym, monday)).toMatchObject({
+      preview: { covered: [], skipped: [{ date: s.date("Mon+1"), reason: "window-closed" }] },
+    });
+    expect(cards(owner, "missed")).toEqual([]);
+    expect(owner.today().alerts).toEqual([expect.objectContaining({ kind: "vacation-rejected", excusable: null })]);
   });
 
   test("a rejected excuse doesn't move the window again: after the vacation's 48 hours, a new excuse for Mon+1 is refused", async () => {

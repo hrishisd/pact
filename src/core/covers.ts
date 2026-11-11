@@ -108,14 +108,19 @@ export function coveredSql(pact: string, date: string, state: "waiting" | "appro
  * `date`, judged at `judgedAt` (SQL expressions; ISO strings), opens: the
  * later of its judging and the rejection or withdrawal of a vacation that
  * covered it while it waited (R3). A rejected or withdrawn excuse doesn't
- * move it (v0:256). Every read of the window goes through here or
- * `excusableUntil`.
+ * move it (v0:256), and nothing reopens it once its penalty is on a bill: a
+ * billed penalty can't be excused (`settle`). Bills now wait out a reopened
+ * window, but bills made before R3 may hold a released penalty. Every read
+ * of the window goes through here or `excusableUntil`.
  */
 export function excuseWindowOpensSql(pact: string, date: string, judgedAt: string): string {
   return `MAX(${judgedAt}, COALESCE((SELECT MAX(COALESCE(released.withdrawn_at, released.decided_at))
     FROM cover_day_v AS released
     WHERE released.kind = 'vacation' AND released.pact_id = ${pact} AND released.date = ${date}
-      AND (released.withdrawn_at IS NOT NULL OR released.decision = 'rejected')), ${judgedAt}))`;
+      AND (released.withdrawn_at IS NOT NULL OR released.decision = 'rejected')
+      AND NOT EXISTS (SELECT 1 FROM penalty AS billed
+                      WHERE billed.pact_id = ${pact} AND billed.occurrence_date = ${date} AND billed.bill_id IS NOT NULL)),
+    ${judgedAt}))`;
 }
 
 /** When the excuse window that opens at `opensAt` (from `excuseWindowOpensSql`) closes. */
