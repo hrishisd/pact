@@ -1260,6 +1260,18 @@ export const MAX_EXCUSE_PHOTOS = 3;
 /** The longest date range one excuse may span, in days. */
 export const MAX_EXCUSE_SPAN_DAYS = 62;
 
+/** How long after creation the owner can edit or delete a pact freely, in minutes. */
+export const EDIT_WINDOW_MINUTES = 10;
+
+/**
+ * How long after it's judged Missed (a rejection judges it then) an
+ * occurrence can be excused, in hours.
+ */
+export const EXCUSE_WINDOW_HOURS = 48;
+
+/** The hour a bedtime night closes (and the next night starts): 18:00 the day after it. */
+export const NIGHT_CLOSES_AT = 18;
+
 /** The dates an owner picks for an excuse for one pact. */
 export interface ExcuseDates {
   /** In the owner's timezone, both included. */

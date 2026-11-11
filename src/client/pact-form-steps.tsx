@@ -18,7 +18,7 @@ import {
   type Weekday,
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
-import { clockText, inBedByName, initial } from "./format.ts";
+import { clockText, EDIT_WINDOW_TEXT, inBedByName, initial, NIGHT_CLOSES_TEXT } from "./format.ts";
 import { remindersAs, scheduleKindOf, termsOfFormKind, type Form } from "./pact-form.ts";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { loadFailure, loadedData, useLoad, useSend } from "./ui.tsx";
@@ -69,7 +69,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "not-a-friend": "Only friends can be reviewers.",
   "no-timezone": "Confirm your timezone first.",
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-closed": "The 10 minutes are up.",
+  "edit-window-closed": `The ${EDIT_WINDOW_TEXT} are up.`,
   "evidence-kind-fixed": "A pact's evidence kind can't change.",
 };
 
@@ -446,7 +446,7 @@ function ScheduleStep({
       )}
       <small className="muted">
         {oura
-          ? "Each night is judged when your ring syncs. A night with no sleep data by 6pm the next day counts as missed."
+          ? `Each night is judged when your ring syncs. A night with no sleep data by ${NIGHT_CLOSES_TEXT} the next day counts as missed.`
           : anki
             ? `Each day is judged from AnkiWeb. Finish the deck and sync before ${until}. A day Pact hasn't seen finished by then counts as missed.`
             : oneTime

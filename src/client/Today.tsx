@@ -46,10 +46,11 @@ import {
   formatDate,
   formatDay,
   formatDueAt,
+  hoursLeft,
   minutesLeft,
   money,
+  NIGHT_CLOSES_TEXT,
   timeLeft,
-  hoursLeft,
 } from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
 import { firstName } from "./vacation-text.ts";
@@ -521,7 +522,9 @@ function NoOuraDataCard({
           ? "Checking Oura…"
           : `${night} night hasn't synced. ${ouraConnectionProblem ? "Reconnect Oura to count it." : "Open the Oura app."}`}
       </div>
-      <div className="meta due">Counts as missed at 6pm · {timeLeft(Date.parse(card.closesAt) - now)}</div>
+      <div className="meta due">
+        Counts as missed at {NIGHT_CLOSES_TEXT} · {timeLeft(Date.parse(card.closesAt) - now)}
+      </div>
       {tonight && (
         <div className="meta">
           Tonight, in bed by {clockText(tonight.inBedBy)} · {timeLeft(Date.parse(tonight.dueAt) - now)}
@@ -623,7 +626,7 @@ function missedLine({ detail, occurrenceDate }: Json<TodayMissedCard>, timezone:
     case "anki":
       return `${formatDate(occurrenceDate)} · ${ankiMissText(detail.lastCheck, timezone)}`;
     case "night":
-      return `${formatDate(occurrenceDate)} night · ${detail.inBedAt === null ? "no sleep data by 6pm" : `in bed at ${clockText(detail.inBedAt)}`}`;
+      return `${formatDate(occurrenceDate)} night · ${detail.inBedAt === null ? `no sleep data by ${NIGHT_CLOSES_TEXT}` : `in bed at ${clockText(detail.inBedAt)}`}`;
     case undefined:
       return formatDate(occurrenceDate);
   }

@@ -26,7 +26,7 @@ import {
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
-import { formatDate, money, remindersText } from "./format.ts";
+import { EDIT_WINDOW_TEXT, formatDate, money, remindersText } from "./format.ts";
 import { formOf, termsOfForm, type Form } from "./pact-form.ts";
 import { ListsFailed, PactFormStep, PROBLEMS, usePactFormLists, type FormStep } from "./pact-form-steps.tsx";
 import { LoadedFound, Sheet, useLoad, useSend } from "./ui.tsx";
@@ -59,7 +59,7 @@ const STEP_TITLES: Record<FormStep, string> = {
 
 const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": "It's still in its first 10 minutes. Edit it instead.",
+  "edit-window-open": `It's still in its first ${EDIT_WINDOW_TEXT}. Edit it instead.`,
   "pact-ended": "This pact has Ended.",
   "change-request-waiting":
     "A change request is waiting. Until it's decided or you withdraw it, only the name, reminders and new reviewers can change.",

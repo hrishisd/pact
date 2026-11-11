@@ -25,7 +25,7 @@ import { HeatMap } from "./history.tsx";
 import { listNames, openOccurrenceText } from "./change-terms.tsx";
 import { formOf } from "./pact-form.ts";
 import { PROBLEMS, ReviewersStep } from "./pact-form-steps.tsx";
-import { clockText, formatDate, formatDay, minutesLeft, money } from "./format.ts";
+import { clockText, EDIT_WINDOW_TEXT, formatDate, formatDay, minutesLeft, money } from "./format.ts";
 import { WaitingRow } from "./item-page.tsx";
 import { TermsList } from "./terms-list.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
@@ -147,7 +147,7 @@ function EditWindowBar({
     async () => {
       const result = await api.deletePact(pact.id);
       if (!result.ok)
-        return result.reason === "edit-window-closed" ? "The 10 minutes are up." : "This pact wasn't found.";
+        return result.reason === "edit-window-closed" ? `The ${EDIT_WINDOW_TEXT} are up.` : "This pact wasn't found.";
       onDeleted();
     },
     (failure) => `Couldn't delete it. ${failureText(failure, "Check your connection and try again.")}`,

@@ -15,7 +15,7 @@ import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/ap
 import { ouraResultText, takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
 import { api, failureText } from "./api.ts";
-import { clockText, clockTime, formatDate, minutesLeft, parseCents } from "./format.ts";
+import { clockText, clockTime, EDIT_WINDOW_TEXT, formatDate, minutesLeft, parseCents } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { EMPTY_FORM, formOf, optionalTimes, scheduleKindOf, scheduleOf, termsOfForm, type Form } from "./pact-form.ts";
 import {
@@ -240,7 +240,7 @@ export function CreatePact({
   if (editing && (windowClosed || minutes === null)) {
     return (
       <div className="alert bad" role="status">
-        <b>The 10 minutes are up.</b>
+        <b>The {EDIT_WINDOW_TEXT} are up.</b>
         <span>Your changes weren't saved, and {editing.name} stays as it was.</span>
         <button className="btn sm self-start" onClick={onCancel}>
           Back to pact
@@ -486,7 +486,11 @@ function CheckStep({
           )}
           {editing?.editWindowClosesAt && (
             // On this device's clock: the form has no profile timezone, and the window ends minutes from now.
-            <> Your 10 minutes end at {clockTime(editing.editWindowClosesAt, undefined)}. Saving doesn't add more.</>
+            <>
+              {" "}
+              Your {EDIT_WINDOW_TEXT} end at {clockTime(editing.editWindowClosesAt, undefined)}. Saving doesn't add
+              more.
+            </>
           )}
         </p>
         {first.kind === "refused" && <p className="error">{PROBLEMS[first.reason]}</p>}

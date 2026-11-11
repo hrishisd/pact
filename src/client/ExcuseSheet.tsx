@@ -21,7 +21,7 @@ import {
 import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
 import { DayChip, SKIP_REASON_TEXT, dayNote, excuseDayText } from "./excuse-days.tsx";
-import { formatDate, money, scheduleText, hoursLeft } from "./format.ts";
+import { EDIT_WINDOW_TEXT, formatDate, hoursLeft, money, scheduleText } from "./format.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useNow, useSend } from "./ui.tsx";
 
@@ -103,7 +103,7 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
 
 const OPEN_REFUSAL_TEXT: Record<"pact-not-found" | "edit-window-open", string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": "Excuses open once the 10 minutes are up.",
+  "edit-window-open": `Excuses open once the ${EDIT_WINDOW_TEXT} are up.`,
 };
 
 /** The preview for some dates: `key` says which, so a stale one isn't taken for the current. */
@@ -595,7 +595,7 @@ function onlyAfter(preview: Preview, day: string): Preview {
 
 const DATES_REFUSAL_TEXT: Record<ExcuseDatesRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": "Excuses open once the 10 minutes are up.",
+  "edit-window-open": `Excuses open once the ${EDIT_WINDOW_TEXT} are up.`,
   "invalid-dates": "The last day is before the first. Pick the dates again.",
   "too-many-days": `One excuse can cover at most ${MAX_EXCUSE_SPAN_DAYS} days. Pick fewer.`,
 };
