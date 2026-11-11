@@ -252,6 +252,8 @@ function ledgerSummaries(ctx: CoreContext, ownerId: AccountId, recipientId?: str
     id: string;
     name: string;
     penalty_cents: number;
+    held_by_excuse_cents: number;
+    held_by_vacation_cents: number;
     paid_cents: number;
     awaiting_cents: number;
     awaiting_count: number;
@@ -260,6 +262,12 @@ function ledgerSummaries(ctx: CoreContext, ownerId: AccountId, recipientId?: str
               (SELECT COALESCE(SUM(amount_cents), 0) FROM penalty
                WHERE penalty.owner_account_id = recipient.owner_account_id
                  AND penalty.recipient_id = recipient.id AND NOT ${PENALTY_HELD}) AS penalty_cents,
+              (SELECT COALESCE(SUM(amount_cents) FILTER (WHERE NOT ${PENALTY_HELD_BY_VACATION}), 0) FROM penalty
+               WHERE penalty.owner_account_id = recipient.owner_account_id
+                 AND penalty.recipient_id = recipient.id AND ${PENALTY_HELD}) AS held_by_excuse_cents,
+              (SELECT COALESCE(SUM(amount_cents), 0) FROM penalty
+               WHERE penalty.owner_account_id = recipient.owner_account_id
+                 AND penalty.recipient_id = recipient.id AND ${PENALTY_HELD_BY_VACATION}) AS held_by_vacation_cents,
               COALESCE(SUM(payment.amount_cents) FILTER (WHERE payment.decision = 'approved'), 0) AS paid_cents,
               COALESCE(SUM(payment.amount_cents) FILTER (WHERE payment.decision IS NULL), 0) AS awaiting_cents,
               COUNT(payment.id) FILTER (WHERE payment.decision IS NULL) AS awaiting_count
@@ -278,9 +286,18 @@ function ledgerSummaries(ctx: CoreContext, ownerId: AccountId, recipientId?: str
   const now = ctx.clock.now();
   return rows.sort(byName).map((row) => {
     // An excuse approved after its penalty was paid leaves more paid than
-    // owed. The surplus pays the next penalties (`allocate`), and owed is $0
-    // meanwhile, never below.
+    // owed. The surplus is the ledger's credit: it pays the next penalties
+    // (`allocate`), and owed is $0 meanwhile, never below (R12).
     const owedCents = Math.max(0, row.penalty_cents - row.paid_cents);
+    const creditCents = Math.max(0, row.paid_cents - row.penalty_cents);
+    // A held penalty released by a rejection would take the credit first.
+    const creditWaitsOn: LedgerSummary["creditWaitsOn"] =
+      creditCents === 0
+        ? []
+        : [
+            ...(row.held_by_excuse_cents > 0 ? (["excuse"] as const) : []),
+            ...(row.held_by_vacation_cents > 0 ? (["vacation"] as const) : []),
+          ];
     const payableCents = Math.max(0, owedCents - row.awaiting_cents);
     const bills = billsOf(ctx, ownerId, row.id);
     const billDue = billDueOf(bills, now);
@@ -297,6 +314,8 @@ function ledgerSummaries(ctx: CoreContext, ownerId: AccountId, recipientId?: str
       suggestedPaymentCents: billsCents > 0 ? Math.min(billsCents, payableCents) : payableCents,
       overdueCents,
       billDue: billDue && { amountCents: billDue.amountCents, dueAt: billDue.dueAt },
+      creditCents,
+      creditWaitsOn,
     };
   });
 }

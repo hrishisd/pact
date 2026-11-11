@@ -169,6 +169,8 @@ describe("judging at the end of a scheduled day", () => {
         awaitingCount: 0,
         paidCents: 0,
         suggestedPaymentCents: 1000,
+        creditCents: 0,
+        creditWaitsOn: [],
         overdueCents: 0,
         billDue: null,
       },

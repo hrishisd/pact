@@ -159,7 +159,8 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 
 ## Money
 
-- A penalty is owed to its recipient. Owed is unheld penalties less approved payments, never below zero (`ledgerSummaries`, `money.ts:248`).
+- A penalty is owed to its recipient. Owed is unheld penalties less approved payments, never below zero (`ledgerSummaries`, `money.ts`).
+- Approved payments beyond the unheld penalties are the ledger's credit, which arises when a paid penalty is then excused. The ledger card shows it beside owed $0 ("$5 credit · pays your next penalties") until the next penalties use it up; Today shows nothing for it. While a waiting excuse or vacation holds a penalty the credit would pay if rejected, the card says the credit lasts only if that is approved ("$5 credit if the excuse is approved"). Allocation and billing are unchanged: the credit pays the next penalties through `allocate` (`creditCents` and `creditWaitsOn`, `ledgerSummaries`, `money.ts`; rule R12 in `.scratch/design-review/spec.md`). Test: `ledgers.test.ts`, `Ledgers.test.tsx`.
 - Bills are made each Wednesday at 18:00 in the owner's timezone, one per recipient, due 7 days later (`makeBills`, `money.ts:377`; `BILL_TERM_DAYS`, `bill-math.ts`). The owner is told only if something on it is unpaid. Test: `bills.test.ts`.
 - A payment needs a screenshot and may not exceed what is owed less payments already waiting (`recordPayment`, `money.ts:93`; `paymentAcceptance`, `money.ts:604`). Test: `payments.test.ts`.
 - Approved payments go to billed penalties first, oldest bill first, then to unbilled ones by when they were added. Held penalties are skipped (`allocate`, `money.ts:310`).

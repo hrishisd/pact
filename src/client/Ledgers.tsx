@@ -229,7 +229,8 @@ function RecordPaymentButton({ ledger, onRecord }: { ledger: Json<LedgerSummary>
 
 /**
  * The big owed amount, then one status line only when needed (overdue, else
- * a bill due, else payments awaiting approval), then lifetime paid.
+ * a bill due, else payments awaiting approval), then any credit, then
+ * lifetime paid.
  */
 function Summary({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezone: string }) {
   return (
@@ -237,6 +238,7 @@ function Summary({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezone: 
       <span className="bigmoney">{money(ledger.owedCents)}</span>
       <span className="meta">owed</span>
       <StatusLine ledger={ledger} timezone={timezone} />
+      <CreditLine ledger={ledger} />
       <span className="meta">Lifetime paid {money(ledger.paidCents)}</span>
     </span>
   );
@@ -262,4 +264,21 @@ function StatusLine({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezon
     );
   }
   return null;
+}
+
+/**
+ * The credit approved payments left beyond what's owed, which pays the next
+ * penalties; while a waiting excuse or vacation holds a penalty it would pay,
+ * it lasts only if that's approved.
+ */
+function CreditLine({ ledger }: { ledger: Json<LedgerSummary> }) {
+  if (ledger.creditCents <= 0) return null;
+  const credit = `${money(ledger.creditCents)} credit`;
+  const waitsOn = ledger.creditWaitsOn;
+  if (waitsOn.length === 0) return <span className="meta">{credit} · pays your next penalties</span>;
+  return (
+    <span className="meta">
+      {credit} if the {waitsOn.join(" and ")} {waitsOn.length === 1 ? "is" : "are"} approved
+    </span>
+  );
 }

@@ -588,7 +588,14 @@ describe("holds and payments", () => {
     await reviewer.decide(await fileExcuse(owner, gym, sick(s.date("Mon"))), { kind: "approve" });
 
     expect(owner.ledgers()).toEqual([
-      expect.objectContaining({ owedCents: 0, payableCents: 0, paidCents: 500, overdueCents: 0, billDue: null }),
+      expect.objectContaining({
+        owedCents: 0,
+        payableCents: 0,
+        paidCents: 500,
+        overdueCents: 0,
+        billDue: null,
+        creditCents: 500,
+      }),
     ]);
     expect(await owner.recordPayment({ recipientId: sam.id, amountCents: 1 }, photo())).toEqual({
       ok: false,
@@ -597,7 +604,7 @@ describe("holds and payments", () => {
 
     // Wednesday's miss is paid already; Friday's is owed.
     await s.advanceTo("Thu 00:00");
-    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0 })]);
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, payableCents: 0, creditCents: 0 })]);
     expect(ledgerHistory(owner).filter((entry) => entry.kind === "penalty")).toEqual([
       expect.objectContaining({ occurrenceDate: s.date("Wed"), paidCents: 500 }),
     ]);

@@ -1184,6 +1184,18 @@ export interface LedgerSummary {
    * cover: that part, and the soonest due time. Null when there's none.
    */
   billDue: { amountCents: number; dueAt: Date } | null;
+  /**
+   * Approved payments beyond the penalties not held, when there are more of
+   * them: an excuse approved after its penalty was paid leaves this. It pays
+   * the next penalties as they're added (rule R12). Zero when there's none.
+   */
+  creditCents: number;
+  /**
+   * The kinds of waiting cover that hold penalties this credit would pay if
+   * rejected: the credit lasts only if they're approved. Empty when there's
+   * no credit or nothing held could use it.
+   */
+  creditWaitsOn: ("excuse" | "vacation")[];
 }
 
 /** A payment the owner made to a recipient outside the app, to record with its screenshot. */

@@ -67,6 +67,8 @@ const SAM_LEDGER: LedgerResponse = {
       awaitingCount: 0,
       paidCents: 0,
       suggestedPaymentCents: 1000,
+      creditCents: 0,
+      creditWaitsOn: [],
       overdueCents: 0,
       billDue: { amountCents: 1000, dueAt: "2026-01-08T05:00:00Z" },
     },

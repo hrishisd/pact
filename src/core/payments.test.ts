@@ -39,6 +39,8 @@ describe("recording a payment", () => {
         billDue: null,
         payableCents: 500,
         suggestedPaymentCents: 500,
+        creditCents: 0,
+        creditWaitsOn: [],
       },
     ]);
 
@@ -63,6 +65,8 @@ describe("recording a payment", () => {
         billDue: null,
         payableCents: 0,
         suggestedPaymentCents: 0,
+        creditCents: 0,
+        creditWaitsOn: [],
       },
     ]);
   });
@@ -258,6 +262,8 @@ describe("deciding a payment", () => {
         billDue: null,
         payableCents: 500,
         suggestedPaymentCents: 500,
+        creditCents: 0,
+        creditWaitsOn: [],
       },
     ]);
   });
@@ -282,6 +288,8 @@ describe("deciding a payment", () => {
         billDue: null,
         payableCents: 1500,
         suggestedPaymentCents: 1500,
+        creditCents: 0,
+        creditWaitsOn: [],
       },
     ]);
   });

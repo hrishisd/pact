@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle } from "./testing/scenario.ts";
-import { ok } from "./testing/queries.ts";
+import { ledgerHistory, ok } from "./testing/queries.ts";
 
 describe("a ledger's history", () => {
   test("lists each penalty from every pact naming the recipient, newest first, under the ledger's summary", async () => {
@@ -29,6 +29,8 @@ describe("a ledger's history", () => {
           awaitingCount: 0,
           paidCents: 0,
           suggestedPaymentCents: 1500,
+          creditCents: 0,
+          creditWaitsOn: [],
           overdueCents: 0,
           billDue: null,
         },
@@ -132,6 +134,8 @@ describe("a ledger's history", () => {
           awaitingCount: 0,
           paidCents: 0,
           suggestedPaymentCents: 0,
+          creditCents: 0,
+          creditWaitsOn: [],
           overdueCents: 0,
           billDue: null,
         },
@@ -250,6 +254,8 @@ describe("payments in a ledger's history", () => {
           awaitingCount: 1,
           paidCents: 300,
           suggestedPaymentCents: 800,
+          creditCents: 0,
+          creditWaitsOn: [],
           overdueCents: 0,
           billDue: null,
         },
@@ -306,6 +312,51 @@ describe("payments in a ledger's history", () => {
     const ledger = owner.ledger(sam.id);
     expect(ledger.ok && ledger.ledger.history).toEqual([
       expect.objectContaining({ kind: "penalty", pactName: "Gym", paidCents: 0 }),
+    ]);
+  });
+});
+
+describe("a ledger's credit (R12)", () => {
+  /** Gym, Mon/Wed/Fri at $5: Monday Missed, paid $5 and approved, then excused at Tue 09:00. */
+  async function mondayPaidThenExcused() {
+    const s = scenario();
+    const setup = await ownerWithReviewers(s);
+    const gym = await setup.createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Tue 00:00");
+    s.setClockTo("Tue 08:00");
+    const payment = await recordPayment(setup.owner, { recipientId: setup.sam.id, amountCents: 500 });
+    await setup.reviewer.decide(payment, { kind: "approve" });
+    s.setClockTo("Tue 09:00");
+    const excuseId = ok(
+      await setup.owner.fileExcuse(gym, { from: s.date("Mon"), to: s.date("Mon"), reason: "Sick" }, [photo()]),
+    ).excuseId;
+    return { s, ...setup, gym, excuseId };
+  }
+
+  test("a paid penalty excused leaves a credit, provisional while the excuse waits, that pays the next penalty", async () => {
+    const { s, owner, reviewer, excuseId } = await mondayPaidThenExcused();
+    expect(owner.ledgers()).toEqual([
+      expect.objectContaining({ owedCents: 0, creditCents: 500, creditWaitsOn: ["excuse"] }),
+    ]);
+
+    await reviewer.decide(excuseId, { kind: "approve" });
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, creditCents: 500, creditWaitsOn: [] })]);
+
+    // Wednesday's miss takes the credit.
+    await s.advanceTo("Thu 00:00");
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, creditCents: 0, creditWaitsOn: [] })]);
+    expect(ledgerHistory(owner).filter((entry) => entry.kind === "penalty")).toEqual([
+      expect.objectContaining({ occurrenceDate: s.date("Wed"), paidCents: 500 }),
+    ]);
+  });
+
+  test("the excuse rejected instead: the credit is gone and the payment pays its penalty again", async () => {
+    const { s, owner, reviewer, excuseId } = await mondayPaidThenExcused();
+    await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
+
+    expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0, creditCents: 0, creditWaitsOn: [] })]);
+    expect(ledgerHistory(owner).filter((entry) => entry.kind === "penalty")).toEqual([
+      expect.objectContaining({ occurrenceDate: s.date("Mon"), held: false, paidCents: 500 }),
     ]);
   });
 });
