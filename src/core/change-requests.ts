@@ -131,6 +131,7 @@ export function requestEnd(ctx: CoreContext, accountId: AccountId, pactId: strin
   if (!pact) return { ok: false, reason: "pact-not-found" };
   if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
   if (editWindowClosesAt(pact, ctx.clock.now()) !== null) return { ok: false, reason: "edit-window-open" };
+  if (pact.end_approved_at !== null) return { ok: false, reason: "end-approved" };
   if (waitingChangeRequestId(ctx, pactId) !== null) return { ok: false, reason: "change-request-waiting" };
   if (textTooLong(note)) return { ok: false, reason: "text-too-long" };
   const id = sendChangeRequest(ctx, pact, ownerName, changeableTerms(ctx, pact), null, note);
@@ -344,6 +345,10 @@ export function checkedChange(
   const diffs = termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by));
   if (waitingChangeRequestId(ctx, pactId) !== null && diffs.some((diff) => diff.effect !== "at-once")) {
     return { ok: false, reason: "change-request-waiting" };
+  }
+  // An approved end waits for the open occurrence: nothing after it will be judged, and a later end date would undo it.
+  if (pact.end_approved_at !== null && diffs.some((diff) => diff.effect !== "at-once")) {
+    return { ok: false, reason: "end-approved" };
   }
   // A One-time change applies to its occurrence even once it's open, given an hour to the new deadline.
   if (checked.terms.schedule.kind === "one-time" && !deadlineFarEnough(ctx, pact, zone, after, now)) {

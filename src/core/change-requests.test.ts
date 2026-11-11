@@ -772,6 +772,39 @@ describe("ending a pact", () => {
     expect(penaltyDays(owner, "Gym")).toEqual([s.date("Mon"), s.date("Wed"), s.date("Fri"), s.date("Mon+1")]);
   });
 
+  test("while an approved end waits, a new end request or change request is refused; the name and an added reviewer still change", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await dailyGym(s);
+    const third = await s.befriend(owner, "third");
+    const end = ok(await owner.requestEnd(gym));
+    await reviewer.decide(end.changeRequestId, { kind: "approve" });
+    expect(pactOf(owner, gym)).toMatchObject({ stage: "active", ending: { lastDay: s.date("Thu") } });
+
+    expect(await owner.requestEnd(gym)).toEqual({ ok: false, reason: "end-approved" });
+    for (const change of [
+      { penaltyCents: 200 },
+      { penaltyCents: 1000 },
+      { endDate: s.date("Mon+2") },
+      { endDate: undefined },
+    ]) {
+      expect(await owner.changePact(gym, changed(owner, gym, change))).toEqual({ ok: false, reason: "end-approved" });
+      expect(owner.changePreview(gym, changed(owner, gym, change))).toEqual({ ok: false, reason: "end-approved" });
+    }
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(ok(await owner.changePact(gym, changed(owner, gym, { name: "Gym, any gym" })))).toMatchObject({
+      outcome: { kind: "at-once" },
+    });
+    ok(
+      await owner.changePact(
+        gym,
+        changed(owner, gym, { reviewerIds: [...termsOf(pactOf(owner, gym)).reviewerIds, third.id] }),
+      ),
+    );
+
+    await s.advanceTo("Sat 12:00");
+    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endedAt: s.at("Fri 00:00") });
+  });
+
   test("a rejected end keeps the pact running", async () => {
     const s = scenario();
     const { owner, reviewer, gym } = await dailyGym(s);

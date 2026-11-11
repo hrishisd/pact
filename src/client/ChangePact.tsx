@@ -63,6 +63,7 @@ const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = 
   "pact-ended": "This pact has Ended.",
   "change-request-waiting":
     "A change request is waiting. Until it's decided or you withdraw it, only the name, reminders and new reviewers can change.",
+  "end-approved": "Its end is approved, so until it Ends only the name, reminders and new reviewers can change.",
   "pact-started": "It has already started, so the start date can't change.",
   "schedule-kind-fixed": "The kind of schedule can't change now. Make a new pact for that.",
   "nothing-changed": "Nothing changed yet.",

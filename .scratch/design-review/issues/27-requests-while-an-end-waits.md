@@ -1,6 +1,6 @@
 # 27 What a pact takes while an approved end waits
 
-Status: ready-for-agent
+Status: done
 Blocked by: 13
 
 Found while building ticket 13.
@@ -19,8 +19,8 @@ Since ticket 13, an approved end request waits for the occurrence or week open a
 
 ## Acceptance criteria
 
-- [ ] Decided, built through `scenario()` tests, and `docs/behaviour.md` updated.
-- [ ] `npm run check` passes.
+- [x] Decided, built through `scenario()` tests, and `docs/behaviour.md` updated.
+- [x] `npm run check` passes.
 
 ## Owner decision (2026-11-11)
 

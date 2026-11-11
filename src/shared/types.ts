@@ -1678,6 +1678,8 @@ export type ChangePactRefusal =
   | "pact-ended"
   /** A change request waits: until it's decided or withdrawn, only the name, the reminders and added reviewers change. */
   | "change-request-waiting"
+  /** An approved end waits for the occurrence open at approval: until the pact Ends, only the name, the reminders and added reviewers change. */
+  | "end-approved"
   /** The start date can't change once the first occurrence has opened. */
   | "pact-started"
   /** Fixed days and Weekly count can't be swapped after the edit window: a new pact is needed. */
@@ -1697,7 +1699,8 @@ export type RequestEndResult =
   | { ok: true; changeRequestId: string }
   | {
       ok: false;
-      reason: "pact-not-found" | "edit-window-open" | "pact-ended" | "change-request-waiting" | TextTooLong;
+      reason:
+        "pact-not-found" | "edit-window-open" | "pact-ended" | "end-approved" | "change-request-waiting" | TextTooLong;
     };
 
 /** A change request, as its reviewers and its owner see it. */
