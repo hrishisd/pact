@@ -11,7 +11,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { matchedRoutes } from "hono/route";
-import type { AccountId, AnkiConnector, OuraConnector, PactCore, Photo, Schedule } from "../core/index.ts";
+import type { AccountId, AnkiConnector, DevClock, OuraConnector, PactCore, Photo, Schedule } from "../core/index.ts";
 import {
   EVIDENCE_KINDS,
   MAX_EVIDENCE_PHOTOS,
@@ -24,7 +24,9 @@ import {
   API_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  DEV_ADVANCE_PATH,
   DEV_SIGN_IN_PATH,
+  type DevAdvanceRequest,
   EVIDENCE_PHOTO_FIELD,
   EXCUSE_FROM_FIELD,
   EXCUSE_REASON_FIELD,
@@ -150,6 +152,11 @@ export interface AppOptions {
   anki: AnkiConnector | null;
   /** Where the app writes log lines. Default: console.log. */
   log?: (line: string) => void;
+  /**
+   * DEVELOPMENT ONLY (PACT_DEV_CLOCK=1): the clock the core runs on, which
+   * POST /api/dev/advance moves forward. Null or absent: no such route.
+   */
+  devClock?: DevClock | null;
 }
 
 /** A parsed multipart form: each field's value, or values when it repeats. */
@@ -207,6 +214,7 @@ export function createApp({
   oura,
   anki,
   log = (line) => console.log(line),
+  devClock = null,
 }: AppOptions) {
   const app = new Hono<Env>();
 
@@ -361,6 +369,21 @@ export function createApp({
       }
       // As Google's sign-in does: back to the invite, to accept it, or home.
       return c.redirect(inviteToken === undefined ? "/" : APP_PATHS.invite(inviteToken));
+    });
+  }
+
+  // DEVELOPMENT ONLY, with PACT_DEV_CLOCK=1: moves the server's clock forward
+  // and runs the scheduler's tick up to the new time, for the browser smoke
+  // test (e2e/). From this machine only, as the dev sign-in.
+  if (!production && devClock) {
+    app.post(DEV_ADVANCE_PATH, async (c, next) => {
+      if (!fromThisMachine(c)) return next();
+      const request = await readJson(c, parseDevAdvance);
+      if (!request || !(request.minutes > 0)) return apiError(c, 400, "invalid-request");
+      devClock.advance(request.minutes);
+      const now = devClock.now();
+      await core.advanceTo(now);
+      return c.json({ now: now.toISOString() });
     });
   }
 
@@ -789,6 +812,7 @@ const schedule = union<Schedule>({
   "one-time": object({ deadline: string, submitAnytime: boolean }),
 });
 
+const parseDevAdvance = object<DevAdvanceRequest>({ minutes: number });
 const parseSetTimezone = object<SetTimezoneRequest>({ timezone: string });
 const parseConnectAnki = object<ConnectAnkiRequest>({ email: string, password: string });
 const parseNewRecipient = object<AddRecipientRequest>({ name: string });

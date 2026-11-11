@@ -1,6 +1,6 @@
 # 07 Browser smoke test and an ExcuseSheet test
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: T1 (`../code-structure-review.md`, section 3).
@@ -26,12 +26,21 @@ Nothing checks that a whole flow works in a browser. Client component tests exis
 
 ## Acceptance criteria
 
-- [ ] `npm run test:e2e` passes locally and is documented in `docs/agents/local-dev.md`.
-- [ ] Shown to fail: temporarily break one navigation callback in `App.tsx` that the flow uses, see the test fail, revert.
-- [ ] `ExcuseSheet.test.tsx` covers the two cases above.
-- [ ] `npm run check` passes.
+- [x] `npm run test:e2e` passes locally and is documented in `docs/agents/local-dev.md`.
+- [x] Shown to fail: temporarily break one navigation callback in `App.tsx` that the flow uses, see the test fail, revert.
+- [x] `ExcuseSheet.test.tsx` covers the two cases above.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - Visual comparison of screenshots.
 - More than one flow.
+
+## Comments
+
+2026-11-11 (agent): Built.
+
+- Dev clock: `loadConfig` reads `PACT_DEV_CLOCK=1` into `config.devClock` and throws in production when the variable is set at all. `main.ts` then wires `offsetClock()` (`src/core/adapters.ts`: the system clock plus an offset that only grows) into the core, the adapters and the scheduler in place of `systemClock`; the log file keeps real time. `createApp` takes it as `devClock` and, outside production and only then, registers `POST /api/dev/advance` (`DEV_ADVANCE_PATH` in `src/shared/api.ts`, beside `DEV_SIGN_IN_PATH`): `{ minutes }` moves the clock forward, awaits `core.advanceTo(now)` and answers `{ now }`. It answers only to this machine, as the dev sign-in does. Tests: `config.test.ts` "dev clock", `app.test.ts` "dev clock".
+- The smoke test (`e2e/smoke.spec.ts`, `playwright.config.ts`) doesn't use `npm run dev`: it builds the client and runs `npm start` (development mode, serving `dist/client`) on port 3100 with a fresh database under the system temp directory, so it never collides with a dev server on 3000/5173 or touches the dev database. Each browser's clock is moved with the server's (`page.clock`), since the client reads `Date.now()` for headings and countdowns. It first moves to 9am New York so the pact's first day is today whatever time it runs. `@playwright/test` is pinned to 1.63.0, the machine's Playwright.
+- Shown to fail: with `openExcuse` in `App.tsx` made a no-op, the step "files an excuse … and opens it" failed waiting for the Excuse page heading; reverted. `ExcuseSheet.test.tsx`'s Weekly count case fails when `DayCard`'s `holds` ignores the week; reverted.
+- CI: not added. The run takes about 8 seconds locally, but in CI it would also need a Chromium download (`npx playwright install --with-deps chromium`), and I couldn't time that without pushing. It stays local (`npm run test:e2e`); adding it after `build` is a one-step change once someone times it there.

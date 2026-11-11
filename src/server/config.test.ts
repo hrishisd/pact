@@ -120,3 +120,16 @@ describe("Anki", () => {
     });
   });
 });
+
+describe("dev clock", () => {
+  test("development turns it on with PACT_DEV_CLOCK=1, and it is off by default", () => {
+    expect(loadConfig({ PACT_DB_PATH: "/tmp/pact-dev/pact.db" }).devClock).toBe(false);
+    expect(loadConfig({ PACT_DB_PATH: "/tmp/pact-dev/pact.db", PACT_DEV_CLOCK: "1" }).devClock).toBe(true);
+  });
+
+  test("production refuses to start with it set", () => {
+    expect(() => loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, PACT_DEV_CLOCK: "1" })).toThrow(
+      "PACT_DEV_CLOCK is for development only",
+    );
+  });
+});

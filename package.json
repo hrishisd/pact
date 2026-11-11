@@ -14,6 +14,7 @@
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/server/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "lint": "prettier --check . && knip && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-conventions.ts && shellcheck scripts/*.sh .claude/hooks/*.sh .githooks/*",
@@ -31,6 +32,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",

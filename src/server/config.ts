@@ -59,6 +59,11 @@ export interface Config {
   anki: { tokenKey: string; python: string } | null;
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
   restored: boolean;
+  /**
+   * Development only (PACT_DEV_CLOCK=1): the server's clock can be moved
+   * forward through POST /api/dev/advance. Production refuses to start with it.
+   */
+  devClock: boolean;
   /** The commit CI built the image from, reported by /health. Null when built without one; never required. */
   commit: string | null;
 }
@@ -124,10 +129,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       : null,
     restored: env.PACT_RESTORED === "1",
     commit: env.PACT_COMMIT?.trim() || null,
+    devClock: env.PACT_DEV_CLOCK === "1",
   };
 
   if (missing.length > 0) {
     throw new Error(`missing required environment variables: ${missing.join(", ")}`);
+  }
+  if (production && env.PACT_DEV_CLOCK !== undefined) {
+    throw new Error("PACT_DEV_CLOCK is for development only: unset it in production");
   }
   if (production) config.canonicalOrigin = new URL(config.auth.url).origin;
   if (!Number.isInteger(port) || port <= 0) throw new Error(`PORT is not a port number: ${env.PORT}`);

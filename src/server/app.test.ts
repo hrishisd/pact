@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
+import { offsetClock } from "../core/adapters.ts";
 import { scenario } from "../core/testing/scenario.ts";
 import { EVIDENCE_KINDS, MAX_EVIDENCE_PHOTOS } from "../shared/types.ts";
 import { termsOf } from "../shared/terms.ts";
@@ -17,6 +18,7 @@ import {
   APP_PATHS,
   AUTH_BASE_PATH,
   AUTH_ERROR_PATH,
+  DEV_ADVANCE_PATH,
   DEV_SIGN_IN_PATH,
   EVIDENCE_PHOTO_FIELD,
   INVITE_REQUIRED_PATH,
@@ -113,6 +115,7 @@ async function server({
   production = false,
   ouraSetUp = true,
   ankiSetUp = true,
+  devClock = false,
 }: {
   canonicalOrigin?: string | null;
   commit?: string | null;
@@ -120,6 +123,7 @@ async function server({
   production?: boolean;
   ouraSetUp?: boolean;
   ankiSetUp?: boolean;
+  devClock?: boolean;
 } = {}) {
   const s = scenario();
   const ouraConnects: { account: string; code: string }[] = [];
@@ -172,6 +176,8 @@ async function server({
         }
       : null,
     log: (line) => s.logs.push(line),
+    // On the scenario's clock, so the core and the route agree on the time.
+    devClock: devClock ? offsetClock(s.clock) : null,
   });
   // Runs before the scenario's cleanup (finished hooks run in reverse order).
   onTestFinished(() => close());
@@ -701,6 +707,42 @@ describe("dev sign-in", () => {
     expect(again.status).toBe(302);
     expect(s.authRows()).toEqual({ user: 1, account: 0, session: 2 });
     expect((await s.api<MeResponse>(API_PATHS.me, { cookie: cookieFrom(again) })).status).toBe(200);
+  });
+});
+
+describe("dev clock", () => {
+  test("with the dev clock on, advance moves the server's time forward and ticks up to it", async () => {
+    const s = await server({ devClock: true });
+    const before = s.clock.now();
+
+    const response = await s.api(DEV_ADVANCE_PATH, { method: "POST", body: { minutes: 11 } });
+
+    const now = new Date(before.getTime() + 11 * 60_000).toISOString();
+    expect(response).toEqual({ status: 200, body: { now } });
+    expect(s.core.lastTick()?.toISOString()).toBe(now);
+  });
+
+  test("a shape other than a positive number of minutes is refused with 400", async () => {
+    const s = await server({ devClock: true });
+
+    for (const body of [{}, { minutes: -5 }, { minutes: 0 }, { minutes: "11" }]) {
+      expect((await s.api(DEV_ADVANCE_PATH, { method: "POST", body })).status).toBe(400);
+    }
+  });
+
+  test("without the dev clock, or from another machine, the route doesn't exist", async () => {
+    const off = await server();
+    expect((await off.api(DEV_ADVANCE_PATH, { method: "POST", body: { minutes: 11 } })).status).toBe(401);
+
+    const on = await server({ devClock: true });
+    const remote = await on.request(DEV_ADVANCE_PATH, {
+      origin: "http://192.168.1.20:5173",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ minutes: 11 }),
+    });
+    expect(remote.status).toBe(401);
+    expect(on.core.lastTick()).toBeNull();
   });
 });
 
