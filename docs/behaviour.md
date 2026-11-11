@@ -190,7 +190,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
   - Anki: sent until the day is judged.
   - Camera: sent while no evidence is in for the occurrence and it is not judged.
   - Weekly count: sent on a day with no evidence, while approved and waiting days are fewer than the target. Test: `reminders.test.ts`.
-- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows days whose excuse window is still open (rule R3), without misses from a rejection, days on a waiting cover, or days on a rejected excuse while its alert stands (`recentlyMissed`, `today.ts`).
+- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows days whose excuse window is still open (rule R3), without misses from a rejection, days on a waiting cover, or days on a rejected excuse while its alert stands, whether the day was judged before or after the rejection: the alert files another excuse for them (`recentlyMissed`, `today.ts`; `rejectedExcuseAlertStandsSql`, `excuses.ts`). Test: `excuses.test.ts` "a rejected excuse with days not judged yet".
 - Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:179`). Test: `invites.test.ts`.
 
 ## Text and request limits

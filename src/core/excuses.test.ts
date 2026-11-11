@@ -535,18 +535,33 @@ describe("a rejected excuse with days not judged yet", () => {
       }),
     ]);
     await s.advanceTo("Thu 08:00");
-    // Wednesday is Missed as usual, with its push, and its own Missed card.
+    // Wednesday is Missed as usual, with its push; the alert shows it, so it gets no Missed card too.
     expect(owed(owner)).toBe(1000);
     expect(s.notifier.sent.filter((n) => n.kind === "missed-occurrence").map((n) => n.payload.occurrenceDate)).toEqual([
       s.date("Mon"),
       s.date("Wed"),
     ]);
-    expect(owner.today().sections).toEqual([
-      { kind: "missed", cards: [expect.objectContaining({ occurrenceDate: s.date("Wed") })] },
-    ]);
+    expect(owner.today().sections).toEqual([]);
     // Wednesday, Missed after the rejection, can be excused until Sat 00:00; Friday is not judged yet.
     expect(owner.today().alerts).toEqual([expect.objectContaining({ refile: { closesAt: s.at("Sat 00:00") } })]);
   });
+  test("a day ahead rejected before it's judged shows once on Today when Missed: in the alert, not also as a Missed card", async () => {
+    const { s, owner, reviewer, gym } = await gymMissedMonday();
+    s.setClockTo("Wed 08:00");
+    const excuseId = await fileExcuse(owner, gym, sick(s.date("Fri")));
+    await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
+
+    await s.advanceTo("Sat 01:00");
+
+    expect(statusOn(owner, gym, s.date("Fri"))).toBe("missed");
+    expect(owner.today()).toMatchObject({
+      alerts: [
+        expect.objectContaining({ kind: "excuse-rejected", excuseId, refile: { closesAt: s.at("Mon+1 00:00") } }),
+      ],
+      sections: [],
+    });
+  });
+
   test("an approved change takes all its days off the schedule: no alert is left, and Today still loads", async () => {
     const { s, owner, reviewer, gym } = await gymMissedMonday();
     s.setClockTo("Tue 08:00");

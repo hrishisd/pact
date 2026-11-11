@@ -1,6 +1,6 @@
 # A day on an excuse rejected before its judging shows twice on Today
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 ## Problem
@@ -17,9 +17,15 @@ Which of the two shows the day: hide the Missed card while any rejected excuse's
 
 ## Acceptance criteria
 
-- [ ] A scenario: an excuse rejected before its day is judged; once Missed, Today shows the day once.
-- [ ] `docs/behaviour.md` matches.
+- [x] A scenario: an excuse rejected before its day is judged; once Missed, Today shows the day once.
+- [x] `docs/behaviour.md` matches.
 
 ## Owner decision (2026-11-11)
 
 Ready for an agent.
+
+## Notes from the agent that built it
+
+- Decided: Missed hides the card while any rejected excuse's alert covers the day, as `docs/behaviour.md` already said; the alert keeps its refile. One condition, `rejectedExcuseAlertStandsSql` (`src/core/excuses.ts`), now decides both when the alert stands and when Missed hides the day.
+- Side effect: a day missed after an excuse whose alert no longer stands (a later excuse filed for another of its days) now shows its Missed card; before, a rejection at or after the judging hid it with no alert left.
+- `excuses.test.ts` "its days ahead are judged as usual" asserted Wed's duplicate Missed card; it now expects none.

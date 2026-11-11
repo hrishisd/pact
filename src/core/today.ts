@@ -25,7 +25,7 @@ import { activePactsUsing } from "./connections.ts";
 import type { CoreContext } from "./context.ts";
 import { coveredSql, excusableUntil, excuseWindowOpensSql, onApprovedVacation } from "./covers.ts";
 import { rejectedDayAlerts, rejectedEvidenceAlerts } from "./evidence.ts";
-import { rejectedExcuseAlerts } from "./excuses.ts";
+import { rejectedExcuseAlertStandsSql, rejectedExcuseAlerts } from "./excuses.ts";
 import { ankiCheckOf, yesterdayEntries } from "./history.ts";
 import { billsForToday } from "./money.ts";
 import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, weekProgress } from "./occurrence-state.ts";
@@ -378,13 +378,15 @@ function weekToDo(
 }
 
 /**
- * SQL: an excuse or vacation waiting, or an excuse rejected after the miss
- * (its alert shows the miss), hides it from Missed. A vacation rejected
- * after the miss doesn't: its alert says until when the day can be excused,
- * and the day's card files the excuse (R3).
+ * SQL: an excuse or vacation waiting, or a rejected excuse whose alert
+ * stands, hides the miss from Missed: the alert shows the day and files
+ * another excuse for it, whether the day was judged before or after the
+ * rejection. A rejected vacation doesn't: its alert says until when the day
+ * can be excused, and the day's card files the excuse (R3).
  */
 const COVER_HIDES_MISS = `(cover.decision IS NULL
-  OR (cover.kind = 'excuse' AND cover.decision = 'rejected' AND cover.decided_at >= occurrence.judged_at))`;
+  OR (cover.kind = 'excuse' AND EXISTS (SELECT 1 FROM excuse AS rejected
+                                        WHERE rejected.id = cover.id AND ${rejectedExcuseAlertStandsSql("rejected")})))`;
 
 /** SQL: when the `occurrence` row's excuse window opens. */
 const WINDOW_OPENS = excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at");
