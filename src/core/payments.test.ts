@@ -335,6 +335,28 @@ describe("deciding a payment", () => {
     expect(owner.ledger(sam.id)).toMatchObject({ ok: true, ledger: { summary: { owedCents: 0, paidCents: 500 } } });
   });
 
+  test("a payment waiting when its pact's recipient and reviewers change goes to the pact's new reviewers, so it's never stranded", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    await s.advanceTo("Tue 12:00"); // Monday Missed: $5 to Sam
+    const paymentId = await recordPayment(owner, { recipientId: sam.id, amountCents: 500 });
+    const third = await s.befriend(owner, "third");
+    const redCross = ok(await owner.addRecipient({ name: "Red Cross" }));
+    const sent = await owner.changePact(
+      gym,
+      changed(owner, gym, { recipientId: redCross.recipient.id, reviewerIds: [third.id] }),
+    );
+    await reviewer.decide(changeRequestIdOf(sent), { kind: "approve" });
+
+    // Gym's earlier terms and its penalty still link it to Sam, so whoever reviews Gym now decides.
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(third.reviewQueue()).toEqual([expect.objectContaining({ kind: "payment", id: paymentId })]);
+    expect(await reviewer.decide(paymentId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    expect(await third.decide(paymentId, { kind: "approve" })).toEqual({ ok: true });
+    expect(owner.ledger(sam.id)).toMatchObject({ ok: true, ledger: { summary: { owedCents: 0, paidCents: 500 } } });
+  });
+
   test("a friend who reviews no pact with the recipient can't decide it", async () => {
     const s = scenario();
     const { owner, createPact, paymentId } = await tenRecorded(s);

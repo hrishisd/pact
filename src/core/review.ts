@@ -2,7 +2,6 @@
 // owner's reply, and who may see a photo.
 
 import { APP_PATHS } from "../shared/api.ts";
-import { money } from "../shared/format.ts";
 import type {
   AccountId,
   AskOwnerResult,
@@ -11,49 +10,14 @@ import type {
   ReviewDecision,
   ReviewItem,
 } from "../shared/types.ts";
-import {
-  approvableNow,
-  changeRequestRow,
-  changeRequestsToReview,
-  decideChangeRequest,
-  waitingChangeRequestId,
-  type StoredChangeRequest,
-} from "./change-requests.ts";
 import type { CoreContext } from "./context.ts";
-import { decideEvidence, evidenceToReview, type EvidenceToDecide } from "./evidence.ts";
-import { decideExcuse, excusesToReview, type ExcuseToDecide } from "./excuses.ts";
 import type { AnkiChecksRunning } from "./judging.ts";
-import { settlePactDueBy } from "./settle.ts";
-import {
-  decidePayment,
-  mayViewPaymentPhoto,
-  paymentReviewers,
-  paymentsToReview,
-  paymentToDecide,
-  type PaymentToDecide,
-} from "./money.ts";
-import { pactsToJudge } from "./occurrence-state.ts";
 import { tellAll } from "./outbox.ts";
-import {
-  decideVacation,
-  ownVacation,
-  vacationsToReview,
-  vacationToDecide,
-  type VacationToDecide,
-} from "./vacations.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
+import { REQUEST_HANDLERS } from "./request-kinds.ts";
+import { isWaiting, thread, type Decided, type RequestKindHandler, type RequestRow } from "./requests.ts";
 import { textTooLong } from "./text-limits.ts";
-import {
-  accountRow,
-  editWindowCutoff,
-  mergeByTime,
-  pactName,
-  recipientName,
-  reviewersOf,
-  thread,
-  type Decided,
-  type ReviewOutcome,
-} from "./rows.ts";
+import { accountRow } from "./rows.ts";
 
 export type PhotoResult = { ok: true; photo: Photo } | { ok: false; reason: "photo-not-found" };
 
@@ -64,10 +28,15 @@ export async function viewPhoto(
   photoStore: PhotoStore,
 ): Promise<PhotoResult> {
   accountRow(ctx, accountId);
-  const viewable =
-    mayViewPactItemPhoto(ctx, "evidence", photoId, accountId) ||
-    mayViewPactItemPhoto(ctx, "excuse", photoId, accountId) ||
-    mayViewPaymentPhoto(ctx, photoId, accountId);
+  // Those who may see a photo: the item's owner and whoever may decide it.
+  const viewable = REQUEST_HANDLERS.some((handler) =>
+    (handler.itemsWithPhoto?.(ctx, photoId) ?? []).some((itemId) => {
+      const item = handler.load(ctx, itemId);
+      return (
+        item !== undefined && (item.owner_account_id === accountId || handler.deciders(ctx, item).includes(accountId))
+      );
+    }),
+  );
   const photo = viewable ? await photoStore.fetch(photoId) : null;
   return photo ? { ok: true, photo } : { ok: false, reason: "photo-not-found" };
 }
@@ -91,15 +60,16 @@ export function askOwner(ctx: CoreContext, accountId: AccountId, itemId: string,
   if (text === "") return { ok: false, reason: "blank-question" };
   if (textTooLong(text)) return { ok: false, reason: "text-too-long" };
   addComment(ctx, itemId, accountId, false, text);
+  const { what, ownerPath } = item.handler.describe(ctx, item.row);
   ctx.enqueue({
     recipient: item.row.owner_account_id,
     kind: "reviewer-question",
     payload: {
-      itemKind: item.kind,
+      itemKind: item.row.kind,
       itemId,
-      title: `${name} asked about your ${itemWhat(ctx, item.kind, itemId)}`,
+      title: `${name} asked about your ${what}`,
       body: `“${text}”`,
-      url: itemPath(item.kind, itemId),
+      url: ownerPath,
     },
   });
   return { ok: true };
@@ -109,16 +79,16 @@ export function ownerReply(ctx: CoreContext, accountId: AccountId, itemId: strin
   const { name } = accountRow(ctx, accountId);
   const item = ownItem(ctx, accountId, itemId);
   if (!item) return { ok: false, reason: "item-not-found" };
-  if (!item.waiting) return { ok: false, reason: "not-waiting" };
+  if (!isWaiting(item.row)) return { ok: false, reason: "not-waiting" };
   if (!thread(ctx, itemId, true).waitingOnReply) return { ok: false, reason: "no-question" };
   const text = reply.trim();
   if (text === "") return { ok: false, reason: "blank-reply" };
   if (textTooLong(text)) return { ok: false, reason: "text-too-long" };
   addComment(ctx, itemId, accountId, true, text);
-  tellAll(ctx, item.reviewerIds, "owner-replied", {
-    itemKind: item.kind,
+  tellAll(ctx, item.handler.deciders(ctx, item.row), "owner-replied", {
+    itemKind: item.row.kind,
     itemId,
-    title: `${name} replied about their ${itemWhat(ctx, item.kind, itemId)}`,
+    title: `${name} replied about their ${item.handler.describe(ctx, item.row).what}`,
     body: `“${text}” It's back in your queue.`,
     url: APP_PATHS.review,
   });
@@ -140,159 +110,44 @@ export function decide(
   if (reason === "") return { ok: false, reason: "blank-reason" };
   if (reason !== null && textTooLong(reason)) return { ok: false, reason: "text-too-long" };
   const decided: Decided = reason === null ? { outcome: "approved", reason: null } : { outcome: "rejected", reason };
-  switch (item.kind) {
-    case "evidence":
-      decideEvidence(ctx, item.row, decided, accountId);
-      break;
-    case "excuse":
-      decideExcuse(ctx, item.row, decided, accountId, ankiChecksRunning);
-      break;
-    case "payment":
-      decidePayment(ctx, item.row, decided, accountId);
-      break;
-    case "vacation":
-      decideVacation(ctx, item.row, decided, accountId, ankiChecksRunning);
-      break;
-    case "change-request":
-      if (decided.outcome === "approved") {
-        // Judging catches up on the pact first, as the scheduler would have: a change never
-        // rescues an occurrence already due, and an end approved with nothing open leaves none
-        // unjudged. Judging may End it, which withdraws the request.
-        const [pact] = pactsToJudge(ctx, item.row.pact_id);
-        settlePactDueBy(ctx, pact!, ctx.clock.now(), ankiChecksRunning);
-        if (waitingChangeRequestId(ctx, item.row.pact_id) !== item.row.id) {
-          return { ok: false, reason: "item-not-found" };
-        }
-      }
-      if (decided.outcome === "approved" && !approvableNow(ctx, item.row)) {
-        return { ok: false, reason: "deadline-too-soon" };
-      }
-      decideChangeRequest(ctx, item.row, decided, accountId);
-      break;
-  }
+  const refusal = item.handler.checkDecision?.(ctx, item.row, decided, ankiChecksRunning) ?? null;
+  if (refusal !== null) return { ok: false, reason: refusal };
+  item.handler.apply(ctx, item.row, decided, accountId, ankiChecksRunning);
   return { ok: true };
+}
+
+/** A review item with its kind's handler. */
+interface FoundItem {
+  handler: RequestKindHandler<RequestRow>;
+  row: RequestRow;
+}
+
+/** The review item `itemId`, of whatever kind, with its handler. */
+function findItem(ctx: CoreContext, itemId: string): FoundItem | undefined {
+  for (const handler of REQUEST_HANDLERS) {
+    const row = handler.load(ctx, itemId);
+    if (row) return { handler, row };
+  }
+  return undefined;
 }
 
 /**
  * The review item `itemId`, if `reviewerId` may decide it (decided or not):
- * evidence or an excuse for a pact they review (evidence once the pact's
- * edit window has closed), a payment to a recipient of any of the owner's
- * pacts they review, a change request not withdrawn, for an Active pact, or
- * a vacation not withdrawn that the owner picked them for.
+ * they're one of its deciders, it isn't withdrawn, and its kind lets them
+ * act on it yet (`reviewable`).
  */
-function itemToDecide(ctx: CoreContext, reviewerId: AccountId, itemId: string): ItemToDecide | undefined {
-  const evidence = ctx.one<EvidenceToDecide>(
-    `SELECT evidence.id, evidence.pact_id, evidence.occurrence_date, evidence.day, evidence.decision,
-                pact.owner_account_id, owner.timezone
-         FROM evidence
-         JOIN pact ON pact.id = evidence.pact_id
-         JOIN account AS owner ON owner.id = pact.owner_account_id
-         JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-         WHERE evidence.id = ? AND pact.created_at <= ?`,
-    reviewerId,
-    itemId,
-    editWindowCutoff(ctx),
-  );
-  if (evidence) return { kind: "evidence", row: evidence };
-  const excuse = ctx.one<ExcuseToDecide>(
-    `SELECT excuse.id, excuse.pact_id, excuse.decision, pact.owner_account_id
-       FROM excuse
-       JOIN pact ON pact.id = excuse.pact_id
-       JOIN pact_reviewer ON pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?
-       WHERE excuse.id = ?`,
-    reviewerId,
-    itemId,
-  );
-  if (excuse) return { kind: "excuse", row: excuse };
-  const payment = paymentToDecide(ctx, reviewerId, itemId);
-  if (payment) return { kind: "payment", row: payment };
-  const vacation = vacationToDecide(ctx, reviewerId, itemId);
-  if (vacation) return { kind: "vacation", row: vacation };
-  const mayDecideRequest =
-    ctx.db
-      .prepare(
-        `SELECT 1 FROM change_request
-         JOIN pact ON pact.id = change_request.pact_id
-         JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
-                           AND pact_reviewer.reviewer_account_id = ?
-         WHERE change_request.id = ? AND change_request.withdrawn_at IS NULL AND pact.stage = 'active'`,
-      )
-      .get(reviewerId, itemId) !== undefined;
-  const changeRequest = mayDecideRequest ? changeRequestRow(ctx, itemId) : undefined;
-  return changeRequest && { kind: "change-request", row: changeRequest };
+function itemToDecide(ctx: CoreContext, reviewerId: AccountId, itemId: string): FoundItem | undefined {
+  const item = findItem(ctx, itemId);
+  if (!item || item.row.withdrawn_at !== null) return undefined;
+  const { handler, row } = item;
+  if (!handler.deciders(ctx, row).includes(reviewerId)) return undefined;
+  return (handler.reviewable?.(ctx, row) ?? true) ? item : undefined;
 }
 
-/**
- * One of `ownerId`'s review items: its kind, whether it's still waiting for
- * a decision (not decided, nor a change request withdrawn), and who may
- * decide it.
- */
-function ownItem(
-  ctx: CoreContext,
-  ownerId: AccountId,
-  itemId: string,
-): { kind: ReviewItem["kind"]; waiting: boolean; reviewerIds: AccountId[] } | undefined {
-  const ofPact = (table: "evidence" | "excuse") =>
-    ctx.one<{ pact_id: string; decision: ReviewOutcome | null }>(
-      `SELECT ${table}.pact_id, ${table}.decision FROM ${table}
-         JOIN pact ON pact.id = ${table}.pact_id
-         WHERE ${table}.id = ? AND pact.owner_account_id = ?`,
-      itemId,
-      ownerId,
-    );
-  for (const kind of ["evidence", "excuse"] as const) {
-    const row = ofPact(kind);
-    if (row) return { kind, waiting: row.decision === null, reviewerIds: reviewersOf(ctx, row.pact_id) };
-  }
-  const payment = ctx.one<{ recipient_id: string; decision: ReviewOutcome | null }>(
-    `SELECT recipient_id, decision FROM payment WHERE id = ? AND owner_account_id = ?`,
-    itemId,
-    ownerId,
-  );
-  if (payment) {
-    return {
-      kind: "payment",
-      waiting: payment.decision === null,
-      reviewerIds: paymentReviewers(ctx, ownerId, payment.recipient_id),
-    };
-  }
-  const request = changeRequestRow(ctx, itemId);
-  if (request && request.owner_account_id === ownerId) {
-    return {
-      kind: "change-request",
-      waiting: request.decision === null && request.withdrawn_at === null,
-      reviewerIds: reviewersOf(ctx, request.pact_id),
-    };
-  }
-  const vacation = ownVacation(ctx, ownerId, itemId);
-  if (vacation) return { kind: "vacation", ...vacation };
-  return undefined;
-}
-
-/** How a notification names a review item after "your" or "their": "evidence for Gym", "$10 payment to Sam". */
-function itemWhat(ctx: CoreContext, kind: ReviewItem["kind"], itemId: string): string {
-  switch (kind) {
-    case "evidence":
-    case "excuse": {
-      const { name } = ctx.db
-        .prepare(`SELECT pact.name FROM ${kind} JOIN pact ON pact.id = ${kind}.pact_id WHERE ${kind}.id = ?`)
-        .get(itemId) as { name: string };
-      return `${kind} for ${name}`;
-    }
-    case "payment": {
-      const { amount_cents, recipient_id } = ctx.db
-        .prepare(`SELECT amount_cents, recipient_id FROM payment WHERE id = ?`)
-        .get(itemId) as { amount_cents: number; recipient_id: string };
-      return `${money(amount_cents)} payment to ${recipientName(ctx, recipient_id)}`;
-    }
-    case "change-request": {
-      const row = changeRequestRow(ctx, itemId)!;
-      const name = pactName(ctx, row.pact_id);
-      return row.request.kind === "end" ? `request to end ${name}` : `change to ${name}`;
-    }
-    case "vacation":
-      return "vacation";
-  }
+/** One of `ownerId`'s review items. */
+function ownItem(ctx: CoreContext, ownerId: AccountId, itemId: string): FoundItem | undefined {
+  const item = findItem(ctx, itemId);
+  return item?.row.owner_account_id === ownerId ? item : undefined;
 }
 
 /** Adds a question (a reviewer's) or a reply (the owner's) to an item's thread. */
@@ -304,81 +159,14 @@ function addComment(ctx: CoreContext, itemId: string, authorId: AccountId, fromO
 
 /**
  * Every item `reviewerId` may decide, waiting on the owner's reply or not:
- * change requests first, then the rest (vacations included) oldest first.
+ * the kinds listed first (change requests), then the rest oldest first.
+ * Items at the same time keep the registry's order of kinds.
  */
 function reviewItems(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
-  // Change requests first: one waiting holds up any other change to its pact.
-  return [
-    ...changeRequestsToReview(ctx, reviewerId),
-    ...mergeByTime(
-      reviewItemSince,
-      "oldest-first",
-      evidenceToReview(ctx, reviewerId),
-      excusesToReview(ctx, reviewerId),
-      paymentsToReview(ctx, reviewerId),
-      vacationsToReview(ctx, reviewerId),
-    ),
-  ];
-}
-
-/** Whether `photoId` is a photo of some evidence or excuse (`table`) and `accountId` owns or reviews its pact. */
-function mayViewPactItemPhoto(
-  ctx: CoreContext,
-  table: "evidence" | "excuse",
-  photoId: string,
-  accountId: AccountId,
-): boolean {
-  return (
-    ctx.db
-      .prepare(
-        `SELECT 1 FROM ${table}_photo
-         JOIN ${table} ON ${table}.id = ${table}_photo.${table}_id
-         JOIN pact ON pact.id = ${table}.pact_id
-         WHERE ${table}_photo.photo_id = ?
-           AND (pact.owner_account_id = ?
-                OR EXISTS (SELECT 1 FROM pact_reviewer
-                           WHERE pact_reviewer.pact_id = pact.id AND pact_reviewer.reviewer_account_id = ?))`,
-      )
-      .get(photoId, accountId, accountId) !== undefined
+  const queued = REQUEST_HANDLERS.flatMap((handler) =>
+    handler.queue(ctx, reviewerId).map((entry) => ({ ...entry, first: handler.queueFirst === true })),
   );
-}
-
-/** A review item a reviewer may decide, as `decide` and `askOwner` read it. */
-type ItemToDecide =
-  | { kind: "evidence"; row: EvidenceToDecide }
-  | { kind: "excuse"; row: ExcuseToDecide }
-  | { kind: "payment"; row: PaymentToDecide }
-  | { kind: "change-request"; row: StoredChangeRequest }
-  | { kind: "vacation"; row: VacationToDecide };
-
-/** The owner's page for a review item: where a question about it opens. */
-function itemPath(kind: ReviewItem["kind"], itemId: string): string {
-  switch (kind) {
-    case "evidence":
-      return APP_PATHS.evidence(itemId);
-    case "excuse":
-      return APP_PATHS.excuse(itemId);
-    case "payment":
-      return APP_PATHS.payment(itemId);
-    case "change-request":
-      return APP_PATHS.changeRequest(itemId);
-    case "vacation":
-      return APP_PATHS.profile;
-  }
-}
-
-/** When a review item was sent for a decision: for ordering the Review Queue. */
-function reviewItemSince(item: ReviewItem): Date {
-  switch (item.kind) {
-    case "evidence":
-      return item.submittedAt;
-    case "excuse":
-      return item.filedAt;
-    case "payment":
-      return item.recordedAt;
-    case "change-request":
-      return item.requestedAt;
-    case "vacation":
-      return item.filedAt;
-  }
+  return queued
+    .sort((a, b) => Number(b.first) - Number(a.first) || a.since.getTime() - b.since.getTime())
+    .map((entry) => entry.item);
 }

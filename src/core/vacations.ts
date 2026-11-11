@@ -9,7 +9,6 @@ import {
   type AcceptVacationRejectionResult,
   type AccountId,
   type ExcusableDays,
-  type ReviewItem,
   type TodayAlert,
   type TodayVacation,
   type VacationCover,
@@ -43,18 +42,22 @@ import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
   accountRow,
-  decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
   occurrencesOf,
-  recordDecision,
   reviewersOf,
   scheduleOf,
+  type PactRow,
+} from "./rows.ts";
+import {
+  decisionDetails,
+  recordDecision,
   thread,
   type Decided,
-  type PactRow,
+  type QueuedItem,
+  type RequestKindHandler,
   type ReviewOutcome,
-} from "./rows.ts";
+} from "./requests.ts";
 
 export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
   const now = ctx.clock.now();
@@ -477,7 +480,7 @@ function heldTotal(held: CoveredPenalty[], dates = false): Pick<VacationCard, "h
 }
 
 /** Vacations waiting for approval that `reviewerId` was picked for, oldest first. */
-export function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<VacationRow & { owner_name: string; timezone: string }>(
     `SELECT ${VACATION_COLUMNS}, owner.name AS owner_name, owner.timezone
      FROM vacation
@@ -488,16 +491,20 @@ export function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): Revi
      ORDER BY vacation.filed_at, vacation.id`,
     reviewerId,
   );
-  return rows.map((row): ReviewItem => {
+  return rows.map((row) => {
     const held = coveredPenalties(ctx, row.id);
+    const filedAt = new Date(row.filed_at);
     return {
-      kind: "vacation",
-      ...vacationSummary(ctx, row),
-      ownerName: row.owner_name,
-      covers: vacationCovers(ctx, row.id, row.timezone, held),
-      ...heldTotal(held),
-      filedAt: new Date(row.filed_at),
-      thread: thread(ctx, row.id, true),
+      item: {
+        kind: "vacation",
+        ...vacationSummary(ctx, row),
+        ownerName: row.owner_name,
+        covers: vacationCovers(ctx, row.id, row.timezone, held),
+        ...heldTotal(held),
+        filedAt,
+        thread: thread(ctx, row.id, true),
+      },
+      since: filedAt,
     };
   });
 }
@@ -505,50 +512,32 @@ export function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): Revi
 /** A vacation a reviewer is deciding on, as `decide` reads it. */
 export interface VacationToDecide {
   id: string;
+  kind: "vacation";
   decision: ReviewOutcome | null;
+  withdrawn_at: string | null;
   owner_account_id: AccountId;
   first_day: LocalDate;
   last_day: LocalDate;
 }
 
 /**
- * The owner's vacation `vacationId`, for a reply to a question about it:
- * whether it still waits for a decision, and its picked reviewers.
+ * Vacations as review items: decided by the reviewers the owner picked at
+ * filing. Its Profile card lists it for the owner, so no waiting list does.
  */
-export function ownVacation(
-  ctx: CoreContext,
-  ownerId: AccountId,
-  vacationId: string,
-): { waiting: boolean; reviewerIds: AccountId[] } | undefined {
-  const vacation = ctx.one<{ decision: ReviewOutcome | null; withdrawn_at: string | null }>(
-    `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
-    vacationId,
-    ownerId,
-  );
-  return (
-    vacation && {
-      waiting: vacation.decision === null && vacation.withdrawn_at === null,
-      reviewerIds: pickedReviewers(ctx, vacationId),
-    }
-  );
-}
-
-/** The vacation `vacationId`, decided or not, if `reviewerId` was picked for it and it wasn't withdrawn. */
-export function vacationToDecide(
-  ctx: CoreContext,
-  reviewerId: AccountId,
-  vacationId: string,
-): VacationToDecide | undefined {
-  return ctx.one<VacationToDecide>(
-    `SELECT vacation.id, vacation.decision, vacation.owner_account_id, vacation.first_day, vacation.last_day
-     FROM vacation
-     JOIN vacation_reviewer ON vacation_reviewer.vacation_id = vacation.id
-                           AND vacation_reviewer.reviewer_account_id = ?
-     WHERE vacation.id = ? AND vacation.withdrawn_at IS NULL`,
-    reviewerId,
-    vacationId,
-  );
-}
+export const vacationKind: RequestKindHandler<VacationToDecide> = {
+  kind: "vacation",
+  load: (ctx, id) =>
+    ctx.one<VacationToDecide>(
+      `SELECT id, 'vacation' AS kind, decision, withdrawn_at, owner_account_id, first_day, last_day
+         FROM vacation WHERE id = ?`,
+      id,
+    ),
+  deciders: (ctx, vacation) => pickedReviewers(ctx, vacation.id),
+  apply: decideVacation,
+  describe: () => ({ what: "vacation", ownerPath: APP_PATHS.profile }),
+  queue: vacationsToReview,
+  waiting: () => [],
+};
 
 /**
  * Records a picked reviewer's decision on a vacation waiting for approval

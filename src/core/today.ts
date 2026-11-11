@@ -45,9 +45,9 @@ import {
   occurrencesOf,
   scheduleOf,
   termsOn,
-  thread,
-  waitingChangeRequests,
 } from "./rows.ts";
+import { thread } from "./requests.ts";
+import { waitingChangeRequests } from "./change-requests.ts";
 
 export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
   const { timezone } = accountRow(ctx, accountId);

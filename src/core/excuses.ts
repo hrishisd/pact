@@ -23,7 +23,6 @@ import {
   type FileExcuseResult,
   type LocalDate,
   type NewExcuse,
-  type ReviewItem,
   type TodayAlert,
   type TodayWaitingItem,
 } from "../shared/types.ts";
@@ -41,22 +40,26 @@ import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
   accountRow,
-  decisionDetails,
   friendsSortedByName,
   isWeekly,
   occurrencesOf,
   ownPact,
   pactName,
-  recordDecision,
   reviewersOf,
+  type PactRow,
+} from "./rows.ts";
+import {
+  decisionDetails,
+  recordDecision,
   reviewStateColumns,
   reviewStateOf,
   thread,
   type Decided,
-  type PactRow,
+  type QueuedItem,
+  type RequestKindHandler,
   type ReviewOutcome,
   type ReviewStateRow,
-} from "./rows.ts";
+} from "./requests.ts";
 
 export function excuseOptions(ctx: CoreContext, accountId: AccountId, pactId: string): ExcuseOptionsResult {
   const { timezone } = accountRow(ctx, accountId);
@@ -208,7 +211,11 @@ export interface ExcuseViewRow {
 /** An excuse a reviewer is deciding on, as `decide` reads it. */
 export interface ExcuseToDecide {
   id: string;
+  kind: "excuse";
+  /** An excuse is never withdrawn. */
+  withdrawn_at: null;
   pact_id: string;
+  pact_name: string;
   decision: ReviewOutcome | null;
   owner_account_id: AccountId;
 }
@@ -361,7 +368,7 @@ export function decideExcuse(
 }
 
 /** Excuses waiting for approval that `reviewerId` may decide: those for pacts they review. */
-export function excusesToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+function excusesToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<ExcuseViewRow & { owner_name: string; recipient_name: string }>(
     `SELECT excuse.id, excuse.reason, excuse.filed_at, pact.id AS pact_id, pact.name AS pact_name,
               owner.name AS owner_name, owner.timezone, recipient.name AS recipient_name
@@ -374,18 +381,46 @@ export function excusesToReview(ctx: CoreContext, reviewerId: AccountId): Review
        ORDER BY excuse.filed_at, excuse.id`,
     reviewerId,
   );
-  return rows.map((row): ReviewItem => {
+  return rows.map((row) => {
     const excuse = excuseView(ctx, row);
     return {
-      kind: "excuse",
-      ...excuse,
-      ownerName: row.owner_name,
-      heldCents: excuse.days.reduce((sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0), 0),
-      recipientName: row.recipient_name,
-      thread: thread(ctx, row.id, true),
+      item: {
+        kind: "excuse",
+        ...excuse,
+        ownerName: row.owner_name,
+        heldCents: excuse.days.reduce(
+          (sum, { status }) => sum + (status.kind === "missed" ? status.penaltyCents : 0),
+          0,
+        ),
+        recipientName: row.recipient_name,
+        thread: thread(ctx, row.id, true),
+      },
+      since: new Date(row.filed_at),
     };
   });
 }
+
+/** Excuses as review items: decided by the pact's reviewers. */
+export const excuseKind: RequestKindHandler<ExcuseToDecide> = {
+  kind: "excuse",
+  load: (ctx, id) =>
+    ctx.one<ExcuseToDecide>(
+      `SELECT excuse.id, 'excuse' AS kind, NULL AS withdrawn_at, excuse.pact_id, pact.name AS pact_name,
+              excuse.decision, pact.owner_account_id
+         FROM excuse JOIN pact ON pact.id = excuse.pact_id
+         WHERE excuse.id = ?`,
+      id,
+    ),
+  deciders: (ctx, excuse) => reviewersOf(ctx, excuse.pact_id),
+  apply: decideExcuse,
+  describe: (_ctx, excuse) => ({ what: `excuse for ${excuse.pact_name}`, ownerPath: APP_PATHS.excuse(excuse.id) }),
+  queue: excusesToReview,
+  waiting: waitingExcuses,
+  itemsWithPhoto: (ctx, photoId) =>
+    ctx
+      .all<{ excuse_id: string }>(`SELECT excuse_id FROM excuse_photo WHERE photo_id = ?`, photoId)
+      .map((row) => row.excuse_id),
+};
 
 /** The owner's excuses waiting for a decision (or just those for `pactId`), newest first. */
 export function waitingExcuses(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {

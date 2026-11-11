@@ -40,3 +40,8 @@ Decision 5 in `../spec.md` (rule R10), decided 2026-11-11: the owner has one wai
 
 - Withdrawal reasons (ticket 20).
 - The reviewer's Review Queue (unchanged).
+
+## Notes from ticket 17
+
+- Each handler in `REQUEST_KINDS` (`src/core/request-kinds.ts`) already has `waiting(ctx, ownerId, pactId?)`, wrapping the existing per-kind query; payment's answers nothing for a `pactId`, vacation's nothing at all yet. Today and the pact page still call the per-kind functions.
+- Import cycle to watch: `pacts.ts` and `change-requests.ts` import each other. If `pacts.ts` imports `request-kinds.ts`, the registry may be built before `change-requests.ts` has defined `changeRequestKind` (a TDZ error at startup, depending on import order). Build `waitingFor` in a module `pacts.ts` doesn't sit in a cycle with (for example `requests`-side code that `core.ts` calls and passes into `pactPage`), or look the registry up lazily.

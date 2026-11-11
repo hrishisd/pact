@@ -18,7 +18,6 @@ import type {
   Recipient,
   RecordPaymentRefusal,
   RecordPaymentResult,
-  ReviewItem,
   TodayAlert,
   TodayBillCard,
   TodayWaitingItem,
@@ -41,22 +40,19 @@ import { settingIsOff, tellAll } from "./outbox.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
 import { textTooLong } from "./text-limits.ts";
+import { accountName, accountRow, byName, friendsSortedByName, mergeByTime, recipientName } from "./rows.ts";
 import {
-  accountName,
-  accountRow,
-  byName,
   decisionDetails,
-  friendsSortedByName,
-  mergeByTime,
-  recipientName,
   recordDecision,
   reviewStateColumns,
   reviewStateOf,
   thread,
   type Decided,
+  type QueuedItem,
+  type RequestKindHandler,
   type ReviewOutcome,
   type ReviewStateRow,
-} from "./rows.ts";
+} from "./requests.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How often an Overdue owner is reminded, and how often their reviewers are told. */
@@ -652,7 +648,7 @@ function paymentAcceptance(
 }
 
 /** Payments awaiting approval that `reviewerId` may decide, oldest recorded first. */
-export function paymentsToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+function paymentsToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<
     PaymentViewRow & {
       owner_account_id: AccountId;
@@ -670,15 +666,18 @@ export function paymentsToReview(ctx: CoreContext, reviewerId: AccountId): Revie
        ORDER BY payment.recorded_at, payment.id`,
     reviewerId,
   );
-  return rows.map((row): ReviewItem => {
+  return rows.map((row) => {
     const owedCents = ledgerSummaries(ctx, row.owner_account_id, row.recipient_id)[0]?.owedCents ?? 0;
     return {
-      kind: "payment",
-      ...paymentView(row),
-      ownerName: row.owner_name,
-      owedCents,
-      owedAfterApprovalCents: Math.max(0, owedCents - row.amount_cents),
-      thread: thread(ctx, row.id, true),
+      item: {
+        kind: "payment",
+        ...paymentView(row),
+        ownerName: row.owner_name,
+        owedCents,
+        owedAfterApprovalCents: Math.max(0, owedCents - row.amount_cents),
+        thread: thread(ctx, row.id, true),
+      },
+      since: new Date(row.recorded_at),
     };
   });
 }
@@ -695,20 +694,6 @@ export function paymentReviewers(ctx: CoreContext, ownerId: AccountId, recipient
 }
 
 /**
- * The payment `itemId`, if `reviewerId` may decide it: they review any of
- * the owner's pacts with its recipient.
- */
-export function paymentToDecide(ctx: CoreContext, reviewerId: AccountId, itemId: string): PaymentToDecide | undefined {
-  return ctx.one<PaymentToDecide>(
-    `SELECT payment.id, payment.owner_account_id, payment.recipient_id, payment.decision
-       FROM payment
-       WHERE payment.id = ? AND ${MAY_DECIDE_PAYMENT}`,
-    itemId,
-    reviewerId,
-  );
-}
-
-/**
  * Records a reviewer's decision on a payment awaiting approval and tells
  * the owner. Approved, it counts against the ledger; rejected, it never did.
  */
@@ -720,10 +705,7 @@ export function decidePayment(
 ): void {
   const { outcome, reason } = decided;
   recordDecision(ctx, "payment", payment.id, decided, reviewerId, ctx.clock.now());
-  const { amount_cents } = ctx.db.prepare(`SELECT amount_cents FROM payment WHERE id = ?`).get(payment.id) as {
-    amount_cents: number;
-  };
-  const paid = `${money(amount_cents)} to ${recipientName(ctx, payment.recipient_id)}`;
+  const paid = `${money(payment.amount_cents)} to ${recipientName(ctx, payment.recipient_id)}`;
   ctx.enqueue({
     recipient: payment.owner_account_id,
     kind: "payment-decided",
@@ -740,21 +722,28 @@ export function decidePayment(
 }
 
 /**
- * Whether `photoId` is a payment's screenshot and `accountId` made the
- * payment or reviews any of the owner's pacts with its recipient: those who
- * may decide it.
+ * Payments as review items: decided by the reviewers of any of the owner's
+ * pacts with the recipient (`paymentReviewersSql`). The pact page lists none.
  */
-export function mayViewPaymentPhoto(ctx: CoreContext, photoId: string, accountId: AccountId): boolean {
-  return (
-    ctx.db
-      .prepare(
-        `SELECT 1 FROM payment
-         WHERE payment.photo_id = ?
-           AND (payment.owner_account_id = ? OR ${MAY_DECIDE_PAYMENT})`,
-      )
-      .get(photoId, accountId, accountId) !== undefined
-  );
-}
+export const paymentKind: RequestKindHandler<PaymentToDecide> = {
+  kind: "payment",
+  load: (ctx, id) =>
+    ctx.one<PaymentToDecide>(
+      `SELECT id, 'payment' AS kind, NULL AS withdrawn_at, owner_account_id, recipient_id, amount_cents, decision
+         FROM payment WHERE id = ?`,
+      id,
+    ),
+  deciders: (ctx, payment) => paymentReviewers(ctx, payment.owner_account_id, payment.recipient_id),
+  apply: (ctx, payment, decided, reviewerId) => decidePayment(ctx, payment, decided, reviewerId),
+  describe: (ctx, payment) => ({
+    what: `${money(payment.amount_cents)} payment to ${recipientName(ctx, payment.recipient_id)}`,
+    ownerPath: APP_PATHS.payment(payment.id),
+  }),
+  queue: paymentsToReview,
+  waiting: (ctx, ownerId, pactId) => (pactId === undefined ? waitingPayments(ctx, ownerId) : []),
+  itemsWithPhoto: (ctx, photoId) =>
+    ctx.all<{ id: string }>(`SELECT id FROM payment WHERE photo_id = ?`, photoId).map((row) => row.id),
+};
 
 /** The owner's payments still waiting for a decision, newest first. */
 export function waitingPayments(ctx: CoreContext, ownerId: AccountId): TodayWaitingItem[] {
@@ -808,7 +797,11 @@ function paymentView(row: PaymentViewRow): PaymentView {
 /** A payment a reviewer is deciding on, as `decide` reads it. */
 export interface PaymentToDecide {
   id: string;
+  kind: "payment";
+  /** A payment is never withdrawn. */
+  withdrawn_at: null;
   owner_account_id: AccountId;
   recipient_id: string;
+  amount_cents: number;
   decision: ReviewOutcome | null;
 }

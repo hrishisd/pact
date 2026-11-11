@@ -21,8 +21,8 @@ import type {
   PactChange,
   PactTerms,
   RequestEndResult,
-  ReviewItem,
   TermChange,
+  TodayWaitingItem,
   WithdrawChangeRequestResult,
 } from "../shared/types.ts";
 import { laterDate, localDateOf } from "./calendar.ts";
@@ -30,7 +30,14 @@ import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } 
 import type { CoreContext } from "./context.ts";
 import { uncoverRemovedDays } from "./covers.ts";
 import { endAfter, endPact, endTiming } from "./ending.ts";
-import { dueSoonEnough, hasSchedule, lastDayOf, occurrences, occurrencesOverTime } from "./occurrences.ts";
+import {
+  dueSoonEnough,
+  hasSchedule,
+  lastDayOf,
+  occurrences,
+  occurrencesOverTime,
+  type Occurrences,
+} from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import {
   dayClockOf,
@@ -54,25 +61,32 @@ import {
   accountName,
   accountRow,
   ankiDeckName,
-  decisionDetails,
   earlierTermsOf,
   friendsSortedByName,
   occurrencesOf,
   occurrenceTermsOf,
   ownPact,
+  pactName,
   recipientName,
-  recordDecision,
   remindersOf,
   reviewersOf,
-  reviewStateOf,
   scheduleOf,
   scheduleTermsOf,
-  thread,
-  todayKeeps,
-  type Decided,
+  termsOn,
   type PactRow,
-  type ReviewStateRow,
 } from "./rows.ts";
+import {
+  decisionDetails,
+  recordDecision,
+  reviewStateOf,
+  thread,
+  type Decided,
+  type QueuedItem,
+  type RequestKindHandler,
+  type ReviewStateRow,
+} from "./requests.ts";
+import { pactsToJudge } from "./occurrence-state.ts";
+import { settlePactDueBy } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
 
 export function changePreview(
@@ -208,6 +222,7 @@ export type RequestedChange = { kind: "end" } | { kind: "change"; before: Change
 
 /** A change request as `changeRequestRow` reads it, with what it asks parsed. */
 export type StoredChangeRequest = Omit<ChangeRequestRow, "ends_pact" | "before_terms" | "after_terms"> & {
+  kind: "change-request";
   request: RequestedChange;
 };
 
@@ -219,6 +234,7 @@ export function storedChangeRequestOf({
 }: ChangeRequestRow): StoredChangeRequest {
   return {
     ...row,
+    kind: "change-request",
     request:
       after === null ? { kind: "end" } : { kind: "change", before: storedTerms(before), after: storedTerms(after) },
   };
@@ -678,7 +694,7 @@ export function changeRequestView(ctx: CoreContext, row: StoredChangeRequest): C
 }
 
 /** Change requests waiting for a decision that `reviewerId` may make: those for pacts they review, oldest first. */
-export function changeRequestsToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+function changeRequestsToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const ids = ctx.all<{ id: string }>(
     `SELECT change_request.id FROM change_request
        JOIN pact_reviewer ON pact_reviewer.pact_id = change_request.pact_id
@@ -690,13 +706,80 @@ export function changeRequestsToReview(ctx: CoreContext, reviewerId: AccountId):
   return ids.map(({ id }) => {
     const row = changeRequestRow(ctx, id)!;
     return {
-      kind: "change-request",
-      ownerName: row.owner_name,
-      thread: thread(ctx, id, true),
-      ...changeRequestView(ctx, row),
+      item: {
+        kind: "change-request",
+        ownerName: row.owner_name,
+        thread: thread(ctx, id, true),
+        ...changeRequestView(ctx, row),
+      },
+      since: new Date(row.requested_at),
     };
   });
 }
+
+/** The owner's change requests waiting for a decision (or just that for `pactId`), newest first. */
+export function waitingChangeRequests(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+  const rows = ctx.all<{
+    id: string;
+    pact_id: string;
+    name: string;
+    ends_pact: 0 | 1;
+    requested_at: string;
+  }>(
+    `SELECT change_request.id, change_request.pact_id, pact.name, change_request.ends_pact,
+              change_request.requested_at
+       FROM change_request JOIN pact ON pact.id = change_request.pact_id
+       WHERE pact.owner_account_id = ? AND change_request.decision IS NULL AND change_request.withdrawn_at IS NULL
+         AND (? IS NULL OR pact.id = ?)
+       ORDER BY change_request.requested_at DESC, change_request.id`,
+    ownerId,
+    pactId ?? null,
+    pactId ?? null,
+  );
+  return rows.map((row) => ({
+    kind: "change-request",
+    id: row.id,
+    pactId: row.pact_id,
+    name: row.name,
+    endsPact: row.ends_pact === 1,
+    requestedAt: new Date(row.requested_at),
+  }));
+}
+
+/**
+ * Change requests as review items: decided by the pact's reviewers while
+ * it's Active, and first in the Review Queue, as one waiting holds up any
+ * other change to its pact.
+ */
+export const changeRequestKind: RequestKindHandler<StoredChangeRequest> = {
+  kind: "change-request",
+  load: (ctx, id) => changeRequestRow(ctx, id),
+  deciders: (ctx, row) => reviewersOf(ctx, row.pact_id),
+  reviewable: (ctx, row) =>
+    (ctx.db.prepare(`SELECT stage FROM pact WHERE id = ?`).get(row.pact_id) as Pick<PactRow, "stage">).stage ===
+    "active",
+  checkDecision(ctx, row, decided, ankiChecksRunning) {
+    if (decided.outcome === "rejected") return null;
+    // Judging catches up on the pact first, as the scheduler would have: a change never
+    // rescues an occurrence already due, and an end approved with nothing open leaves none
+    // unjudged. Judging may End it, which withdraws the request.
+    const [pact] = pactsToJudge(ctx, row.pact_id);
+    settlePactDueBy(ctx, pact!, ctx.clock.now(), ankiChecksRunning);
+    if (waitingChangeRequestId(ctx, row.pact_id) !== row.id) return "item-not-found";
+    return approvableNow(ctx, row) ? null : "deadline-too-soon";
+  },
+  apply: (ctx, row, decided, reviewerId) => decideChangeRequest(ctx, row, decided, reviewerId),
+  describe(ctx, row) {
+    const name = pactName(ctx, row.pact_id);
+    return {
+      what: row.request.kind === "end" ? `request to end ${name}` : `change to ${name}`,
+      ownerPath: APP_PATHS.changeRequest(row.id),
+    };
+  },
+  queue: changeRequestsToReview,
+  queueFirst: true,
+  waiting: waitingChangeRequests,
+};
 
 /**
  * Records a reviewer's decision on a change request and tells the owner.
@@ -767,4 +850,18 @@ export function approvableNow(ctx: CoreContext, row: StoredChangeRequest): boole
   const pact = ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
   if (pact.stage === "ended") return true;
   return deadlineFarEnough(ctx, pact, row.timezone, request.after, ctx.clock.now());
+}
+
+/** The penalty the occurrence of `occurrences` open `today` keeps, when it differs from `after`'s; else null. */
+export function todayKeeps(
+  ctx: CoreContext,
+  pactId: string,
+  occurrences: Occurrences,
+  today: LocalDate,
+  after: Pick<ChangeableTerms, "penaltyCents">,
+): number | null {
+  const open = occurrences.covering(today);
+  if (!open) return null;
+  const { penalty_cents: penalty } = termsOn(ctx, pactId, open.date);
+  return penalty !== after.penaltyCents ? penalty : null;
 }

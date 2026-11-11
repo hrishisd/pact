@@ -1,6 +1,6 @@
 # 17 Review item registry
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: H1 step 1 (`../architecture-review.md`, H1, "Target design" and "Migration order"). No behaviour change.
@@ -25,14 +25,42 @@ The duplication has already drifted: deciders are answered three ways (F5), the 
 
 ## Acceptance criteria
 
-- [ ] `review.ts` has no switch or probe sequence over item kinds.
-- [ ] Adding a sixth kind would mean one handler and one registry entry; show it in Comments by listing what a new kind would touch.
-- [ ] Every existing test passes unchanged.
-- [ ] The payment stranding question is answered in Comments, with a scenario for the recipient-change case.
-- [ ] `npm run check` passes.
+- [x] `review.ts` has no switch or probe sequence over item kinds.
+- [x] Adding a sixth kind would mean one handler and one registry entry; show it in Comments by listing what a new kind would touch.
+- [x] Every existing test passes unchanged.
+- [x] The payment stranding question is answered in Comments, with a scenario for the recipient-change case.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - The `request` table and any migration (H1 step 5, not doing now).
 - Any behaviour change: who decides, what is listed, withdrawal (tickets 18 to 21).
 - Collapsing per-kind `AccountView` methods (H4, not ticketed).
+
+## Comments
+
+Built 2026-11-11.
+
+What exists now:
+
+- `src/core/requests.ts`: `RequestKind`, `RequestRow`, `RequestKindHandler<P>`, `QueuedItem`, `isWaiting`, and the lifecycle helpers moved out of `rows.ts` (`ReviewOutcome`, `Decided`, `decisionDetails`, `recordDecision`, `reviewStateColumns`, `ReviewStateRow`, `reviewStateOf`, `thread`). `waitingChangeRequests` and `todayKeeps` moved into `change-requests.ts`.
+- Handlers beside their feature code: `evidenceKind` (`evidence.ts`), `excuseKind` (`excuses.ts`), `paymentKind` (`money.ts`), `changeRequestKind` (`change-requests.ts`), `vacationKind` (`vacations.ts`). The registry is `REQUEST_KINDS` (and `REQUEST_HANDLERS`, its values in order) in `src/core/request-kinds.ts`, its own module so that the feature modules never import it.
+- `review.ts` loops over the registry: `findItem`, `itemToDecide` (a decider, not withdrawn, and the kind's `reviewable`), `ownItem`, `decide` (shared checks, then the kind's `checkDecision` and `apply`), `askOwner`/`ownerReply` (`describe`, `deciders`), `reviewItems` (`queue`, `queueFirst`, then by `since`), `viewPhoto` (`itemsWithPhoto`; the owner or a decider may see it). `paymentToDecide`, `mayViewPaymentPhoto`, `ownVacation` and `vacationToDecide` are gone.
+
+Where the interface differs from the sketch in H1, and why:
+
+- `queue(ctx, reviewerId)` returns `{ item, since }[]`: the kind's queue query and `queueItem` in one, since each kind's query already builds the items; `since` replaces `reviewItemSince`.
+- `itemsWithPhoto(ctx, photoId)` instead of `photoIds(ctx, id)`: `viewPhoto` starts from a photo, not an item.
+- `reviewable` (new): evidence waits for the edit window to close, a change request needs an Active pact. A withdrawn item is never decidable, for every kind.
+- `canWithdraw` left out: withdrawal is still per kind (`withdrawChangeRequest`, `withdrawVacation`; H4 is out of scope), and `withdrawn_at` is null for kinds that can't be withdrawn, so nothing reads it. Ticket 20 can add it with withdrawal reasons.
+- `waiting(ctx, ownerId, pactId?)` is on every handler (payment answers nothing with a `pactId`; vacation nothing yet) but Today and the pact page still call the per-kind functions: writing `waitingFor` over the registry is ticket 18's first bullet.
+- Change request's `checkDecision` catches judging up on approval before checking (as `decide` did), so it can write before refusing; unchanged behaviour.
+
+Adding a sixth kind would touch: its table (a migration), its variant in `ReviewItem` (and `TodayWaitingItem` if the owner lists it) in `src/shared/types.ts`, `recordDecision`'s table name union, one handler beside its code, one entry in `REQUEST_KINDS`, and the client's rendering of the new `ReviewItem` variant. Nothing in `review.ts` changes. `REQUEST_KINDS` is keyed by `RequestKind`, so a new kind without a handler fails `tsc`.
+
+Payment stranding: it can't happen. A payment needs something owed to its recipient, so a penalty row to that recipient exists, from a pact past its edit window. Penalty rows are only deleted when an occurrence is settled again, a pact is only deleted inside its edit window (with no penalties), `pact_earlier_terms` rows are never deleted, and a change keeps at least one reviewer. So some pact of the owner's always links to the recipient through its current terms, earlier terms or a penalty, and its current reviewers decide. New scenario in `payments.test.ts`: "a payment waiting when its pact's recipient and reviewers change goes to the pact's new reviewers, so it's never stranded". It passed before and after the refactor. No ticket filed.
+
+The ticket's line numbers predate tickets 08 to 16 (for example `review.ts:138-166` for `decide` was `:128-174`, `rows.ts:137`/`:148` were `:125`/`:136`); the code it describes was otherwise as written.
+
+`npm run check` and `npm run test:e2e` pass. No existing test changed; one scenario added.
+

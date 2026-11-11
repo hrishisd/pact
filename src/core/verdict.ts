@@ -16,7 +16,8 @@ import { coverOn, type Cover } from "./covers.ts";
 import { ANKI_CHECK_HOLDS_JUDGING_MS } from "./judging.ts";
 import type { Occurrence, Occurrences } from "./occurrences.ts";
 import { deadlineWallClock, wallClock } from "./oura-clock.ts";
-import { ankiDeckOn, occurrencesOf, scheduleOf, termsOn, type ReviewOutcome } from "./rows.ts";
+import type { ReviewOutcome } from "./requests.ts";
+import { ankiDeckOn, occurrencesOf, scheduleOf, termsOn } from "./rows.ts";
 
 /** One submission of evidence for the occurrence (a Weekly count week: for one of its days). */
 export interface EvidenceFact {

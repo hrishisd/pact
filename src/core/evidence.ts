@@ -10,7 +10,6 @@ import {
   type EvidenceResult,
   type EvidenceView,
   type LocalDate,
-  type ReviewItem,
   type SubmitEvidenceRefusal,
   type SubmitEvidenceResult,
   type TodayAlert,
@@ -34,25 +33,29 @@ import type { Photo, PhotoStore } from "./ports.ts";
 import {
   accountName,
   accountRow,
-  decisionDetails,
   editWindowCutoff,
   friendsSortedByName,
   occurrencesOf,
   ownPact,
   pactName,
   recipientName,
-  recordDecision,
   reviewersOf,
-  reviewStateColumns,
-  reviewStateOf,
   scheduleOf,
   termsOn,
+  type PactRow,
+} from "./rows.ts";
+import {
+  decisionDetails,
+  recordDecision,
+  reviewStateColumns,
+  reviewStateOf,
   thread,
   type Decided,
-  type PactRow,
+  type QueuedItem,
+  type RequestKindHandler,
   type ReviewOutcome,
   type ReviewStateRow,
-} from "./rows.ts";
+} from "./requests.ts";
 import { settle } from "./settle.ts";
 
 export async function submitEvidence(
@@ -161,7 +164,13 @@ export interface EvidenceViewRow {
 /** Evidence a reviewer is deciding on, as `decide` reads it. */
 export interface EvidenceToDecide {
   id: string;
+  kind: "evidence";
+  /** Evidence is never withdrawn. */
+  withdrawn_at: null;
   pact_id: string;
+  pact_name: string;
+  /** When the pact was created: its reviewers may decide its evidence once its edit window has closed. */
+  created_at: string;
   occurrence_date: LocalDate;
   /** The day it counts for: on Weekly count, the day of the week. */
   day: LocalDate;
@@ -189,7 +198,7 @@ export function evidenceView(
 }
 
 /** Evidence waiting for approval that `reviewerId` may decide: for pacts they review, past the edit window. */
-export function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<EvidenceViewRow & { owner_name: string; weekly: 0 | 1 }>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
               evidence.submitted_at, evidence.occurrence_date, evidence.day, ${WEEKLY_COUNT_PACT} AS weekly
@@ -202,17 +211,20 @@ export function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): Revie
     reviewerId,
     editWindowCutoff(ctx),
   );
-  return rows.map((row): ReviewItem => {
+  return rows.map((row) => {
     // What counts, and what rejecting costs: the terms of the occurrence's day.
     const terms = termsOn(ctx, row.pact_id, row.occurrence_date);
     return {
-      kind: "evidence",
-      ...evidenceView(ctx, row, terms),
-      ownerName: row.owner_name,
-      penaltyCents: terms.penalty_cents,
-      recipientName: recipientName(ctx, terms.recipient_id),
-      ...(row.weekly === 1 && { week: weekProgress(ctx, row.pact_id, row.occurrence_date) }),
-      thread: thread(ctx, row.id, true),
+      item: {
+        kind: "evidence",
+        ...evidenceView(ctx, row, terms),
+        ownerName: row.owner_name,
+        penaltyCents: terms.penalty_cents,
+        recipientName: recipientName(ctx, terms.recipient_id),
+        ...(row.weekly === 1 && { week: weekProgress(ctx, row.pact_id, row.occurrence_date) }),
+        thread: thread(ctx, row.id, true),
+      },
+      since: new Date(row.submitted_at),
     };
   });
 }
@@ -250,6 +262,38 @@ export function decideEvidence(
   // After the decision's push, so a Missed push it causes comes second.
   settle(ctx, evidence.pact_id, evidence.occurrence_date, now);
 }
+
+/**
+ * Evidence as a review item: decided by the pact's reviewers once its edit
+ * window has closed.
+ */
+export const evidenceKind: RequestKindHandler<EvidenceToDecide> = {
+  kind: "evidence",
+  load: (ctx, id) =>
+    ctx.one<EvidenceToDecide>(
+      `SELECT evidence.id, 'evidence' AS kind, NULL AS withdrawn_at, evidence.pact_id, pact.name AS pact_name,
+              pact.created_at, evidence.occurrence_date, evidence.day, evidence.decision, pact.owner_account_id,
+              owner.timezone
+         FROM evidence
+         JOIN pact ON pact.id = evidence.pact_id
+         JOIN account AS owner ON owner.id = pact.owner_account_id
+         WHERE evidence.id = ?`,
+      id,
+    ),
+  deciders: (ctx, evidence) => reviewersOf(ctx, evidence.pact_id),
+  reviewable: (ctx, evidence) => evidence.created_at <= editWindowCutoff(ctx),
+  apply: (ctx, evidence, decided, reviewerId) => decideEvidence(ctx, evidence, decided, reviewerId),
+  describe: (_ctx, evidence) => ({
+    what: `evidence for ${evidence.pact_name}`,
+    ownerPath: APP_PATHS.evidence(evidence.id),
+  }),
+  queue: evidenceToReview,
+  waiting: waitingEvidence,
+  itemsWithPhoto: (ctx, photoId) =>
+    ctx
+      .all<{ evidence_id: string }>(`SELECT evidence_id FROM evidence_photo WHERE photo_id = ?`, photoId)
+      .map((row) => row.evidence_id),
+};
 
 /** The photos of some evidence, in the order taken. */
 export function evidencePhotoIds(ctx: CoreContext, evidenceId: string): string[] {

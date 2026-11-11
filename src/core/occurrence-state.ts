@@ -14,7 +14,8 @@ import type {
 import type { CoreContext } from "./context.ts";
 import { coverOn, excusableUntil, excuseWindowOpensSql, keepsToDo } from "./covers.ts";
 import { lastDayOf, type Occurrence } from "./occurrences.ts";
-import { occurrencesOf, scheduleOf, termsOn, type PactRow, type ReviewOutcome } from "./rows.ts";
+import type { ReviewOutcome } from "./requests.ts";
+import { occurrencesOf, scheduleOf, termsOn, type PactRow } from "./rows.ts";
 
 /** SQL: what judging reads of a `pact` row and its owner's `account` row (PactToJudge). */
 const PACT_TO_JUDGE_COLUMNS = `pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,

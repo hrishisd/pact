@@ -22,7 +22,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 - For the first 10 minutes after creation the owner can edit or delete the pact freely (`EDIT_WINDOW_MS`, `pact-rules.ts:36`; `editPact`, `pacts.ts:116`; `deletePact`, `pacts.ts:160`). An edit does not restart the window. Test: `edit-window.test.ts`.
 - An edit that drops days from the schedule removes evidence for those days. An edit to a One-time deadline moves its occurrence with its evidence (`editPact`, `moveOneTimeOccurrence`, `pacts.ts:528`).
-- Reviewers are told they were picked only when the window closes, and evidence submitted inside the window goes to them then (`closeEditWindows`, `pacts.ts:571`). Until then a reviewer cannot see or decide the pact's evidence (`evidence.ts:200`; `itemToDecide` in `review.ts:182`).
+- Reviewers are told they were picked only when the window closes, and evidence submitted inside the window goes to them then (`closeEditWindows`, `pacts.ts:571`). Until then a reviewer cannot see or decide the pact's evidence (`evidence.ts:201`; `reviewable` in `evidenceKind`, `evidence.ts:284`).
 - No excuse can be filed while the window is open (`edit-window-open`, `excuseOptions`, `excuses.ts:66`), and vacations offer only pacts past it (`offeredPacts`, `vacations.ts:77`).
 
 ### Change requests
@@ -37,7 +37,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - An end date approved too late to keep the day open now is moved to that day (`laterDate(after.endDate, lastOpen)` in `applyTerms`).
 - With an end date, a Weekly count pact counts only whole weeks: it Ends after the last whole week before the end date (`pact-rules.ts:153`; decided in pact-v0 ticket 14). Test: `weekly-count.test.ts:685`.
 - One-time: the new deadline must be at least an hour away, both when sent and when approved (`deadlineFarEnough` in `checkedChange`; `approvableNow`, `change-requests.ts:755`). A request decided after the occurrence was judged leaves the pact as it was (`applyOneTimeTerms`, `change-requests.ts:483`). Test: `one-time.test.ts`.
-- Before approving a change request, the decider first catches judging up to now (`decide`, `review.ts:128`), so terms never apply to an occurrence already due and an end approved with nothing open leaves no due occurrence unjudged.
+- Before approving a change request, the decider first catches judging up to now (`checkDecision` in `changeRequestKind`, `change-requests.ts:761`), so terms never apply to an occurrence already due and an end approved with nothing open leaves no due occurrence unjudged.
 - A reviewer being removed can still decide until the request is approved, and is deleted at approval (`changeOutcome`, `change-requests.ts:363`; `decideChangeRequest`, `change-requests.ts:700`). The owner is told the outcome (`change-request-decided`).
 - The owner can withdraw a waiting request. Nobody is notified (`withdrawChangeRequest`, `change-requests.ts:161`).
 - An end request is refused once the pact has Ended, while the edit window is open, or while another request waits (`requestEnd`, `change-requests.ts:128`).
@@ -59,7 +59,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 ### Days and due times
 
 - A Camera day runs from midnight in the account's timezone to the due time (`fixedDaysOccurrence`, `occurrences.ts:453`; `dayClockOf`, `pact-rules.ts:176`).
-- An Oura Ring night opens at the start of its date and is due at the in-bed-by time. A time before 18:00 means the next day. The night closes at 18:00 the next day. All of it is read on Oura's clock (`nightStartsAt`, `occurrences.ts:517`; `ouraOffset`, `rows.ts:257`). Test: `oura.test.ts`.
+- An Oura Ring night opens at the start of its date and is due at the in-bed-by time. A time before 18:00 means the next day. The night closes at 18:00 the next day. All of it is read on Oura's clock (`nightStartsAt`, `occurrences.ts:517`; `ouraOffset`, `rows.ts:217`). Test: `oura.test.ts`.
 - An Anki day opens at its rollover hour. Due-by is allowed from noon on day D, after the rollover hour, up to the rollover hour on D+1. Other times are refused (`ankiDueByDayAfter`, `occurrences.ts:404`). Anki days use the account's timezone, not the collection's (deviation from the anki spec, noted in anki ticket 03).
 - A Weekly count week runs Monday to Sunday and is due at the end of Sunday (`weekOccurrence`, `occurrences.ts:384`).
 - A One-time occurrence with Submit anytime opens at creation. Otherwise it opens at the start of the deadline's date (`oneTimeOccurrence`, `occurrences.ts:368`).
@@ -146,14 +146,14 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 The five kinds are evidence, excuses, vacations, payments and change requests.
 
-- Who decides (`itemToDecide`, `review.ts:182`):
+- Who decides: each kind's handler's `deciders` (`itemToDecide`, `review.ts:139`; the handlers are listed in `REQUEST_KINDS`, `request-kinds.ts`):
   - Evidence and excuses: the pact's current reviewers.
   - Payments: anyone who reviews one of the owner's pacts with that recipient, now, in earlier terms, or through a penalty to it (`paymentReviewersSql`, `money.ts:72`).
   - Vacations: the picked reviewers.
   - Change requests: the pact's reviewers, while the request is not withdrawn and the pact is Active.
-- The first decision is final. Others get `already-decided`. A rejection needs a reason (`decide`, `review.ts:128`). Test: `review.test.ts`.
-- A reviewer can ask the owner a question. Only the owner is notified, and the item leaves the review queue until the owner replies. The reply notifies every reviewer (`askOwner`, `review.ts:83`; `ownerReply`, `review.ts:105`; decided in pact-v0 ticket 12). Test: `reviewer-questions.test.ts`.
-- The review queue shows change requests first, then everything else oldest first (`reviewItems`, `review.ts:303`; `reviewItemSince`, `review.ts:365`).
+- The first decision is final. Others get `already-decided`. A rejection needs a reason (`decide`, `review.ts:98`). Test: `review.test.ts`.
+- A reviewer can ask the owner a question. Only the owner is notified, and the item leaves the review queue until the owner replies. The reply notifies every reviewer (`askOwner`, `review.ts:54`; `ownerReply`, `review.ts:78`; decided in pact-v0 ticket 12). Test: `reviewer-questions.test.ts`.
+- The review queue shows change requests first, then everything else oldest first (`reviewItems`, `review.ts:165`; `queueFirst` on `changeRequestKind`).
 - Withdrawal: an owner can withdraw a change request or a vacation, not evidence, an excuse or a payment.
 - Waiting lists: Today lists the owner's waiting change requests, evidence, excuses and payments (`waiting`, `today.ts:95`). The pact page lists change requests, evidence and excuses (`pactPage`, `pacts.ts:241-262`). Waiting vacations appear on neither, only on Profile, so a reviewer's question about a vacation does not show on Today (`questionAlerts`, `today.ts:74`).
 
@@ -189,5 +189,5 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 
 ## Time and timezones
 
-- Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:243`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
+- Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:217`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
 - Every account has a timezone. A new account gets its browser's timezone at sign-up: the client sends it through Google's redirect in the OAuth state (`TIMEZONE_SIGN_IN_KEY`, `src/shared/api.ts`), and `signIn` stores its canonical name (`accounts.ts:27`). A sign-in with no timezone, or one `Intl` does not accept, gets UTC; it is never refused. Signing in again leaves the timezone alone. The person sees it and can change it in Profile. There is no "Is this your timezone?" screen: this differs from story 2 in `.scratch/pact-v0/spec.md` (ticket 22). Migration 30 gave UTC to accounts made before this that never confirmed one. Test: `sign-in.test.ts`.

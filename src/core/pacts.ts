@@ -70,10 +70,9 @@ import {
   reviewersOf,
   scheduleOf,
   selectRecipients,
-  todayKeeps,
-  waitingChangeRequests,
   type PactRow,
 } from "./rows.ts";
+import { todayKeeps, waitingChangeRequests } from "./change-requests.ts";
 
 export function createPact(ctx: CoreContext, accountId: AccountId, pact: NewPact): CreatePactResult {
   const { timezone } = accountRow(ctx, accountId);
