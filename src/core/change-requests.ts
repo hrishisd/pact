@@ -28,6 +28,7 @@ import type {
 import { laterDate, localDateOf } from "./calendar.ts";
 import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import type { CoreContext } from "./context.ts";
+import { uncoverRemovedDays } from "./covers.ts";
 import { endAfter, endPact, endTiming } from "./ending.ts";
 import { dueSoonEnough, hasSchedule, lastDayOf, occurrences, occurrencesOverTime } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
@@ -480,6 +481,9 @@ export function applyTerms(ctx: CoreContext, pact: PactRow, after: ChangeableTer
       after.ankiDeckId,
       pact.id,
     );
+  // A day the new terms don't have is covered no more, so a later change that adds it back finds it uncovered.
+  const scheduled = occurrencesOf(ctx, pact.id, timezone);
+  uncoverRemovedDays(ctx, pact.id, from, (date) => scheduled.includes(date));
 }
 
 /**

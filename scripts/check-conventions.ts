@@ -16,7 +16,10 @@
 //   - the layers import only what they may: src/client/ imports only src/client/
 //     and src/shared/, and src/core/ never imports src/server/ or src/client/;
 //   - no folder holds an x.test.ts beside an x.test.tsx: TypeScript reads them as one
-//     module and type-checks only the .ts one.
+//     module and type-checks only the .ts one;
+//   - every table the migrations leave keyed by an occurrence (`pact_id` with `date` or
+//     `occurrence_date`) is handled where a One-time occurrence moves and where a change's
+//     removed days lose their cover, or the allow list below says why it needn't be.
 // And over .scratch/: every `Status:` line uses a value docs/agents/triage-labels.md lists.
 // A line with a `conventions-ok` comment is skipped. Exits 1 on any finding.
 
@@ -192,6 +195,45 @@ for (const file of markdownFiles(".scratch")) {
     });
 }
 
+// An occurrence is `(pact_id, date)`, with no foreign key that follows it (covers.ts). Each
+// table of facts about one is named in these functions, which move or drop those facts.
+const OCCURRENCE_HANDLERS = {
+  move: [
+    ["src/core/pacts.ts", "moveOneTimeOccurrence"],
+    ["src/core/covers.ts", "moveCovers"],
+  ],
+  cleanup: [["src/core/covers.ts", "uncoverRemovedDays"]],
+} as const;
+type OccurrenceHandler = keyof typeof OCCURRENCE_HANDLERS;
+// Occurrence tables a handler leaves alone, and why.
+const OCCURRENCE_TABLES_ALLOWED: Record<string, Partial<Record<OccurrenceHandler, string>>> = {
+  occurrence: {
+    cleanup: "a day not open has no row yet: evidence, bedtime and judging make it, and only once the day opens",
+  },
+  evidence: { cleanup: "evidence is submitted only for an open occurrence, never for a day not open" },
+  penalty: {
+    move: "only a judged occurrence has a penalty, and a judged One-time occurrence never moves",
+    cleanup: "only a judged occurrence has a penalty, and the cleanup leaves judged days alone",
+  },
+  reminder_sent: {
+    move: "a record of pushes already sent; the moved occurrence's own reminders are dated afresh",
+    cleanup: "no reminder is sent for a day not open yet",
+  },
+};
+for (const table of occurrenceTables(readFileSync(MIGRATIONS, "utf8")))
+  for (const [handler, functions] of Object.entries(OCCURRENCE_HANDLERS) as [
+    OccurrenceHandler,
+    readonly (readonly [string, string])[],
+  ][]) {
+    if (OCCURRENCE_TABLES_ALLOWED[table]?.[handler]) continue;
+    const named = functions.some(([file, name]) => new RegExp(`\\b${table}\\b`).test(functionBody(file, name)));
+    if (!named)
+      findings.push(
+        `${MIGRATIONS}: table ${table} is keyed by an occurrence; name it in ${functions.map(([, name]) => name).join(" or ")}, ` +
+          `or give the reason it needn't be in OCCURRENCE_TABLES_ALLOWED (scripts/check-conventions.ts)`,
+      );
+  }
+
 if (findings.length > 0) {
   console.error(findings.join("\n"));
   process.exit(1);
@@ -215,6 +257,49 @@ function* markdownFiles(dir: string): Generator<string> {
 
 function* testFiles(dir: string): Generator<string> {
   for (const file of sourceFiles(dir)) if (/\.test\.tsx?$/.test(file)) yield file;
+}
+
+/** The tables the migrations leave, in the end, with a `pact_id` column and a `date` or `occurrence_date` one. */
+function occurrenceTables(migrations: string): string[] {
+  const tables = new Map<string, string[]>();
+  // SQL comments may hold any words, commas and brackets; a column is the first word of a definition.
+  const sql = migrations.replace(/--.*$/gm, "");
+  const statement =
+    /\bCREATE TABLE (?:IF NOT EXISTS )?(\w+) \(([\s\S]*?)\);|\bDROP TABLE (?:IF EXISTS )?(\w+)|\bALTER TABLE (\w+) (?:RENAME TO (\w+)|ADD COLUMN (\w+)|DROP COLUMN (\w+))/g;
+  for (const [, created, body, dropped, altered, to, added, removed] of sql.matchAll(statement)) {
+    if (created && body !== undefined)
+      tables.set(
+        created,
+        [...body.matchAll(/(?:^|,)\s*(\w+)\s+[A-Za-z]/gm)].map(([, column]) => column ?? ""),
+      );
+    if (dropped) tables.delete(dropped);
+    const columns = altered ? tables.get(altered) : undefined;
+    if (!altered || !columns) continue;
+    if (to) {
+      tables.delete(altered);
+      tables.set(to, columns);
+    }
+    if (added) columns.push(added);
+    if (removed)
+      tables.set(
+        altered,
+        columns.filter((column) => column !== removed),
+      );
+  }
+  return [...tables]
+    .filter(
+      ([, columns]) => columns.includes("pact_id") && (columns.includes("date") || columns.includes("occurrence_date")),
+    )
+    .map(([table]) => table);
+}
+
+/** The text of the function `name` in `file`, from its signature to its closing brace. */
+function functionBody(file: string, name: string): string {
+  const text = readFileSync(file, "utf8");
+  const start = text.search(new RegExp(`\\bfunction ${name}\\(`));
+  if (start === -1) throw new Error(`${file} has no function ${name}`);
+  const end = text.indexOf("\n}\n", start);
+  return text.slice(start, end === -1 ? undefined : end);
 }
 
 function escapeRegExp(text: string): string {
