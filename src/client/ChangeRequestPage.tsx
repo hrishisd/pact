@@ -7,7 +7,7 @@
 import type { Json } from "../shared/api.ts";
 import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
+import { DiffList, endsWhenText, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { formatDayTime } from "./format.ts";
 import { ItemKindHeader, ItemStateChip, OwnerThread, RejectionLine } from "./item-page.tsx";
 import { LoadedFound, useLoad, useSend } from "./ui.tsx";
@@ -87,9 +87,9 @@ function ChangeRequestView({
         <RejectionLine state={request.state} />
         {request.endsPact ? (
           <p className="small muted">
-            {waiting
-              ? `If approved, ${request.pactName} is Ended at once: no more days. Days already judged stay on your ledger.`
-              : "Days already judged stay on your ledger."}
+            {request.ending &&
+              `If approved, ${request.pactName} ends ${endsWhenText(request.current, request.ending)}. `}
+            Days already judged stay on your ledger.
           </p>
         ) : (
           <>

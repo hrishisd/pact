@@ -31,17 +31,27 @@ Ending is also spread out: One-time ends inside `judge` (`judging.ts:210`), and 
 
 ## Acceptance criteria
 
-- [ ] Rewritten `change-requests.test.ts:671`: a Weekly count 3× pact with no sessions, end approved on Saturday, is Missed at the end of Sunday with the full penalty, then Ended.
-- [ ] Rewritten `change-requests.test.ts:758`: evidence for the day open at approval, rejected afterwards, adds the penalty.
-- [ ] New scenario: a Fixed-days pact whose end is approved Thursday 23:00 with no photo is Missed for Thursday.
-- [ ] New scenario: an end approved when no occurrence is open (a Fixed-days pact on an unscheduled day) Ends at once.
-- [ ] `change-requests.test.ts:771`, `:803` and `:822` pass.
-- [ ] Client tests for the three strings updated (`Review.test.tsx`, `PactPage.test.tsx`).
-- [ ] The judging-writes check refuses `INSERT INTO penalty` in, say, `excuses.ts`; shown by trying it.
-- [ ] Update `docs/behaviour.md`: R1, and remove the F1 known-bug note.
-- [ ] `npm run check` passes.
+- [x] Rewritten `change-requests.test.ts:671`: a Weekly count 3× pact with no sessions, end approved on Saturday, is Missed at the end of Sunday with the full penalty, then Ended.
+- [x] Rewritten `change-requests.test.ts:758`: evidence for the day open at approval, rejected afterwards, adds the penalty.
+- [x] New scenario: a Fixed-days pact whose end is approved Thursday 23:00 with no photo is Missed for Thursday.
+- [x] New scenario: an end approved when no occurrence is open (a Fixed-days pact on an unscheduled day) Ends at once.
+- [x] `change-requests.test.ts:771`, `:803` and `:822` pass.
+- [x] Client tests for the three strings updated (`Review.test.tsx`, `PactPage.test.tsx`).
+- [x] The judging-writes check refuses `INSERT INTO penalty` in, say, `excuses.ts`; shown by trying it.
+- [x] Update `docs/behaviour.md`: R1, and remove the F1 known-bug note.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
 - Withdrawal reasons (ticket 20).
 - The comment at `src/client/PactPage.tsx:339` (ticket 18).
+
+## Comments
+
+From ticket 13 (2026-11-11): built.
+
+- "Open" means opened and not closed yet, unless judged (`endTiming`, `src/core/ending.ts`). With one open, approval sets the end date to the last day of its period and records `pact.end_approved_at` (migration 32); `endPastEndDate` then Ends it once that occurrence closes, with cause `end-request`. A One-time pact keeps its deadline and Ends when judged. The pact page carries `ending: { lastDay }`, and an end request's view carries `ending` (`after` a day, or `at-once`) while it waits.
+- The catch-up in `decide` stays, against "What to build": without it, `one-time.test.ts` "a later deadline approved after the old one passed, before the scheduler's tick, doesn't rescue it" fails, because nothing judges a past-due One-time occurrence before its change applies. It also judges what an end approved at once, with nothing open, leaves due (the new "a day the schedule skips" scenario fails without it).
+- Tests changed by the rule beyond the two named: `:738` (Thursday, open at approval, now Missed), `:822` (Friday opened at midnight, so it is kept and Missed), the bedtime "later nights" test (Tuesday night opened at the start of Tuesday), `history.test.ts` (an Ended pact's heat map; Yesterday), and the end request in `app.test.ts` (Active with `ending` after approval).
+- The client copy: Review "Approving ends Gym after Sun Jan 18, once this week is judged." or "Approving ends Gym now."; ChangeRequestPage "If approved, Gym ends ..."; PactPage "Ending approved: Gym ends after ..., once that day is judged." The Ended line on the pact page is unchanged.
+- Filed ticket 27: end and change requests the owner can still send while an approved end waits.

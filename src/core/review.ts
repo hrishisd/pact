@@ -156,7 +156,8 @@ export function decide(
     case "change-request":
       if (decided.outcome === "approved") {
         // Judging catches up on the pact first, as the scheduler would have: a change never
-        // rescues an occurrence already due. Judging may End it, which withdraws the request.
+        // rescues an occurrence already due, and an end approved with nothing open leaves none
+        // unjudged. Judging may End it, which withdraws the request.
         const [pact] = pactsToJudge(ctx, item.row.pact_id);
         settlePactDueBy(ctx, pact!, ctx.clock.now(), ankiChecksRunning);
         if (waitingChangeRequestId(ctx, item.row.pact_id) !== item.row.id) {

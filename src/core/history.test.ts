@@ -175,9 +175,10 @@ describe("the heat map", () => {
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
     await s.advanceTo("Wed+1 10:00");
 
+    // Tuesday was open when the end was approved: it's judged, and the pact Ended once it closed.
     expect(heatMapDays(owner, gym).map((day) => [day.date, day.occurrence?.status.kind ?? null])).toEqual([
       [s.date("Mon"), "missed"],
-      [s.date("Tue"), null],
+      [s.date("Tue"), "missed"],
       [s.date("Wed"), null],
       [s.date("Thu"), null],
       [s.date("Fri"), null],
@@ -286,9 +287,11 @@ describe("Yesterday on Today", () => {
     await s.advanceTo("Tue 10:00");
     const end = ok(await owner.requestEnd(gym));
     await reviewer.decide(end.changeRequestId, { kind: "approve" });
-    // Ended Tuesday: Monday's day is still yesterday's on Tuesday, but there's no Tuesday on Wednesday.
+    // Ended once Tuesday closed: Tuesday is still yesterday's on Wednesday, but there's no Wednesday on Thursday.
     expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual([s.date("Mon")]);
     await s.advanceTo("Wed 10:00");
+    expect(owner.today().yesterday.map((entry) => entry.occurrenceDate)).toEqual([s.date("Tue")]);
+    await s.advanceTo("Thu 10:00");
     expect(owner.today().yesterday).toEqual([]);
   });
 });

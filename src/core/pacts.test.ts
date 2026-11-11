@@ -40,6 +40,7 @@ describe("creating a pact", () => {
         waiting: [],
         history: expect.objectContaining({ kind: "fixed-days" }),
         connectionProblem: null,
+        ending: null,
       },
     });
   });

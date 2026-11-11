@@ -105,7 +105,7 @@ import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { acceptMiss, evidencePage, submitEvidence } from "./evidence.ts";
 import { acceptExcuseRejection, excuseOptions, excusePage, fileExcuse, previewExcuse } from "./excuses.ts";
-import { endPastEndDate } from "./judging.ts";
+import { endPastEndDate } from "./ending.ts";
 import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOverdue } from "./money.ts";
 import { deliverPending, enqueue } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";

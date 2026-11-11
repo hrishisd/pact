@@ -1,15 +1,14 @@
 // Judging's helpers for `settle`: when a running check of AnkiWeb holds
-// judging, the Missed push, what decided an Anki day, and ending pacts.
+// judging, the Missed push, and what decided an Anki day. Ending pacts is
+// `ending.ts`.
 
 import { APP_PATHS } from "../shared/api.ts";
-import { addDays } from "../shared/calendar.ts";
 import { formatDate, money } from "../shared/format.ts";
 import type { AccountId, AnkiCheck, LocalDate } from "../shared/types.ts";
-import { startOfDay } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { isJudged, weekProgress, type PactToJudge } from "./occurrence-state.ts";
+import { weekProgress, type PactToJudge } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
-import { lastAnkiCheck, occurrencesOf, recipientName, scheduleOf, termsOn, type PactRow } from "./rows.ts";
+import { lastAnkiCheck, recipientName, scheduleOf, termsOn } from "./rows.ts";
 
 /**
  * How long a check of AnkiWeb still running can hold judging the account's
@@ -39,36 +38,6 @@ export function ankiCheckHolds(
   );
 }
 
-/**
- * Ends each Active pact whose end date has passed by `t`: at the start of
- * the next day, or once its last occurrence closes if that's later (a
- * bedtime night closes at 18:00 the next day). Judging has had its turn
- * first, so the last occurrence is judged unless its evidence still waits
- * for a decision, which judges it then. A pact whose last Anki day a running
- * check holds (`ankiCheckHolds`) ends on a later tick, once it's judged.
- */
-export function endPastEndDate(ctx: CoreContext, t: Date, ankiChecksRunning: AnkiChecksRunning): void {
-  const rows = ctx.all<{
-    id: string;
-    end_date: LocalDate;
-    evidence_kind: PactRow["evidence_kind"];
-    owner_account_id: AccountId;
-    timezone: string;
-  }>(`SELECT pact.id, pact.end_date, pact.evidence_kind, pact.owner_account_id, account.timezone
-       FROM pact JOIN account ON account.id = pact.owner_account_id
-       WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL
-       ORDER BY pact.created_at, pact.id`);
-  for (const { id, end_date: endDate, evidence_kind: kind, owner_account_id: owner, timezone } of rows) {
-    const dayAfter = startOfDay(addDays(endDate, 1), timezone);
-    const last = occurrencesOf(ctx, id, timezone).between(addDays(endDate, -7), endDate).at(-1);
-    const endsAt = last && last.closesAt.getTime() > dayAfter.getTime() ? last.closesAt : dayAfter;
-    if (endsAt.getTime() > t.getTime()) continue;
-    if (kind === "anki" && last && !isJudged(ctx, id, last.date) && ankiCheckHolds(ankiChecksRunning, owner, last, t))
-      continue;
-    endPact(ctx, id, endsAt);
-  }
-}
-
 /** Tells the owner the occurrence is Missed, with what it costs; `settle` decides when. */
 export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate): void {
   const pact = {
@@ -91,21 +60,6 @@ export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate)
     kind: "missed-occurrence",
     payload: { pactId, occurrenceDate: date, title: `${pact.name} is Missed`, body, url: APP_PATHS.pact(pactId) },
   });
-}
-
-/**
- * Makes an Active pact Ended as of `at`. A change request still waiting
- * for it is withdrawn: there's nothing left for it to change.
- */
-export function endPact(ctx: CoreContext, pactId: string, at: Date): void {
-  ctx.db
-    .prepare(`UPDATE pact SET stage = 'ended', ended_at = ? WHERE id = ? AND stage = 'active'`)
-    .run(at.toISOString(), pactId);
-  ctx.db
-    .prepare(
-      `UPDATE change_request SET withdrawn_at = ? WHERE pact_id = ? AND decision IS NULL AND withdrawn_at IS NULL`,
-    )
-    .run(at.toISOString(), pactId);
 }
 
 /** On an Anki day just judged Missed at its due time: why, from the last check that counted for it. */

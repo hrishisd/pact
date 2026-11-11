@@ -10,7 +10,7 @@ import { MAX_TEXT_CHARS, type DecideRefusal, type ReviewDecision, type ReviewIte
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { dateSpan, formatDate, formatDayTime, money, weekdayName } from "./format.ts";
 import { Chip, excuseDatesText, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
-import { DiffList, EverythingElse, listNames, startsText } from "./change-terms.tsx";
+import { DiffList, endsWhenText, EverythingElse, listNames, startsText } from "./change-terms.tsx";
 import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-page.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
 import { coveredText, firstName, pactsText, plural, weekOf } from "./vacation-text.ts";
@@ -392,8 +392,8 @@ function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { i
         {item.note !== null && <span className="quote">“{item.note}”</span>}
         {item.endsPact ? (
           <p className="small">
-            Approving makes {item.pactName} Ended at once: no more days. Penalties already judged stay on{" "}
-            {item.ownerName}'s ledger.
+            {item.ending && `Approving ends ${item.pactName} ${endsWhenText(item.current, item.ending)}. `}
+            Penalties already judged stay on {item.ownerName}'s ledger.
           </p>
         ) : (
           <>

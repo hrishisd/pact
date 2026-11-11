@@ -10,6 +10,9 @@
 //   - what covers an occurrence is read only through covers.ts and occurrence-state.ts:
 //     the old cover predicates are gone, and a cover table's rows are touched only
 //     there, in migrations, and by the module that files and decides that kind;
+//   - judging writes (a penalty inserted or deleted, an occurrence's outcome or
+//     judging time updated, a pact's stage updated) happen only in settle.ts,
+//     ending.ts and migrations;
 //   - the layers import only what they may: src/client/ imports only src/client/
 //     and src/shared/, and src/core/ never imports src/server/ or src/client/;
 //   - no folder holds an x.test.ts beside an x.test.tsx: TypeScript reads them as one
@@ -88,6 +91,11 @@ const COVER_TABLES: [RegExp, string][] = [
   [/\bvacation_day\b/, "src/core/vacations.ts"],
 ];
 
+// Writes that judge an occurrence or End a pact, on one line of SQL, and the modules that may make them.
+const judgingWritePattern =
+  /\b(INSERT\s+INTO\s+penalty|DELETE\s+FROM\s+penalty|UPDATE\s+pact\s+SET\s+stage)\b|\bUPDATE\s+occurrence\s+SET\b.*\b(outcome|judged_at)\b/i;
+const JUDGING_WRITERS = new Set(["src/core/settle.ts", "src/core/ending.ts", MIGRATIONS]);
+
 // A relative import or export's path: `from "../x.ts"`, `import "./x.css"` or `import("./x.ts")`.
 const importPattern = /\b(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g;
 // The src/ folders each layer may import from, by the folder its file is in.
@@ -131,6 +139,8 @@ for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
       for (const [table, owner] of COVER_TABLES)
         if (file.startsWith("src/") && !COVER_READERS.has(file) && file !== owner && table.test(line))
           findings.push(`${where}: read an occurrence's cover through covers.ts (coverOn, coveredSql, cover_day_v)`);
+      if (file.startsWith("src/") && !isTest && !JUDGING_WRITERS.has(file) && judgingWritePattern.test(line))
+        findings.push(`${where}: outcomes, penalties and a pact's stage are written only by settle.ts and ending.ts`);
       const layer = file.split("/")[1] ?? "";
       const mayImport = file.startsWith("src/") ? LAYER_IMPORTS[layer] : undefined;
       if (mayImport)

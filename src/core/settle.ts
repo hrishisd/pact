@@ -1,12 +1,13 @@
 // Settling: bringing an occurrence's stored outcome, judging time and penalty
 // in line with what `verdictOf` says of it, and telling the owner when that
 // makes it Missed. The tick, evidence decisions, cover decisions, bedtime
-// nights and Anki checks all judge through here; ending a pact is still
-// `endPact` (design review ticket 13).
+// nights and Anki checks all judge through here. A One-time pact Ends here,
+// through `endPact` (ending.ts).
 
 import type { AccountId, EvidenceKind, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
-import { ankiCheckHolds, endPact, enqueueMissed, noteAnkiMiss, type AnkiChecksRunning } from "./judging.ts";
+import { endPact } from "./ending.ts";
+import { ankiCheckHolds, enqueueMissed, noteAnkiMiss, type AnkiChecksRunning } from "./judging.ts";
 import { isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { occurrencesOf } from "./rows.ts";
 import { occurrenceFacts, verdictOf, type AnkiCheckRun, type Verdict } from "./verdict.ts";
@@ -67,7 +68,7 @@ export function settle(
     .run(pactId, date, verdict.kind, verdict.at.toISOString());
   const weekly = facts.terms.schedule.kind === "weekly-count";
   // A One-time pact has no occurrence left once its one is judged.
-  if (facts.terms.schedule.kind === "one-time") endPact(ctx, pactId, verdict.at);
+  if (facts.terms.schedule.kind === "one-time") endPact(ctx, pactId, "one-time-judged", verdict.at);
   if (verdict.kind === "missed") {
     ctx.db
       .prepare(

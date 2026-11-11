@@ -29,6 +29,7 @@ import type {
 import { laterDate, localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { moveCovers } from "./covers.ts";
+import { endingOf } from "./ending.ts";
 import { enqueueEvidenceReviewItems, waitingEvidence } from "./evidence.ts";
 import { waitingExcuses } from "./excuses.ts";
 import { pactHistory } from "./history.ts";
@@ -261,6 +262,7 @@ export function pactPage(ctx: CoreContext, accountId: AccountId, pactId: string)
     ) as PactWaitingItem[],
     history: pactHistory(ctx, row, timezone, first, now),
     connectionProblem: row.stage === "active" && service !== null ? connectionProblem(ctx, accountId, service) : null,
+    ending: endingOf(row),
   };
   return { ok: true, pact };
 }

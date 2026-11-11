@@ -37,18 +37,19 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - An end date approved too late to keep the day open now is moved to that day (`laterDate(after.endDate, lastOpen)` in `applyTerms`).
 - With an end date, a Weekly count pact counts only whole weeks: it Ends after the last whole week before the end date (`pact-rules.ts:153`; decided in pact-v0 ticket 14). Test: `weekly-count.test.ts:685`.
 - One-time: the new deadline must be at least an hour away, both when sent and when approved (`deadlineFarEnough` in `checkedChange`; `approvableNow`, `change-requests.ts:745`). A request decided after the occurrence was judged leaves the pact as it was (`applyOneTimeTerms`, `change-requests.ts:483`). Test: `one-time.test.ts`.
-- Before approving a change request, the decider first catches judging up to now (`decide`, `review.ts:124`), so terms never apply to an occurrence already due.
+- Before approving a change request, the decider first catches judging up to now (`decide`, `review.ts:128`), so terms never apply to an occurrence already due and an end approved with nothing open leaves no due occurrence unjudged.
 - A reviewer being removed can still decide until the request is approved, and is deleted at approval (`changeOutcome`, `change-requests.ts:363`; `decideChangeRequest`, `change-requests.ts:696`). The owner is told the outcome (`change-request-decided`).
 - The owner can withdraw a waiting request. Nobody is notified (`withdrawChangeRequest`, `change-requests.ts:161`).
 - An end request is refused once the pact has Ended, while the edit window is open, or while another request waits (`requestEnd`, `change-requests.ts:128`).
-- An approved end request Ends the pact at once (`decideChangeRequest` calls `endPact(now)`). **Known bug:** this drops the occurrence open at approval instead of letting it be judged, unlike every other change. See [ticket 13](../.scratch/design-review/issues/13-one-end-pact.md). Evidence already waiting for that day stays in the queue (interaction audit P5c).
+- An approved end request takes effect when the occurrence or week open at approval closes, as every other change does (rule R1). An occurrence is open from when it opens until it closes, unless it is judged; a bedtime night opens at the start of its date and closes at 18:00 the next day. Approval sets the end date to the last day of that occurrence's period (`endTiming`, `endAfter`, `ending.ts:44`, `:72`); a One-time pact keeps its deadline and Ends when it is judged. Until then the pact is Active, its open occurrence is judged normally and takes evidence and excuses as usual, and its page says "Ending approved: Gym ends after Sun Jan 18, once this week is judged." With nothing open, the pact Ends at once. The owner's push says "Gym ends after Sun Jan 18", or "Gym is Ended". The reviewer sees when it would End before approving. Test: `change-requests.test.ts`, "ending a pact".
 - **Known bug:** when an approved change removes a day from the schedule, an excuse or vacation that covers that day is not deleted. A later change that adds the day back finds it already covered. See [ticket 14](../.scratch/design-review/issues/14-cover-cleanup-on-schedule-change.md).
 
 ### Ending
 
-- A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `judging.ts:50`). Test: `due-by-and-dates.test.ts`.
+- A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `ending.ts:107`). An end date an approved end request set Ends it the same way. Test: `due-by-and-dates.test.ts`.
 - A One-time pact Ends when its occurrence is judged (`settle`, `settle.ts:34`).
-- Ending withdraws a waiting change request, silently (`endPact`, `judging.ts:100`).
+- Every ending goes through `endPact(ctx, pactId, cause, at)` (`ending.ts:25`), with cause `end-date`, `one-time-judged` or `end-request`. It withdraws a waiting change request, silently.
+- Only `settle.ts`, `ending.ts` and migrations insert or delete penalties, update an occurrence's outcome or judging time, or update a pact's stage (`scripts/check-conventions.ts`).
 - Only Active pacts are judged and reminded (`pactsToJudge`, `occurrence-state.ts:233`; `remind`, `reminders.ts:37`). An occurrence due after the end is ignored (`dueAfterEnd`, `occurrence-state.ts:205`).
 - The pact list shows pacts in the edit window first, then Active, then Ended (`pactList`, `pacts.ts:207`).
 

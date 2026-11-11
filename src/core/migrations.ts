@@ -825,4 +825,13 @@ export const migrations: readonly Migration[] = [
   ALTER TABLE occurrence ADD COLUMN bedtime_arrived_at TEXT;
   UPDATE occurrence SET bedtime_arrived_at = judged_at WHERE bedtime_start IS NOT NULL;
   `,
+  // 32: an approved end waits for the occurrence open at approval
+  `
+  -- When a reviewer approved ending this pact, while an occurrence (or week)
+  -- was open: approval set end_date to that occurrence's last day, and the
+  -- pact Ends once it closes. Null for a pact whose end wasn't approved, or
+  -- that Ended at approval with nothing open. Pacts Ended before this
+  -- migration keep null: they Ended at approval.
+  ALTER TABLE pact ADD COLUMN end_approved_at TEXT;
+  `,
 ];

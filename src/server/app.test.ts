@@ -1616,9 +1616,10 @@ describe("change requests", () => {
     const end = await owner.post<EndPactResponse>(API_PATHS.endPact(pactId), { note: "Moved away" });
     if (!end.body.ok) throw new Error(end.body.reason);
     await friend.post(API_PATHS.decide(end.body.changeRequestId), { kind: "approve" } satisfies DecideRequest);
+    // The day open at approval is judged first: the pact Ends once it closes.
     expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
       ok: true,
-      pact: { stage: "ended" },
+      pact: { stage: "active", ending: { lastDay: expect.any(String) } },
     });
   });
 

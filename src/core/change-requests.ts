@@ -28,7 +28,7 @@ import type {
 import { laterDate, localDateOf } from "./calendar.ts";
 import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import type { CoreContext } from "./context.ts";
-import { endPact } from "./judging.ts";
+import { endAfter, endPact, endTiming } from "./ending.ts";
 import { dueSoonEnough, hasSchedule, lastDayOf, occurrences, occurrencesOverTime } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import {
@@ -651,7 +651,9 @@ export function changeRequestView(ctx: CoreContext, row: StoredChangeRequest): C
     // Reminders are the owner's own: reviewers don't see them.
     current: withoutReminders(currentTerms(ctx, pact)),
   };
-  if (request.kind === "end") return { ...base, endsPact: true };
+  if (request.kind === "end") {
+    return { ...base, endsPact: true, ending: waiting ? endTiming(ctx, pact.id, ctx.clock.now()) : null };
+  }
   return {
     ...base,
     endsPact: false,
@@ -689,9 +691,11 @@ export function changeRequestsToReview(ctx: CoreContext, reviewerId: AccountId):
 
 /**
  * Records a reviewer's decision on a change request and tells the owner.
- * Approved, an end makes the pact Ended at once; a change applies its terms
- * from the first occurrence not open yet, and takes off the reviewers it
- * removes. Rejected, nothing changes.
+ * Approved, an end makes the pact Ended once the occurrence (or week) open
+ * now closes, after it's judged as usual, or at once with none open (`decide`
+ * has caught judging up first); a change applies its terms from the first
+ * occurrence not open yet, and takes off the reviewers it removes. Rejected,
+ * nothing changes.
  */
 export function decideChangeRequest(
   ctx: CoreContext,
@@ -710,8 +714,14 @@ export function decideChangeRequest(
   if (decided.outcome === "rejected") {
     body = `${pact.name} · “${decided.reason}”`;
   } else if (request.kind === "end") {
-    endPact(ctx, pact.id, now);
-    body = `${pact.name} is Ended`;
+    const timing = endTiming(ctx, pact.id, now);
+    if (timing.kind === "after") {
+      endAfter(ctx, pact.id, timing.lastDay, now);
+      body = `${pact.name} ends after ${formatDate(timing.lastDay)}`;
+    } else {
+      endPact(ctx, pact.id, "end-request", now);
+      body = `${pact.name} is Ended`;
+    }
   } else {
     const { before, after } = request;
     for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {

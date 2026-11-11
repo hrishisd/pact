@@ -22,7 +22,7 @@ import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
-import { listNames, openOccurrenceText } from "./change-terms.tsx";
+import { endsWhenText, listNames, openOccurrenceText } from "./change-terms.tsx";
 import { formOf } from "./pact-form.ts";
 import { PROBLEMS, ReviewersStep } from "./pact-form-steps.tsx";
 import { clockText, EDIT_WINDOW_TEXT, formatDate, formatDay, minutesLeft, money } from "./format.ts";
@@ -110,6 +110,12 @@ export function PactPage({
             <HeatMap pact={pact} timezone={timezone} now={now} />
             <Terms pact={pact} changeable={changeable} changeWaiting={waiting} onSaved={reload} onInvite={onInvite} />
             {changeable && !waiting && <EndPact pact={pact} onSent={reload} />}
+            {pact.ending && (
+              <p className="small muted">
+                Ending approved: {pact.name} ends {endsWhenText(pact, { kind: "after", ...pact.ending })}. Penalties
+                already judged stay on the ledger.
+              </p>
+            )}
             {pact.stage === "ended" && (
               <p className="small muted">
                 Ended {formatDay(pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on the

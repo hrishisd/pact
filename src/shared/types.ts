@@ -249,12 +249,16 @@ export interface PactSummary {
   editWindowClosesAt: Date | null;
 }
 
-/** Active from creation; Ended once its end date passes, an approved change request ends it, or a One-time occurrence is judged. */
+/**
+ * Active from creation; Ended once its end date passes, an approved end
+ * request takes effect (once the occurrence open at approval closes), or a
+ * One-time occurrence is judged.
+ */
 export type PactStage = "active" | "ended";
 
 /**
  * The pact page: a pact's terms as its owner sees them. Ended, it says
- * when: when an approved change request ended it, when its end date passed
+ * when: when an approved end request took effect, when its end date passed
  * (once its last occurrence closed), or for One-time when its occurrence was
  * judged.
  */
@@ -288,6 +292,12 @@ interface PactPageTerms {
   history: PactHistory;
   /** An Active Oura Ring or Anki pact whose owner's Oura or AnkiWeb can't be read: the same alert as on Today. Else null. */
   connectionProblem: ConnectionProblem | null;
+  /**
+   * An Active pact whose end was approved while an occurrence was open: it
+   * Ends once that occurrence (or week), whose last day is `lastDay`, is
+   * judged. Else null.
+   */
+  ending: { lastDay: LocalDate } | null;
 }
 
 /**
@@ -1691,7 +1701,21 @@ export type RequestEndResult =
     };
 
 /** A change request, as its reviewers and its owner see it. */
-export type ChangeRequestView = ChangeRequestBase & ({ endsPact: true } | TermsChangeRequest);
+export type ChangeRequestView = ChangeRequestBase & (EndRequest | TermsChangeRequest);
+
+/** A request to end the pact. */
+interface EndRequest {
+  endsPact: true;
+  /** While it waits: when the pact would End if it were approved now. Null once decided or withdrawn. */
+  ending: EndTiming | null;
+}
+
+/**
+ * When an approved end takes effect: once the occurrence (or Weekly count
+ * week) open at approval is judged, `lastDay` being the last day of its
+ * period, which the pact keeps; or at once, when none is open.
+ */
+export type EndTiming = { kind: "after"; lastDay: LocalDate } | { kind: "at-once" };
 
 interface ChangeRequestBase {
   /** The change request's id. */

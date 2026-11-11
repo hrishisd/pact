@@ -56,6 +56,8 @@ export interface PactRow {
   created_at: string;
   reviewers_notified_at: string | null;
   ended_at: string | null;
+  /** When an end was approved that waits for the occurrence open then (`endAfter`, ending.ts). */
+  end_approved_at: string | null;
   /** JSON: "HH:MM" each, in the order they go off. */
   reminders: string;
   reminded_through: string | null;
