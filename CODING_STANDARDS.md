@@ -1,6 +1,6 @@
 # Coding standards
 
-Read at review time. `npm run lint` enforces the mechanical rules: formatting (Prettier; a pre-commit hook formats staged files, `npm run format` does the whole repo), unused code (knip), glossary words, system time, the machine's timezone and locale, real timers and `Math.random` in the core and in tests, and `localeCompare` without a locale (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
+Read before writing code and at review time. `npm run lint` enforces the mechanical rules: formatting (Prettier; a pre-commit hook formats staged files, `npm run format` does the whole repo), unused code (knip), glossary words, system time, the machine's timezone and locale, real timers and `Math.random` in the core and in tests, and `localeCompare` without a locale (`scripts/check-conventions.ts`), and shell scripts (shellcheck). This file holds the judgement calls.
 
 ## The core owns every domain rule
 
@@ -26,6 +26,7 @@ Read at review time. `npm run lint` enforces the mechanical rules: formatting (P
 - Write the test first and watch it fail for the right reason. A test that passes before the code exists (for example, through the SPA fallback's 200) proves nothing.
 - Account ids are random in production (scenarios make them rise in creation order); never depend on id order. A test that fails the `n`th call to a port names one account only when that account is the only one being called.
 - Asserting on `s.logs` is fine when the log line is a required output (`OPERATOR_ALERT`). `app.test.ts` may read the auth tables directly to prove a refused sign-in created no rows.
+- Server tests check route wiring: one test per route for a shape refused with 400, a refusal returned as 200, and one success through to the core, using `objectContaining` on core output. Domain flows are tested in the core.
 
 ## Auth
 

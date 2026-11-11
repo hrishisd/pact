@@ -7,6 +7,7 @@
 //   - tests and the core don't use the machine's timezone or locale, real
 //     timers, or Math.random, so a run doesn't depend on the machine or on luck;
 //   - every localeCompare names its locale, so an order is the same on every machine.
+// And over .scratch/: every `Status:` line uses a value docs/agents/triage-labels.md lists.
 // A line with a `conventions-ok` comment is skipped. Exits 1 on any finding.
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -104,6 +105,19 @@ for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
     });
 }
 
+// The values docs/agents/triage-labels.md lists for a ticket's or spec's `Status:` line.
+const STATUS_VALUES = new Set(["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "done", "wontfix"]);
+for (const file of markdownFiles(".scratch")) {
+  readFileSync(file, "utf8")
+    .split("\n")
+    .forEach((line, index) => {
+      if (!line.startsWith("Status:")) return;
+      const status = line.slice("Status:".length).trim();
+      if (!STATUS_VALUES.has(status))
+        findings.push(`${file}:${index + 1}: "${status}" is not a Status value docs/agents/triage-labels.md lists`);
+    });
+}
+
 if (findings.length > 0) {
   console.error(findings.join("\n"));
   process.exit(1);
@@ -114,6 +128,14 @@ function* sourceFiles(dir: string): Generator<string> {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) yield* sourceFiles(path);
     else if (/\.(ts|tsx|html|css|webmanifest)$/.test(entry.name)) yield path;
+  }
+}
+
+function* markdownFiles(dir: string): Generator<string> {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) yield* markdownFiles(path);
+    else if (entry.name.endsWith(".md")) yield path;
   }
 }
 

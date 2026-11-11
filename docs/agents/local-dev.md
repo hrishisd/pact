@@ -1,5 +1,7 @@
 # Local development
 
+The `fnm` and iCloud notes apply to the owner's Mac. A cloud session has Node on its path and the repo checked out locally.
+
 ## Dev server
 
 - `npm run dev` runs the API server on :3000 (`node --watch`, restarts on server edits) and Vite on :5173, which proxies `/api/` to :3000. Use http://localhost:5173.

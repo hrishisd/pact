@@ -1,6 +1,6 @@
 # 02 Workflow document edits
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: W3, W5, T2, and W1's status check (`../code-structure-review.md`, section 4).
@@ -89,9 +89,9 @@ Add under its first heading: "The `fnm` and iCloud notes apply to the owner's Ma
 
 ## Acceptance criteria
 
-- [ ] The approved text is applied, word for word.
-- [ ] `scripts/check-conventions.ts` refuses an unknown `Status:` value; shown by temporarily writing one and running `npm run lint`, then removing it.
-- [ ] `npm run check` passes.
+- [x] The approved text is applied, word for word.
+- [x] `scripts/check-conventions.ts` refuses an unknown `Status:` value; shown by temporarily writing one and running `npm run lint`, then removing it.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
