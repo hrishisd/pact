@@ -3,7 +3,8 @@
 // excused, due 7 days later. An unpaid bill past its due time is Overdue:
 // an alert, a daily reminder to the owner, and word to the reviewers.
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, onTestFinished, test } from "vitest";
+import { openWithPragmas } from "./db.ts";
 import { ownerWithOura } from "./testing/bedtime-pact.ts";
 import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle } from "./testing/scenario.ts";
@@ -495,5 +496,34 @@ describe("what Record a payment starts at", () => {
     await s.advanceTo("Wed+2 19:00");
     expect(owner.ledgers()[0]).toMatchObject({ overdueCents: 1100, billDue: { amountCents: 1000 } });
     expect(suggested()).toEqual([[2600, 2100]]);
+  });
+});
+
+describe("a billed penalty", () => {
+  test("is never excused: approving a cover for its day throws and changes nothing", async () => {
+    const s = scenario();
+    const { owner, reviewer } = await fifteenOwed(s);
+    await s.advanceTo("Wed+1 18:00");
+    expect(owner.ledgers()[0]!.billDue).toEqual({ amountCents: 1500, dueAt: s.at("Wed+2 18:00") });
+    // The excuse window keeps this from happening; an excuse for Monday written straight to the database forces it.
+    const db = openWithPragmas(s.dbPath);
+    onTestFinished(() => {
+      db.close();
+    });
+    const gym = db.prepare(`SELECT id FROM pact`).get() as { id: string };
+    db.prepare(`INSERT INTO excuse (id, pact_id, reason, filed_at) VALUES ('forced', ?, 'Sick', ?)`).run(
+      gym.id,
+      s.at("Wed+1 18:00").toISOString(),
+    );
+    const excuseDay = `INSERT INTO excuse_day (excuse_id, pact_id, date) VALUES ('forced', ?, ?)`; // conventions-ok: forces the case
+    db.prepare(excuseDay).run(gym.id, s.date("Mon"));
+
+    await expect(reviewer.decide("forced", { kind: "approve" })).rejects.toThrow(/billed/);
+    // The command rolled back: Monday is still Missed, its penalty still on the bill, the excuse still waiting.
+    expect(
+      db.prepare(`SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`).get(gym.id, s.date("Mon")),
+    ).toEqual({ outcome: "missed" });
+    expect(owner.ledgers()[0]!.billDue).toEqual({ amountCents: 1500, dueAt: s.at("Wed+2 18:00") });
+    expect(db.prepare(`SELECT decision FROM excuse WHERE id = 'forced'`).get()).toEqual({ decision: null });
   });
 });

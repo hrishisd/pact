@@ -5,9 +5,11 @@
 // A mismatch fails the test, unless it's a known one listed below with the
 // ticket that fixes it.
 //
-// Two facts the core doesn't store yet, it watches for itself: which checks
-// of AnkiWeb are still running, and when each bedtime night's first sleep
-// period reached the core (design review ticket 12 stores it).
+// Two facts it watches for itself: which checks of AnkiWeb are still
+// running, which the core keeps only in memory, and when each bedtime
+// night's first sleep period reached the core. The core stores the latter
+// (`judgeNights`); the check takes it from what Oura gave the core instead,
+// so a wrong stored period shows as a mismatch too.
 
 import { addDays } from "../../shared/calendar.ts";
 import type { AccountId, LocalDate } from "../../shared/types.ts";

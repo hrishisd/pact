@@ -584,7 +584,8 @@ class Core implements PactCore {
       fileVacation: (vacation) => this.#command(() => fileVacation(this.#ctx, accountId, vacation)),
       vacations: () => vacationCards(this.#ctx, accountId),
       lastVacation: () => lastVacation(this.#ctx, accountId),
-      withdrawVacation: (vacationId) => this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId)),
+      withdrawVacation: (vacationId) =>
+        this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId, this.#ankiPolling.checksRunning)),
       acceptVacationRejection: (vacationId) =>
         this.#command(() => acceptVacationRejection(this.#ctx, accountId, vacationId)),
       recordPayment: (payment, screenshot) =>
@@ -612,7 +613,7 @@ class Core implements PactCore {
       () => {
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
-        recordAnkiChecks(this.#ctx, checked);
+        recordAnkiChecks(this.#ctx, checked, this.#ankiPolling.checksRunning);
         settleAll(this.#ctx, t, this.#ankiPolling.checksRunning);
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
         noteOuraClock(this.#ctx, fetched.sleep);

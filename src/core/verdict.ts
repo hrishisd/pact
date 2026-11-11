@@ -1,10 +1,8 @@
 // The judging rules stated once: what an occurrence's outcome is, given the
 // facts about it and the time. Pure, with no database and no clock: the
-// facts loader (`occurrenceFacts`) reads the facts. The tick and evidence
-// decisions judge through it (`settle`); until design review tickets 12 and
-// 13 move them there, covers, bedtime and Anki keep their own copies of these
-// rules, and the scenario harness checks after every command and tick that
-// what was stored is what `verdictOf` says (`testing/verdict-check.ts`).
+// facts loader (`occurrenceFacts`) reads the facts. Judging goes through it
+// (`settle`), and the scenario harness checks after every command and tick
+// that what was stored is what `verdictOf` says (`testing/verdict-check.ts`).
 //
 // The verdict is replayed from the facts in time order, because a stored
 // outcome is history: an occurrence judged Missed at its due time stays
@@ -269,14 +267,11 @@ export function dueJudgedFrom(facts: OccurrenceFacts, now: Date): Date | null {
 
 /**
  * The facts `verdictOf` judges the pact's occurrence dated `date` by, as
- * stored, or null if the pact has no occurrence that day. Two facts aren't
- * stored yet: the checks of AnkiWeb and when each was answered, which only
- * the core holds, in memory (`ankiChecks`, none unless given; a finished check's
- * answer reads as recorded when it started), and a bedtime night's
- * first sleep period, which is stored on the occurrence only once a period
- * judged it Satisfied or Missed (design review ticket 12 stores it when it
- * arrives). Until then, a night judged Excused by a late period reads as
- * having none.
+ * stored, or null if the pact has no occurrence that day. One fact isn't
+ * stored: the checks of AnkiWeb and when each was answered, which only the
+ * core holds, in memory (`ankiChecks`, none unless given; a finished check's
+ * answer reads as recorded when it started). A bedtime night's first sleep
+ * period is stored on the occurrence when it arrives (`judgeNights`).
  */
 export function occurrenceFacts(
   ctx: CoreContext,
@@ -314,17 +309,17 @@ export function occurrenceFacts(
   };
   let automatic: OuraFact | AnkiFact | null = null;
   if (pact.evidence_kind === "oura") {
-    const row = ctx.one<{ bedtime_start: string | null; judged_at: string | null }>(
-      `SELECT bedtime_start, judged_at FROM occurrence WHERE pact_id = ? AND date = ?`,
+    const row = ctx.one<{ bedtime_start: string | null; bedtime_arrived_at: string | null }>(
+      `SELECT bedtime_start, bedtime_arrived_at FROM occurrence WHERE pact_id = ? AND date = ?`,
       pactId,
       date,
     );
-    const start = row?.bedtime_start ?? null;
+    const arrivedAt = row?.bedtime_arrived_at ?? null;
     automatic = {
       kind: "oura",
       inBedBy: terms.in_bed_by!,
-      firstBedtimeStart: start,
-      arrivedAt: start === null ? null : new Date(row!.judged_at!),
+      firstBedtimeStart: arrivedAt === null ? null : row!.bedtime_start,
+      arrivedAt: arrivedAt === null ? null : new Date(arrivedAt),
     };
   } else if (pact.evidence_kind === "anki") {
     const finished = ctx.one<{ checked_at: string }>(

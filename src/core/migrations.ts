@@ -814,4 +814,15 @@ export const migrations: readonly Migration[] = [
   CREATE UNIQUE INDEX account_one_operator ON account (is_operator) WHERE is_operator = 1;
   `,
   },
+  // 31: a bedtime night's first sleep period is kept when it arrives
+  `
+  -- When the core got the bedtime_start a bedtime night keeps: the first
+  -- long_sleep period Oura reported for it, stored as it arrives, before the
+  -- night is judged. Until now it was stored only when it judged the night
+  -- Satisfied or Missed, as it arrived, so those nights take their judging time.
+  -- A Missed one a cover excused later was judged again on approval: it takes
+  -- the approval's time, which judges it Excused then all the same.
+  ALTER TABLE occurrence ADD COLUMN bedtime_arrived_at TEXT;
+  UPDATE occurrence SET bedtime_arrived_at = judged_at WHERE bedtime_start IS NOT NULL;
+  `,
 ];

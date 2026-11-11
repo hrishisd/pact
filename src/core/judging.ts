@@ -1,6 +1,5 @@
-// Judging: what the paths not yet moved onto `settle` write (covers,
-// bedtime and Anki, design review ticket 12), the Missed push, and ending
-// pacts.
+// Judging's helpers for `settle`: when a running check of AnkiWeb holds
+// judging, the Missed push, what decided an Anki day, and ending pacts.
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
@@ -70,7 +69,7 @@ export function endPastEndDate(ctx: CoreContext, t: Date, ankiChecksRunning: Ank
   }
 }
 
-/** Tells the owner the occurrence is Missed, with what it costs; `settle` and `judgeNights` decide when. */
+/** Tells the owner the occurrence is Missed, with what it costs; `settle` decides when. */
 export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate): void {
   const pact = {
     ...(ctx.db.prepare(`SELECT owner_account_id, name FROM pact WHERE id = ?`).get(pactId) as {
@@ -92,53 +91,6 @@ export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate)
     kind: "missed-occurrence",
     payload: { pactId, occurrenceDate: date, title: `${pact.name} is Missed`, body, url: APP_PATHS.pact(pactId) },
   });
-}
-
-/**
- * Records an occurrence's outcome as of `at`. Missed adds the penalty to
- * the owner's ledger for the recipient, both as the pact's terms stood when
- * the occurrence opened (held, while an excuse or vacation for it waits for approval):
- * for a Weekly count week, one penalty for each day short of its target.
- */
-export function judge(
-  ctx: CoreContext,
-  pactId: string,
-  date: LocalDate,
-  outcome: "satisfied" | "missed" | "excused",
-  at: Date,
-): void {
-  const pact = {
-    ...(ctx.db.prepare(`SELECT owner_account_id FROM pact WHERE id = ?`).get(pactId) as {
-      owner_account_id: AccountId;
-    }),
-    ...termsOn(ctx, pactId, date),
-  };
-  ctx.db
-    .prepare(
-      `INSERT INTO occurrence (pact_id, date, outcome, judged_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT (pact_id, date) DO UPDATE SET outcome = excluded.outcome, judged_at = excluded.judged_at`,
-    )
-    .run(pactId, date, outcome, at.toISOString());
-  const schedule = scheduleOf(pact.schedule);
-  // A One-time pact has no occurrence left once its one is judged.
-  if (schedule.kind === "one-time") endPact(ctx, pactId, at);
-  if (outcome === "missed") {
-    const short = schedule.kind === "weekly-count" ? schedule.target - weekProgress(ctx, pactId, date).sessions : 1;
-    ctx.db
-      .prepare(
-        `INSERT INTO penalty (id, owner_account_id, recipient_id, pact_id, occurrence_date, amount_cents, added_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        ctx.newId(),
-        pact.owner_account_id,
-        pact.recipient_id,
-        pactId,
-        date,
-        pact.penalty_cents * short,
-        at.toISOString(),
-      );
-  }
 }
 
 /**

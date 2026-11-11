@@ -210,21 +210,6 @@ export function dueAfterEnd(ctx: CoreContext, pactId: string, occurrence: Occurr
 }
 
 /**
- * Whether judging at `t` reaches the pact's occurrence on `date`: it's on
- * or before the pact's `judged_through`, or due by `t` in the owner's
- * timezone now. The cursor counts on its own because a timezone change can
- * move a due time it already went past back into the future.
- */
-export function judgingReached(ctx: CoreContext, pactId: string, date: LocalDate, t: Date): boolean {
-  const [pact] = pactsToJudge(ctx, pactId);
-  if (!pact) throw new Error(`no pact ${pactId}`);
-  if (pact.judged_through !== null && date <= pact.judged_through) return true;
-  return occurrencesOf(ctx, pactId, pact.timezone)
-    .dueAfter(pact.judged_through, t)
-    .some((occurrence) => occurrence.date === date);
-}
-
-/**
  * Every Active pact (or just `pactId`, Active or Ended) with what judging
  * reads of it: its terms, cursor and owner's timezone. An Ended pact makes
  * no more occurrences, but a decision can still judge one it had.

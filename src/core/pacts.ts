@@ -529,8 +529,8 @@ export function moveOneTimeOccurrence(ctx: CoreContext, pactId: string, from: Lo
   if (from === to) return;
   ctx.db
     .prepare(
-      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, miss_accepted_at)
-       SELECT pact_id, ?, outcome, judged_at, bedtime_start, miss_accepted_at FROM occurrence
+      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at)
+       SELECT pact_id, ?, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at FROM occurrence
        WHERE pact_id = ? AND date = ?`,
     )
     .run(to, pactId, from);

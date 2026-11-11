@@ -145,13 +145,13 @@ export function decide(
       decideEvidence(ctx, item.row, decided, accountId);
       break;
     case "excuse":
-      decideExcuse(ctx, item.row, decided, accountId);
+      decideExcuse(ctx, item.row, decided, accountId, ankiChecksRunning);
       break;
     case "payment":
       decidePayment(ctx, item.row, decided, accountId);
       break;
     case "vacation":
-      decideVacation(ctx, item.row, decided, accountId);
+      decideVacation(ctx, item.row, decided, accountId, ankiChecksRunning);
       break;
     case "change-request":
       if (decided.outcome === "approved") {

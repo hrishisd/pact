@@ -421,6 +421,35 @@ function schemaOutside(db: ReturnType<typeof openDatabase>, table: string): unkn
     .all(table);
 }
 
+test("migration 31: a bedtime night judged from a sleep period keeps when that period arrived, its judging time", () => {
+  // At migration 30: a bedtime pact with a night judged from a period, one judged at its close with none, and one waiting.
+  const seeded = openDatabase(path, migrations.slice(0, 30));
+  seeded.exec(`
+    INSERT INTO account (id, email, email_key, name, timezone, created_at)
+      VALUES ('owner', 'owner@example.test', 'owner@example.test', 'owner', 'America/New_York', '2026-01-01T00:00:00Z');
+    INSERT INTO recipient (id, owner_account_id, name, created_at)
+      VALUES ('sam', 'owner', 'Sam', '2026-01-01T00:00:00Z');
+    INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                      recipient_id, stage, first_occurrence, in_bed_by, created_at)
+      VALUES ('sleep', 'owner', 'Sleep', 'In bed by 23:00', 'oura',
+              '{"kind":"fixed-days","days":["mon","tue","wed","thu","fri","sat","sun"]}', 500,
+              'sam', 'active', '2026-01-05', '23:00', '2026-01-01T00:00:00Z');
+    INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start)
+      VALUES ('sleep', '2026-01-05', 'satisfied', '2026-01-06T12:00:00Z', '2026-01-05T22:40:00-05:00'),
+             ('sleep', '2026-01-06', 'missed', '2026-01-07T23:00:00Z', NULL),
+             ('sleep', '2026-01-07', NULL, NULL, NULL);
+  `);
+  const rowsBefore = occurrences(seeded);
+  seeded.close();
+
+  const db = openDatabase(path, migrations.slice(0, 31));
+
+  expect(occurrences(db)).toEqual(
+    rowsBefore.map((row) => ({ ...row, bedtime_arrived_at: row.bedtime_start === null ? null : row.judged_at })),
+  );
+  db.close();
+});
+
 /** Every occurrence row, in date order. */
 function occurrences(db: ReturnType<typeof openDatabase>): Record<string, unknown>[] {
   return db.prepare("SELECT * FROM occurrence ORDER BY date").all() as Record<string, unknown>[];

@@ -31,12 +31,13 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { excuseApprovedDays } from "./excuses.ts";
 import { coverOn, coversOn } from "./covers.ts";
+import type { AnkiChecksRunning } from "./judging.ts";
 import { dueAfterEnd, occurrenceSpan } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { isLocalDate } from "./pact-rules.ts";
+import { settleCoverDays } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
 import {
   accountName,
@@ -542,29 +543,22 @@ export function vacationToDecide(
 
 /**
  * Records a picked reviewer's decision on a vacation waiting for approval
- * and tells the owner. Approved: every covered day of every pact is
- * excused at once, as an approved excuse's are (`excuseApprovedDays`).
- * Rejected: its held penalties are owed by no longer waiting, its days are
- * judged as usual, and Today raises an alert (`rejectedVacationAlerts`).
+ * and tells the owner, and settles every covered day of every pact
+ * (`settleCoverDays`). Approved: they're excused at once, as an approved
+ * excuse's are. Rejected: its held penalties are owed by no longer waiting,
+ * its days are judged as usual, and Today raises an alert
+ * (`rejectedVacationAlerts`).
  */
 export function decideVacation(
   ctx: CoreContext,
   vacation: VacationToDecide,
   decided: Decided,
   reviewerId: AccountId,
+  ankiChecksRunning: AnkiChecksRunning,
 ): void {
   const now = ctx.clock.now();
   recordDecision(ctx, "vacation", vacation.id, decided, reviewerId, now);
-  if (decided.outcome === "approved") {
-    const days = ctx.all<{ pact_id: string; date: LocalDate }>(
-      `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
-      vacation.id,
-    );
-    for (const pactId of new Set(days.map((day) => day.pact_id))) {
-      const dates = days.filter((day) => day.pact_id === pactId).map((day) => day.date);
-      excuseApprovedDays(ctx, pactId, dates, now);
-    }
-  }
+  settleVacationDays(ctx, vacation.id, now, ankiChecksRunning);
   const { first_day: from, last_day: to } = vacation;
   ctx.enqueue({
     recipient: vacation.owner_account_id,
@@ -582,7 +576,12 @@ export function decideVacation(
 }
 
 /** The owner withdraws their vacation `vacationId` while it waits for approval. */
-export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationId: string): WithdrawVacationResult {
+export function withdrawVacation(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  vacationId: string,
+  ankiChecksRunning: AnkiChecksRunning,
+): WithdrawVacationResult {
   const row = ctx.one<{ decision: string | null; withdrawn_at: string | null }>(
     `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
     vacationId,
@@ -590,8 +589,22 @@ export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationI
   );
   if (!row) return { ok: false, reason: "vacation-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
-  ctx.db.prepare(`UPDATE vacation SET withdrawn_at = ? WHERE id = ?`).run(ctx.clock.now().toISOString(), vacationId);
+  const now = ctx.clock.now();
+  ctx.db.prepare(`UPDATE vacation SET withdrawn_at = ? WHERE id = ?`).run(now.toISOString(), vacationId);
+  settleVacationDays(ctx, vacationId, now, ankiChecksRunning);
   return { ok: true };
+}
+
+/** Settles every day the vacation covers, pact by pact (`settleCoverDays`). */
+function settleVacationDays(ctx: CoreContext, vacationId: string, now: Date, anki: AnkiChecksRunning): void {
+  const days = ctx.all<{ pact_id: string; date: LocalDate }>(
+    `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
+    vacationId,
+  );
+  for (const pactId of new Set(days.map((day) => day.pact_id))) {
+    const dates = days.filter((day) => day.pact_id === pactId).map((day) => day.date);
+    settleCoverDays(ctx, pactId, dates, now, anki);
+  }
 }
 
 /**

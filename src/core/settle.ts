@@ -1,10 +1,10 @@
 // Settling: bringing an occurrence's stored outcome, judging time and penalty
 // in line with what `verdictOf` says of it, and telling the owner when that
-// makes it Missed. The tick and evidence decisions judge through here;
-// covers, bedtime and Anki still judge for themselves (design review ticket
-// 12), and ending a pact is still `endPact` (ticket 13).
+// makes it Missed. The tick, evidence decisions, cover decisions, bedtime
+// nights and Anki checks all judge through here; ending a pact is still
+// `endPact` (design review ticket 13).
 
-import type { LocalDate } from "../shared/types.ts";
+import type { AccountId, EvidenceKind, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { ankiCheckHolds, endPact, enqueueMissed, noteAnkiMiss, type AnkiChecksRunning } from "./judging.ts";
 import { isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
@@ -21,8 +21,10 @@ export interface Transition {
  * Settles the pact's occurrence dated `date` as of `now`: if it isn't judged
  * and its verdict is final, stores the outcome as of the verdict's time, with
  * the penalty for a Missed one, and ends a One-time pact. An outcome once
- * stored is kept: cover approvals still change it themselves until design
- * review ticket 12 moves them here.
+ * stored is kept, except that a Missed one an approved cover now excuses
+ * becomes Excused, without its penalty. That penalty can't be on a bill yet
+ * (the excuse window closes before billing takes it): if it is, this throws,
+ * and the command changes nothing.
  *
  * The owner is told whenever this makes an occurrence Missed, except when
  * a rejection judged a Fixed day or One-time occurrence (the rejection's push
@@ -36,11 +38,26 @@ export function settle(
   now: Date,
   ankiChecks: AnkiCheckRun[] = [],
 ): Transition | null {
-  if (isJudged(ctx, pactId, date)) return null;
+  const from =
+    ctx.one<{ outcome: Transition["from"] }>(
+      `SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`,
+      pactId,
+      date,
+    )?.outcome ?? null;
+  // Only a Missed outcome may still change, and only to Excused.
+  if (from !== null && from !== "missed") return null;
   const facts = occurrenceFacts(ctx, pactId, date, { ankiChecks });
   if (facts === null) return null;
   const verdict = verdictOf(facts, now);
   if (!("at" in verdict)) return null;
+  if (from === "missed") {
+    if (verdict.kind !== "excused") return null;
+    deletePenalties(ctx, pactId, date);
+    ctx.db
+      .prepare(`UPDATE occurrence SET outcome = 'excused', judged_at = ? WHERE pact_id = ? AND date = ?`)
+      .run(verdict.at.toISOString(), pactId, date);
+    return { from, to: verdict };
+  }
   const owner = ctx.one<{ owner_account_id: string }>(`SELECT owner_account_id FROM pact WHERE id = ?`, pactId)!;
   ctx.db
     .prepare(
@@ -69,7 +86,61 @@ export function settle(
     const toldByRejection = !weekly && facts.evidence.some((e) => e.decision === "rejected");
     if (!toldByRejection && facts.cover === null) enqueueMissed(ctx, pactId, date);
   }
-  return { from: null, to: verdict };
+  return { from, to: verdict };
+}
+
+/** Deletes the occurrence's penalties; throws, before deleting any, if one is on a bill. */
+function deletePenalties(ctx: CoreContext, pactId: string, date: LocalDate): void {
+  const billed = ctx.one<{ id: string; bill_id: string }>(
+    `SELECT id, bill_id FROM penalty WHERE pact_id = ? AND occurrence_date = ? AND bill_id IS NOT NULL LIMIT 1`,
+    pactId,
+    date,
+  );
+  if (billed) {
+    throw new Error(
+      `penalty ${billed.id} for pact ${pactId} on ${date} is billed (bill ${billed.bill_id}): it can't change`,
+    );
+  }
+  ctx.db.prepare(`DELETE FROM penalty WHERE pact_id = ? AND occurrence_date = ?`).run(pactId, date);
+}
+
+/**
+ * Settles the pact's occurrences that take in `dates`, the days of a cover
+ * just decided or withdrawn, as of `now`, given the checks of AnkiWeb still
+ * running. Approved: a Missed one becomes Excused, and one not judged yet
+ * whose due time has passed (its evidence was waiting) is judged Excused
+ * now; the rest are judged Excused at their due time. Rejected or withdrawn:
+ * the cover no longer counts, and nothing changes. A bedtime night not
+ * judged yet is left to judging (`judgeNights`), which waits for Oura until
+ * the night closes, and takes a period on its first look after the close.
+ */
+export function settleCoverDays(
+  ctx: CoreContext,
+  pactId: string,
+  dates: readonly LocalDate[],
+  now: Date,
+  anki: AnkiChecksRunning,
+): void {
+  const pact = ctx.one<{ timezone: string; evidence_kind: EvidenceKind; owner_account_id: AccountId }>(
+    `SELECT account.timezone, pact.evidence_kind, pact.owner_account_id
+       FROM pact JOIN account ON account.id = pact.owner_account_id WHERE pact.id = ?`,
+    pactId,
+  )!;
+  const { covering } = occurrencesOf(ctx, pactId, pact.timezone);
+  const running = runningAnkiChecks(anki, pact.owner_account_id);
+  const settled = new Set<LocalDate>();
+  for (const day of dates) {
+    const occurrence = covering(day);
+    if (occurrence === null || settled.has(occurrence.date)) continue;
+    settled.add(occurrence.date);
+    if (pact.evidence_kind === "oura" && !isJudged(ctx, pactId, occurrence.date)) continue;
+    settle(ctx, pactId, occurrence.date, now, running);
+  }
+}
+
+/** The checks of the account's AnkiWeb still running, as `verdictOf` reads them. */
+export function runningAnkiChecks(anki: AnkiChecksRunning, account: AccountId): AnkiCheckRun[] {
+  return [...(anki.get(account) ?? [])].map(({ startedAt }) => ({ startedAt: new Date(startedAt), finishedAt: null }));
 }
 
 /**
@@ -93,10 +164,7 @@ export function settlePactDueBy(ctx: CoreContext, pact: PactToJudge, t: Date, an
   if (pact.evidence_kind === "oura") return;
   settleBehindCursor(ctx, pact, t);
   const due = occurrencesOf(ctx, pact.id, pact.timezone).dueAfter(pact.judged_through, t);
-  const running = [...(anki.get(pact.owner_account_id) ?? [])].map(({ startedAt }) => ({
-    startedAt: new Date(startedAt),
-    finishedAt: null,
-  }));
+  const running = runningAnkiChecks(anki, pact.owner_account_id);
   let through: LocalDate | null = null;
   for (const occurrence of due) {
     const isAnki = pact.evidence_kind === "anki";

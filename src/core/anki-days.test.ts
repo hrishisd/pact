@@ -310,6 +310,32 @@ describe("judging an Anki day", () => {
     });
   });
 
+  test("an excuse rejected while a check from before the due time is still running leaves the day to that check", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    deckShows({ review: 3 }, s.date("Tue"), "Tue 23:45");
+    await s.advanceTo("Tue 23:50");
+    const filed = ok(
+      await owner.fileExcuse(pactId, { from: s.date("Tue"), to: s.date("Tue"), reason: "Travelling" }, []),
+    );
+
+    deckShows({}, s.date("Tue"), "Tue 23:58");
+    s.setClockTo("Tue 23:59");
+    const download = s.ankiSource.holdDeckCounts(owner.id);
+    const checking = owner.checkAnki();
+    await download.started;
+    await s.advanceTo("Wed 00:00");
+    await reviewer.decide(filed.excuseId, { kind: "reject", reason: "Not a reason" });
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("not-judged");
+
+    download.release();
+    await checking;
+    await s.advanceTo("Wed 00:01");
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+  });
+
   test("a check still running at the due time that finds cards left lets the next tick judge the day Missed", async () => {
     const s = scenario();
     const { owner, createPact, deckShows } = await ownerWithAnki(s);
