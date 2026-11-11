@@ -1,6 +1,7 @@
 // A pact's page, pushed on the current tab: its terms, Edit and Delete in
 // its edit window; after it File excuse, Request change and End pact (or,
-// while a change request waits, word of it); when new terms start; and
+// while a change request waits, word of it; while an approved end waits,
+// neither, and word of the end); when new terms start; and
 // what's waiting on a reviewer; and its History, a heat map of its days.
 // After the edit window the name, the reminders and added reviewers change
 // right here, with no review, even while a change request waits.
@@ -229,7 +230,8 @@ function changeWaiting(pact: Pact): boolean {
 /**
  * File excuse and Request change, once the edit window has closed. The
  * excuse sheet asks which day. While a change request waits, Request change
- * gives way to word of it.
+ * gives way to word of it. While an approved end waits it's gone, as End pact
+ * is: the core refuses all but the at-once changes, which Terms offers.
  */
 function Actions({
   pact,
@@ -263,7 +265,7 @@ function Actions({
         <button className="btn" onClick={() => setFiling(true)}>
           File excuse
         </button>
-        {!waiting && (
+        {!waiting && pact.ending === null && (
           <button className="btn" onClick={onRequestChange}>
             Request change
           </button>

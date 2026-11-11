@@ -1,6 +1,6 @@
 # Hide Request change while an approved end waits
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 ## What to build
@@ -9,9 +9,9 @@ Ticket 27 hid "End pact" on the pact page while an approved end waits, and made 
 
 ## Acceptance criteria
 
-- [ ] The pact page shows neither "End pact" nor "Request change" while an approved end waits, and shows both otherwise.
-- [ ] A client test covers both states.
-- [ ] `docs/behaviour.md` says the owner can't open the change form while an end waits.
+- [x] The pact page shows neither "End pact" nor "Request change" while an approved end waits, and shows both otherwise.
+- [x] A client test covers both states.
+- [x] `docs/behaviour.md` says the owner can't open the change form while an end waits.
 
 ## Comments
 

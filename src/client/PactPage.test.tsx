@@ -91,7 +91,7 @@ describe("the Add a reviewer sheet", () => {
   });
 });
 
-test("a pact whose end was approved says when it ends, and offers no End pact", async () => {
+test("a pact whose end was approved says when it ends, and offers neither End pact nor Request change", async () => {
   stubApi({ pact: answers({ ok: true, pact: { ...cameraPact(), ending: { lastDay: "2026-01-08" } } }) });
   renderPactPage();
 
@@ -101,11 +101,13 @@ test("a pact whose end was approved says when it ends, and offers no End pact", 
     ),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "End pact" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Request change" })).toBeNull();
 });
 
-test("an Active pact past its edit window offers End pact", async () => {
+test("an Active pact past its edit window offers End pact and Request change", async () => {
   stubApi({ pact: answers({ ok: true, pact: cameraPact() }) });
   renderPactPage();
 
   expect(await screen.findByRole("button", { name: "End pact" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Request change" })).toBeTruthy();
 });
