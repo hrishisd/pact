@@ -1,0 +1,54 @@
+
+ RUN  v5.0.5 /home/user/pact
+
+stdout | src/core/zz-audit-tmp.test.ts > probe 1: an approved end drops the occurrence open now > Weekly count: 0 of 3 on Saturday, end approved Saturday -> the week is never judged, no penalty
+PROBE1 weekly penalties: []
+
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 1: an approved end drops the occurrence open now > Weekly count: 0 of 3 on Saturday, end approved Saturday -> the week is never judged, no penalty 583ms
+stdout | src/core/zz-audit-tmp.test.ts > probe 1: an approved end drops the occurrence open now > control: the same week with no end request costs 3 penalties
+PROBE1 control penalties: [{"date":"2026-01-12","cents":1500,"recipient":"Sam","pactName":"Piano"}]
+
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 1: an approved end drops the occurrence open now > control: the same week with no end request costs 3 penalties 895ms
+stdout | src/core/zz-audit-tmp.test.ts > probe 1: an approved end drops the occurrence open now > Fixed days: no photo by 23:00, end approved at 23:00 -> that day is never judged
+PROBE1 fixed penalties: ["2026-01-05","2026-01-06","2026-01-07"]
+
+stdout | src/core/zz-audit-tmp.test.ts > probe 2: a Weekly count week judged Missed by a late decision > approved Monday after: Missed 2 short, but no Missed push; the decision push says only 'approved'
+PROBE2 penalties: [{"date":"2026-01-12","cents":1000,"recipient":"Sam","pactName":"Piano"}]
+PROBE2 pushes: [["evidence-decided","reviewer approved your evidence","Piano · Sun Jan 18"]]
+
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 1: an approved end drops the occurrence open now > Fixed days: no photo by 23:00, end approved at 23:00 -> that day is never judged 52ms
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 2: a Weekly count week judged Missed by a late decision > approved Monday after: Missed 2 short, but no Missed push; the decision push says only 'approved' 59ms
+stdout | src/core/zz-audit-tmp.test.ts > probe 3: a removed day added back is covered by the old excuse > excuse approved for Mon+1..Sun+1, Wed removed then added back -> Wed+1 is Excused
+PROBE3 re-add outcome: stricter
+
+stdout | src/core/zz-audit-tmp.test.ts > probe 3: a removed day added back is covered by the old excuse > excuse approved for Mon+1..Sun+1, Wed removed then added back -> Wed+1 is Excused
+PROBE3 Wed+1: excused penalties: ["2026-01-05","2026-01-07","2026-01-09"]
+
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 3: a removed day added back is covered by the old excuse > excuse approved for Mon+1..Sun+1, Wed removed then added back -> Wed+1 is Excused 736ms
+stdout | src/core/zz-audit-tmp.test.ts > probe 4: a waiting excuse for today > Today drops the To do card, but the 18:00 reminder still fires
+PROBE4 to-do cards for Gym: 0 reminders: ["2026-01-08"]
+
+stdout | src/core/zz-audit-tmp.test.ts > probe 5: items left in the queue after they stop mattering > evidence still waits after an excuse made its deferred day Excused
+PROBE5a Thu: excused
+PROBE5a queue: [["evidence","00000000-0000-4000-8000-000000000009"]]
+
+stdout | src/core/zz-audit-tmp.test.ts > probe 5: items left in the queue after they stop mattering > evidence still waits after an excuse made its deferred day Excused
+PROBE5a pushes after: ["reviewer rejected your evidence"]
+
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 4: a waiting excuse for today > Today drops the To do card, but the 18:00 reminder still fires 87ms
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 5: items left in the queue after they stop mattering > evidence still waits after an excuse made its deferred day Excused 71ms
+stdout | src/core/zz-audit-tmp.test.ts > probe 5: items left in the queue after they stop mattering > an excuse whose every day an approved change removed stays in the queue with no days
+PROBE5b excuse item days: []
+PROBE5b owner waiting: ["excuse"]
+
+stdout | src/core/zz-audit-tmp.test.ts > probe 5: items left in the queue after they stop mattering > evidence for the day open when the end was approved still sits in the queue
+PROBE5c queue has evidence: true
+
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 5: items left in the queue after they stop mattering > an excuse whose every day an approved change removed stays in the queue with no days 55ms
+ ✓ |node| src/core/zz-audit-tmp.test.ts > probe 5: items left in the queue after they stop mattering > evidence for the day open when the end was approved still sits in the queue 47ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  23:18:35
+   Duration  2.85s (tests 96%, transform 2%, import 2%)
+

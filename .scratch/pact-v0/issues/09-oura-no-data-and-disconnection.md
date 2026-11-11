@@ -1,6 +1,6 @@
 # 09 No Oura data card, check now, 3pm push and disconnection
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05, 07, 08
 
 Spec stories: 37, 38, 41, 93 (Reconnect), 94. Rules: Judging bedtime pacts (disconnected, 15:00 push), Oura polling (check now).
@@ -61,3 +61,5 @@ Make the gap between waking up and Oura syncing visible and cheap to fix, and ha
 - 2026-11-04: The real-ring and Open Oura link checks are in `.scratch/pact-v0/manual-checks.md` (Oura Ring section).
 
 - 2026-11-05: `DayChip` and `dayNote` take an `oura` flag, so a bedtime night past its in-bed-by time with no excuse reads "No Oura data" in the File excuse sheet (day card, Which day? rows, covered-day lists). The heat map uses the same chip instead of its own special case.
+
+- 2026-11-10 (design review): Verified every acceptance criterion has a passing scenario on `main` (`src/core/oura-no-data.test.ts`; routes in `src/server/app.test.ts`, "connecting Oura"); set to done, with the real-ring and Open Oura link checks left in `manual-checks.md` (Oura Ring section).

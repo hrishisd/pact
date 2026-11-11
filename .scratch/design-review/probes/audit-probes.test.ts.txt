@@ -1,0 +1,168 @@
+// TEMPORARY audit probes. Each test asserts what the code does today; a pass
+// confirms the finding. Delete after the audit.
+
+import { describe, expect, test } from "vitest";
+import type { PactChange, Schedule } from "../shared/types.ts";
+import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
+import { cards, changed, ok, pactOf, penalties, penaltyDays, statusOn } from "./testing/queries.ts";
+import { changeRequestIdOf, scenario, type Scenario } from "./testing/scenario.ts";
+
+const THREE_A_WEEK: Schedule = { kind: "weekly-count", target: 3 };
+
+async function tickHourly(s: Scenario, from: string, to: string) {
+  const end = s.at(to).getTime();
+  for (let t = s.at(from).getTime(); t <= end; t += 3600_000) await s.advanceTo(new Date(t).toISOString());
+}
+
+describe("probe 1: an approved end drops the occurrence open now", () => {
+  test("Weekly count: 0 of 3 on Saturday, end approved Saturday -> the week is never judged, no penalty", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", THREE_A_WEEK);
+    await tickHourly(s, "Mon 10:00", "Sat+1 12:00");
+    const end = ok(await owner.requestEnd(piano, "Done with piano"));
+    s.setClockTo("Sat+1 13:00");
+    ok(await reviewer.decide(end.changeRequestId, { kind: "approve" }));
+    await tickHourly(s, "Sat+1 14:00", "Thu+2 00:00");
+    console.log("PROBE1 weekly penalties:", JSON.stringify(penalties(owner)));
+    expect(penaltyDays(owner, "Piano")).toEqual([]);
+  });
+
+  test("control: the same week with no end request costs 3 penalties", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", THREE_A_WEEK);
+    await tickHourly(s, "Mon 10:00", "Thu+2 00:00");
+    console.log("PROBE1 control penalties:", JSON.stringify(penalties(owner)));
+    expect(penalties(owner).map((p) => p.cents)).toEqual([1500]);
+    expect(pactOf(owner, piano).stage).toBe("active");
+  });
+
+  test("Fixed days: no photo by 23:00, end approved at 23:00 -> that day is never judged", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Thu 12:00");
+    const end = ok(await owner.requestEnd(gym));
+    s.setClockTo("Thu 23:00");
+    ok(await reviewer.decide(end.changeRequestId, { kind: "approve" }));
+    await s.advanceTo("Sat 12:00");
+    console.log("PROBE1 fixed penalties:", JSON.stringify(penaltyDays(owner, "Gym")));
+    expect(penaltyDays(owner, "Gym")).not.toContain(s.date("Thu"));
+  });
+});
+
+describe("probe 2: a Weekly count week judged Missed by a late decision", () => {
+  test("approved Monday after: Missed 2 short, but no Missed push; the decision push says only 'approved'", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    await createPact("Piano", THREE_A_WEEK);
+    await s.advanceTo("Sun+1 12:00");
+    const late = await submit(owner, (owner.pacts()[0] as { id: string }).id);
+    await s.advanceTo("Mon+2 01:00");
+    expect(penalties(owner)).toEqual([]);
+    s.setClockTo("Mon+2 10:00");
+    ok(await reviewer.decide(late, { kind: "approve" }));
+    await s.advanceTo("Mon+2 11:00");
+    console.log("PROBE2 penalties:", JSON.stringify(penalties(owner)));
+    console.log(
+      "PROBE2 pushes:",
+      JSON.stringify(s.notifier.sentTo(owner).map((n) => [n.kind, n.payload.title, n.payload.body])),
+    );
+    expect(penalties(owner).map((p) => p.cents)).toEqual([1000]);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+  });
+});
+
+describe("probe 3: a removed day added back is covered by the old excuse", () => {
+  test("excuse approved for Mon+1..Sun+1, Wed removed then added back -> Wed+1 is Excused", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Tue 12:00");
+    const excuse = ok(
+      await owner.fileExcuse(gym, { from: s.date("Mon+1"), to: s.date("Sun+1"), reason: "Trip" }, []),
+    );
+    ok(await reviewer.decide(excuse.excuseId, { kind: "approve" }));
+    const fewer: Partial<PactChange> = { schedule: { kind: "fixed-days", days: ["mon", "fri"] } };
+    const request = ok(await owner.changePact(gym, changed(owner, gym, fewer)));
+    ok(await reviewer.decide(changeRequestIdOf(request), { kind: "approve" }));
+    const more: Partial<PactChange> = { schedule: { kind: "fixed-days", days: MON_WED_FRI } };
+    const back = ok(await owner.changePact(gym, changed(owner, gym, more)));
+    console.log("PROBE3 re-add outcome:", back.outcome.kind);
+    await tickHourly(s, "Tue 13:00", "Sat+1 00:00");
+    console.log("PROBE3 Wed+1:", statusOn(owner, gym, s.date("Wed+1")), "penalties:", JSON.stringify(penaltyDays(owner)));
+    expect(back.outcome.kind).toBe("stricter");
+    expect(statusOn(owner, gym, s.date("Wed+1"))).toBe("excused");
+  });
+});
+
+describe("probe 4: a waiting excuse for today", () => {
+  test("Today drops the To do card, but the 18:00 reminder still fires", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { reminders: ["18:00"] });
+    await s.advanceTo("Thu 12:00");
+    ok(await owner.fileExcuse(gym, { from: s.date("Thu"), to: s.date("Thu"), reason: "Sick" }, []));
+    await tickHourly(s, "Thu 13:00", "Thu 18:00");
+    await s.advanceTo("Thu 18:30");
+    const todo = cards(owner, "to-do").filter((c) => "pactId" in c && c.pactId === gym);
+    const reminders = s.notifier.sentTo(owner, "reminder").map((n) => n.payload.occurrenceDate);
+    console.log("PROBE4 to-do cards for Gym:", todo.length, "reminders:", JSON.stringify(reminders));
+    expect(todo).toEqual([]);
+    expect(reminders).toContain(s.date("Thu"));
+  });
+});
+
+describe("probe 5: items left in the queue after they stop mattering", () => {
+  test("evidence still waits after an excuse made its deferred day Excused", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Thu 20:00");
+    const evidenceId = await submit(owner, gym);
+    await s.advanceTo("Fri 01:00");
+    const excuse = ok(await owner.fileExcuse(gym, { from: s.date("Thu"), to: s.date("Thu"), reason: "Wrong photo" }, []));
+    ok(await reviewer.decide(excuse.excuseId, { kind: "approve" }));
+    console.log("PROBE5a Thu:", statusOn(owner, gym, s.date("Thu")));
+    const queued = reviewer.reviewQueue().map((i) => [i.kind, i.id]);
+    console.log("PROBE5a queue:", JSON.stringify(queued));
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("excused");
+    expect(queued).toContainEqual(["evidence", evidenceId]);
+    ok(await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" }));
+    console.log(
+      "PROBE5a pushes after:",
+      JSON.stringify(s.notifier.sentTo(owner, "evidence-decided").map((n) => n.payload.title)),
+    );
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("excused");
+  });
+
+  test("an excuse whose every day an approved change removed stays in the queue with no days", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Tue 12:00");
+    const fewer: Partial<PactChange> = { schedule: { kind: "fixed-days", days: ["mon", "fri"] } };
+    const request = ok(await owner.changePact(gym, changed(owner, gym, fewer)));
+    const excuse = ok(await owner.fileExcuse(gym, { from: s.date("Wed+1"), to: s.date("Wed+1"), reason: "Dentist" }, []));
+    ok(await reviewer.decide(changeRequestIdOf(request), { kind: "approve" }));
+    const item = reviewer.reviewQueue().find((i) => i.id === excuse.excuseId);
+    console.log("PROBE5b excuse item days:", JSON.stringify(item && "days" in item ? item.days : "absent"));
+    console.log("PROBE5b owner waiting:", JSON.stringify(owner.today().waiting.map((w) => w.kind)));
+    expect(item).toBeDefined();
+    expect(item && "days" in item ? item.days : null).toEqual([]);
+  });
+
+  test("evidence for the day open when the end was approved still sits in the queue", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Thu 12:00");
+    const evidenceId = ok(await owner.submitEvidence(gym, [photo()])).evidenceId;
+    const end = ok(await owner.requestEnd(gym));
+    ok(await reviewer.decide(end.changeRequestId, { kind: "approve" }));
+    const queued = reviewer.reviewQueue().map((i) => i.id);
+    console.log("PROBE5c queue has evidence:", queued.includes(evidenceId));
+    expect(queued).toContain(evidenceId);
+  });
+});
