@@ -1,6 +1,6 @@
 # A vacation test runs close to Vitest's 5-second timeout
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 ## Problem

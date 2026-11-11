@@ -1,6 +1,6 @@
 # The moot rule withdraws Weekly count evidence that only counts together
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 ## Problem
