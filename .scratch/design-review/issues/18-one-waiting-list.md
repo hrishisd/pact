@@ -1,6 +1,6 @@
 # 18 One waiting list and one row
 
-Status: ready-for-agent
+Status: done
 Blocked by: 17
 
 Closes: F11, C2 and rule R10 (`../interaction-audit.md` finding 11, `../code-structure-review.md` C2); H1 step 2; the exhaustive-kinds part of W4.
@@ -55,3 +55,5 @@ Built 2026-11-11.
 - Client: `ItemOpeners`, `openItem` and `WaitingItemRow` (with its `WAITING_ROWS` record) in `item-page.tsx`. App builds the openers once and passes them to Today and the pact page. A vacation opens the Profile sheet, where its card and Reply are; no vacation page was added. Evidence rows now show the day on Today too. The three Take the L refusal tables are one `TAKE_THE_L_REFUSAL_TEXT`.
 - Removing `vacation` from `WAITING_ROWS` or from App's openers fails `tsc` with TS2741 (tried, then restored).
 - Where the ticket no longer matched the code: `occurrence-state.ts:180` no longer hides vacation-waiting (days already read "Vacation waiting for approval", `docs/behaviour.md`); `vacations.test.ts` had no "Waiting for approval never" test, only the question test asserting Today empty, which was rewritten; `app.test.ts`'s waiting objects (now at :1077 and :1375) are evidence and excuse rows and did not change.
+
+Owner decision (2026-11-11): accept rows that carry each kind's own fields, formatted by the client, in place of a core-made title and detail line. One row component keyed by kind keeps every screen the same.
