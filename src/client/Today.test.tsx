@@ -169,7 +169,10 @@ test("a reload that fails keeps the cards shown, and says what failed above them
 });
 
 describe("a rejected vacation's alert", () => {
-  const rejected = (owedAgainCents: number): TodayResponse => ({
+  const rejected = (
+    owedAgainCents: number,
+    excusable: { firstDate: string; lastDate: string; until: string } | null = null,
+  ): TodayResponse => ({
     hasPacts: true,
     alerts: [
       {
@@ -180,6 +183,7 @@ describe("a rejected vacation's alert", () => {
         firstDate: "2026-12-20",
         lastDate: "2027-01-02",
         owedAgainCents,
+        excusable,
       },
     ],
     sections: [],
@@ -209,6 +213,21 @@ describe("a rejected vacation's alert", () => {
 
     expect(spies.acceptVacationRejection).toHaveBeenCalledWith("v1");
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
+  test("with Missed days it released, says until when they can be excused", async () => {
+    const excusable = { firstDate: "2026-12-21", lastDate: "2026-12-23", until: "2026-12-26T13:00:00.000Z" };
+    stubApi({ today: answers(rejected(1000, excusable)) });
+    renderToday();
+    const alert = await screen.findByRole("status");
+    expect(alert.textContent).toContain("Mon Dec 21 to Wed Dec 23 can be excused until Sat Dec 26, 8:00am.");
+  });
+
+  test("with none it can release, says nothing of excuses", async () => {
+    stubApi({ today: answers(rejected(1000)) });
+    renderToday();
+    const alert = await screen.findByRole("status");
+    expect(alert.textContent).not.toContain("can be excused");
   });
 });
 

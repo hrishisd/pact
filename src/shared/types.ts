@@ -869,7 +869,8 @@ export type TodayAlert =
       recipientName: string;
       /**
        * Until when an excuse for the day is accepted: 48 hours after the
-       * rejection. Null on Weekly count: the week isn't judged yet, so no 48
+       * rejection, or after a vacation that covered it was rejected or
+       * withdrawn, if later. Null on Weekly count: the week isn't judged yet, so no 48
        * hours are running.
        */
       excusableUntil: Date | null;
@@ -920,6 +921,12 @@ export type TodayAlert =
       lastDate: LocalDate;
       /** The penalties it held, owed again now. */
       owedAgainCents: number;
+      /**
+       * Its days Missed when it was rejected that can still be excused, and
+       * when their window closes: 48 hours from the rejection (R3). Null
+       * when none can.
+       */
+      excusable: ExcusableDays | null;
     }
   /**
    * Bills to one recipient are past their due time and not all paid, and
@@ -1034,7 +1041,11 @@ export interface TodayMissedCard extends TodayPactCard {
   occurrenceDate: LocalDate;
   /** When it was judged Missed. */
   missedAt: Date;
-  /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+  /**
+   * Until when an excuse for it is accepted: 48 hours after it was judged
+   * Missed, or after a vacation that covered it was rejected or withdrawn,
+   * if later (R3).
+   */
   excusableUntil: Date;
   /** What else its line says, or null for a plain Missed day. */
   detail: MissedDetail | null;
@@ -1310,7 +1321,11 @@ export type OccurrenceStatus = OccurrenceStanding &
         kind: "missed";
         /** Its penalty, held while `cover` waits for approval. */
         penaltyCents: number;
-        /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+        /**
+         * Until when an excuse for it is accepted: 48 hours after it was
+         * judged Missed, or after a vacation that covered it was rejected or
+         * withdrawn, if later (R3).
+         */
         excusableUntil: Date;
       }
     | {
@@ -1526,6 +1541,11 @@ export interface VacationCard {
   state: VacationState;
   /** The penalties it holds while it waits, left out when none: withdrawing makes them owed. */
   heldCents?: number;
+  /**
+   * The first and last day whose penalty it holds, there exactly when
+   * `heldCents` is: withdrawing gives them 48 hours to be excused (R3).
+   */
+  heldDates?: { firstDate: LocalDate; lastDate: LocalDate };
 }
 
 /**
@@ -1538,6 +1558,13 @@ export type VacationState =
   | { kind: "waiting-on-reply"; askedBy: string; question: string }
   | { kind: "approved"; reviewerName: string }
   | { kind: "on-now" };
+
+/** Days a rejected or withdrawn vacation released, oldest and newest, and when their excuse window closes. */
+export interface ExcusableDays {
+  firstDate: LocalDate;
+  lastDate: LocalDate;
+  until: Date;
+}
 
 /** The dates of the owner's last approved vacation that has ended, as Profile's "Last one" shows them. */
 export interface LastVacation {

@@ -43,6 +43,7 @@ import {
   clockTime,
   dateSpan,
   dateUnlessToday,
+  excusableText,
   formatDate,
   formatDay,
   formatDueAt,
@@ -772,7 +773,7 @@ function Alert({
     case "excuse-rejected":
       return <RejectedExcuseAlert alert={alert} now={now} onFileExcuse={onFileExcuse} onTaken={onChanged} />;
     case "vacation-rejected":
-      return <RejectedVacationAlert alert={alert} onTaken={onChanged} />;
+      return <RejectedVacationAlert alert={alert} timezone={timezone} onTaken={onChanged} />;
     case "bill-overdue":
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
     case "connection":
@@ -1024,16 +1025,22 @@ function RejectedExcuseAlert({
 
 /**
  * A rejected vacation: its held penalties are owed again, and its days are
- * judged as usual. Take the L clears it, with no confirmation.
+ * judged as usual. The days it released can be excused for 48 hours from
+ * the rejection, each from its Missed card; the alert says until when.
+ * Take the L clears it, with no confirmation.
  */
 function RejectedVacationAlert({
   alert,
+  timezone,
   onTaken,
 }: {
   alert: Extract<Json<TodayAlert>, { kind: "vacation-rejected" }>;
+  /** The profile's timezone, for when the excuse window closes. */
+  timezone: string;
   /** After Take the L: Today reloads. */
   onTaken: () => void;
 }) {
+  const { excusable } = alert;
   const { busy, error, take } = useTakeTheL(
     () => api.acceptVacationRejection(alert.vacationId),
     ACCEPT_VACATION_REJECTION_REFUSAL_TEXT,
@@ -1052,6 +1059,11 @@ function RejectedVacationAlert({
           "your pacts keep all their days"
         )}
       </span>
+      {excusable && (
+        <span className="small">
+          {excusableText(excusable.firstDate, excusable.lastDate, excusable.until, timezone)}
+        </span>
+      )}
       <div className="row2">
         <button className="btn sm danger" disabled={busy} onClick={take}>
           {busy ? "Sending…" : "Take the L"}

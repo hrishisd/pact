@@ -1,7 +1,7 @@
 // How the client writes money, schedules, dates and time left.
 
 import { parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
-import { clockText, formatDate, formatDay, partsIn } from "../shared/format.ts";
+import { clockText, clockTime, formatDate, formatDay, partsIn } from "../shared/format.ts";
 import type { Json } from "../shared/api.ts";
 import {
   EDIT_WINDOW_MINUTES,
@@ -15,9 +15,13 @@ import {
 
 export {
   clockText,
+  clockTime,
   dateSpan,
+  daysText,
+  excusableText,
   formatDate,
   formatDay,
+  formatDayTime,
   inBedByName,
   monthDay,
   money,
@@ -63,11 +67,6 @@ export function weekdayName(date: LocalDate): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(
     new Date(Date.UTC(year, month - 1, day)),
   );
-}
-
-/** An instant, as an ISO string, as its day and time in `timeZone` (the profile's): "Thu Oct 22, 9:05pm". */
-export function formatDayTime(instant: string, timeZone: string): string {
-  return `${formatDay(instant, timeZone)}, ${clockTime(instant, timeZone)}`;
 }
 
 /**
@@ -125,15 +124,6 @@ export function minutesLeft(closesAt: string | null, now: number): number | null
   if (closesAt === null) return null;
   const ms = Date.parse(closesAt) - now;
   return ms > 0 ? Math.ceil(ms / 60_000) : null;
-}
-
-/**
- * An instant, as an ISO string, as a time in `timeZone` (the profile's):
- * "2:24pm". Undefined reads it on this device's clock.
- */
-export function clockTime(instant: string, timeZone: string | undefined): string {
-  const part = partsIn(instant, timeZone, { hour: "numeric", minute: "2-digit" });
-  return `${part("hour")}:${part("minute")}${part("dayPeriod").toLowerCase()}`;
 }
 
 /** "Sam Lee" → "S". */

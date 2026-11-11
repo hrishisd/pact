@@ -115,13 +115,13 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 ### Excuses
 
 - An excuse covers one pact for a range of days and needs a reason, at most 3 photos (`MAX_EXCUSE_PHOTOS`) and at most 62 days (`MAX_EXCUSE_SPAN_DAYS`) (`fileExcuse`, `excuses.ts:92`; `excusePreview`, `excuses.ts:233`). Test: `excuses.test.ts`.
-- It can cover future days, today, and past days that were Missed within the last 48 hours or are still waiting on evidence (`excuseOptions`, `excuses.ts:66`; `EXCUSE_WINDOW_MS`, `pact-rules.ts:42`).
+- It can cover future days, today, and past days that are still waiting on evidence or were Missed with their excuse window still open (`excuseOptions`, `excuses.ts:66`; `EXCUSE_WINDOW_MS`, `pact-rules.ts:42`). The window is 48 hours from the later of the day's judging and the rejection or withdrawal of a vacation that covered it (rule R3 in `.scratch/design-review/spec.md`).
 - Days after the end, days already excused, and days on a waiting vacation are skipped (`excuseSkipReason`, `excuses.ts:267`). Days a change removed from the schedule are not offered (`excuseDays`, `excuses.ts:277`).
 - On a Weekly count, excusing any day of a week covers the whole week (`excusePreview`, `excuses.ts:248`). Test: `weekly-count.test.ts:440`.
 - An excuse dated any day of a Submit anytime window covers the One-time occurrence (decided in pact-v0 ticket 15).
 - The pact's reviewers get a push. Any one of them decides it (`decideExcuse`, `excuses.ts:331`).
 - Approval turns Missed days into Excused and deletes their penalties, and judges days past their due time as Excused now. Oura nights not judged yet are left to judging, which waits for Oura until they close. Rejection and withdrawal settle the days too, which changes nothing, and a check of AnkiWeb still running holds an Anki day as it does for the tick (`settleCoverDays`, `settle.ts:117`).
-- After a rejection the owner can file again while a day is still excusable, or take the L. The alert goes once no day is left (`rejectedExcuseAlerts`, `excuses.ts:426`; `acceptExcuseRejection`, `excuses.ts:171`).
+- After a rejection the owner can file again while a day is still excusable, or take the L. The alert goes once no day is left (`rejectedExcuseAlerts`, `excuses.ts:426`; `acceptExcuseRejection`, `excuses.ts:171`). A rejected excuse never restarts a day's window (v0:256; `excuses.test.ts` "re-filing after a rejection").
 - An excuse cannot be withdrawn.
 
 ### Vacations
@@ -131,13 +131,14 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - A Weekly count week is covered only when the vacation covers every day from Thursday on. The Check step lists each week it does not cover (`pactPreview`, `vacations.ts:150`; `PlanVacation.tsx:420-425`). This differs on purpose from an excuse (rule R11 in `.scratch/design-review/spec.md`).
 - Only the picked reviewers are told and may decide (`vacationToDecide`, `vacations.ts:528`). Approval excuses each covered day as an approved excuse would (`decideVacation`, `vacations.ts:552`).
 - The owner can withdraw a vacation that waits. Nobody is notified (`withdrawVacation`, `vacations.ts:579`).
-- After a rejection, Take the L covers only the days that were Missed at the time of the rejection (`acceptVacationRejection`, `vacations.ts:666`; decided in vacation ticket 03).
+- Rejecting or withdrawing a vacation reopens the excuse window of each covered day already Missed: 48 hours from the rejection or withdrawal (rule R3). Those days show on Today's Missed for the rest of it, beside the rejection alert. The rejection push and the alert say which days can be excused and until when ("Mon Jan 12 to Wed Jan 14 can be excused until Sat Jan 17, 8:00am."), and say nothing of excuses when no day can be (`releasedDays`, `decideVacation`, `rejectedVacationAlerts` in `vacations.ts`). Profile's withdraw confirm says the held days can be excused for 48 hours. This reverses vac:81 for vacations only (design review ticket 15). Test: `vacations.test.ts`, "the excuse window a rejected or withdrawn vacation reopens".
+- After a rejection, Take the L covers only the days that were Missed at the time of the rejection (`acceptVacationRejection`, `vacations.ts`; decided in vacation ticket 03).
 - Moving a One-time deadline keeps a vacation day only if the new deadline is inside the vacation (`moveOneTimeOccurrence`, `pacts.ts:529`; `moveCovers`, `covers.ts:102`).
 
 ### Holds and the 48-hour window
 
 - A waiting excuse or vacation that covers a Missed day holds its penalty: it is left off bills and out of what is owed (`PENALTY_HELD`, `money.ts:87`). Test: `ledgers.test.ts`.
-- A bill takes only penalties added at least 48 hours before it, so a Missed day can still be excused before it is billed (`billOwner`, `money.ts:394`).
+- A bill takes only penalties whose excuse window closed by its time, so a Missed day can still be excused before it is billed (`billOwner`, `money.ts`). The window opens at the later of the day's judging and the rejection or withdrawal of a vacation that covered it; one expression decides it everywhere it is read: the occurrence view, excuse filing, Today's Missed cards and alerts, the ledger's next bill, and bills (`excuseWindowOpensSql` and `excusableUntil`, `covers.ts`; rule R3).
 - Excuses and vacations are read as one kind of cover (`covers.ts`; the `cover_day_v` view). When one day has several covers, a waiting excuse comes first, then an approved excuse, then an approved vacation, then a waiting vacation (`coverOn`, `covers.ts:55`). A rejected or withdrawn cover covers nothing.
 - A waiting excuse takes the day off the owner's to-do list and stops its reminders. A waiting vacation keeps both (`keepsToDo`, `covers.ts:76`; rule R7 below).
 
@@ -176,7 +177,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
   - Anki: sent until the day is judged.
   - Camera: sent while no evidence is in for the occurrence and it is not judged.
   - Weekly count: sent on a day with no evidence, while approved and waiting days are fewer than the target. Test: `reminders.test.ts`.
-- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows the last 48 hours, without misses from a rejection or covered days (`recentlyMissed`, `today.ts:405`).
+- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows days whose excuse window is still open (rule R3), without misses from a rejection, days on a waiting cover, or days on a rejected excuse while its alert stands (`recentlyMissed`, `today.ts`).
 - Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:179`). Test: `invites.test.ts`.
 
 ## Text and request limits

@@ -8,7 +8,7 @@ import type { Json } from "../shared/api.ts";
 import type { LastVacation, VacationCard } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
-import { dateSpan, formatDate, money } from "./format.ts";
+import { dateSpan, daysText, EXCUSE_WINDOW_TEXT, formatDate, money } from "./format.ts";
 import { ReplyBox } from "./questions.tsx";
 import { loadedData, loadFailure, useLoad, useSend } from "./ui.tsx";
 import { firstName, pactsText, plural } from "./vacation-text.ts";
@@ -149,12 +149,7 @@ function WaitingActions({
       )}
       {open === "withdraw" ? (
         <div className="alert amber" role="status">
-          <span>
-            Withdraw this vacation?{" "}
-            {vacation.heldCents === undefined
-              ? "Your pacts keep all their days."
-              : `${money(vacation.heldCents)} held becomes owed.`}
-          </span>
+          <span>Withdraw this vacation? {withdrawText(vacation)}</span>
           <div className="row2">
             <button className="btn sm danger" disabled={withdraw.busy} onClick={() => withdraw.run()}>
               {withdraw.busy ? "Withdrawing…" : "Withdraw"}
@@ -187,4 +182,16 @@ function WaitingActions({
       {withdraw.error && <p className="error small">{withdraw.error}</p>}
     </>
   );
+}
+
+/**
+ * What withdrawing does, after "Withdraw this vacation?": the held penalties
+ * become owed, and their days can be excused for 48 hours from then (R3).
+ */
+function withdrawText(vacation: Json<VacationCard>): string {
+  const { heldCents, heldDates } = vacation;
+  if (heldCents === undefined) return "Your pacts keep all their days.";
+  if (heldDates === undefined) return `${money(heldCents)} held becomes owed.`;
+  const days = daysText(heldDates.firstDate, heldDates.lastDate);
+  return `${money(heldCents)} held becomes owed, and ${days} can be excused for ${EXCUSE_WINDOW_TEXT}.`;
 }

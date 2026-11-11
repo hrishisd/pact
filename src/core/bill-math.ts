@@ -87,11 +87,12 @@ export function billDays(from: Date, to: Date, timezone: string): LocalDate[] {
 }
 
 /**
- * The Wednesday whose bill a penalty added at `addedAt` goes on, if nothing
- * excuses it: the first bill time after both its 48-hour window and `now`.
+ * The Wednesday whose bill a penalty whose excuse window opens at
+ * `windowOpens` goes on, if nothing excuses it: the first bill time after
+ * both its 48-hour window and `now`.
  */
-export function nextBillDay(addedAt: Date, now: Date, timezone: string): LocalDate {
-  const after = Math.max(addedAt.getTime() + EXCUSE_WINDOW_MS - 1, now.getTime());
+export function nextBillDay(windowOpens: Date, now: Date, timezone: string): LocalDate {
+  const after = Math.max(windowOpens.getTime() + EXCUSE_WINDOW_MS - 1, now.getTime());
   let date = localDateOf(new Date(after), timezone);
   while (weekdayOf(date) !== "wed" || billInstant(date, timezone).getTime() <= after) date = addDays(date, 1);
   return date;

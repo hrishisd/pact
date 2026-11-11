@@ -13,6 +13,7 @@
 
 import type { LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
+import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 
 export type CoverKind = "excuse" | "vacation";
 
@@ -100,6 +101,26 @@ export function coveredSql(pact: string, date: string, state: "waiting" | "appro
   return `EXISTS (SELECT 1 FROM cover_day_v AS cover
     WHERE cover.pact_id = ${pact} AND cover.date = ${date} AND cover.withdrawn_at IS NULL
       AND ${stateCondition} AND (${condition}))`;
+}
+
+/**
+ * SQL: when the 48-hour excuse window of the occurrence of pact `pact` on
+ * `date`, judged at `judgedAt` (SQL expressions; ISO strings), opens: the
+ * later of its judging and the rejection or withdrawal of a vacation that
+ * covered it while it waited (R3). A rejected or withdrawn excuse doesn't
+ * move it (v0:256). Every read of the window goes through here or
+ * `excusableUntil`.
+ */
+export function excuseWindowOpensSql(pact: string, date: string, judgedAt: string): string {
+  return `MAX(${judgedAt}, COALESCE((SELECT MAX(COALESCE(released.withdrawn_at, released.decided_at))
+    FROM cover_day_v AS released
+    WHERE released.kind = 'vacation' AND released.pact_id = ${pact} AND released.date = ${date}
+      AND (released.withdrawn_at IS NOT NULL OR released.decision = 'rejected')), ${judgedAt}))`;
+}
+
+/** When the excuse window that opens at `opensAt` (from `excuseWindowOpensSql`) closes. */
+export function excusableUntil(opensAt: string): Date {
+  return new Date(new Date(opensAt).getTime() + EXCUSE_WINDOW_MS);
 }
 
 /**

@@ -3,11 +3,12 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
-import { dateSpan } from "../shared/format.ts";
+import { dateSpan, excusableText } from "../shared/format.ts";
 import {
   MAX_EXCUSE_SPAN_DAYS,
   type AcceptVacationRejectionResult,
   type AccountId,
+  type ExcusableDays,
   type ReviewItem,
   type TodayAlert,
   type TodayVacation,
@@ -31,7 +32,7 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { coverOn, coversOn } from "./covers.ts";
+import { coveredSql, coverOn, coversOn, excusableUntil, excuseWindowOpensSql } from "./covers.ts";
 import type { AnkiChecksRunning } from "./judging.ts";
 import { dueAfterEnd, occurrenceSpan } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
@@ -296,7 +297,7 @@ export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCar
   return rows.map((row) => ({
     ...vacationSummary(ctx, row),
     state: vacationState(ctx, row, today),
-    ...heldTotal(coveredPenalties(ctx, row.id)),
+    ...heldTotal(coveredPenalties(ctx, row.id), true),
   }));
 }
 
@@ -461,10 +462,18 @@ interface CoveredPenalty {
   added_at: string;
 }
 
-/** The total of the vacation's held penalties, as `heldCents`, left out when none are held. */
-function heldTotal(held: CoveredPenalty[]): { heldCents?: number } {
+/**
+ * The total of the vacation's held penalties, as `heldCents`, and with
+ * `dates`, their first and last day; left out when none are held.
+ */
+function heldTotal(held: CoveredPenalty[], dates = false): Pick<VacationCard, "heldCents" | "heldDates"> {
   const cents = held.reduce((sum, penalty) => sum + penalty.amount_cents, 0);
-  return cents > 0 ? { heldCents: cents } : {};
+  if (cents === 0) return {};
+  const days = held.map((penalty) => penalty.date).toSorted();
+  return {
+    heldCents: cents,
+    ...(dates && { heldDates: { firstDate: days[0]!, lastDate: days.at(-1)! } }),
+  };
 }
 
 /** Vacations waiting for approval that `reviewerId` was picked for, oldest first. */
@@ -560,6 +569,8 @@ export function decideVacation(
   recordDecision(ctx, "vacation", vacation.id, decided, reviewerId, now);
   settleVacationDays(ctx, vacation.id, now, ankiChecksRunning);
   const { first_day: from, last_day: to } = vacation;
+  const released = decided.outcome === "rejected" ? releasedDays(ctx, vacation.id, now.toISOString(), now) : null;
+  const { timezone } = accountRow(ctx, vacation.owner_account_id);
   ctx.enqueue({
     recipient: vacation.owner_account_id,
     kind: "vacation-decided",
@@ -568,7 +579,12 @@ export function decideVacation(
       itemId: vacation.id,
       ...decisionDetails(decided),
       title: `${accountName(ctx, reviewerId)} ${decided.outcome} your vacation`,
-      body: decided.reason === null ? dateSpan(from, to) : `“${decided.reason}”`,
+      body:
+        decided.reason === null
+          ? dateSpan(from, to)
+          : released === null
+            ? `“${decided.reason}”`
+            : `“${decided.reason}” · ${excusableText(released.firstDate, released.lastDate, released.until.toISOString(), timezone)}`,
       // A rejection shows as an alert on Today; an approval on the vacation's Profile card.
       url: decided.outcome === "approved" ? APP_PATHS.profile : APP_PATHS.today,
     },
@@ -624,6 +640,7 @@ export function noLaterFilingSql(alias: string): string {
  * the alerts.
  */
 export function rejectedVacationAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
+  const now = ctx.clock.now();
   const rows = ctx.all<{
     id: string;
     first_day: LocalDate;
@@ -654,8 +671,39 @@ export function rejectedVacationAlerts(ctx: CoreContext, ownerId: AccountId): { 
       owedAgainCents: coveredPenalties(ctx, row.id)
         .filter((penalty) => penalty.added_at <= row.decided_at)
         .reduce((sum, penalty) => sum + penalty.amount_cents, 0),
+      excusable: releasedDays(ctx, row.id, row.decided_at, now),
     },
   }));
+}
+
+/**
+ * The vacation's covered days already Missed when it was rejected or
+ * withdrawn at `releasedAt` whose excuse window, reopened then, is still
+ * open at `now` and that no other excuse or vacation waits over, and when
+ * the first of those windows closes (R3); null when there are none. Days
+ * judged later have their own windows and cards.
+ */
+function releasedDays(ctx: CoreContext, vacationId: string, releasedAt: string, now: Date): ExcusableDays | null {
+  const rows = ctx.all<{ date: LocalDate; excuse_window_opens: string }>(
+    `SELECT occurrence.date,
+            ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} AS excuse_window_opens
+     FROM vacation_day
+     JOIN occurrence ON occurrence.pact_id = vacation_day.pact_id AND occurrence.date = vacation_day.date
+     WHERE vacation_day.vacation_id = ? AND occurrence.outcome = 'missed' AND occurrence.judged_at <= ?
+       AND NOT ${coveredSql("occurrence.pact_id", "occurrence.date", "waiting")}
+     ORDER BY occurrence.date`,
+    vacationId,
+    releasedAt,
+  );
+  const open = rows
+    .map((row) => ({ date: row.date, until: excusableUntil(row.excuse_window_opens) }))
+    .filter((day) => day.until.getTime() > now.getTime());
+  if (open.length === 0) return null;
+  return {
+    firstDate: open[0]!.date,
+    lastDate: open.at(-1)!.date,
+    until: new Date(Math.min(...open.map((day) => day.until.getTime()))),
+  };
 }
 
 /**

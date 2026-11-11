@@ -18,7 +18,7 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { coveredSql } from "./covers.ts";
+import { coveredSql, excusableUntil, excuseWindowOpensSql } from "./covers.ts";
 import {
   evidenceDecision,
   isJudged,
@@ -29,7 +29,7 @@ import {
 } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
-import { editWindowClosesAt, EXCUSE_WINDOW_MS } from "./pact-rules.ts";
+import { editWindowClosesAt } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
 import {
   accountName,
@@ -347,10 +347,13 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
     name: string;
     date: LocalDate;
     judged_at: string;
+    excuse_window_opens: string;
     amount_cents: number;
     recipient_name: string;
   }>(
-    `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at, penalty.amount_cents,
+    `SELECT pact.id, pact.name, occurrence.date, occurrence.judged_at,
+            ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} AS excuse_window_opens,
+            penalty.amount_cents,
               recipient.name AS recipient_name
        FROM occurrence
        JOIN pact ON pact.id = occurrence.pact_id
@@ -381,7 +384,7 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
         occurrenceDate: row.date,
         penaltyCents: row.amount_cents,
         recipientName: row.recipient_name,
-        excusableUntil: new Date(judgedAt.getTime() + EXCUSE_WINDOW_MS),
+        excusableUntil: excusableUntil(row.excuse_window_opens),
         week: false,
       },
     };

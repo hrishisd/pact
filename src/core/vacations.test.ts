@@ -8,6 +8,7 @@
 // Today, vacation days on the heat map, and Profile on now and after.
 
 import { describe, expect, test } from "vitest";
+import { formatDate } from "../shared/format.ts";
 import type { NewVacation, PactChange, Schedule } from "../shared/types.ts";
 import { ownerWithAnki } from "./testing/anki-pact.ts";
 import { bedtimePact, sleep } from "./testing/bedtime-pact.ts";
@@ -1018,9 +1019,10 @@ describe("deciding a vacation after its first day", () => {
         firstDate: s.date("Mon+1"),
         lastDate: s.date("Sun+1"),
         owedAgainCents: 500,
+        excusable: { firstDate: s.date("Mon+1"), lastDate: s.date("Mon+1"), until: s.at("Thu+1 08:00") },
       },
     ]);
-    // Its 48 hours run to Thu+1 00:00, so Wed+1's bill is too early; Wed+2's takes it.
+    // Its 48 hours run from the rejection to Thu+1 08:00, so Wed+1's bill is too early; Wed+2's takes it.
     await tickHourly(s, "Tue+1 09:00", "Wed+2 19:00");
     expect(statusOn(owner, gym, s.date("Wed+1"))).toBe("missed");
     const monday = ledgerHistory(owner).find(
@@ -1035,7 +1037,9 @@ describe("deciding a vacation after its first day", () => {
 
     ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
 
-    expect(owner.today().alerts).toEqual([expect.objectContaining({ kind: "vacation-rejected", owedAgainCents: 0 })]);
+    expect(owner.today().alerts).toEqual([
+      expect.objectContaining({ kind: "vacation-rejected", owedAgainCents: 0, excusable: null }),
+    ]);
     expect(owed(owner)).toBe(0);
   });
 
@@ -1069,14 +1073,23 @@ describe("after a rejection", () => {
     expect(owed(owner)).toBe(0);
   });
 
-  test("an excuse for Mon+1 after its 48 hours is refused: a rejection never restarts them", async () => {
-    const s = scenario();
-    const { owner, gym } = await rejectedAfterMonday(s);
-    s.setClockTo("Thu+1 00:01");
+  test("rejected on Fri+1, long after Mon+1's own 48 hours: an excuse for Mon+1 is accepted within 48 hours of the rejection and refused after (R3)", async () => {
+    const mondayExcuse = { from: "", to: "", reason: "Flight moved" };
+    for (const [at, accepted] of [
+      ["Sun+1 07:59", true],
+      ["Sun+1 08:00", false],
+    ] as const) {
+      const s = scenario();
+      const { owner, reviewer, gym, vacationId } = await waitingOverGym(s, "Fri+1 08:00");
+      ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
+      s.setClockTo(at);
+      const excuse = { ...mondayExcuse, from: s.date("Mon+1"), to: s.date("Mon+1") };
 
-    expect(
-      await owner.fileExcuse(gym, { from: s.date("Mon+1"), to: s.date("Mon+1"), reason: "Flight moved" }, []),
-    ).toEqual({ ok: false, reason: "nothing-to-excuse" });
+      const filed = await owner.fileExcuse(gym, excuse, []);
+
+      if (accepted) expect(filed).toMatchObject({ ok: true });
+      else expect(filed).toEqual({ ok: false, reason: "nothing-to-excuse" });
+    }
   });
 
   test("a new vacation for days not open yet is accepted and clears the alert", async () => {
@@ -1088,13 +1101,16 @@ describe("after a rejection", () => {
     expect(owner.today().alerts).toEqual([]);
   });
 
-  test("once a new vacation clears the alert, Mon+1 is back on Today's Missed for the rest of its 48 hours", async () => {
+  test("Mon+1 is back on Today's Missed beside the alert, its 48 hours running from the rejection, and stays once a new vacation clears the alert (R3)", async () => {
     const s = scenario();
     const { owner, reviewer, gym } = await rejectedAfterMonday(s);
 
+    const monday = { pactId: gym, occurrenceDate: s.date("Mon+1"), excusableUntil: s.at("Thu+1 08:00") };
+    expect(cards(owner, "missed")).toEqual([expect.objectContaining(monday)]);
     await file(owner, vacation(s.date("Fri+1"), s.date("Sun+1"), [gym], [reviewer]));
-
-    expect(cards(owner, "missed")).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon+1") })]);
+    expect(cards(owner, "missed")).toEqual([expect.objectContaining(monday)]);
+    s.setClockTo("Thu+1 08:00");
+    expect(cards(owner, "missed")).toEqual([]);
   });
 
   test("Take the L clears the alert and Mon+1's Missed card for good, and owed doesn't change", async () => {
@@ -1124,6 +1140,83 @@ describe("after a rejection", () => {
     const { owner, vacationId } = await waitingOverGym(s);
 
     expect(await owner.acceptVacationRejection(vacationId)).toEqual({ ok: false, reason: "nothing-to-accept" });
+  });
+});
+
+describe("the excuse window a rejected or withdrawn vacation reopens (R3)", () => {
+  test("withdrawn on Fri+1, after Mon+1's own 48 hours: Mon+1 and Wed+1 are on Today's Missed and can be excused for 48 hours from the withdrawal", async () => {
+    const s = scenario();
+    const { owner, gym, vacationId } = await waitingOverGym(s, "Fri+1 08:00");
+    const monday = { from: s.date("Mon+1"), to: s.date("Mon+1"), reason: "Flight moved" };
+
+    ok(await owner.withdrawVacation(vacationId));
+
+    expect(cards(owner, "missed")).toEqual(
+      ["Wed+1", "Mon+1"].map((day) =>
+        expect.objectContaining({ pactId: gym, occurrenceDate: s.date(day), excusableUntil: s.at("Sun+1 08:00") }),
+      ),
+    );
+    s.setClockTo("Sun+1 07:59");
+    ok(await owner.fileExcuse(gym, monday, []));
+    s.setClockTo("Sun+1 08:00");
+    expect(owner.excusePreview(gym, { from: s.date("Wed+1"), to: s.date("Wed+1") })).toMatchObject({
+      preview: { covered: [], skipped: [{ date: s.date("Wed+1"), reason: "window-closed" }] },
+    });
+  });
+
+  test("rejected on Tue+2: Mon+1's $5 isn't on Wed+2's bill, inside its reopened 48 hours, and is on Wed+3's when nothing excuses it", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await waitingOverGym(s, "Tue+2 08:00");
+
+    ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
+    const mondayPenalty = () =>
+      ledgerHistory(owner).find((entry) => entry.kind === "penalty" && entry.occurrenceDate === s.date("Mon+1"));
+    expect(mondayPenalty()).toMatchObject({ bill: { kind: "next-bill", billedOn: s.date("Wed+3") } });
+
+    await tickHourly(s, "Tue+2 09:00", "Wed+2 19:00");
+    expect(mondayPenalty()).toMatchObject({ bill: { kind: "next-bill", billedOn: s.date("Wed+3") } });
+    await tickHourly(s, "Wed+2 20:00", "Wed+3 19:00");
+    expect(mondayPenalty()).toMatchObject({ bill: { kind: "on-bill", billedOn: s.date("Wed+3") } });
+  });
+
+  test("the rejection push says until when the Missed days can be excused", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await waitingOverGym(s, "Thu+1 08:00");
+
+    ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
+
+    expect(s.notifier.sentTo(owner, "vacation-decided")).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          body: `“Not that week” · ${formatDate(s.date("Mon+1"))} to ${formatDate(s.date("Wed+1"))} can be excused until Sat Jan 17, 8:00am.`,
+        }),
+      }),
+    ]);
+  });
+
+  test("the rejection push says nothing of excuses when no day is Missed", async () => {
+    const s = scenario();
+    const { owner, reviewer, vacationId } = await waitingOverGym(s, "Thu 10:00");
+
+    ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
+
+    expect(s.notifier.sentTo(owner, "vacation-decided")).toEqual([
+      expect.objectContaining({ payload: expect.objectContaining({ body: "“Not that week”" }) }),
+    ]);
+  });
+
+  test("a rejected excuse doesn't move the window again: after the vacation's 48 hours, a new excuse for Mon+1 is refused", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await rejectedAfterMonday(s);
+    const monday = { from: s.date("Mon+1"), to: s.date("Mon+1"), reason: "Flight moved" };
+    s.setClockTo("Wed+1 23:00");
+    const excuseId = ok(await owner.fileExcuse(gym, monday, [])).excuseId;
+    ok(await reviewer.decide(excuseId, { kind: "reject", reason: "No" }));
+
+    s.setClockTo("Thu+1 07:59");
+    expect(owner.excusePreview(gym, monday)).toMatchObject({ preview: { covered: [{ date: s.date("Mon+1") }] } });
+    s.setClockTo("Thu+1 08:00");
+    expect(await owner.fileExcuse(gym, monday, [])).toEqual({ ok: false, reason: "nothing-to-excuse" });
   });
 });
 
@@ -1212,7 +1305,13 @@ describe("held penalties on the review item and the Profile card", () => {
         covers: [expect.objectContaining({ pactId: gym, held: [{ date: s.date("Mon+1"), penaltyCents: 500 }] })],
       }),
     ]);
-    expect(owner.vacations()).toEqual([expect.objectContaining({ id: vacationId, heldCents: 500 })]);
+    expect(owner.vacations()).toEqual([
+      expect.objectContaining({
+        id: vacationId,
+        heldCents: 500,
+        heldDates: { firstDate: s.date("Mon+1"), lastDate: s.date("Mon+1") },
+      }),
+    ]);
   });
 
   test("before its first day nothing is held", async () => {

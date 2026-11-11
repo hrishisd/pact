@@ -128,6 +128,22 @@ test("Withdraw on a vacation holding penalties says what becomes owed", async ()
   expect(screen.getByText("Withdraw this vacation? $15 held becomes owed.")).toBeTruthy();
 });
 
+test("Withdraw on a vacation holding penalties says the held days can be excused for 48 hours", async () => {
+  stubApi({
+    vacations: answers<VacationsResponse>([
+      { ...WAITING[0]!, heldCents: 1500, heldDates: { firstDate: "2026-12-21", lastDate: "2026-12-23" } },
+    ]),
+  });
+  const { user } = renderWithUser(<VacationSection message={null} onPlan={vi.fn()} />);
+  await user.click(await screen.findByRole("button", { name: "Withdraw" }));
+
+  expect(
+    screen.getByText(
+      "Withdraw this vacation? $15 held becomes owed, and Mon Dec 21 to Wed Dec 23 can be excused for 48 hours.",
+    ),
+  ).toBeTruthy();
+});
+
 test("a vacation on now says until when, with the On now chip and no Withdraw", async () => {
   stubApi({ vacations: answers<VacationsResponse>([{ ...WAITING[0]!, state: { kind: "on-now" } }]) });
   renderWithUser(<VacationSection message={null} onPlan={vi.fn()} />);

@@ -23,7 +23,7 @@ import type {
 import { localDateOf } from "./calendar.ts";
 import { activePactsUsing } from "./connections.ts";
 import type { CoreContext } from "./context.ts";
-import { coveredSql, onApprovedVacation } from "./covers.ts";
+import { coveredSql, excusableUntil, excuseWindowOpensSql, onApprovedVacation } from "./covers.ts";
 import { rejectedDayAlerts, rejectedEvidenceAlerts, waitingEvidence } from "./evidence.ts";
 import { rejectedExcuseAlerts, waitingExcuses } from "./excuses.ts";
 import { ankiCheckOf, yesterdayEntries } from "./history.ts";
@@ -33,7 +33,7 @@ import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import { activePacts, waitingSince, type ActivePact } from "./pacts.ts";
-import { noLaterFilingSql, rejectedVacationAlerts, vacationsOnNow } from "./vacations.ts";
+import { rejectedVacationAlerts, vacationsOnNow } from "./vacations.ts";
 import {
   accountRow,
   ankiDeckMissing,
@@ -389,14 +389,23 @@ function weekToDo(
   return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, week: progress };
 }
 
-/** SQL: an excuse or vacation waiting, or rejected after the miss (its alert shows the miss), hides it from Missed. */
-const REJECTION_HIDES_MISS =
-  "(cover.decision IS NULL OR (cover.decision = 'rejected' AND cover.decided_at >= occurrence.judged_at))";
+/**
+ * SQL: an excuse or vacation waiting, or an excuse rejected after the miss
+ * (its alert shows the miss), hides it from Missed. A vacation rejected
+ * after the miss doesn't: its alert says until when the day can be excused,
+ * and the day's card files the excuse (R3).
+ */
+const COVER_HIDES_MISS = `(cover.decision IS NULL
+  OR (cover.kind = 'excuse' AND cover.decision = 'rejected' AND cover.decided_at >= occurrence.judged_at))`;
+
+/** SQL: when the `occurrence` row's excuse window opens. */
+const WINDOW_OPENS = excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at");
 
 /**
- * The owner's occurrences judged Missed in the 48 hours before `now`,
- * latest first, but not accepted misses, nor those Missed through a
- * rejection or on a rejected excuse or vacation while its alert stands, nor
+ * The owner's occurrences judged Missed whose excuse window is still open
+ * at `now` (48 hours from the judging, or from a vacation's rejection or
+ * withdrawal), latest first, but not accepted misses, nor those Missed
+ * through a rejection or on a rejected excuse while its alert stands, nor
  * those on an excuse or vacation waiting for approval. Today's day of a
  * Camera pact with a due-by time is Closed.
  */
@@ -411,24 +420,19 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
     amount_cents: number;
     date: LocalDate;
     judged_at: string;
+    excuse_window_opens: string;
     bedtime_start: string | null;
     anki_cards_left: number | null;
     anki_checked_at: string | null;
   }>(
     `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, penalty.amount_cents, occurrence.date,
-              occurrence.judged_at, occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at
+              occurrence.judged_at, ${WINDOW_OPENS} AS excuse_window_opens, occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at
        FROM occurrence
        JOIN pact ON pact.id = occurrence.pact_id
        JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
-       WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.judged_at > ?
+       WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND ${WINDOW_OPENS} > ?
          AND occurrence.miss_accepted_at IS NULL AND NOT ${MISSED_THROUGH_REJECTION}
-         AND NOT ${coveredSql(
-           "occurrence.pact_id",
-           "occurrence.date",
-           "any",
-           // A rejected vacation hides it only while its alert stands.
-           `${REJECTION_HIDES_MISS} AND (cover.kind = 'excuse' OR cover.decision IS NULL OR ${noLaterFilingSql("cover")})`,
-         )}
+         AND NOT ${coveredSql("occurrence.pact_id", "occurrence.date", "any", COVER_HIDES_MISS)}
        ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
     ownerId,
     since.toISOString(),
@@ -442,7 +446,7 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
       penaltyCents: row.amount_cents,
       occurrenceDate: row.date,
       missedAt: new Date(row.judged_at),
-      excusableUntil: new Date(new Date(row.judged_at).getTime() + EXCUSE_WINDOW_MS),
+      excusableUntil: excusableUntil(row.excuse_window_opens),
       detail: missedDetail(ctx, row, dueBy, weekly),
     };
   });

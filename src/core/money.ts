@@ -35,7 +35,7 @@ import {
 } from "./bill-math.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { coveredSql } from "./covers.ts";
+import { coveredSql, excuseWindowOpensSql } from "./covers.ts";
 import { rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
 import { settingIsOff, tellAll } from "./outbox.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
@@ -81,6 +81,8 @@ function paymentReviewersSql(owner: string, recipient: string): string {
 }
 /** SQL: the account bound to the one `?` may decide the `payment` row: they review it. */
 const MAY_DECIDE_PAYMENT = `? IN (${paymentReviewersSql("payment.owner_account_id", "payment.recipient_id")})`;
+/** SQL: when the `penalty` row's occurrence's excuse window opens; a bill takes it only once the window has closed. */
+const PENALTY_WINDOW_OPENS = excuseWindowOpensSql("penalty.pact_id", "penalty.occurrence_date", "penalty.added_at");
 /** SQL: the `penalty` row is held: an excuse or vacation waiting for approval covers its occurrence. */
 const PENALTY_HELD = coveredSql("penalty.pact_id", "penalty.occurrence_date", "waiting");
 /** SQL: what holds the `penalty` row is a vacation waiting for approval. */
@@ -193,13 +195,15 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
     occurrence_date: string;
     amount_cents: number;
     added_at: string;
+    excuse_window_opens: string;
     bill_id: string | null;
     held: 0 | 1;
     held_by_vacation: 0 | 1;
     weekly: 0 | 1;
   }>(
     `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
-              penalty.amount_cents, penalty.added_at, penalty.bill_id, ${PENALTY_HELD} AS held,
+              penalty.amount_cents, penalty.added_at, ${PENALTY_WINDOW_OPENS} AS excuse_window_opens,
+              penalty.bill_id, ${PENALTY_HELD} AS held,
               ${PENALTY_HELD_BY_VACATION} AS held_by_vacation, ${WEEKLY_COUNT_PACT} AS weekly
        FROM penalty JOIN pact ON pact.id = penalty.pact_id
        WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
@@ -209,6 +213,7 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
   );
   const allocation = allocate(ctx, ownerId, recipientId);
   const bills = billsOf(ctx, ownerId, recipientId);
+  const now = ctx.clock.now();
   return penaltyRows.map((row): LedgerPenalty => {
     const held = row.held === 1;
     // Missed with evidence means all of it was rejected, on Fixed days; a short week is its own miss.
@@ -229,9 +234,10 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
       bill: bill
         ? { kind: "on-bill", billedOn: bill.billedOn, dueAt: bill.dueAt }
         : {
-            // A rejected excuse or vacation releases it to the next bill it can make, as if it had never been held.
+            // A rejected excuse or vacation releases it to the next bill it can make after its excuse window,
+            // which a vacation's rejection reopens from then (R3).
             kind: !held ? "next-bill" : row.held_by_vacation === 1 ? "if-vacation-rejected" : "if-excuse-rejected",
-            billedOn: nextBillDay(new Date(row.added_at), ctx.clock.now(), timezone),
+            billedOn: nextBillDay(row.held_by_vacation === 1 ? now : new Date(row.excuse_window_opens), now, timezone),
           },
     };
   });
@@ -392,7 +398,7 @@ function billOwner(ctx: CoreContext, ownerId: AccountId, wednesday: LocalDate, t
   const excusableAfter = new Date(createdAt.getTime() - EXCUSE_WINDOW_MS).toISOString();
   const recipients = ctx.all<{ recipient_id: string }>(
     `SELECT DISTINCT penalty.recipient_id FROM penalty
-       WHERE penalty.owner_account_id = ? AND penalty.bill_id IS NULL AND penalty.added_at <= ?
+       WHERE penalty.owner_account_id = ? AND penalty.bill_id IS NULL AND ${PENALTY_WINDOW_OPENS} <= ?
          AND NOT ${PENALTY_HELD}
        ORDER BY penalty.recipient_id`,
     ownerId,
@@ -409,7 +415,7 @@ function billOwner(ctx: CoreContext, ownerId: AccountId, wednesday: LocalDate, t
     ctx.db
       .prepare(
         `UPDATE penalty SET bill_id = ?
-         WHERE owner_account_id = ? AND recipient_id = ? AND bill_id IS NULL AND added_at <= ?
+         WHERE owner_account_id = ? AND recipient_id = ? AND bill_id IS NULL AND ${PENALTY_WINDOW_OPENS} <= ?
            AND NOT ${PENALTY_HELD}`,
       )
       .run(billId, ownerId, recipientId, excusableAfter);

@@ -29,7 +29,7 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { coversOn } from "./covers.ts";
+import { coversOn, excuseWindowOpensSql } from "./covers.ts";
 import type { AnkiChecksRunning } from "./judging.ts";
 import { dueAfterEnd, occurrenceSpan, occurrenceStatus, skipReason } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
@@ -71,7 +71,8 @@ export function excuseOptions(ctx: CoreContext, accountId: AccountId, pactId: st
     ctx.db
       .prepare(
         `SELECT MIN(date) AS date FROM occurrence
-         WHERE pact_id = ? AND date < ? AND (outcome IS NULL OR (outcome = 'missed' AND judged_at > ?))`,
+         WHERE pact_id = ? AND date < ?
+           AND (outcome IS NULL OR (outcome = 'missed' AND ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} > ?))`,
       )
       .get(pactId, today, since) as { date: LocalDate | null }
   ).date;
