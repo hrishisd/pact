@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import type { AccountId, Schedule } from "../shared/types.ts";
 import type { Notification } from "./ports.ts";
 import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, recordPayment, submit } from "./testing/camera-pact.ts";
-import { changed, ok, pactOf, statusOn } from "./testing/queries.ts";
+import { changed, ok, pactOf, penaltyDays, statusOn } from "./testing/queries.ts";
 import { changeRequestIdOf, scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
 /** Every notification about `itemId` sent to any of `accounts`. */
@@ -187,7 +187,7 @@ describe("moot items are withdrawn with their reason, silently", () => {
 });
 
 describe("items whose decision still matters stay", () => {
-  test("evidence for a day an approved excuse already made Excused stays: approving it would make the day Satisfied", async () => {
+  test("evidence for a day an approved excuse already made Excused stays, and approving it makes the day Satisfied with no penalty", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", EVERY_DAY);
@@ -204,6 +204,11 @@ describe("items whose decision still matters stay", () => {
     expect(queued(reviewer)).toContain(evidenceId);
     expect(waiting(owner)).toContain(evidenceId);
     expect(owner.evidence(evidenceId)).toMatchObject({ evidence: { state: { kind: "waiting" } } });
+
+    ok(await reviewer.decide(evidenceId, { kind: "approve" }));
+
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("satisfied");
+    expect(penaltyDays(owner)).not.toContain(s.date("Thu"));
   });
 
   test("evidence for an open day, an excuse for a day not judged yet and one for a Missed day, and a payment stay", async () => {
