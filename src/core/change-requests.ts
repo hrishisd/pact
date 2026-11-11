@@ -88,6 +88,7 @@ import {
 import { pactsToJudge } from "./occurrence-state.ts";
 import { settlePactDueBy } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
+import { tellNewVacationDeciders } from "./vacations.ts";
 
 export function changePreview(
   ctx: CoreContext,
@@ -816,9 +817,11 @@ export function decideChangeRequest(
     }
   } else {
     const { before, after } = request;
-    for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
-      ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`).run(pact.id, removed);
-    }
+    tellNewVacationDeciders(ctx, pact.id, () => {
+      for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
+        ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`).run(pact.id, removed);
+      }
+    });
     const { timezone } = row;
     const { appliesFrom } = startOfNewTerms(ctx, pact, timezone, after, now);
     applyTerms(ctx, pact, after, now, timezone);

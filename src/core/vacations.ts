@@ -258,12 +258,11 @@ export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: New
         .run(vacationId, pact.pactId, date);
     }
   }
-  tellAll(ctx, reviewerIds, "review-item", {
-    itemKind: "vacation",
-    itemId: vacationId,
-    title: `${accountName(ctx, ownerId)} asked for a vacation`,
-    body: dateSpan(vacation.from, vacation.to),
-    url: APP_PATHS.review,
+  tellVacationFiled(ctx, vacationDeciders(ctx, vacationId), {
+    id: vacationId,
+    owner_account_id: ownerId,
+    first_day: vacation.from,
+    last_day: vacation.to,
   });
   return { ok: true, vacationId };
 }
@@ -387,7 +386,58 @@ function vacationState(ctx: CoreContext, row: VacationRow, today: LocalDate): Va
     : { kind: "waiting" };
 }
 
-/** The reviewers the owner picked for the vacation: only they may decide it. */
+/**
+ * Who may decide the vacation (rule R5): the reviewers picked at filing who
+ * still review at least one of its pacts, or with none left, every current
+ * reviewer of one of them.
+ */
+export function vacationDeciders(ctx: CoreContext, vacationId: string): AccountId[] {
+  const pactIds = ctx
+    .all<{ pact_id: string }>(`SELECT pact_id FROM vacation_pact WHERE vacation_id = ?`, vacationId)
+    .map((row) => row.pact_id);
+  const current = new Set(pactIds.flatMap((pactId) => reviewersOf(ctx, pactId)));
+  const stillPicked = pickedReviewers(ctx, vacationId).filter((id) => current.has(id));
+  return stillPicked.length > 0 ? stillPicked : [...current].sort();
+}
+
+/**
+ * Runs `removeReviewers`, which takes reviewers off `pactId`, and tells each
+ * account it makes a decider of a waiting vacation covering the pact about
+ * that vacation, as filing told the picked reviewers: the last picked
+ * reviewer gone, a current reviewer decides it (rule R5).
+ */
+export function tellNewVacationDeciders(ctx: CoreContext, pactId: string, removeReviewers: () => void): void {
+  const waiting = ctx.all<{ id: string; owner_account_id: AccountId; first_day: LocalDate; last_day: LocalDate }>(
+    `SELECT vacation.id, vacation.owner_account_id, vacation.first_day, vacation.last_day FROM vacation
+     JOIN vacation_pact ON vacation_pact.vacation_id = vacation.id AND vacation_pact.pact_id = ?
+     WHERE vacation.decision IS NULL AND vacation.withdrawn_at IS NULL
+     ORDER BY vacation.filed_at, vacation.id`,
+    pactId,
+  );
+  const before = new Map(waiting.map((row) => [row.id, vacationDeciders(ctx, row.id)]));
+  removeReviewers();
+  for (const row of waiting) {
+    const added = vacationDeciders(ctx, row.id).filter((id) => !before.get(row.id)!.includes(id));
+    tellVacationFiled(ctx, added, row);
+  }
+}
+
+/** Tells `reviewerIds` the vacation waits for their decision. */
+function tellVacationFiled(
+  ctx: CoreContext,
+  reviewerIds: AccountId[],
+  vacation: { id: string; owner_account_id: AccountId; first_day: LocalDate; last_day: LocalDate },
+): void {
+  tellAll(ctx, reviewerIds, "review-item", {
+    itemKind: "vacation",
+    itemId: vacation.id,
+    title: `${accountName(ctx, vacation.owner_account_id)} asked for a vacation`,
+    body: dateSpan(vacation.first_day, vacation.last_day),
+    url: APP_PATHS.review,
+  });
+}
+
+/** The reviewers the owner picked for the vacation when filing it. */
 export function pickedReviewers(ctx: CoreContext, vacationId: string): AccountId[] {
   return ctx
     .all<{ reviewer_account_id: AccountId }>(
@@ -480,34 +530,36 @@ function heldTotal(held: CoveredPenalty[], dates = false): Pick<VacationCard, "h
   };
 }
 
-/** Vacations waiting for approval that `reviewerId` was picked for, oldest first. */
+/** Vacations waiting for approval that `reviewerId` may decide (`vacationDeciders`), oldest first. */
 function vacationsToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<VacationRow & { owner_name: string; timezone: string }>(
     `SELECT ${VACATION_COLUMNS}, owner.name AS owner_name, owner.timezone
      FROM vacation
-     JOIN vacation_reviewer ON vacation_reviewer.vacation_id = vacation.id
-                           AND vacation_reviewer.reviewer_account_id = ?
      JOIN account AS owner ON owner.id = vacation.owner_account_id
      WHERE vacation.decision IS NULL AND vacation.withdrawn_at IS NULL
+       AND EXISTS (SELECT 1 FROM vacation_pact JOIN pact_reviewer ON pact_reviewer.pact_id = vacation_pact.pact_id
+                   WHERE vacation_pact.vacation_id = vacation.id AND pact_reviewer.reviewer_account_id = ?)
      ORDER BY vacation.filed_at, vacation.id`,
     reviewerId,
   );
-  return rows.map((row) => {
-    const held = coveredPenalties(ctx, row.id);
-    const filedAt = new Date(row.filed_at);
-    return {
-      item: {
-        kind: "vacation",
-        ...vacationSummary(ctx, row),
-        ownerName: row.owner_name,
-        covers: vacationCovers(ctx, row.id, row.timezone, held),
-        ...heldTotal(held),
-        filedAt,
-        thread: thread(ctx, row.id, true),
-      },
-      since: filedAt,
-    };
-  });
+  return rows
+    .filter((row) => vacationDeciders(ctx, row.id).includes(reviewerId))
+    .map((row) => {
+      const held = coveredPenalties(ctx, row.id);
+      const filedAt = new Date(row.filed_at);
+      return {
+        item: {
+          kind: "vacation",
+          ...vacationSummary(ctx, row),
+          ownerName: row.owner_name,
+          covers: vacationCovers(ctx, row.id, row.timezone, held),
+          ...heldTotal(held),
+          filedAt,
+          thread: thread(ctx, row.id, true),
+        },
+        since: filedAt,
+      };
+    });
 }
 
 /** A vacation a reviewer is deciding on, as `decide` reads it. */
@@ -546,8 +598,8 @@ function waitingVacations(ctx: CoreContext, ownerId: AccountId, pactId?: string)
 }
 
 /**
- * Vacations as review items: decided by the reviewers the owner picked at
- * filing. The owner's waiting list has it, and the page of each pact it
+ * Vacations as review items: decided by the picked reviewers who still
+ * review a covered pact, else any current reviewer of one (rule R5). The owner's waiting list has it, and the page of each pact it
  * covers a day of.
  */
 export const vacationKind: RequestKindHandler<VacationToDecide> = {
@@ -558,7 +610,7 @@ export const vacationKind: RequestKindHandler<VacationToDecide> = {
          FROM vacation WHERE id = ?`,
       id,
     ),
-  deciders: (ctx, vacation) => pickedReviewers(ctx, vacation.id),
+  deciders: (ctx, vacation) => vacationDeciders(ctx, vacation.id),
   apply: decideVacation,
   describe: () => ({ what: "vacation", ownerPath: APP_PATHS.profile }),
   queue: vacationsToReview,
@@ -566,7 +618,7 @@ export const vacationKind: RequestKindHandler<VacationToDecide> = {
 };
 
 /**
- * Records a picked reviewer's decision on a vacation waiting for approval
+ * Records a decider's decision on a vacation waiting for approval
  * and tells the owner, and settles every covered day of every pact
  * (`settleCoverDays`). Approved: they're excused at once, as an approved
  * excuse's are. Rejected: its held penalties are owed by no longer waiting,

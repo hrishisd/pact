@@ -626,7 +626,7 @@ describe("the review item", () => {
     expect(reviewer.reviewQueue().map((item) => item.id)).toEqual([changeId, vacationId, excuseId]);
   });
 
-  test("a reviewer of a covered pact who wasn't picked can't decide or ask about it", async () => {
+  test("a reviewer of a covered pact who wasn't picked can't decide or ask about it while a picked one still reviews a covered pact", async () => {
     const s = scenario();
     const { third, vacationId } = await sentToTwoOfThree(s);
 
@@ -669,6 +669,101 @@ describe("the review item", () => {
 
     expect(reviewer.reviewQueue()).toEqual([]);
     expect(await reviewer.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+  });
+});
+
+/** Approves, as `by`, the owner's change to `pactId`'s reviewers, which waits for approval because it removes one. */
+async function changeReviewers(owner: AccountHandle, by: AccountHandle, pactId: string, reviewers: AccountHandle[]) {
+  const change = changed(owner, pactId, { reviewerIds: reviewers.map((r) => r.id) });
+  ok(await by.decide(changeRequestIdOf(await owner.changePact(pactId, change)), { kind: "approve" }));
+}
+
+/** The review-item pushes `who` got for the vacation `vacationId`. */
+function vacationPushes(s: Scenario, who: AccountHandle, vacationId: string) {
+  return s.notifier.sentTo(who, "review-item").filter((n) => n.payload.itemId === vacationId);
+}
+
+// Rule R5 (design review ticket 19): the picked reviewers who still review a
+// covered pact decide; with none left, any current reviewer of one does.
+describe("who decides a vacation when a covered pact's reviewers change", () => {
+  test("a picked reviewer removed from every covered pact can no longer see or decide it; the other picked one still can", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, third, gym, vacationId } = await sentToTwoOfThree(s);
+    await changeReviewers(owner, third, gym, [second, third]);
+
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(await reviewer.askOwner(vacationId, "Where to?")).toEqual({ ok: false, reason: "item-not-found" });
+    expect(await reviewer.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    // Second, picked, still reviews Gym: third, not picked, still can't decide.
+    expect(third.reviewQueue()).toEqual([]);
+    expect(vacationPushes(s, third, vacationId)).toEqual([]);
+    expect(second.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
+    expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
+  });
+
+  test("a picked reviewer who still reviews another covered pact still decides", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    const read = await createPact("Read", MON_WED_FRI, { reviewers: [reviewer] });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, read], [reviewer]));
+    await changeReviewers(owner, second, gym, [second]);
+
+    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
+    expect(second.reviewQueue()).toEqual([]);
+    expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    expect(await reviewer.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
+  });
+
+  test("with the only picked reviewer removed, a current reviewer of a covered pact is told once, sees it and can decide it", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const third = await s.befriend(owner, "third");
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer, second, third] });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
+    expect(vacationPushes(s, second, vacationId)).toEqual([]);
+
+    await changeReviewers(owner, second, gym, [second, third]);
+
+    for (const who of [second, third]) {
+      expect(vacationPushes(s, who, vacationId)).toEqual([
+        expect.objectContaining({
+          payload: {
+            itemKind: "vacation",
+            itemId: vacationId,
+            title: "owner asked for a vacation",
+            body: "Jan 12 – 18",
+            url: "/review",
+          },
+        }),
+      ]);
+      expect(who.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
+    }
+    expect(reviewer.reviewQueue()).toEqual([]);
+    // Removing another reviewer later tells nobody again.
+    await changeReviewers(owner, second, gym, [second]);
+    expect(vacationPushes(s, second, vacationId)).toHaveLength(1);
+    // The owner's reply goes to whoever decides it now.
+    ok(await second.askOwner(vacationId, "Where to?"));
+    ok(await owner.reply(vacationId, "Lisbon"));
+    expect(s.notifier.sent.filter((n) => n.kind === "owner-replied").map((n) => n.recipient)).toEqual([second.id]);
+    expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
+  });
+
+  test("a reviewer added to a covered pact while a picked reviewer remains doesn't see it", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
+    ok(await owner.changePact(gym, changed(owner, gym, { reviewerIds: [reviewer.id, second.id] })));
+
+    expect(second.reviewQueue()).toEqual([]);
+    expect(vacationPushes(s, second, vacationId)).toEqual([]);
+    expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: false, reason: "item-not-found" });
+    expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
   });
 });
 
