@@ -114,6 +114,7 @@ import { droppedText, remind } from "./reminders.ts";
 import { askOwner, decide, ownerReply, reviewQueue, viewPhoto, waitingOnReply, type PhotoResult } from "./review.ts";
 import { settleAll } from "./settle.ts";
 import { todayPage } from "./today.ts";
+import { waitingFor } from "./waiting.ts";
 import {
   acceptVacationRejection,
   fileVacation,
@@ -546,7 +547,7 @@ class Core implements PactCore {
       deletePact: (pactId) => this.#command(() => deletePact(this.#ctx, accountId, pactId)),
       firstOccurrence: (timing, editing) => firstOccurrence(this.#ctx, accountId, timing, editing),
       pacts: () => pactList(this.#ctx, accountId),
-      pact: (pactId) => pactPage(this.#ctx, accountId, pactId),
+      pact: (pactId) => pactPage(this.#ctx, accountId, pactId, waitingFor),
       changePreview: (pactId, change) => changePreview(this.#ctx, accountId, pactId, change),
       changePact: (pactId, change) => this.#command(() => changePact(this.#ctx, accountId, pactId, change)),
       requestEnd: (pactId, note) => this.#command(() => requestEnd(this.#ctx, accountId, pactId, note)),

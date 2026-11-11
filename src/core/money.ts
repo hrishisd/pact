@@ -746,7 +746,7 @@ export const paymentKind: RequestKindHandler<PaymentToDecide> = {
 };
 
 /** The owner's payments still waiting for a decision, newest first. */
-export function waitingPayments(ctx: CoreContext, ownerId: AccountId): TodayWaitingItem[] {
+function waitingPayments(ctx: CoreContext, ownerId: AccountId): TodayWaitingItem[] {
   return ctx
     .all<{
       id: string;

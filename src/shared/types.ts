@@ -286,7 +286,7 @@ interface PactPageTerms {
    * is an occurrence on the old terms with another penalty.
    */
   newTerms: ChangeStart | null;
-  /** The pact's evidence, excuses and change request waiting for a reviewer's decision, newest first. */
+  /** The pact's change request, evidence, excuses and vacations covering it, waiting for a reviewer's decision, newest first. */
   waiting: PactWaitingItem[];
   /** What its heat map shows. */
   history: PactHistory;
@@ -488,8 +488,11 @@ export interface AnkiCheck {
   checkedAt: Date;
 }
 
-/** What the pact page's "Waiting on" list holds: never payments, which belong to a recipient. */
-export type PactWaitingItem = Extract<TodayWaitingItem, { kind: "evidence" | "excuse" | "change-request" }>;
+/**
+ * What the pact page's "Waiting on" list holds: never payments, which belong
+ * to a recipient; a vacation when it covers the pact.
+ */
+export type PactWaitingItem = Exclude<TodayWaitingItem, { kind: "payment" }>;
 
 export type PactResult = { ok: true; pact: PactTerms } | { ok: false; reason: "pact-not-found" };
 
@@ -1140,6 +1143,16 @@ export type TodayWaitingItem =
       /** It asks to end the pact, rather than change its terms. */
       endsPact: boolean;
       requestedAt: Date;
+    }
+  /** A vacation no picked reviewer has decided yet, and the owner hasn't withdrawn. */
+  | {
+      kind: "vacation";
+      /** The vacation's id. */
+      id: string;
+      /** Its first and last days. */
+      firstDate: LocalDate;
+      lastDate: LocalDate;
+      filedAt: Date;
     };
 /** One pact due yesterday, and how it did. Weekly count pacts are never in it. */
 export interface TodayYesterdayEntry {

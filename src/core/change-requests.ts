@@ -718,7 +718,7 @@ function changeRequestsToReview(ctx: CoreContext, reviewerId: AccountId): Queued
 }
 
 /** The owner's change requests waiting for a decision (or just that for `pactId`), newest first. */
-export function waitingChangeRequests(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+function waitingChangeRequests(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
   const rows = ctx.all<{
     id: string;
     pact_id: string;

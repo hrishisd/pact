@@ -352,7 +352,7 @@ export function evidenceAcceptance(
 }
 
 /** The owner's evidence still waiting for a decision (or just that for `pactId`), newest first. */
-export function waitingEvidence(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+function waitingEvidence(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
   const rows = ctx.all<{
     id: string;
     pact_id: string;

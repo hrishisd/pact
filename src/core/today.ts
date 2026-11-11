@@ -24,15 +24,15 @@ import { localDateOf } from "./calendar.ts";
 import { activePactsUsing } from "./connections.ts";
 import type { CoreContext } from "./context.ts";
 import { coveredSql, excusableUntil, excuseWindowOpensSql, onApprovedVacation } from "./covers.ts";
-import { rejectedDayAlerts, rejectedEvidenceAlerts, waitingEvidence } from "./evidence.ts";
-import { rejectedExcuseAlerts, waitingExcuses } from "./excuses.ts";
+import { rejectedDayAlerts, rejectedEvidenceAlerts } from "./evidence.ts";
+import { rejectedExcuseAlerts } from "./excuses.ts";
 import { ankiCheckOf, yesterdayEntries } from "./history.ts";
-import { billsForToday, waitingPayments } from "./money.ts";
+import { billsForToday } from "./money.ts";
 import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, weekProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
-import { activePacts, waitingSince, type ActivePact } from "./pacts.ts";
+import { activePacts, type ActivePact } from "./pacts.ts";
 import { rejectedVacationAlerts, vacationsOnNow } from "./vacations.ts";
 import {
   accountRow,
@@ -47,7 +47,7 @@ import {
   termsOn,
 } from "./rows.ts";
 import { thread } from "./requests.ts";
-import { waitingChangeRequests } from "./change-requests.ts";
+import { waitingFor } from "./waiting.ts";
 
 export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
   const { timezone } = accountRow(ctx, accountId);
@@ -59,7 +59,7 @@ export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
     hasPacts,
     alerts,
     sections,
-    waiting: waiting(ctx, accountId),
+    waiting: waitingFor(ctx, accountId, {}),
     yesterday,
     ...(vacations.length > 0 && { vacations }),
   };
@@ -70,7 +70,7 @@ export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
  * comment is a reviewer's question, with when it was asked.
  */
 function questionAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
-  return waiting(ctx, ownerId).flatMap((item) => {
+  return waitingFor(ctx, ownerId, {}).flatMap((item) => {
     const { comments, waitingOnReply } = thread(ctx, item.id, true);
     const question = comments.at(-1);
     if (!waitingOnReply || !question) return [];
@@ -87,18 +87,6 @@ function questionAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert
       },
     ];
   });
-}
-
-/** The owner's evidence, excuses and payments still waiting for a decision, newest first. */
-function waiting(ctx: CoreContext, ownerId: AccountId): TodayWaitingItem[] {
-  return mergeByTime(
-    waitingSince,
-    "newest-first",
-    waitingChangeRequests(ctx, ownerId),
-    waitingEvidence(ctx, ownerId),
-    waitingExcuses(ctx, ownerId),
-    waitingPayments(ctx, ownerId),
-  );
 }
 
 /** Today's alerts and sections for the owner, as `todayAlerts` and `todaySections` put them. */

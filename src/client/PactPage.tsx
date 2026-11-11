@@ -27,7 +27,7 @@ import { endsWhenText, listNames, openOccurrenceText } from "./change-terms.tsx"
 import { formOf } from "./pact-form.ts";
 import { PROBLEMS, ReviewersStep } from "./pact-form-steps.tsx";
 import { clockText, EDIT_WINDOW_TEXT, formatDate, formatDay, minutesLeft, money } from "./format.ts";
-import { WaitingRow } from "./item-page.tsx";
+import { openItem, WaitingItemRow, type ItemOpeners } from "./item-page.tsx";
 import { TermsList } from "./terms-list.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { LoadedFound, Sheet, loadFailure, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
@@ -46,8 +46,7 @@ export function PactPage({
   onEdit,
   onDeleted,
   onRequestChange,
-  onOpenExcuse,
-  onOpenChangeRequest,
+  openers,
   onInvite,
 }: {
   pactId: string;
@@ -57,8 +56,8 @@ export function PactPage({
   onEdit: () => void;
   onDeleted: () => void;
   onRequestChange: () => void;
-  onOpenExcuse: (excuseId: string) => void;
-  onOpenChangeRequest: (changeRequestId: string) => void;
+  /** Each kind's own page: a waiting row opens its item's. */
+  openers: ItemOpeners;
   onInvite: () => void;
 }) {
   // Reloaded after a change made here, keeping the pact shown meanwhile and if the reload fails.
@@ -106,7 +105,7 @@ export function PactPage({
               />
             )}
             {pact.waiting.length > 0 && (
-              <WaitingOn items={pact.waiting} onOpenExcuse={onOpenExcuse} onOpenChangeRequest={onOpenChangeRequest} />
+              <WaitingOn items={pact.waiting} onOpenItem={(item) => openItem(item, openers)} />
             )}
             <HeatMap pact={pact} timezone={timezone} now={now} />
             <Terms pact={pact} changeable={changeable} changeWaiting={waiting} onSaved={reload} onInvite={onInvite} />
@@ -354,51 +353,24 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
 }
 
 /**
- * The pact's change request, evidence and excuses waiting for a reviewer,
- * like Today's Waiting for approval rows. A change request or an excuse
- * opens its page; evidence has no page.
+ * The pact's change request, evidence, excuses and vacations covering it,
+ * waiting for a reviewer: the same rows as Today's Waiting for approval, each
+ * opening its item's own page.
  */
 function WaitingOn({
   items,
-  onOpenExcuse,
-  onOpenChangeRequest,
+  onOpenItem,
 }: {
   items: Json<PactWaitingItem>[];
-  onOpenExcuse: (excuseId: string) => void;
-  onOpenChangeRequest: (changeRequestId: string) => void;
+  onOpenItem: (item: Json<PactWaitingItem>) => void;
 }) {
   return (
     <section className="stack">
       <div className="label">Waiting on</div>
       <div className="cards">
-        {items.map((item) => {
-          switch (item.kind) {
-            case "change-request":
-              return (
-                <WaitingRow
-                  key={item.id}
-                  kind="change-request"
-                  title={item.name}
-                  detail={item.endsPact ? "End this pact" : undefined}
-                  onOpen={() => onOpenChangeRequest(item.id)}
-                />
-              );
-            case "excuse":
-              return (
-                <WaitingRow
-                  key={item.id}
-                  kind="excuse"
-                  title={item.name}
-                  detail={datesText(item.firstDate, item.lastDate)}
-                  onOpen={() => onOpenExcuse(item.id)}
-                />
-              );
-            case "evidence":
-              return (
-                <WaitingRow key={item.id} kind="evidence" title={item.name} detail={formatDate(item.occurrenceDate)} />
-              );
-          }
-        })}
+        {items.map((item) => (
+          <WaitingItemRow key={item.id} item={item} onOpen={onOpenItem} />
+        ))}
       </div>
     </section>
   );

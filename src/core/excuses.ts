@@ -423,7 +423,7 @@ export const excuseKind: RequestKindHandler<ExcuseToDecide> = {
 };
 
 /** The owner's excuses waiting for a decision (or just those for `pactId`), newest first. */
-export function waitingExcuses(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+function waitingExcuses(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
   const rows = ctx.all<{
     id: string;
     pact_id: string;

@@ -4,9 +4,11 @@
 
 import type { ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
-import type { ChangeRequestState, QuestionThread, ReviewItem } from "../shared/types.ts";
+import { formatDate } from "../shared/format.ts";
+import type { ChangeRequestState, QuestionThread, ReviewItem, TodayWaitingItem } from "../shared/types.ts";
 import { listNames } from "./change-terms.tsx";
-import { formatDayTime } from "./format.ts";
+import { datesText } from "./excuse-days.tsx";
+import { formatDayTime, money } from "./format.ts";
 import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon, SuitcaseIcon } from "./icons.tsx";
 import { ReplyBox, Thread } from "./questions.tsx";
 
@@ -132,6 +134,35 @@ export function SentTo({
       Sent to {listNames(reviewerNames)} · {formatDayTime(sentAt, timezone)}
     </p>
   );
+}
+
+/** One of the owner's items still waiting for a decision, as Today and a pact page list it. */
+type WaitingItem = Json<TodayWaitingItem>;
+
+/** How each kind opens its own page (a vacation: its Profile card), from the item's id. */
+export type ItemOpeners = { readonly [K in ItemKind]: (id: string) => void };
+
+/** Opens the page of one of the owner's waiting items, from any list or alert that shows it. */
+export function openItem(item: WaitingItem, open: ItemOpeners): void {
+  open[item.kind](item.id);
+}
+
+/** Each kind's row in a waiting list: its title, and what follows the kind's name. */
+const WAITING_ROWS: {
+  readonly [K in ItemKind]: (item: Extract<WaitingItem, { kind: K }>) => { title: string; detail?: string };
+} = {
+  evidence: (item) => ({ title: item.name, detail: formatDate(item.occurrenceDate) }),
+  excuse: (item) => ({ title: item.name, detail: datesText(item.firstDate, item.lastDate) }),
+  payment: (item) => ({ title: `${money(item.amountCents)} to ${item.recipientName}` }),
+  "change-request": (item) => ({ title: item.name, ...(item.endsPact && { detail: "End this pact" }) }),
+  vacation: (item) => ({ title: datesText(item.firstDate, item.lastDate) }),
+};
+
+/** One of the owner's waiting items, the same row wherever it's listed; it opens the item's page. */
+export function WaitingItemRow<T extends WaitingItem>({ item, onOpen }: { item: T; onOpen: (item: T) => void }) {
+  const row = WAITING_ROWS[item.kind] as (item: WaitingItem) => { title: string; detail?: string };
+  const { title, detail } = row(item);
+  return <WaitingRow kind={item.kind} title={title} detail={detail} onOpen={() => onOpen(item)} />;
 }
 
 /**

@@ -460,6 +460,41 @@ describe("the owner's vacations on Profile", () => {
   });
 });
 
+describe("a waiting vacation in the owner's waiting list", () => {
+  test("Today lists it, and so does the page of each pact it covers, but not another pact's; deciding it takes it off", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym, bed, piano } = await ownerWithThreePacts(s);
+    s.setClockTo("Wed 13:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, bed], [reviewer]));
+    const row = {
+      kind: "vacation",
+      id: vacationId,
+      firstDate: s.date("Mon+1"),
+      lastDate: s.date("Sun+1"),
+      filedAt: s.at("Wed 13:00"),
+    };
+
+    expect(owner.today().waiting).toEqual([row]);
+    expect(pactOf(owner, gym).waiting).toEqual([row]);
+    expect(pactOf(owner, bed).waiting).toEqual([row]);
+    expect(pactOf(owner, piano).waiting).toEqual([]);
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+    expect(owner.today().waiting).toEqual([]);
+    expect(pactOf(owner, gym).waiting).toEqual([]);
+  });
+
+  test("a withdrawn one leaves it", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await ownerWithThreePacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
+    ok(await owner.withdrawVacation(vacationId));
+
+    expect(owner.today().waiting).toEqual([]);
+    expect(pactOf(owner, gym).waiting).toEqual([]);
+  });
+});
+
 describe("withdrawing a vacation", () => {
   test("works while it waits, and leaves Profile; a second time is refused", async () => {
     const s = scenario();
@@ -638,7 +673,7 @@ describe("the review item", () => {
 });
 
 describe("a question about a vacation", () => {
-  test("leaves both picked queues and shows on its Profile card, not Today; the reply brings it back to both", async () => {
+  test("leaves both picked queues and shows on its Profile card and Today's question alert; the reply brings it back to both", async () => {
     const s = scenario();
     const { owner, reviewer, second, vacationId } = await sentToTwoOfThree(s);
     s.setClockTo("Wed 13:00");
@@ -659,8 +694,16 @@ describe("a question about a vacation", () => {
         },
       }),
     ]);
-    expect(owner.today().alerts).toEqual([]);
-    expect(owner.today().waiting).toEqual([]);
+    expect(owner.today().alerts).toEqual([
+      {
+        kind: "reviewer-question",
+        item: expect.objectContaining({ kind: "vacation", id: vacationId }),
+        reviewerName: "reviewer",
+        question: "When does your flight leave?",
+        askedAt: s.at("Wed 13:00"),
+      },
+    ]);
+    expect(owner.today().waiting).toEqual([expect.objectContaining({ kind: "vacation", id: vacationId })]);
     expect(owner.vacations()).toMatchObject([
       {
         id: vacationId,
@@ -677,6 +720,7 @@ describe("a question about a vacation", () => {
     expect(reviewer.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
     expect(second.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId })]);
     expect(owner.vacations()).toMatchObject([{ state: { kind: "waiting" } }]);
+    expect(owner.today().alerts).toEqual([]);
   });
 
   test("the other picked reviewer can approve it while it waits on the reply", async () => {

@@ -8,6 +8,14 @@ import { answers, cameraPact, onOurSide, renderWithUser, stubApi } from "./testi
 const NOW = "2026-01-05T15:00:00Z";
 const IN_EDIT_WINDOW = cameraPact("2026-01-05T15:05:00Z");
 
+const openers = {
+  evidence: vi.fn<(id: string) => void>(),
+  excuse: vi.fn<(id: string) => void>(),
+  payment: vi.fn<(id: string) => void>(),
+  "change-request": vi.fn<(id: string) => void>(),
+  vacation: vi.fn<(id: string) => void>(),
+};
+
 function renderPactPage(onDeleted = vi.fn()) {
   return renderWithUser(
     <PactPage
@@ -17,8 +25,7 @@ function renderPactPage(onDeleted = vi.fn()) {
       onEdit={vi.fn()}
       onDeleted={onDeleted}
       onRequestChange={vi.fn()}
-      onOpenExcuse={vi.fn()}
-      onOpenChangeRequest={vi.fn()}
+      openers={openers}
       onInvite={vi.fn()}
     />,
   );
@@ -26,6 +33,7 @@ function renderPactPage(onDeleted = vi.fn()) {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], now: new Date(NOW) });
+  for (const open of Object.values(openers)) open.mockReset();
 });
 
 test("a delete that goes through stays Deleting… while the page goes Back", async () => {
@@ -110,4 +118,40 @@ test("an Active pact past its edit window offers End pact and Request change", a
 
   expect(await screen.findByRole("button", { name: "End pact" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Request change" })).toBeTruthy();
+});
+
+describe("Waiting on", () => {
+  beforeEach(() =>
+    stubApi({
+      pact: answers({
+        ok: true,
+        pact: {
+          ...cameraPact(),
+          waiting: [
+            { kind: "vacation", id: "trip", firstDate: "2026-01-12", lastDate: "2026-01-18", filedAt: NOW },
+            {
+              kind: "evidence",
+              id: "photo-1",
+              pactId: "gym",
+              name: "Gym",
+              occurrenceDate: "2026-01-05",
+              submittedAt: "2026-01-05T14:00:00Z",
+            },
+          ],
+        },
+      }),
+    }),
+  );
+
+  test("a waiting evidence row opens its evidence page", async () => {
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: /Gym\s*Evidence · Mon Jan 5/ }));
+    expect(openers.evidence).toHaveBeenCalledWith("photo-1");
+  });
+
+  test("a waiting vacation row opens the vacation", async () => {
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: /Mon Jan 12 – Sun Jan 18\s*Vacation/ }));
+    expect(openers.vacation).toHaveBeenCalledWith("trip");
+  });
 });

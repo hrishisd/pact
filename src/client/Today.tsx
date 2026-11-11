@@ -58,7 +58,7 @@ import { firstName } from "./vacation-text.ts";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
 import { CameraIcon } from "./icons.tsx";
-import { WaitingRow } from "./item-page.tsx";
+import { openItem, WaitingItemRow, type ItemOpeners } from "./item-page.tsx";
 import { usePhotoPicks } from "./photos.ts";
 import { VacationBanner } from "./VacationBanner.tsx";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
@@ -84,10 +84,7 @@ export function Today({
   timezone,
   onOpenPact,
   onOpenLedger,
-  onOpenExcuse,
-  onOpenChangeRequest,
-  onOpenEvidence,
-  onOpenPayment,
+  openers,
   onCreate,
   onInvite,
 }: {
@@ -95,10 +92,8 @@ export function Today({
   timezone: string;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
-  onOpenExcuse: (excuseId: string) => void;
-  onOpenChangeRequest: (changeRequestId: string) => void;
-  onOpenEvidence: (evidenceId: string) => void;
-  onOpenPayment: (paymentId: string) => void;
+  /** Each kind's own page: a waiting row or a reviewer's question opens its item's. */
+  openers: ItemOpeners;
   onCreate: () => void;
   onInvite: () => void;
 }) {
@@ -126,19 +121,8 @@ export function Today({
     reload,
     null,
   );
-  // A reviewer's question opens the page of the item it's about.
-  const openItem = (item: Json<TodayWaitingItem>) => {
-    switch (item.kind) {
-      case "evidence":
-        return onOpenEvidence(item.id);
-      case "excuse":
-        return onOpenExcuse(item.id);
-      case "payment":
-        return onOpenPayment(item.id);
-      case "change-request":
-        return onOpenChangeRequest(item.id);
-    }
-  };
+  // A waiting row or a reviewer's question opens the page of the item it's about.
+  const open = (item: Json<TodayWaitingItem>) => openItem(item, openers);
 
   // A failed reload keeps the cards shown, with what failed above them.
   return (
@@ -175,7 +159,7 @@ export function Today({
                 now={now}
                 ouraError={ouraError}
                 onFileExcuse={setExcusing}
-                onOpenItem={openItem}
+                onOpenItem={open}
                 onChanged={reload}
               />
             ))}
@@ -197,15 +181,7 @@ export function Today({
                 onChanged={reload}
               />
             ))}
-            {today.waiting.length > 0 && (
-              <Waiting
-                items={today.waiting}
-                onOpenPact={onOpenPact}
-                onOpenLedger={onOpenLedger}
-                onOpenExcuse={onOpenExcuse}
-                onOpenChangeRequest={onOpenChangeRequest}
-              />
-            )}
+            {today.waiting.length > 0 && <Waiting items={today.waiting} onOpenItem={open} />}
             <Yesterday entries={today.yesterday} timezone={timezone} now={now} onOpenPact={onOpenPact} />
             {excusing && (
               <ExcuseSheet
@@ -823,22 +799,31 @@ function questionSubject(item: Json<TodayWaitingItem>): string {
       return `your ${money(item.amountCents)} payment to ${item.recipientName}`;
     case "change-request":
       return item.endsPact ? `your request to end ${item.name}` : `your change to ${item.name}`;
+    case "vacation":
+      return `your vacation, ${datesText(item.firstDate, item.lastDate)}`;
   }
 }
+
+/** Why Take the L was refused, on a Missed card or any rejection alert. */
+type TakeTheLRefusal =
+  AcceptMissRefusal | Refusal<AcceptExcuseRejectionResult> | Refusal<AcceptVacationRejectionResult>;
+
+const TAKE_THE_L_REFUSAL_TEXT: Record<TakeTheLRefusal, string> = {
+  "pact-not-found": "This pact wasn't found.",
+  "excuse-not-found": "This excuse wasn't found.",
+  "vacation-not-found": "This vacation wasn't found.",
+  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
+};
 
 /**
  * Take the L: it only takes a card or alert off Today and changes nothing
  * else, so it sends at once, with no confirmation.
  */
-function useTakeTheL<Refusal extends string>(
-  send: () => Promise<{ ok: true } | { ok: false; reason: Refusal }>,
-  refusalText: Record<Refusal, string>,
-  onTaken: () => void,
-) {
+function useTakeTheL(send: () => Promise<{ ok: true } | { ok: false; reason: TakeTheLRefusal }>, onTaken: () => void) {
   const { busy, error, run } = useSend(
     async () => {
       const result = await send();
-      if (!result.ok) return refusalText[result.reason];
+      if (!result.ok) return TAKE_THE_L_REFUSAL_TEXT[result.reason];
       onTaken();
     },
     (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
@@ -869,11 +854,7 @@ function MissedActions({
   /** After Take the L: Today reloads. */
   onTaken: () => void;
 }) {
-  const { busy, error, take } = useTakeTheL(
-    () => api.acceptMiss(pactId, occurrenceDate),
-    ACCEPT_MISS_REFUSAL_TEXT,
-    onTaken,
-  );
+  const { busy, error, take } = useTakeTheL(() => api.acceptMiss(pactId, occurrenceDate), onTaken);
   const fileLabel = fileExcuseLabel("File excuse", excusableUntil, now);
   return (
     <CardActions className="stack">
@@ -909,11 +890,7 @@ function RejectedEvidenceAlert({
   /** After Take the L: Today reloads. */
   onTaken: () => void;
 }) {
-  const { busy, error, take } = useTakeTheL(
-    () => api.acceptMiss(alert.pactId, alert.occurrenceDate),
-    ACCEPT_MISS_REFUSAL_TEXT,
-    onTaken,
-  );
+  const { busy, error, take } = useTakeTheL(() => api.acceptMiss(alert.pactId, alert.occurrenceDate), onTaken);
   const fileLabel =
     alert.excusableUntil === null ? "File excuse" : fileExcuseLabel("File excuse", alert.excusableUntil, now);
 
@@ -948,11 +925,6 @@ function RejectedEvidenceAlert({
   );
 }
 
-const ACCEPT_MISS_REFUSAL_TEXT: Record<AcceptMissRefusal, string> = {
-  "pact-not-found": "This pact wasn't found.",
-  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
-};
-
 /**
  * A rejected excuse: its held penalties are owed again, and its days not
  * judged yet are judged as usual. File another excuse while a day is still
@@ -970,11 +942,7 @@ function RejectedExcuseAlert({
   /** After Take the L: Today reloads. */
   onTaken: () => void;
 }) {
-  const { busy, error, take } = useTakeTheL(
-    () => api.acceptExcuseRejection(alert.excuseId),
-    ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT,
-    onTaken,
-  );
+  const { busy, error, take } = useTakeTheL(() => api.acceptExcuseRejection(alert.excuseId), onTaken);
   const owedAgain = alert.owedAgainCents > 0;
   // One day opens the sheet on it; several open the pact-page form, which
   // offers only the days that can still be excused.
@@ -1041,11 +1009,7 @@ function RejectedVacationAlert({
   onTaken: () => void;
 }) {
   const { excusable } = alert;
-  const { busy, error, take } = useTakeTheL(
-    () => api.acceptVacationRejection(alert.vacationId),
-    ACCEPT_VACATION_REJECTION_REFUSAL_TEXT,
-    onTaken,
-  );
+  const { busy, error, take } = useTakeTheL(() => api.acceptVacationRejection(alert.vacationId), onTaken);
   return (
     <div className="alert bad" role="status">
       <b>{firstName(alert.reviewerName)} rejected your vacation</b>
@@ -1074,80 +1038,21 @@ function RejectedVacationAlert({
   );
 }
 
-const ACCEPT_VACATION_REJECTION_REFUSAL_TEXT: Record<Refusal<AcceptVacationRejectionResult>, string> = {
-  "vacation-not-found": "This vacation wasn't found.",
-  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
-};
-
-const ACCEPT_EXCUSE_REJECTION_REFUSAL_TEXT: Record<Refusal<AcceptExcuseRejectionResult>, string> = {
-  "excuse-not-found": "This excuse wasn't found.",
-  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
-};
-
-/**
- * Waiting for approval, last on Today: each item with its kind's icon in a
- * coloured square. Evidence opens its pact; an excuse or a change request,
- * its page; a payment, its recipient's ledger.
- */
+/** Waiting for approval, last on Today: every kind, each row opening its item's own page. */
 function Waiting({
   items,
-  onOpenPact,
-  onOpenLedger,
-  onOpenExcuse,
-  onOpenChangeRequest,
+  onOpenItem,
 }: {
   items: Json<TodayWaitingItem>[];
-  onOpenPact: (id: string, name: string) => void;
-  onOpenLedger: (recipientId: string, name: string) => void;
-  onOpenExcuse: (excuseId: string) => void;
-  onOpenChangeRequest: (changeRequestId: string) => void;
+  onOpenItem: (item: Json<TodayWaitingItem>) => void;
 }) {
   return (
     <section className="stack">
       <div className="label">Waiting for approval</div>
       <div className="cards">
-        {items.map((item) => {
-          switch (item.kind) {
-            case "change-request":
-              return (
-                <WaitingRow
-                  key={item.id}
-                  kind="change-request"
-                  title={item.name}
-                  detail={item.endsPact ? "End this pact" : undefined}
-                  onOpen={() => onOpenChangeRequest(item.id)}
-                />
-              );
-            case "excuse":
-              return (
-                <WaitingRow
-                  key={item.id}
-                  kind="excuse"
-                  title={item.name}
-                  detail={datesText(item.firstDate, item.lastDate)}
-                  onOpen={() => onOpenExcuse(item.id)}
-                />
-              );
-            case "evidence":
-              return (
-                <WaitingRow
-                  key={item.id}
-                  kind="evidence"
-                  title={item.name}
-                  onOpen={() => onOpenPact(item.pactId, item.name)}
-                />
-              );
-            case "payment":
-              return (
-                <WaitingRow
-                  key={item.id}
-                  kind="payment"
-                  title={`${money(item.amountCents)} to ${item.recipientName}`}
-                  onOpen={() => onOpenLedger(item.recipientId, item.recipientName)}
-                />
-              );
-          }
-        })}
+        {items.map((item) => (
+          <WaitingItemRow key={item.id} item={item} onOpen={onOpenItem} />
+        ))}
       </div>
     </section>
   );

@@ -28,13 +28,13 @@ Decision 5 in `../spec.md` (rule R10), decided 2026-11-11: the owner has one wai
 
 ## Acceptance criteria
 
-- [ ] New core scenario: a waiting vacation appears in Today's waiting list and on the pact page of each pact it covers, and not on another pact's page.
-- [ ] New core scenario: a question about a waiting vacation raises Today's question alert.
-- [ ] Rewritten tests that pinned the old rule: the vacation tests asserting Today lists no vacation (`vacations.test.ts`, search "Waiting for approval never" and "questionAlerts"), and the waiting object in `src/server/app.test.ts:1007-1016` if it changes.
-- [ ] `Today.test.tsx` and `PactPage.test.tsx`: tapping a waiting evidence row opens `EvidencePage` from both screens; a vacation row opens the vacation.
-- [ ] Removing a kind from the client record fails `tsc`; shown by trying it.
-- [ ] Update `docs/behaviour.md`.
-- [ ] `npm run check` passes.
+- [x] New core scenario: a waiting vacation appears in Today's waiting list and on the pact page of each pact it covers, and not on another pact's page.
+- [x] New core scenario: a question about a waiting vacation raises Today's question alert.
+- [x] Rewritten tests that pinned the old rule: the vacation tests asserting Today lists no vacation (`vacations.test.ts`, search "Waiting for approval never" and "questionAlerts"), and the waiting object in `src/server/app.test.ts:1007-1016` if it changes.
+- [x] `Today.test.tsx` and `PactPage.test.tsx`: tapping a waiting evidence row opens `EvidencePage` from both screens; a vacation row opens the vacation.
+- [x] Removing a kind from the client record fails `tsc`; shown by trying it.
+- [x] Update `docs/behaviour.md`.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
@@ -45,3 +45,13 @@ Decision 5 in `../spec.md` (rule R10), decided 2026-11-11: the owner has one wai
 
 - Each handler in `REQUEST_KINDS` (`src/core/request-kinds.ts`) already has `waiting(ctx, ownerId, pactId?)`, wrapping the existing per-kind query; payment's answers nothing for a `pactId`, vacation's nothing at all yet. Today and the pact page still call the per-kind functions.
 - Import cycle to watch: `pacts.ts` and `change-requests.ts` import each other. If `pacts.ts` imports `request-kinds.ts`, the registry may be built before `change-requests.ts` has defined `changeRequestKind` (a TDZ error at startup, depending on import order). Build `waitingFor` in a module `pacts.ts` doesn't sit in a cycle with (for example `requests`-side code that `core.ts` calls and passes into `pactPage`), or look the registry up lazily.
+
+## Comments
+
+Built 2026-11-11.
+
+- Core: `waitingFor(ctx, ownerId, { pactId? })` in `src/core/waiting.ts`, over `REQUEST_HANDLERS`; overloaded so a pact scope returns `PactWaitingItem[]` (now `Exclude<TodayWaitingItem, { kind: "payment" }>`). `waitingSince` moved there from `pacts.ts`. `today.ts` imports it; `pactPage` takes it as a parameter that `core.ts` passes, so `pacts.ts` never imports the registry (the cycle noted by ticket 17). The per-kind `waiting*` functions are no longer exported. Vacation's handler now answers (`waitingVacations`, `vacations.ts`): a pact scope includes a vacation with a `vacation_day` on that pact.
+- `TodayWaitingItem` gained `{ kind: "vacation", id, firstDate, lastDate, filedAt }`. Rows keep their kind's own fields rather than a core-made title and detail line: the client words dates and money, as everywhere else.
+- Client: `ItemOpeners`, `openItem` and `WaitingItemRow` (with its `WAITING_ROWS` record) in `item-page.tsx`. App builds the openers once and passes them to Today and the pact page. A vacation opens the Profile sheet, where its card and Reply are; no vacation page was added. Evidence rows now show the day on Today too. The three Take the L refusal tables are one `TAKE_THE_L_REFUSAL_TEXT`.
+- Removing `vacation` from `WAITING_ROWS` or from App's openers fails `tsc` with TS2741 (tried, then restored).
+- Where the ticket no longer matched the code: `occurrence-state.ts:180` no longer hides vacation-waiting (days already read "Vacation waiting for approval", `docs/behaviour.md`); `vacations.test.ts` had no "Waiting for approval never" test, only the question test asserting Today empty, which was rewritten; `app.test.ts`'s waiting objects (now at :1077 and :1375) are evidence and excuse rows and did not change.

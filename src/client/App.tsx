@@ -11,6 +11,7 @@ import { formatDay, initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
 import { BackIcon, CardsIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, RingIcon, TodayIcon } from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
+import type { ItemOpeners } from "./item-page.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
 import { forgetThisDevice, usePush, type Push } from "./push.ts";
 import { LedgerPage, Ledgers } from "./Ledgers.tsx";
@@ -210,6 +211,14 @@ function Shell({
   const openChangeRequest = (id: string) => nav.push({ kind: "change-request", id });
   const openEvidence = (id: string) => nav.push({ kind: "evidence", id });
   const openPayment = (id: string) => nav.push({ kind: "payment", id });
+  // Each waiting item's own page; a vacation has none, so it opens the Profile sheet, where its card is.
+  const openers: ItemOpeners = {
+    evidence: openEvidence,
+    excuse: openExcuse,
+    payment: openPayment,
+    "change-request": openChangeRequest,
+    vacation: openProfile,
+  };
   const create = () => nav.push({ kind: "create" });
   const openNotifications = () => {
     setProfileOpen(false);
@@ -230,8 +239,7 @@ function Shell({
               onEdit={() => nav.push({ kind: "edit-pact", id: page.id })}
               onDeleted={nav.back}
               onRequestChange={() => nav.push({ kind: "change-pact", id: page.id })}
-              onOpenExcuse={openExcuse}
-              onOpenChangeRequest={openChangeRequest}
+              openers={openers}
               onInvite={openProfile}
             />
           ),
@@ -342,10 +350,7 @@ function Shell({
                 timezone={profile.timezone}
                 onOpenPact={openPact}
                 onOpenLedger={openLedger}
-                onOpenExcuse={openExcuse}
-                onOpenChangeRequest={openChangeRequest}
-                onOpenEvidence={openEvidence}
-                onOpenPayment={openPayment}
+                openers={openers}
                 onCreate={create}
                 onInvite={openProfile}
               />

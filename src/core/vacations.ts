@@ -11,6 +11,7 @@ import {
   type ExcusableDays,
   type TodayAlert,
   type TodayVacation,
+  type TodayWaitingItem,
   type VacationCover,
   type VacationState,
   type FileVacationResult,
@@ -521,8 +522,33 @@ export interface VacationToDecide {
 }
 
 /**
+ * The owner's vacations waiting for a decision (or those covering a day of
+ * `pactId`), newest first.
+ */
+function waitingVacations(ctx: CoreContext, ownerId: AccountId, pactId?: string): TodayWaitingItem[] {
+  const rows = ctx.all<{ id: string; first_day: LocalDate; last_day: LocalDate; filed_at: string }>(
+    `SELECT id, first_day, last_day, filed_at FROM vacation
+     WHERE owner_account_id = ? AND decision IS NULL AND withdrawn_at IS NULL
+       AND (? IS NULL OR EXISTS (SELECT 1 FROM vacation_day
+                                 WHERE vacation_day.vacation_id = vacation.id AND vacation_day.pact_id = ?))
+     ORDER BY filed_at DESC, id`,
+    ownerId,
+    pactId ?? null,
+    pactId ?? null,
+  );
+  return rows.map((row) => ({
+    kind: "vacation",
+    id: row.id,
+    firstDate: row.first_day,
+    lastDate: row.last_day,
+    filedAt: new Date(row.filed_at),
+  }));
+}
+
+/**
  * Vacations as review items: decided by the reviewers the owner picked at
- * filing. Its Profile card lists it for the owner, so no waiting list does.
+ * filing. The owner's waiting list has it, and the page of each pact it
+ * covers a day of.
  */
 export const vacationKind: RequestKindHandler<VacationToDecide> = {
   kind: "vacation",
@@ -536,7 +562,7 @@ export const vacationKind: RequestKindHandler<VacationToDecide> = {
   apply: decideVacation,
   describe: () => ({ what: "vacation", ownerPath: APP_PATHS.profile }),
   queue: vacationsToReview,
-  waiting: () => [],
+  waiting: waitingVacations,
 };
 
 /**
