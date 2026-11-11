@@ -1,7 +1,7 @@
 # 21 Stale-item reminders
 
 Status: ready-for-agent
-Blocked by: 17
+Blocked by: 17, 22
 
 Closes: F2 and rule R2 (`../interaction-audit.md` finding 2); the remainder of F6; H1 step 6.
 

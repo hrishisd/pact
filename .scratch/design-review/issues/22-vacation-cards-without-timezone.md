@@ -1,6 +1,6 @@
 # 22 An account always has a timezone
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 Found while building ticket 04. First filed as "Profile's vacation queries without a timezone"; reworked into a proposal to make that state impossible, at the owner's request.
@@ -92,3 +92,10 @@ If the owner wants new people still to see their zone once (open question 1), ke
 2. A sign-in with no usable timezone: fall back to `UTC` (proposed), fall back to something else, or refuse the sign-in?
 3. The backfill: how many production accounts have no timezone (`SELECT id, created_at FROM account WHERE timezone IS NULL`, see `docs/agents/production.md`)? Fill them with the operator's timezone (proposed), `UTC`, or a value you choose per account?
 4. Ticket 21 is ready-for-agent and plans a fallback for reviewers with no timezone. Land this first and drop that rule from 21, or let 21 go first and remove its fallback here?
+
+## Owner decisions (2026-11-11)
+
+1. Remove the confirm-timezone screen. Profile shows the timezone and lets people change it.
+2. If sign-in brings no usable timezone, or a name `Intl` does not accept, save UTC. Do not refuse.
+3. The migration fills UTC into existing accounts with no timezone.
+4. This ticket lands before ticket 21, which is now blocked by it.
