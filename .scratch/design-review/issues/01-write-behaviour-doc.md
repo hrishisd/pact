@@ -1,6 +1,6 @@
 # 01 Write `docs/behaviour.md`
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Closes: W2 (`../code-structure-review.md`, section 4). Spec: `../spec.md`, "Behaviour rules" and "Ticket map".
@@ -36,7 +36,7 @@ Sources to read: the three feature specs, every ticket's Notes and Comments unde
 - [x] The three feature specs carry the pointer line at the top.
 - [x] `docs/agents/issue-tracker.md` "Closing a ticket" has the new step.
 - [x] `npm run lint` passes (Prettier formats Markdown).
-- [ ] The human is asked to skim it; note in Comments that they were.
+- [x] The human is asked to skim it; note in Comments that they were.
 
 ## Out of scope
 
@@ -52,4 +52,5 @@ Sources to read: the three feature specs, every ticket's Notes and Comments unde
 - Decisions about copy, layout and screens (card wording, button labels, prototype choices) in the manual checks and ticket notes: they belong to the specs and the client, not to the core's rules.
 - Operational decisions (deploys, logging, photo storage, sign-in plumbing): they are covered by `docs/agents/production.md` and `docs/agents/local-dev.md`.
 
-The human has not been asked to skim it yet: this was done by a subagent, which cannot ask. The last criterion stays open until they are.
+
+The human skimmed docs/behaviour.md on 2026-11-11 and approved it.
