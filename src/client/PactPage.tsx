@@ -12,7 +12,6 @@ import {
   MAX_NAME_CHARS,
   MAX_TEXT_CHARS,
   type ChangePactRefusal,
-  type Friend,
   type PactChange,
   type PactTerms,
   type PactWaitingItem,
@@ -30,7 +29,7 @@ import { clockText, formatDate, formatDay, minutesLeft, money } from "./format.t
 import { WaitingRow } from "./item-page.tsx";
 import { TermsList } from "./terms-list.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
-import { LoadedFound, Sheet, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
+import { LoadedFound, Sheet, loadFailure, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
 
@@ -536,10 +535,10 @@ function AddReviewerSheet({
   onSaved: () => void;
   onInvite: () => void;
 }) {
-  const [friends, setFriends] = useState<Friend[] | null>(null);
+  const { state: friendsLoad, reload: loadFriends } = useLoad(api.friends);
+  const friends = loadedData(friendsLoad);
+  const failed = loadFailure(friendsLoad);
   const [picked, setPicked] = useState<string[]>([]);
-  const loadFriends = useCallback(() => api.friends().then(setFriends, () => setFriends([])), []);
-  useEffect(() => void loadFriends(), [loadFriends]);
 
   const current = pact.reviewers.map((r) => r.id);
   const others = friends?.filter((f) => !current.includes(f.id)) ?? null;
@@ -559,7 +558,18 @@ function AddReviewerSheet({
   });
 
   let body: ReactNode = null;
-  if (others !== null && others.length === 0) {
+  if (others === null && failed) {
+    body = (
+      <>
+        <p className="error">
+          Your friends couldn't load. {failureText(failed.error, "Check your connection and try again.")}
+        </p>
+        <button className="btn block" onClick={loadFriends}>
+          Try again
+        </button>
+      </>
+    );
+  } else if (others !== null && others.length === 0) {
     body = (
       <>
         <p className="muted">
@@ -570,7 +580,7 @@ function AddReviewerSheet({
           <button className="btn primary" onClick={onInvite}>
             Invite a friend
           </button>
-          <button className="btn" onClick={() => void loadFriends()}>
+          <button className="btn" onClick={loadFriends}>
             Check again
           </button>
         </div>
@@ -590,7 +600,7 @@ function AddReviewerSheet({
             kind={pact.evidenceKind}
             hint={hint}
             onInvite={onInvite}
-            onCheckAgain={() => void loadFriends()}
+            onCheckAgain={loadFriends}
           />
         </div>
         {error && <p className="error">{error}</p>}

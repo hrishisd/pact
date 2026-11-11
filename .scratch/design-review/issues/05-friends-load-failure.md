@@ -1,6 +1,6 @@
 # 05 A failed friends load says so
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: C3 (`../code-structure-review.md`, section 1).
@@ -20,9 +20,9 @@ Load with `useLoad(api.friends)` and show `loadFailure` on failure, as `src/clie
 
 ## Acceptance criteria
 
-- [ ] `PactPage.test.tsx`: with `api.friends` failing, the Add reviewer sheet shows the load failure text and not the "Only friends can review" copy.
-- [ ] The existing Add reviewer tests still pass.
-- [ ] `npm run check` passes.
+- [x] `PactPage.test.tsx`: with `api.friends` failing, the Add reviewer sheet shows the load failure text and not the "Only friends can review" copy.
+- [x] The existing Add reviewer tests still pass. (There were none in `PactPage.test.tsx`; a test for the no-other-friends copy was added alongside, and the full suite passes.)
+- [x] `npm run check` passes.
 
 ## Out of scope
 

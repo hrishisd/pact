@@ -1,7 +1,8 @@
 import { screen } from "@testing-library/react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { FriendsResponse } from "../shared/api.ts";
 import { PactPage } from "./PactPage.tsx";
-import { answers, cameraPact, renderWithUser, stubApi } from "./testing/render.tsx";
+import { answers, cameraPact, onOurSide, renderWithUser, stubApi } from "./testing/render.tsx";
 
 // Five minutes into Gym's edit window.
 const NOW = "2026-01-05T15:00:00Z";
@@ -52,4 +53,40 @@ test("a refused delete offers Delete pact again, with why", async () => {
   expect(await screen.findByText("The 10 minutes are up.")).toBeTruthy();
   expect(onDeleted).not.toHaveBeenCalled();
   expect((screen.getByRole("button", { name: "Delete pact" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+describe("the Add a reviewer sheet", () => {
+  const openSheet = async (user: Awaited<ReturnType<typeof renderPactPage>>["user"]) =>
+    user.click(await screen.findByRole("button", { name: "Add a reviewer" }));
+
+  test("with no other friends, says only friends can review", async () => {
+    stubApi({ pact: answers({ ok: true, pact: cameraPact() }), friends: answers([{ id: "ana", name: "Ana" }]) });
+    const { user } = renderPactPage();
+    await openSheet(user);
+    expect(await screen.findByText(/Only friends can review your pacts/)).toBeTruthy();
+  });
+
+  test("a failed friends load says so, and not that there are no friends", async () => {
+    stubApi({ pact: answers({ ok: true, pact: cameraPact() }), friends: answers<FriendsResponse>(onOurSide) });
+    const { user } = renderPactPage();
+    await openSheet(user);
+    expect(await screen.findByText(/Your friends couldn't load\./)).toBeTruthy();
+    expect(screen.getByText(/Something went wrong on our side\. Try again in a minute\./)).toBeTruthy();
+    expect(screen.queryByText(/Only friends can review your pacts/)).toBeNull();
+  });
+
+  test("Try again after a failed load shows the friends who loaded", async () => {
+    stubApi({
+      pact: answers({ ok: true, pact: cameraPact() }),
+      friends: answers<FriendsResponse>(onOurSide, [
+        { id: "ana", name: "Ana" },
+        { id: "bo", name: "Bo" },
+      ]),
+    });
+    const { user } = renderPactPage();
+    await openSheet(user);
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Bo")).toBeTruthy();
+    expect(screen.queryByText(/Your friends couldn't load/)).toBeNull();
+  });
 });
