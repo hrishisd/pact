@@ -766,4 +766,17 @@ export const migrations: readonly Migration[] = [
   );
   CREATE INDEX vacation_day_occurrence ON vacation_day (pact_id, date);
   `,
+  // 29: one read of what covers an occurrence
+  `
+  -- Every day an excuse or a vacation covers, whatever its state, read as one
+  -- kind of cover. An excuse can't be withdrawn, so its withdrawn_at is NULL.
+  CREATE VIEW cover_day_v AS
+    SELECT 'excuse' AS kind, excuse.id, excuse_day.pact_id, excuse_day.date, excuse.filed_at, excuse.decision,
+           excuse.decided_at, NULL AS withdrawn_at
+      FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
+    UNION ALL
+    SELECT 'vacation', vacation.id, vacation_day.pact_id, vacation_day.date, vacation.filed_at, vacation.decision,
+           vacation.decided_at, vacation.withdrawn_at
+      FROM vacation_day JOIN vacation ON vacation.id = vacation_day.vacation_id;
+  `,
 ];

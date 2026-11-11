@@ -62,7 +62,8 @@ describe("the spec's examples", () => {
         status: {
           kind: "missed",
           penaltyCents: 500,
-          held: false,
+          cover: null,
+          phase: "past-due",
           excusableUntil: new Date(s.at("Mon+2 00:00").getTime() + 2 * DAY_MS),
           recipientName: "Sam",
           rejection: null,
@@ -304,7 +305,12 @@ describe("evidence", () => {
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status.kind).toBe("not-judged");
     await s.advanceTo("Mon+2 00:00");
 
-    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: null });
+    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
+      kind: "satisfied",
+      cover: null,
+      phase: "past-due",
+      approvedBy: null,
+    });
   });
 
   test("evidence waiting for a decision at the end of Sunday holds the outcome until it's decided", async () => {
@@ -326,7 +332,8 @@ describe("evidence", () => {
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
       kind: "missed",
       penaltyCents: 500,
-      held: false,
+      cover: null,
+      phase: "past-due",
       excusableUntil: new Date(s.at("Tue+2 10:00").getTime() + 2 * DAY_MS),
       recipientName: "Sam",
       rejection: null,
@@ -346,7 +353,12 @@ describe("evidence", () => {
 
     await reviewer.decide(late, { kind: "approve" });
 
-    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({ kind: "satisfied", approvedBy: null });
+    expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
+      kind: "satisfied",
+      cover: null,
+      phase: "past-due",
+      approvedBy: null,
+    });
     expect(owed(owner)).toBe(0);
   });
 });
@@ -456,7 +468,8 @@ describe("excuses", () => {
               opensAt: s.at("Mon+1 00:00"),
               dueAt: s.at("Mon+2 00:00"),
               evidenceWaiting: false,
-              excuse: null,
+              cover: null,
+              phase: "open",
             },
           },
         ],
@@ -472,7 +485,12 @@ describe("excuses", () => {
     await s.advanceTo("Mon+2 00:00");
 
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence).toEqual({
-      status: { kind: "excused", excuseApproval: { reviewerName: "reviewer", reason: "Recital" } },
+      status: {
+        kind: "excused",
+        cover: { kind: "excuse", state: "approved" },
+        phase: "past-due",
+        excuseApproval: { reviewerName: "reviewer", reason: "Recital" },
+      },
       detail: null,
     });
     expect(owed(owner)).toBe(0);
@@ -495,6 +513,8 @@ describe("excuses", () => {
 
     expect(weekOf(owner, piano, s.date("Mon+1")).occurrence?.status).toEqual({
       kind: "excused",
+      cover: { kind: "excuse", state: "approved" },
+      phase: "past-due",
       excuseApproval: { reviewerName: "reviewer", reason: "Sick all week" },
     });
     expect(owed(owner)).toBe(0);
@@ -745,7 +765,7 @@ describe("dates, bills and the heat map", () => {
       {
         date: s.date("Mon+1"),
         progress: { sessions: 2, waiting: 0, target: 2 },
-        occurrence: { status: { kind: "satisfied", approvedBy: null }, detail: null },
+        occurrence: { status: { kind: "satisfied", cover: null, phase: "past-due", approvedBy: null }, detail: null },
       },
       {
         date: s.date("Mon+2"),
@@ -756,7 +776,8 @@ describe("dates, bills and the heat map", () => {
             opensAt: s.at("Mon+2 00:00"),
             dueAt: s.at("Mon+3 00:00"),
             evidenceWaiting: false,
-            excuse: null,
+            cover: null,
+            phase: "open",
             excuseApproval: null,
           },
           detail: null,

@@ -18,12 +18,11 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
+import { coveredSql, coverOn } from "./covers.ts";
 import { judge, judgeWeek } from "./judging.ts";
 import {
   dueAfterEnd,
   evidenceDecision,
-  excuseCoversSql,
-  excuseOn,
   isJudged,
   judgingReached,
   MISSED_THROUGH_REJECTION,
@@ -238,7 +237,7 @@ export function decideEvidence(
   const now = ctx.clock.now();
   recordDecision(ctx, "evidence", evidence.id, decided, reviewerId, now);
   // A day ahead with an approved excuse or vacation stays for judging at its due time, which makes it Excused.
-  const excusedAhead = excuseOn(ctx, evidence.pact_id, evidence.occurrence_date) === "approved";
+  const excusedAhead = coverOn(ctx, evidence.pact_id, evidence.occurrence_date)?.state === "approved";
   const occurrence = occurrencesOf(ctx, evidence.pact_id, evidence.timezone).covering(evidence.occurrence_date);
   if (occurrence === null || dueAfterEnd(ctx, evidence.pact_id, occurrence)) {
     // The pact Ended before the day fell due: it's never judged.
@@ -380,10 +379,11 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
        JOIN recipient ON recipient.id = penalty.recipient_id
        WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.miss_accepted_at IS NULL
          AND ${MISSED_THROUGH_REJECTION}
-         AND NOT ${excuseCoversSql(
+         AND NOT ${coveredSql(
            "occurrence.pact_id",
            "occurrence.date",
-           "(excuse.decision IS NULL OR excuse.filed_at >= occurrence.judged_at)",
+           "any",
+           "cover.decision IS NULL OR cover.filed_at >= occurrence.judged_at",
          )}
        ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
     ownerId,
@@ -436,10 +436,11 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
          AND NOT EXISTS (SELECT 1 FROM occurrence
                          WHERE occurrence.pact_id = evidence.pact_id AND occurrence.date = evidence.occurrence_date
                            AND occurrence.outcome IS NOT NULL)
-         AND NOT ${excuseCoversSql(
+         AND NOT ${coveredSql(
            "evidence.pact_id",
            "evidence.occurrence_date",
-           "(excuse.decision IS NULL OR excuse.decision = 'approved' OR excuse.filed_at >= evidence.decided_at)",
+           "any",
+           "cover.decision IS NULL OR cover.decision = 'approved' OR cover.filed_at >= evidence.decided_at",
          )}
        ORDER BY evidence.decided_at DESC, pact.name, pact.id`,
     ownerId,

@@ -28,6 +28,7 @@ import type {
 } from "../shared/types.ts";
 import { laterDate, localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
+import { moveCovers } from "./covers.ts";
 import { enqueueEvidenceReviewItems, waitingEvidence } from "./evidence.ts";
 import { waitingExcuses } from "./excuses.ts";
 import { pactHistory } from "./history.ts";
@@ -537,14 +538,7 @@ export function moveOneTimeOccurrence(ctx: CoreContext, pactId: string, from: Lo
   ctx.db
     .prepare(`UPDATE evidence SET occurrence_date = ?, day = ? WHERE pact_id = ? AND occurrence_date = ?`)
     .run(to, to, pactId, from);
-  ctx.db.prepare(`UPDATE excuse_day SET date = ? WHERE pact_id = ? AND date = ?`).run(to, pactId, from);
-  ctx.db
-    .prepare(
-      `UPDATE vacation_day SET date = ? WHERE pact_id = ? AND date = ?
-         AND vacation_id IN (SELECT id FROM vacation WHERE first_day <= ? AND last_day >= ?)`,
-    )
-    .run(to, pactId, from, to, to);
-  ctx.db.prepare(`DELETE FROM vacation_day WHERE pact_id = ? AND date = ?`).run(pactId, from);
+  moveCovers(ctx, pactId, from, to);
   ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ? AND date = ?`).run(pactId, from);
 }
 

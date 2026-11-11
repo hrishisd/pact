@@ -33,7 +33,8 @@ import {
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { excuseApprovedDays } from "./excuses.ts";
-import { dueAfterEnd, excuseOn, occurrenceSpan, vacationOn } from "./occurrence-state.ts";
+import { coverOn, coversOn } from "./covers.ts";
+import { dueAfterEnd, occurrenceSpan } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { isLocalDate } from "./pact-rules.ts";
@@ -191,11 +192,10 @@ function vacationSkipReason(
   now: Date,
 ): VacationSkipReason | null {
   if (occurrence.opensAt.getTime() <= now.getTime()) return "already-open";
-  // Before excuseOn, which counts an approved vacation as an approved excuse.
-  if (vacationOn(ctx, pactId, occurrence.date) !== null) return "on-vacation";
-  const excuse = excuseOn(ctx, pactId, occurrence.date);
-  if (excuse === "waiting") return "on-waiting-excuse";
-  return excuse === "approved" ? "excused" : null;
+  if (coversOn(ctx, pactId, occurrence.date).some((c) => c.kind === "vacation")) return "on-vacation";
+  const cover = coverOn(ctx, pactId, occurrence.date);
+  if (cover?.state === "waiting") return "on-waiting-excuse";
+  return cover?.state === "approved" ? "excused" : null;
 }
 
 /**
@@ -605,12 +605,9 @@ export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationI
  * its days. A rejected vacation's alert stands only while this holds.
  */
 export function noLaterFilingSql(alias: string): string {
-  return `NOT EXISTS (SELECT 1 FROM vacation_day AS mine
-    WHERE mine.vacation_id = ${alias}.id
-      AND (EXISTS (SELECT 1 FROM vacation_day AS other JOIN vacation AS later ON later.id = other.vacation_id
-                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)
-        OR EXISTS (SELECT 1 FROM excuse_day AS other JOIN excuse AS later ON later.id = other.excuse_id
-                   WHERE other.pact_id = mine.pact_id AND other.date = mine.date AND later.filed_at > ${alias}.filed_at)))`;
+  return `NOT EXISTS (SELECT 1 FROM cover_day_v AS mine
+    JOIN cover_day_v AS later ON later.pact_id = mine.pact_id AND later.date = mine.date
+    WHERE mine.kind = 'vacation' AND mine.id = ${alias}.id AND later.filed_at > ${alias}.filed_at)`;
 }
 
 /**

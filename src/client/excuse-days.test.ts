@@ -8,7 +8,8 @@ describe("a covered day's note while it's open", () => {
     opensAt: "2026-01-21T05:00:00.000Z",
     dueAt,
     evidenceWaiting: false,
-    excuse: null,
+    cover: null,
+    phase: "open" as const,
   });
 
   test.each([

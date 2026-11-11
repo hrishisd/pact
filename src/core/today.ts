@@ -23,19 +23,12 @@ import type {
 import { localDateOf } from "./calendar.ts";
 import { activePactsUsing } from "./connections.ts";
 import type { CoreContext } from "./context.ts";
+import { coveredSql, onApprovedVacation } from "./covers.ts";
 import { rejectedDayAlerts, rejectedEvidenceAlerts, waitingEvidence } from "./evidence.ts";
 import { rejectedExcuseAlerts, waitingExcuses } from "./excuses.ts";
 import { ankiCheckOf, yesterdayEntries } from "./history.ts";
 import { billsForToday, waitingPayments } from "./money.ts";
-import {
-  evidenceDecision,
-  excuseCoversSql,
-  isJudged,
-  MISSED_THROUGH_REJECTION,
-  stillToDo,
-  vacationOn,
-  weekProgress,
-} from "./occurrence-state.ts";
+import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, weekProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
@@ -189,7 +182,7 @@ function todaySections(
         break;
       case "coming-up":
         // A first occurrence an approved vacation covers isn't coming up: the owner is off that day.
-        if (vacationOn(ctx, pact.id, placed.card.opensOn) !== "approved") comingUp.push(placed.card);
+        if (!onApprovedVacation(ctx, pact.id, placed.card.opensOn)) comingUp.push(placed.card);
         break;
     }
   }
@@ -240,7 +233,7 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
   }
   const today = localDateOf(now, timezone);
   // Nights the owner needn't hear about: judged, or with an excuse filed (a waiting vacation keeps them).
-  const open = (night: Occurrence) => !isJudged(ctx, pact.id, night.date) && stillToDo(ctx, pact.id, night.date);
+  const open = (night: Occurrence) => occurrenceView(ctx, pact.id, night).toDo;
   const nights = between(addDays(today, -2), today);
   // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
   const tonight = nights.find(
@@ -295,11 +288,12 @@ function ankiToday(
 ): TodayPlacement | null {
   const { first, openAt } = occurrencesOf(ctx, pact.id, timezone);
   const open = openAt(now);
-  if (open && !isJudged(ctx, pact.id, open.date) && now.getTime() < open.dueAt.getTime()) {
-    if (!stillToDo(ctx, pact.id, open.date)) return null;
-    return { section: "to-do", card: ankiCard(ctx, pact, ownerId, open) };
+  if (open) {
+    return occurrenceView(ctx, pact.id, open).toDo
+      ? { section: "to-do", card: ankiCard(ctx, pact, ownerId, open) }
+      : null;
   }
-  if (!open && now.getTime() < first.opensAt.getTime()) {
+  if (now.getTime() < first.opensAt.getTime()) {
     return { section: "coming-up", card: comingUpCard(ctx, pact, first) };
   }
   return null;
@@ -317,10 +311,9 @@ function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: 
       ? { section: "coming-up", card: comingUpCard(ctx, pact, first) }
       : null;
   }
-  // Judged while still open: its evidence was rejected, so it's an alert, or
-  // it's past its due-by time, so it's Missed. Past it and not judged yet,
-  // the next tick judges it.
-  if (isJudged(ctx, pact.id, open.date) || now.getTime() >= open.dueAt.getTime()) return null;
+  // Not the owner's to do: judged while still open (its evidence was rejected, so it's an alert),
+  // past its due-by time (Missed, or the next tick judges it), its evidence in, or an excuse filed.
+  if (!occurrenceView(ctx, pact.id, open).toDo) return null;
   const { editWindowClosesAt } = pact;
   if (pact.terms.schedule.kind === "weekly-count") {
     const today = localDateOf(now, timezone);
@@ -331,11 +324,6 @@ function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: 
       card: { kind: "evidence", ...cardOn(ctx, pact, open.date), editWindowClosesAt, ...week },
     };
   }
-  // Evidence waiting or approved: Waiting for approval, or done.
-  const decision = evidenceDecision(ctx, pact.id, open.date);
-  if (decision === "waiting" || decision === "approved") return null;
-  // An excuse waiting for today is under Waiting for approval; an approved one excuses it.
-  if (!stillToDo(ctx, pact.id, open.date)) return null;
   return {
     section: "to-do",
     card: {
@@ -384,9 +372,9 @@ function ankiCard(ctx: CoreContext, pact: ActivePact, ownerId: AccountId, open: 
 }
 
 /**
- * A Weekly count week's To do card as of `now`, when `today` still takes
- * evidence (before `todayDueAt`) and has none, no excuse or approved vacation
- * covers the week, and its target isn't met or waiting for approval; else null.
+ * The To do card of a Weekly count week that is the owner's to do, as of
+ * `now`, when `today` still takes evidence (before `todayDueAt`) and has
+ * none; else null.
  */
 function weekToDo(
   ctx: CoreContext,
@@ -397,17 +385,15 @@ function weekToDo(
   now: Date,
 ): Pick<TodayToDoCard, "occurrenceDate" | "dueAt" | "dueBy" | "week"> | null {
   if (now.getTime() >= todayDueAt.getTime()) return null;
-  if (!stillToDo(ctx, pactId, week.date)) return null;
   if (evidenceDecision(ctx, pactId, today, "day") !== "none") return null;
   const progress = weekProgress(ctx, pactId, week.date);
-  if (progress.sessions + progress.waiting >= progress.target) return null;
   const { due_by: dueBy } = termsOn(ctx, pactId, week.date);
   return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, week: progress };
 }
 
 /** SQL: an excuse or vacation waiting, or rejected after the miss (its alert shows the miss), hides it from Missed. */
 const REJECTION_HIDES_MISS =
-  "(excuse.decision IS NULL OR (excuse.decision = 'rejected' AND excuse.decided_at >= occurrence.judged_at))";
+  "(cover.decision IS NULL OR (cover.decision = 'rejected' AND cover.decided_at >= occurrence.judged_at))";
 
 /**
  * The owner's occurrences judged Missed in the 48 hours before `now`,
@@ -438,12 +424,12 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
        JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
        WHERE pact.owner_account_id = ? AND occurrence.outcome = 'missed' AND occurrence.judged_at > ?
          AND occurrence.miss_accepted_at IS NULL AND NOT ${MISSED_THROUGH_REJECTION}
-         AND NOT ${excuseCoversSql(
+         AND NOT ${coveredSql(
            "occurrence.pact_id",
            "occurrence.date",
-           REJECTION_HIDES_MISS,
+           "any",
            // A rejected vacation hides it only while its alert stands.
-           `(${REJECTION_HIDES_MISS} AND (excuse.decision IS NULL OR ${noLaterFilingSql("excuse")}))`,
+           `${REJECTION_HIDES_MISS} AND (cover.kind = 'excuse' OR cover.decision IS NULL OR ${noLaterFilingSql("cover")})`,
          )}
        ORDER BY occurrence.judged_at DESC, pact.name, pact.id`,
     ownerId,

@@ -1,6 +1,6 @@
 # 08 One occurrence view in the core
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Closes: F7 and rule R7 (`../interaction-audit.md` finding 7, probe P4); architecture ranked item 1, H2 steps 1 to 3 (`../architecture-review.md`, "More important than the four" and H2); the cover-predicate check from W4.
@@ -39,14 +39,14 @@ Steps 1, 2 and 4 must not change any test. Only step 3's reminder change moves t
 
 ## Acceptance criteria
 
-- [ ] Steps 1, 2 and 4 land with no test changed (run the suite between steps).
-- [ ] New scenario in `reminders.test.ts`: an excuse filed in the morning for today's Camera day; Today has no To do card for it and no reminder fires that evening.
-- [ ] New scenario: a vacation waiting for approval keeps both the To do card and the reminder (pins vac:80).
-- [ ] New scenario: a bedtime night under a waiting excuse gets no reminder and no Automatic card.
-- [ ] `reminders.test.ts:169` still passes.
-- [ ] The conventions check refuses `excuseOn` in, say, `today.ts`; shown by trying it.
-- [ ] Update `docs/behaviour.md`: R7 as a rule, and remove the F7 known-bug note.
-- [ ] `npm run check` passes.
+- [x] Steps 1, 2 and 4 land with no test changed (run the suite between steps).
+- [x] New scenario in `reminders.test.ts`: an excuse filed in the morning for today's Camera day; Today has no To do card for it and no reminder fires that evening.
+- [x] New scenario: a vacation waiting for approval keeps both the To do card and the reminder (pins vac:80).
+- [x] New scenario: a bedtime night under a waiting excuse gets no reminder and no Automatic card.
+- [x] `reminders.test.ts:169` still passes.
+- [x] The conventions check refuses `excuseOn` in, say, `today.ts`; shown by trying it.
+- [x] Update `docs/behaviour.md`: R7 as a rule, and remove the F7 known-bug note.
+- [x] `npm run check` passes.
 
 ## Out of scope
 
@@ -54,3 +54,11 @@ Steps 1, 2 and 4 must not change any test. Only step 3's reminder change moves t
 - The pure verdict function (ticket 10) and any change to judging.
 - Merging the excuse and vacation tables (not doing; see `../spec.md`).
 - F9's cleanup (ticket 14).
+
+## Comments
+
+- Built. Steps 1, 2 and 4 ran with only the three new scenarios failing (no existing test changed). Step 5's wire change (`cover` and `phase` replace `excuse`, `held` and `heldByVacation`) then moved fixtures in tests that compare whole statuses; no assertion's meaning changed. `toDo` and `remind` live on the core's `OccurrenceView` (`occurrenceView`), not on the wire type; `occurrenceStatus` is its wire projection.
+- The conventions check lets each kind's own module (`excuses.ts`, `vacations.ts`) touch its own day table for filing and deciding by id; One-time deadline moves went to `moveCovers` in `covers.ts`.
+- A Camera reminder now reads the occurrence's evidence, as Today does, where it read the evidence by day. No behaviour changes: a Camera day's evidence is always for its own date, and One-time evidence is filed under the deadline date whichever day it comes (`evidenceAcceptance`, `evidence.ts`), so early evidence already stopped the reminder (`one-time.test.ts`, "reminders").
+- Review: the conventions check also lets `excuses.ts` and `vacations.ts` touch their own day tables, where step 6 named only `covers.ts` and `occurrence-state.ts`. Kept: those reads are filing and lookups by excuse or vacation id, except `rejectedExcuseAlerts`' check for a later excuse on the same days, which could move to `cover_day_v` with ticket 14.
+- A bedtime night judged before its reminder still gets it, as the reminders spec says; that conflicts with R7's "if and only if". Filed as ticket 24.

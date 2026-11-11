@@ -8,15 +8,9 @@ import type { AccountId, LocalDate } from "../shared/types.ts";
 import { earlierDate, laterDate, localDateOf } from "./calendar.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
+import { coverOn, keepsToDo } from "./covers.ts";
 import { enqueueMissed, judge } from "./judging.ts";
-import {
-  endedBedtimePacts,
-  excuseOn,
-  isJudged,
-  pactsToJudge,
-  stillToDo,
-  type PactToJudge,
-} from "./occurrence-state.ts";
+import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { nightStartsAt, noOuraDataPushAt, type Occurrence } from "./occurrences.ts";
 import { deadlineWallClock, nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
 import type { OuraSleepPeriod, OuraSource } from "./ports.ts";
@@ -149,7 +143,7 @@ export function pushNoOuraData(ctx: CoreContext, t: Date): void {
     const offset = ouraOffset(ctx, pact.owner_account_id, pact.timezone);
     if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone, offset).getTime()) continue;
     if (t.getTime() >= night.closesAt.getTime() || isJudged(ctx, pact.id, night.date)) continue;
-    if (!stillToDo(ctx, pact.id, night.date)) continue;
+    if (!keepsToDo(coverOn(ctx, pact.id, night.date))) continue;
     const sent = ctx.db
       .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
       .run(pact.owner_account_id, night.date);
@@ -190,21 +184,25 @@ export function judgeNights(
     const period = (sleep.get(pact.owner_account_id) ?? [])
       .filter((p) => p.type === "long_sleep" && nightOf(p.bedtime_start) === night.date)
       .sort((a, b) => wallClock(a.bedtime_start).localeCompare(wallClock(b.bedtime_start), "en-US"))[0];
-    const excuse = excuseOn(ctx, pact.id, night.date);
+    const cover = coverOn(ctx, pact.id, night.date);
     const satisfied = period !== undefined && wallClock(period.bedtime_start) < deadlineWallClock(night.date, inBedBy);
     // As for a photo: an on-time bedtime beats an approved excuse, and an approved excuse beats a late one.
     // So with no period yet, an approved excuse waits for one until the night closes.
-    if (excuse === "approved" && !satisfied && (period !== undefined || night.closesAt.getTime() <= t.getTime())) {
+    if (
+      cover?.state === "approved" &&
+      !satisfied &&
+      (period !== undefined || night.closesAt.getTime() <= t.getTime())
+    ) {
       judge(ctx, pact.id, night.date, "excused", period ? t : night.closesAt);
     } else if (period) {
       judge(ctx, pact.id, night.date, satisfied ? "satisfied" : "missed", t);
       ctx.db
         .prepare(`UPDATE occurrence SET bedtime_start = ? WHERE pact_id = ? AND date = ?`)
         .run(period.bedtime_start, pact.id, night.date);
-      if (!satisfied && excuse === null) enqueueMissed(ctx, pact.id, night.date);
+      if (!satisfied && cover === null) enqueueMissed(ctx, pact.id, night.date);
     } else if (night.closesAt.getTime() <= t.getTime()) {
       judge(ctx, pact.id, night.date, "missed", night.closesAt);
-      if (excuse === null) enqueueMissed(ctx, pact.id, night.date);
+      if (cover === null) enqueueMissed(ctx, pact.id, night.date);
     } else {
       stopped.add(pact.id);
       continue;

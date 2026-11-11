@@ -42,7 +42,7 @@ function squareOf(record: Occurrence | null, now: number): Square {
   const { status } = record;
   if (vacationOf(status)) return "vac";
   if (status.kind !== "not-judged") return status.kind;
-  if (status.excuse === "approved") return "excused";
+  if (status.cover?.state === "approved") return "excused";
   if (Date.parse(status.opensAt) > now) return "ahead";
   return Date.parse(status.dueAt) > now ? "open" : "not-judged";
 }
@@ -114,7 +114,7 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
 
 /** What a Missed occurrence cost: held while an excuse or vacation waits, else paid to its recipient. */
 function missedCost(status: Extract<Occurrence["status"], { kind: "missed" }>): string {
-  return status.held
+  return status.cover?.state === "waiting"
     ? `${money(status.penaltyCents)} held.`
     : `${money(status.penaltyCents)} to ${status.recipientName ?? "your recipient"}.`;
 }
@@ -217,7 +217,7 @@ function OneTimeHistory({
   const dueOn =
     status.kind === "not-judged" &&
     !status.evidenceWaiting &&
-    status.excuse === null &&
+    (status.cover === null || (status.cover.kind === "vacation" && status.cover.state === "waiting")) &&
     square === "open" &&
     dateIn(now, timezone) !== day.date;
   return (

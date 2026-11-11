@@ -49,7 +49,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - A pact with an end date Ends at the start of the day after the end date, or when its last occurrence closes if that is later. Nobody is notified (`endPastEndDate`, `judging.ts:94`). Test: `due-by-and-dates.test.ts`.
 - A One-time pact Ends when its occurrence is judged (`judge`, `judging.ts:189`).
 - Ending withdraws a waiting change request, silently (`endPact`, `judging.ts:234`).
-- Only Active pacts are judged and reminded (`pactsToJudge`, `occurrence-state.ts:230`; `remind`, `reminders.ts:37`). An occurrence due after the end is ignored (`dueAfterEnd`, `occurrence-state.ts:202`).
+- Only Active pacts are judged and reminded (`pactsToJudge`, `occurrence-state.ts:233`; `remind`, `reminders.ts:37`). An occurrence due after the end is ignored (`dueAfterEnd`, `occurrence-state.ts:205`).
 - The pact list shows pacts in the edit window first, then Active, then Ended (`pactList`, `pacts.ts:207`).
 
 ## Occurrences and judging
@@ -121,14 +121,14 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - Only the picked reviewers are told and may decide (`vacationToDecide`, `vacations.ts:525`). Approval excuses each covered day as an approved excuse would (`decideVacation`, `vacations.ts:548`).
 - The owner can withdraw a vacation that waits. Nobody is notified (`withdrawVacation`, `vacations.ts:583`).
 - After a rejection, Take the L covers only the days that were Missed at the time of the rejection (`acceptVacationRejection`, `vacations.ts:654`; decided in vacation ticket 03).
-- Moving a One-time deadline keeps a vacation day only if the new deadline is inside the vacation (`moveOneTimeOccurrence`, `pacts.ts:528`).
+- Moving a One-time deadline keeps a vacation day only if the new deadline is inside the vacation (`moveOneTimeOccurrence`, `pacts.ts:529`; `moveCovers`, `covers.ts:102`).
 
 ### Holds and the 48-hour window
 
-- A waiting excuse or vacation that covers a Missed day holds its penalty: it is left off bills and out of what is owed (`PENALTY_HELD`, `money.ts:85`). Test: `ledgers.test.ts`.
+- A waiting excuse or vacation that covers a Missed day holds its penalty: it is left off bills and out of what is owed (`PENALTY_HELD`, `money.ts:87`). Test: `ledgers.test.ts`.
 - A bill takes only penalties added at least 48 hours before it, so a Missed day can still be excused before it is billed (`billOwner`, `money.ts:394`).
-- When one day has several covers, a waiting excuse comes first, then an approved excuse or vacation, then a waiting vacation (`excuseOn`, `occurrence-state.ts:67`).
-- A waiting excuse takes the day off the owner's to-do list. A waiting vacation does not (`stillToDo`, `occurrence-state.ts:88`).
+- Excuses and vacations are read as one kind of cover (`covers.ts`; the `cover_day_v` view). When one day has several covers, a waiting excuse comes first, then an approved excuse, then an approved vacation, then a waiting vacation (`coverOn`, `covers.ts:55`). A rejected or withdrawn cover covers nothing.
+- A waiting excuse takes the day off the owner's to-do list and stops its reminders. A waiting vacation keeps both (`keepsToDo`, `covers.ts:76`; rule R7 below).
 
 ## Review items
 
@@ -143,7 +143,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 - A reviewer can ask the owner a question. Only the owner is notified, and the item leaves the review queue until the owner replies. The reply notifies every reviewer (`askOwner`, `review.ts:83`; `ownerReply`, `review.ts:105`; decided in pact-v0 ticket 12). Test: `reviewer-questions.test.ts`.
 - The review queue shows change requests first, then everything else oldest first (`reviewItems`, `review.ts:303`; `reviewItemSince`, `review.ts:365`).
 - Withdrawal: an owner can withdraw a change request or a vacation, not evidence, an excuse or a payment.
-- Waiting lists: Today lists the owner's waiting change requests, evidence, excuses and payments (`waiting`, `today.ts:102`). The pact page lists change requests, evidence and excuses (`pactPage`, `pacts.ts:241-262`). Waiting vacations appear on neither, only on Profile, so a reviewer's question about a vacation does not show on Today (`questionAlerts`, `today.ts:81`).
+- Waiting lists: Today lists the owner's waiting change requests, evidence, excuses and payments (`waiting`, `today.ts:95`). The pact page lists change requests, evidence and excuses (`pactPage`, `pacts.ts:241-262`). Waiting vacations appear on neither, only on Profile, so a reviewer's question about a vacation does not show on Today (`questionAlerts`, `today.ts:74`).
 
 ## Money
 
@@ -160,13 +160,12 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 - Each push belongs to one setting the person can turn off: picked as reviewer, review item, decision, comment, missed occurrence, new bill, overdue bill, connection problem (`NOTIFICATION_SETTINGS`, `src/shared/types.ts:712`). Test: `notifications.test.ts`.
 - Pushes are written to an outbox and sent after the change commits.
 - Reminders go at their times in the account's timezone, once each (`remind`, `reminders.ts:37`; `reminder_sent`). One more than 15 minutes late is dropped with an operator alert (`REMINDER_LATE_MS`, `reminders.ts:25`). Test: `reminders.test.ts`.
-- A reminder is skipped when an approved cover is on the day. Otherwise (`worthReminding`, `reminders.ts:118`):
-  - Oura Ring: always sent.
+- A reminder fires for an occurrence if and only if Today shows it as the owner's to do (a To do card, or for a bedtime night the Automatic or No Oura data card), as far as cover, judging and evidence go: one view decides both (`toDo` and `remind`, `occurrenceView`, `occurrence-state.ts:115`; rule R7 in `.scratch/design-review/spec.md`). An approved cover or a waiting excuse removes both; a waiting vacation keeps both. Reminders keep their own timing: each goes at its time, before the due time. Otherwise (`worthReminding`, `reminders.ts:111`):
+  - Oura Ring: always sent, even once Oura has judged the night (the owner may already be in bed), so a night judged early is reminded with no Automatic card.
   - Anki: sent until the day is judged.
-  - Camera: sent while no evidence is in and the day is not judged.
-  - Weekly count: sent while approved and waiting days are fewer than the target.
-- **Known bug:** a waiting excuse removes the day from Today's to-do list but its reminders still fire. See [ticket 08](../.scratch/design-review/issues/08-one-occurrence-view.md).
-- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:135`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:166`). Missed shows the last 48 hours, without misses from a rejection or covered days (`recentlyMissed`, `today.ts:419`).
+  - Camera: sent while no evidence is in for the occurrence and it is not judged.
+  - Weekly count: sent on a day with no evidence, while approved and waiting days are fewer than the target. Test: `reminders.test.ts`.
+- Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows the last 48 hours, without misses from a rejection or covered days (`recentlyMissed`, `today.ts:405`).
 - Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:175`). Test: `invites.test.ts`.
 
 ## Text and request limits

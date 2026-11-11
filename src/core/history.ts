@@ -17,7 +17,8 @@ import {
 } from "../shared/types.ts";
 import { laterDate, localDateOf, mondayOf, weekdayOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { occurrenceStatus, rejection, vacationOn, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
+import { onApprovedVacation } from "./covers.ts";
+import { occurrenceStatus, rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
@@ -109,7 +110,7 @@ export function yesterdayEntries(ctx: CoreContext, ownerId: AccountId, timezone:
   );
   return pacts.flatMap((pact) =>
     occurrenceRecords(ctx, pact, timezone, yesterday, yesterday).flatMap(({ date, occurrence }) =>
-      occurrence && vacationOn(ctx, pact.id, date) !== "approved"
+      occurrence && !onApprovedVacation(ctx, pact.id, date)
         ? [{ pactId: pact.id, name: pact.name, evidenceKind: pact.evidence_kind, occurrenceDate: date, occurrence }]
         : [],
     ),
@@ -209,14 +210,14 @@ export function recordedStatus(
       return { ...status, recipientName, rejection: weekly ? null : rejection(ctx, pactId, date) };
     case "excused":
     case "not-judged": {
-      const covered = status.kind === "excused" || status.excuse === "approved";
+      const covered = status.kind === "excused" || status.cover?.state === "approved";
       const row = covered
         ? ctx.one<{ name: string; reason: string }>(
-            `SELECT account.name, excuse.reason FROM excuse_day
-               JOIN excuse ON excuse.id = excuse_day.excuse_id
+            `SELECT account.name, excuse.reason FROM cover_day_v AS cover
+               JOIN excuse ON excuse.id = cover.id
                JOIN account ON account.id = excuse.decided_by_account_id
-               WHERE excuse_day.pact_id = ? AND excuse_day.date = ? AND excuse.decision = 'approved'
-               ORDER BY excuse.decided_at DESC LIMIT 1`,
+               WHERE cover.kind = 'excuse' AND cover.pact_id = ? AND cover.date = ? AND cover.decision = 'approved'
+               ORDER BY cover.decided_at DESC LIMIT 1`,
             pactId,
             date,
           )
@@ -238,9 +239,9 @@ function approvedVacationOn(
   date: LocalDate,
 ): { first_day: LocalDate; last_day: LocalDate } | undefined {
   return ctx.one(
-    `SELECT vacation.first_day, vacation.last_day FROM vacation_day
-       JOIN vacation ON vacation.id = vacation_day.vacation_id
-       WHERE vacation_day.pact_id = ? AND vacation_day.date = ? AND vacation.decision = 'approved'`,
+    `SELECT vacation.first_day, vacation.last_day FROM cover_day_v AS cover
+       JOIN vacation ON vacation.id = cover.id
+       WHERE cover.kind = 'vacation' AND cover.pact_id = ? AND cover.date = ? AND cover.decision = 'approved'`,
     pactId,
     date,
   );

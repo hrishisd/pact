@@ -3,13 +3,16 @@
 
 import type {
   AccountId,
+  EvidenceKind,
   EvidenceRejection,
   ExcuseSkipReason,
   LocalDate,
+  OccurrenceStanding,
   OccurrenceStatus,
   WeekProgress,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
+import { coverOn, keepsToDo } from "./covers.ts";
 import { lastDayOf, type Occurrence } from "./occurrences.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import { occurrencesOf, ownerZone, scheduleOf, termsOn, type PactRow, type ReviewOutcome } from "./rows.ts";
@@ -50,65 +53,6 @@ export function isJudged(ctx: CoreContext, pactId: string, date: LocalDate): boo
 }
 
 /**
- * What covers the occurrence: an excuse waiting for approval, an approved
- * excuse or vacation, or a vacation waiting for approval, in that order of
- * precedence; null for none.
- */
-export type ExcuseCover = "waiting" | "approved" | "vacation-waiting" | null;
-
-/**
- * Whether an excuse waiting for approval, or else an approved excuse or
- * approved vacation, or else a vacation waiting for approval, covers the
- * occurrence. An approved vacation counts exactly as an approved excuse
- * does. A waiting one counts as a waiting excuse (its Missed penalties are
- * held and the owner isn't told it's Missed), except where a caller keeps
- * it apart: Today keeps its cards and reminders keep firing.
- */
-export function excuseOn(ctx: CoreContext, pactId: string, date: LocalDate): ExcuseCover {
-  const decisions = ctx
-    .all<{ decision: ReviewOutcome | null }>(
-      `SELECT excuse.decision FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
-         WHERE excuse_day.pact_id = ? AND excuse_day.date = ?`,
-      pactId,
-      date,
-    )
-    .map((row) => row.decision);
-  if (decisions.includes(null)) return "waiting";
-  if (decisions.includes("approved")) return "approved";
-  const vacation = vacationOn(ctx, pactId, date);
-  return vacation === "waiting" ? "vacation-waiting" : vacation;
-}
-
-/**
- * Whether Today and the No Oura data push still show the owner the pact's
- * occurrence on `date` as theirs to do: nothing covers it, or only a
- * vacation waiting for approval, whose days keep their cards and reminders
- * until it's approved.
- */
-export function stillToDo(ctx: CoreContext, pactId: string, date: LocalDate): boolean {
-  const cover = excuseOn(ctx, pactId, date);
-  return cover === null || cover === "vacation-waiting";
-}
-
-/**
- * Whether a vacation waiting for approval, or else an approved one, covers
- * the occurrence. A withdrawn or rejected vacation covers nothing.
- */
-export function vacationOn(ctx: CoreContext, pactId: string, date: LocalDate): "waiting" | "approved" | null {
-  const decisions = ctx
-    .all<{ decision: ReviewOutcome | null }>(
-      `SELECT vacation.decision FROM vacation_day JOIN vacation ON vacation.id = vacation_day.vacation_id
-         WHERE vacation_day.pact_id = ? AND vacation_day.date = ? AND vacation.withdrawn_at IS NULL
-           AND (vacation.decision IS NULL OR vacation.decision = 'approved')`,
-      pactId,
-      date,
-    )
-    .map((row) => row.decision);
-  if (decisions.includes(null)) return "waiting";
-  return decisions.length > 0 ? "approved" : null;
-}
-
-/**
  * Where the evidence for an occurrence (or with `by` "day", for one day of
  * it) stands: waiting or approved if any is, else rejected or none.
  */
@@ -142,11 +86,35 @@ export function weekProgress(ctx: CoreContext, pactId: string, monday: LocalDate
 }
 
 /**
- * Where the pact's occurrence `occurrence` stands as of `now`, excuses
- * included.
+ * The one read of where the pact's occurrence stands as of now, which Today,
+ * reminders, history and excuses share: its `OccurrenceStatus`, and whether
+ * it's still the owner's to do.
  */
+export type OccurrenceView = OccurrenceStatus & {
+  /**
+   * Today shows it as the owner's to do now: a To do card, or for a bedtime
+   * night the Automatic or No Oura data card. A Weekly count week's card also
+   * needs today's day to take evidence.
+   */
+  toDo: boolean;
+  /**
+   * Its reminders still fire (at their times, before its due time): the same
+   * cover rule as `toDo` (R7), so a waiting excuse stops both and a waiting
+   * vacation keeps both. A bedtime night is reminded even once judged.
+   */
+  remind: boolean;
+};
+
+/** Where the pact's occurrence stands as of now, as the owner's screens show it: its view without the to-do flags. */
 export function occurrenceStatus(ctx: CoreContext, pactId: string, occurrence: Occurrence): OccurrenceStatus {
+  const { toDo: _toDo, remind: _remind, ...status } = occurrenceView(ctx, pactId, occurrence);
+  return status;
+}
+
+/** See `OccurrenceView`. */
+export function occurrenceView(ctx: CoreContext, pactId: string, occurrence: Occurrence): OccurrenceView {
   const { date } = occurrence;
+  const now = ctx.clock.now().getTime();
   const row = ctx.one<{
     outcome: "satisfied" | "missed" | "excused" | null;
     judged_at: string | null;
@@ -159,26 +127,61 @@ export function occurrenceStatus(ctx: CoreContext, pactId: string, occurrence: O
     pactId,
     date,
   );
-  const excuse = excuseOn(ctx, pactId, date);
-  if (row?.outcome === "satisfied") return { kind: "satisfied" };
-  if (row?.outcome === "excused") return { kind: "excused" };
-  if (row?.outcome === "missed") {
+  const found = coverOn(ctx, pactId, date);
+  const cover = found && { kind: found.kind, state: found.state };
+  const phase = now < occurrence.opensAt.getTime() ? "ahead" : now < occurrence.dueAt.getTime() ? "open" : "past-due";
+  const outcome = row?.outcome ?? null;
+  const evidence = evidenceDecision(ctx, pactId, date);
+  const { evidence_kind: evidenceKind } = ctx.db.prepare(`SELECT evidence_kind FROM pact WHERE id = ?`).get(pactId) as {
+    evidence_kind: EvidenceKind;
+  };
+  // R7: one rule for Today and reminders. Judged, or under a cover that takes it off the owner, it's not theirs to do.
+  const owed = outcome === null && keepsToDo(found) && evidenceStillNeeded(ctx, pactId, date, evidenceKind, evidence);
+  // A bedtime night stays on Today, under No Oura data, until it closes.
+  const inWindow = now >= occurrence.opensAt.getTime() && now < occurrence.closesAt.getTime();
+  const standing = {
+    cover,
+    phase,
+    toDo: owed && inWindow,
+    // A bedtime night is reminded even once Oura has judged it, as the owner may already be in bed.
+    remind: evidenceKind === "oura" ? keepsToDo(found) : owed,
+  } satisfies OccurrenceStanding & Pick<OccurrenceView, "toDo" | "remind">;
+  if (outcome === "satisfied") return { kind: "satisfied", ...standing };
+  if (outcome === "excused") return { kind: "excused", ...standing };
+  if (outcome === "missed") {
     return {
       kind: "missed",
-      penaltyCents: row.amount_cents!,
-      held: excuse === "waiting" || excuse === "vacation-waiting",
-      ...(excuse === "vacation-waiting" && { heldByVacation: true as const }),
-      excusableUntil: new Date(new Date(row.judged_at!).getTime() + EXCUSE_WINDOW_MS),
+      penaltyCents: row!.amount_cents!,
+      excusableUntil: new Date(new Date(row!.judged_at!).getTime() + EXCUSE_WINDOW_MS),
+      ...standing,
     };
   }
   return {
     kind: "not-judged",
     opensAt: occurrence.opensAt,
     dueAt: occurrence.dueAt,
-    evidenceWaiting: evidenceDecision(ctx, pactId, date) === "waiting",
-    // A vacation isn't an excuse: excuseSkipReason finds it waiting.
-    excuse: excuse === "vacation-waiting" ? null : excuse,
+    evidenceWaiting: evidence === "waiting",
+    ...standing,
   };
+}
+
+/**
+ * Whether the occurrence still needs evidence from its owner, as far as the
+ * whole occurrence goes: a Camera day with none submitted, a Weekly count week
+ * whose approved and waiting days are short of its target. Bedtime and Anki
+ * need nothing from the owner here.
+ */
+function evidenceStillNeeded(
+  ctx: CoreContext,
+  pactId: string,
+  date: LocalDate,
+  kind: EvidenceKind,
+  evidence: ReturnType<typeof evidenceDecision>,
+): boolean {
+  if (kind !== "camera") return true;
+  if (scheduleOf(termsOn(ctx, pactId, date).schedule).kind !== "weekly-count") return evidence === "none";
+  const { sessions, waiting, target } = weekProgress(ctx, pactId, date);
+  return sessions + waiting < target;
 }
 
 /** Who rejected the latest rejected evidence for an occurrence, and why; null if none was rejected. */
@@ -255,11 +258,13 @@ export function skipReason(status: OccurrenceStatus, now: Date): ExcuseSkipReaso
     case "excused":
       return "excused";
     case "missed":
-      if (status.held) return status.heldByVacation ? "on-waiting-vacation" : "on-waiting-excuse";
+      if (status.cover?.state === "waiting")
+        return status.cover.kind === "vacation" ? "on-waiting-vacation" : "on-waiting-excuse";
       return status.excusableUntil.getTime() > now.getTime() ? null : "window-closed";
     case "not-judged":
-      if (status.excuse === "waiting") return "on-waiting-excuse";
-      return status.excuse === "approved" ? "excused" : null;
+      // A vacation waiting for approval isn't an excuse: the excuse's own check finds it.
+      if (status.cover?.kind === "excuse" && status.cover.state === "waiting") return "on-waiting-excuse";
+      return status.cover?.state === "approved" ? "excused" : null;
   }
 }
 
@@ -275,32 +280,3 @@ export const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekl
 export const MISSED_THROUGH_REJECTION = `(NOT ${WEEKLY_COUNT_PACT} AND EXISTS (SELECT 1 FROM evidence
   WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
     AND evidence.decision = 'rejected'))`;
-
-/**
- * SQL: an excuse or vacation matching `condition` covers the occurrence of
- * pact `pact` on `date` (SQL expressions). `condition` reads
- * `excuse.decision`, `excuse.filed_at` and `excuse.decided_at`, which a
- * vacation has too, so a vacation counts as an excuse in the same state,
- * unless `vacationCondition` gives vacations their own.
- */
-export function excuseCoversSql(
-  pact: string,
-  date: string,
-  condition: string,
-  vacationCondition: string = condition,
-): string {
-  return `(EXISTS (SELECT 1 FROM excuse_day JOIN excuse ON excuse.id = excuse_day.excuse_id
-    WHERE excuse_day.pact_id = ${pact} AND excuse_day.date = ${date} AND ${condition})
-  OR ${vacationCoversSql(pact, date, vacationCondition)})`;
-}
-
-/**
- * SQL: a vacation not withdrawn matching `condition` covers the occurrence
- * of pact `pact` on `date`. `condition` reads the vacation as `excuse`, as
- * `excuseCoversSql` passes it.
- */
-export function vacationCoversSql(pact: string, date: string, condition: string): string {
-  return `EXISTS (SELECT 1 FROM vacation_day JOIN vacation AS excuse ON excuse.id = vacation_day.vacation_id
-    WHERE vacation_day.pact_id = ${pact} AND vacation_day.date = ${date} AND excuse.withdrawn_at IS NULL
-      AND ${condition})`;
-}

@@ -7,14 +7,8 @@ import { formatDate, money } from "../shared/format.ts";
 import type { AccountId, AnkiCheck, LocalDate } from "../shared/types.ts";
 import { startOfDay } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import {
-  evidenceDecision,
-  excuseOn,
-  isJudged,
-  pactsToJudge,
-  weekProgress,
-  type PactToJudge,
-} from "./occurrence-state.ts";
+import { coverOn } from "./covers.ts";
+import { evidenceDecision, isJudged, pactsToJudge, weekProgress, type PactToJudge } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { lastAnkiCheck, occurrencesOf, ownerZone, recipientName, scheduleOf, termsOn, type PactRow } from "./rows.ts";
 
@@ -128,14 +122,14 @@ function judgeAtDueTime(ctx: CoreContext, pact: Pick<PactRow, "id" | "schedule">
     return judgeWeek(ctx, pactId, occurrence, occurrence.dueAt, true);
   }
   const decision = evidenceDecision(ctx, pactId, occurrence.date);
-  const excuse = excuseOn(ctx, pactId, occurrence.date);
-  if (decision !== "approved" && excuse === "approved") {
+  const cover = coverOn(ctx, pactId, occurrence.date);
+  if (decision !== "approved" && cover?.state === "approved") {
     return judge(ctx, pactId, occurrence.date, "excused", occurrence.dueAt);
   }
   if (decision === "waiting") return;
   const outcome = decision === "approved" ? "satisfied" : "missed";
   judge(ctx, pactId, occurrence.date, outcome, occurrence.dueAt);
-  if (outcome === "missed" && excuse === null) enqueueMissed(ctx, pactId, occurrence.date);
+  if (outcome === "missed" && cover === null) enqueueMissed(ctx, pactId, occurrence.date);
 }
 
 /**
@@ -148,12 +142,12 @@ function judgeAtDueTime(ctx: CoreContext, pact: Pick<PactRow, "id" | "schedule">
  */
 export function judgeWeek(ctx: CoreContext, pactId: string, week: Occurrence, at: Date, tell: boolean): void {
   const { sessions, waiting, target } = weekProgress(ctx, pactId, week.date);
-  const excuse = excuseOn(ctx, pactId, week.date);
+  const cover = coverOn(ctx, pactId, week.date);
   if (sessions >= target) return judge(ctx, pactId, week.date, "satisfied", at);
-  if (excuse === "approved") return judge(ctx, pactId, week.date, "excused", at);
+  if (cover?.state === "approved") return judge(ctx, pactId, week.date, "excused", at);
   if (waiting > 0) return;
   judge(ctx, pactId, week.date, "missed", at);
-  if (tell && excuse === null) enqueueMissed(ctx, pactId, week.date);
+  if (tell && cover === null) enqueueMissed(ctx, pactId, week.date);
 }
 
 /** Only for judging at the due time: a rejection already told the owner, with the reason. */

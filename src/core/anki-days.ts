@@ -5,7 +5,8 @@ import type { AccountId, AnkiDecksResult } from "../shared/types.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { judge, noteAnkiResult } from "./judging.ts";
-import { excuseOn, isJudged } from "./occurrence-state.ts";
+import { coverOn } from "./covers.ts";
+import { isJudged } from "./occurrence-state.ts";
 import type { AnkiCountsResult, AnkiSource } from "./ports.ts";
 import { accountRow, ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf, ownerZone } from "./rows.ts";
 
@@ -108,7 +109,7 @@ function ankiDaysWaiting(
     const open = occurrencesOf(ctx, pact.id, ownerZone(pact.timezone, pact.owner_account_id)).openAt(t);
     if (!open || t.getTime() >= open.dueAt.getTime() || isJudged(ctx, pact.id, open.date)) return [];
     // An approved excuse or vacation covers it: it's Excused at its due time whatever the deck shows.
-    if (excuseOn(ctx, pact.id, open.date) === "approved") return [];
+    if (coverOn(ctx, pact.id, open.date)?.state === "approved") return [];
     return [{ pactId: pact.id, account: pact.owner_account_id, deckId: ankiDeckOn(ctx, pact.id, open.date) }];
   });
 }

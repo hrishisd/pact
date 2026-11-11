@@ -45,7 +45,7 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.ledgers()).toEqual([expect.objectContaining({ name: "Sam", owedCents: 0 })]);
     expect(owner.today()).toEqual({
       ...nothingOnToday,
-      yesterday: gymMonday({ kind: "satisfied", approvedBy: "reviewer" }),
+      yesterday: gymMonday({ kind: "satisfied", cover: null, phase: "past-due", approvedBy: "reviewer" }),
     });
   });
 
@@ -183,7 +183,7 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);
     expect(owner.today()).toEqual({
       ...nothingOnToday,
-      yesterday: gymMonday({ kind: "satisfied", approvedBy: "reviewer" }),
+      yesterday: gymMonday({ kind: "satisfied", cover: null, phase: "past-due", approvedBy: "reviewer" }),
     });
   });
 });

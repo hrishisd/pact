@@ -1284,32 +1284,43 @@ export interface NewExcuse extends ExcuseDates {
   reason: string;
 }
 
+/** The excuse or vacation that counts for an occurrence, waiting for approval or approved. */
+export interface OccurrenceCover {
+  kind: "excuse" | "vacation";
+  state: "waiting" | "approved";
+}
+
 /**
- * Where one of a pact's occurrences stands. `excuse` says whether an excuse
- * waiting for approval, or an approved one, covers a day not judged yet.
+ * Where one of a pact's occurrences stands: its outcome, the cover that
+ * counts for it, and where it is in time.
  */
-export type OccurrenceStatus =
-  | { kind: "satisfied" }
-  | { kind: "excused" }
-  | {
-      kind: "missed";
-      /** Its penalty. */
-      penaltyCents: number;
-      /** Held while an excuse or vacation for it waits for approval. */
-      held: boolean;
-      /** Set when what holds it is a vacation waiting for approval, not an excuse. */
-      heldByVacation?: true;
-      /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
-      excusableUntil: Date;
-    }
-  | {
-      kind: "not-judged";
-      opensAt: Date;
-      dueAt: Date;
-      /** Its evidence is waiting for a reviewer. */
-      evidenceWaiting: boolean;
-      excuse: "waiting" | "approved" | null;
-    };
+export type OccurrenceStatus = OccurrenceStanding &
+  (
+    | { kind: "satisfied" }
+    | { kind: "excused" }
+    | {
+        kind: "missed";
+        /** Its penalty, held while `cover` waits for approval. */
+        penaltyCents: number;
+        /** Until when an excuse for it is accepted: 48 hours after it was judged Missed. */
+        excusableUntil: Date;
+      }
+    | {
+        kind: "not-judged";
+        opensAt: Date;
+        dueAt: Date;
+        /** Its evidence is waiting for a reviewer. */
+        evidenceWaiting: boolean;
+      }
+  );
+
+/** What every `OccurrenceStatus` carries, whatever its outcome. */
+export interface OccurrenceStanding {
+  /** The excuse or vacation that counts for it; null when none does (a rejected or withdrawn one doesn't). */
+  cover: OccurrenceCover | null;
+  /** Before it opens, open, or past its due time. */
+  phase: "ahead" | "open" | "past-due";
+}
 
 /** One of a pact's days on an excuse, and where it stands. */
 export interface ExcuseDay {

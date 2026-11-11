@@ -30,15 +30,9 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
+import { coversOn } from "./covers.ts";
 import { judge } from "./judging.ts";
-import {
-  dueAfterEnd,
-  judgingReached,
-  occurrenceSpan,
-  occurrenceStatus,
-  skipReason,
-  vacationOn,
-} from "./occurrence-state.ts";
+import { dueAfterEnd, judgingReached, occurrenceSpan, occurrenceStatus, skipReason } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import { editWindowClosesAt, EXCUSE_WINDOW_MS, isLocalDate } from "./pact-rules.ts";
@@ -269,7 +263,8 @@ function excusePreview(
 function excuseSkipReason(ctx: CoreContext, pactId: string, day: ExcuseDay, now: Date): ExcuseSkipReason | null {
   const reason = skipReason(day.status, now);
   if (reason !== null) return reason;
-  return vacationOn(ctx, pactId, day.date) === "waiting" ? "on-waiting-vacation" : null;
+  const vacationWaiting = coversOn(ctx, pactId, day.date).some((c) => c.kind === "vacation" && c.state === "waiting");
+  return vacationWaiting ? "on-waiting-vacation" : null;
 }
 
 /**

@@ -6,7 +6,10 @@
 //     hour, the year or the machine's timezone;
 //   - tests and the core don't use the machine's timezone or locale, real
 //     timers, or Math.random, so a run doesn't depend on the machine or on luck;
-//   - every localeCompare names its locale, so an order is the same on every machine.
+//   - every localeCompare names its locale, so an order is the same on every machine;
+//   - what covers an occurrence is read only through covers.ts and occurrence-state.ts:
+//     the old cover predicates are gone, and a cover table's rows are touched only
+//     there, in migrations, and by the module that files and decides that kind.
 // And over .scratch/: every `Status:` line uses a value docs/agents/triage-labels.md lists.
 // A line with a `conventions-ok` comment is skipped. Exits 1 on any finding.
 
@@ -71,6 +74,15 @@ const systemClockPattern = /\bsystemClock\b/;
 // the core's index exports it for the server to wire in.
 const SYSTEM_CLOCK_ADAPTER = "src/core/adapters.ts";
 const SYSTEM_CLOCK_EXPORT = "src/core/index.ts";
+// The cover predicates that each picked their own subset of an occurrence's
+// cover, before `coverOn` and the occurrence view replaced them (R7).
+const oldCoverPredicatePattern = /\b(excuseOn|vacationOn|stillToDo|excuseCoversSql|vacationCoversSql)\b/;
+const COVER_READERS = new Set(["src/core/covers.ts", "src/core/occurrence-state.ts", MIGRATIONS]);
+// Each cover kind's own module files and decides its days; everyone else reads covers through COVER_READERS.
+const COVER_TABLES: [RegExp, string][] = [
+  [/\bexcuse_day\b/, "src/core/excuses.ts"],
+  [/\bvacation_day\b/, "src/core/vacations.ts"],
+];
 
 const findings: string[] = [];
 for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
@@ -100,6 +112,13 @@ for (const file of [...sourceFiles("src"), ...testFiles("scripts")]) {
         findings.push(`${where}: no real timers in tests or the core; move a FakeClock, or hold a fake`);
       if ((isTest || inCore) && randomPattern.test(line))
         findings.push(`${where}: no Math.random in tests or the core`);
+      if (!COVER_READERS.has(file) && oldCoverPredicatePattern.test(line))
+        findings.push(
+          `${where}: read an occurrence's cover with coverOn or occurrenceView (covers.ts, occurrence-state.ts)`,
+        );
+      for (const [table, owner] of COVER_TABLES)
+        if (file.startsWith("src/") && !COVER_READERS.has(file) && file !== owner && table.test(line))
+          findings.push(`${where}: read an occurrence's cover through covers.ts (coverOn, coveredSql, cover_day_v)`);
       if (file.startsWith("src/") && localeComparePattern.test(line))
         findings.push(`${where}: give localeCompare a locale ("en-US"), or the machine's decides the order`);
     });

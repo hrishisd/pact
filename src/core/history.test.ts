@@ -17,7 +17,7 @@ async function excused(owner: AccountHandle, reviewer: AccountHandle, pactId: st
 }
 
 const satisfied = (approvedBy: string | null, detail: OccurrenceDetail | null = null): OccurrenceRecord => ({
-  status: { kind: "satisfied", approvedBy },
+  status: { kind: "satisfied", cover: null, phase: "past-due", approvedBy },
   detail,
 });
 
@@ -30,7 +30,8 @@ const missed = (
   status: {
     kind: "missed",
     penaltyCents: 500,
-    held: false,
+    cover: null,
+    phase: "past-due",
     excusableUntil: new Date(s.at(judgedAt).getTime() + 48 * 3600_000),
     recipientName: "Sam",
     rejection,
@@ -39,17 +40,29 @@ const missed = (
 });
 
 const excusedBy = (reviewerName: string, reason: string): OccurrenceRecord => ({
-  status: { kind: "excused", excuseApproval: { reviewerName, reason } },
+  status: {
+    kind: "excused",
+    cover: { kind: "excuse", state: "approved" },
+    phase: "past-due",
+    excuseApproval: { reviewerName, reason },
+  },
   detail: null,
 });
 
-const notJudged = (s: Scenario, day: string, next: string, evidenceWaiting = false): OccurrenceRecord => ({
+const notJudged = (
+  s: Scenario,
+  day: string,
+  next: string,
+  evidenceWaiting = false,
+  phase: "ahead" | "past-due" = "past-due",
+): OccurrenceRecord => ({
   status: {
     kind: "not-judged",
     opensAt: s.at(`${day} 00:00`),
     dueAt: s.at(`${next} 00:00`),
     evidenceWaiting,
-    excuse: null,
+    cover: null,
+    phase,
     excuseApproval: null,
   },
   detail: null,
@@ -92,7 +105,7 @@ describe("the heat map", () => {
       { date: s.date("Wed+1"), occurrence: notJudged(s, "Wed+1", "Thu+1", true) },
       { date: s.date("Thu+1"), occurrence: null },
       // Ahead.
-      { date: s.date("Fri+1"), occurrence: notJudged(s, "Fri+1", "Sat+1") },
+      { date: s.date("Fri+1"), occurrence: notJudged(s, "Fri+1", "Sat+1", false, "ahead") },
       { date: s.date("Sat+1"), occurrence: null },
       { date: s.date("Sun+1"), occurrence: null },
     ]);
@@ -105,7 +118,7 @@ describe("the heat map", () => {
     const gym = await createPact("Gym", ["fri"]);
 
     expect(heatMapDays(owner, gym)).toEqual([
-      { date: s.date("Fri"), occurrence: notJudged(s, "Fri", "Sat") },
+      { date: s.date("Fri"), occurrence: notJudged(s, "Fri", "Sat", false, "ahead") },
       { date: s.date("Sat"), occurrence: null },
       { date: s.date("Sun"), occurrence: null },
     ]);

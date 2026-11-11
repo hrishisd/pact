@@ -1398,13 +1398,22 @@ describe("the heat map after an approved vacation", () => {
     for (const day of ["Mon+1", "Tue+1", "Thu+1", "Fri+1", "Sat+1", "Sun+1"]) {
       expect(dayOn(owner, bed, s.date(day))?.status).toEqual({
         kind: "excused",
+        cover: { kind: "vacation", state: "approved" },
+        phase: "past-due",
         excuseApproval: null,
         vacation: onVacation,
       });
     }
-    expect(dayOn(owner, bed, s.date("Wed+1"))?.status).toEqual({ kind: "satisfied", approvedBy: null });
+    expect(dayOn(owner, bed, s.date("Wed+1"))?.status).toEqual({
+      kind: "satisfied",
+      cover: { kind: "vacation", state: "approved" },
+      phase: "past-due",
+      approvedBy: null,
+    });
     expect(dayOn(owner, bed, s.date("Fri"))?.status).toEqual({
       kind: "excused",
+      cover: { kind: "excuse", state: "approved" },
+      phase: "past-due",
       excuseApproval: { reviewerName: "reviewer", reason: "Red-eye flight" },
     });
   });
@@ -1417,7 +1426,7 @@ describe("the heat map after an approved vacation", () => {
 
     expect(dayOn(owner, bed, s.date("Tue+1"))?.status).toMatchObject({
       kind: "not-judged",
-      excuse: "approved",
+      cover: { kind: "vacation", state: "approved" },
       excuseApproval: null,
       vacation: { from: s.date("Mon+1"), to: s.date("Sun+1") },
     });
@@ -1435,6 +1444,8 @@ describe("the heat map after an approved vacation", () => {
     if (history.kind !== "weekly-count") throw new Error("not a week heat map");
     expect(history.weeks.find((week) => week.date === s.date("Mon+1"))?.occurrence?.status).toEqual({
       kind: "excused",
+      cover: { kind: "vacation", state: "approved" },
+      phase: "past-due",
       excuseApproval: null,
       vacation: { from: s.date("Mon+1"), to: s.date("Sat+1") },
     });

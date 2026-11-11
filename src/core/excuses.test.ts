@@ -200,14 +200,14 @@ describe("days ahead", () => {
       excuse: {
         days: [s.date("Fri"), s.date("Sat"), s.date("Sun")].map((date) => ({
           date,
-          status: { kind: "not-judged", evidenceWaiting: false, excuse: "waiting" },
+          status: { kind: "not-judged", evidenceWaiting: false, cover: { kind: "excuse", state: "waiting" } },
         })),
       },
     });
     await s.advanceTo("Thu 10:00");
     await reviewer.decide(excuseId, { kind: "approve" });
     expect(owner.excuse(excuseId)).toMatchObject({
-      excuse: { days: [{ status: { kind: "not-judged", excuse: "approved" } }, {}, {}] },
+      excuse: { days: [{ status: { kind: "not-judged", cover: { kind: "excuse", state: "approved" } } }, {}, {}] },
     });
     await s.advanceTo("2026-01-12T05:00:00Z"); // Mon Jan 12, 00:00 in New York
 
@@ -250,7 +250,14 @@ describe("an excuse covering today", () => {
     expect(owed(owner)).toBe(0);
     expect(ledgerHistory(owner)).toEqual([expect.objectContaining({ occurrenceDate: s.date("Mon"), held: true })]);
     expect(owner.excuse(excuseId)).toMatchObject({
-      excuse: { days: [{ date: s.date("Mon"), status: { kind: "missed", penaltyCents: 500, held: true } }] },
+      excuse: {
+        days: [
+          {
+            date: s.date("Mon"),
+            status: { kind: "missed", penaltyCents: 500, cover: { kind: "excuse", state: "waiting" } },
+          },
+        ],
+      },
     });
     // A miss with an excuse waiting isn't on Today's Missed section, and isn't pushed.
     expect(owner.today().sections).toEqual([]);
@@ -275,7 +282,7 @@ describe("which days an excuse covers", () => {
     await s.advanceTo("Fri 08:00");
 
     const dates = { from: s.date("Mon"), to: s.date("Sun") };
-    const fridayOpen = { kind: "not-judged", evidenceWaiting: false, excuse: null };
+    const fridayOpen = { kind: "not-judged", evidenceWaiting: false, cover: null, phase: "open" };
     expect(owner.excusePreview(gym, dates)).toEqual({
       ok: true,
       preview: {
@@ -675,7 +682,13 @@ describe("the review item", () => {
       days: [
         {
           date: s.date("Mon"),
-          status: { kind: "missed", penaltyCents: 500, held: true, excusableUntil: s.at("Thu 00:00") },
+          status: {
+            kind: "missed",
+            penaltyCents: 500,
+            excusableUntil: s.at("Thu 00:00"),
+            cover: { kind: "excuse", state: "waiting" },
+            phase: "past-due",
+          },
         },
         {
           date: s.date("Wed"),
@@ -684,7 +697,8 @@ describe("the review item", () => {
             opensAt: s.at("Wed 00:00"),
             dueAt: s.at("Thu 00:00"),
             evidenceWaiting: false,
-            excuse: "waiting",
+            cover: { kind: "excuse", state: "waiting" },
+            phase: "ahead",
           },
         },
       ],
@@ -740,7 +754,7 @@ describe("the pact page", () => {
         today: s.date("Wed"),
         recentDays: [
           { date: s.date("Wed"), status: expect.objectContaining({ kind: "not-judged" }) },
-          { date: s.date("Mon"), status: expect.objectContaining({ kind: "missed", held: false }) },
+          { date: s.date("Mon"), status: expect.objectContaining({ kind: "missed", cover: null }) },
         ],
       },
     });

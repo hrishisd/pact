@@ -1333,7 +1333,7 @@ describe("excuses", () => {
     );
     expect(preview.body).toMatchObject({
       ok: true,
-      preview: { covered: [{ date: s.date("Mon"), status: { kind: "missed", held: false } }], heldCents: 500 },
+      preview: { covered: [{ date: s.date("Mon"), status: { kind: "missed", cover: null } }], heldCents: 500 },
     });
     const options = await owner.get<ExcuseOptionsResponse>(API_PATHS.excuseOptions(pactId));
     expect(options.body).toMatchObject({

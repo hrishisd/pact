@@ -42,12 +42,13 @@ export function DayChip({
     case "missed":
       return (
         <span className="chip c-missed">
-          {status.held ? `Missed · ${heldBy(status)} waiting for approval` : "Missed"}
+          {status.cover?.state === "waiting" ? `Missed · ${heldBy(status)} waiting for approval` : "Missed"}
         </span>
       );
     case "not-judged":
-      if (status.excuse === "approved") return <span className="chip c-excused">Excused</span>;
-      if (status.excuse === "waiting") return <span className="chip c-wait">Excuse waiting for approval</span>;
+      if (status.cover?.state === "approved") return <span className="chip c-excused">Excused</span>;
+      if (status.cover?.kind === "excuse" && status.cover.state === "waiting")
+        return <span className="chip c-wait">Excuse waiting for approval</span>;
       if (status.evidenceWaiting) return <span className="chip c-wait">Waiting for approval</span>;
       if (Date.parse(status.opensAt) > now) return <span className="chip c-soon">Coming up</span>;
       if (Date.parse(status.dueAt) > now)
@@ -58,7 +59,7 @@ export function DayChip({
 
 /** What holds a Missed day's penalty: an excuse or a vacation waiting for approval. */
 function heldBy(status: Extract<Status, { kind: "missed" }>): string {
-  return status.heldByVacation ? "vacation" : "excuse";
+  return status.cover?.kind === "vacation" ? "vacation" : "excuse";
 }
 
 /**
@@ -70,7 +71,9 @@ function heldBy(status: Extract<Status, { kind: "missed" }>): string {
 export function dayNote(status: Status, now: number, timezone: string, week = false, oura = false): string {
   switch (status.kind) {
     case "missed":
-      return status.held ? `${money(status.penaltyCents)} held` : `${money(status.penaltyCents)} to be held`;
+      return status.cover?.state === "waiting"
+        ? `${money(status.penaltyCents)} held`
+        : `${money(status.penaltyCents)} to be held`;
     case "not-judged":
       if (Date.parse(status.opensAt) > now) return "Not open yet";
       if (Date.parse(status.dueAt) > now)
