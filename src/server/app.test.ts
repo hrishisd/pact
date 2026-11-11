@@ -24,6 +24,7 @@ import {
   INVITE_REQUIRED_PATH,
   INVITE_TOKEN_SIGN_IN_KEY,
   OURA_RECONNECT_PATH,
+  TIMEZONE_SIGN_IN_KEY,
   MAX_PHOTO_BYTES,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
@@ -250,15 +251,23 @@ async function server({
      * then comes back to the callback with a code that Google's (faked) token
      * endpoint exchanges for `email`. Returns the callback's response, the
      * cookies it set, the account signed in as (null if refused) and the API
-     * as that session. With `inviteToken`, signs in as the invite page does.
+     * as that session. The browser's `timezone` (America/New_York unless
+     * given) rides in the OAuth state, as the client sends it. With
+     * `inviteToken`, signs in as the invite page does.
      */
-    async signIn(email: string, { inviteToken }: { inviteToken?: string } = {}) {
+    async signIn(
+      email: string,
+      { inviteToken, timezone = "America/New_York" }: { inviteToken?: string; timezone?: string } = {},
+    ) {
       fakeGoogle(email);
       // As the invite page does: come back to the invite, carrying its token.
       const fromInvite =
         inviteToken === undefined
-          ? { callbackURL: "/" }
-          : { callbackURL: APP_PATHS.invite(inviteToken), additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: inviteToken } };
+          ? { callbackURL: "/", additionalData: { [TIMEZONE_SIGN_IN_KEY]: timezone } }
+          : {
+              callbackURL: APP_PATHS.invite(inviteToken),
+              additionalData: { [INVITE_TOKEN_SIGN_IN_KEY]: inviteToken, [TIMEZONE_SIGN_IN_KEY]: timezone },
+            };
       const start = await request(`${AUTH_BASE_PATH}/sign-in/social`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -386,10 +395,10 @@ describe("sign-in", () => {
     expect(google.searchParams.get("client_id")).toBe("test-client-id");
   });
 
-  test("the operator signs in, confirms a timezone, and sees an empty Today", async () => {
+  test("the operator signs in with their browser's timezone and sees an empty Today", async () => {
     const s = await server();
 
-    const operator = await s.signIn(OPERATOR);
+    const operator = await s.signIn(OPERATOR, { timezone: "America/Los_Angeles" });
     expect(operator.response.status).toBe(302);
     expect(operator.response.headers.get("Location")).toBe("/");
     expect(s.authRows()).toEqual({ user: 1, account: 1, session: 1 });
@@ -397,17 +406,11 @@ describe("sign-in", () => {
     expect((await operator.get(API_PATHS.me)).body).toEqual({
       email: OPERATOR,
       name: "owner",
-      timezone: null,
+      timezone: "America/Los_Angeles",
       connections: [],
       ouraAvailable: true,
       ankiAvailable: true,
     } satisfies MeResponse);
-
-    expect(await operator.post(API_PATHS.timezone, { timezone: "America/Los_Angeles" })).toEqual({
-      status: 200,
-      body: { ok: true, timezone: "America/Los_Angeles" } satisfies SetTimezoneResponse,
-    });
-    expect((await operator.get<MeResponse>(API_PATHS.me)).body.timezone).toBe("America/Los_Angeles");
 
     expect((await operator.get(API_PATHS.today)).body).toEqual({
       hasPacts: false,
@@ -416,6 +419,26 @@ describe("sign-in", () => {
       waiting: [],
       yesterday: [],
     } satisfies TodayResponse);
+  });
+
+  test("the timezone can be changed after sign-in", async () => {
+    const s = await server();
+    const operator = await s.signIn(OPERATOR);
+
+    expect(await operator.post(API_PATHS.timezone, { timezone: "America/Los_Angeles" })).toEqual({
+      status: 200,
+      body: { ok: true, timezone: "America/Los_Angeles" } satisfies SetTimezoneResponse,
+    });
+    expect((await operator.get<MeResponse>(API_PATHS.me)).body.timezone).toBe("America/Los_Angeles");
+  });
+
+  test("an invited friend's new account gets the timezone their browser sent", async () => {
+    const s = await server();
+    const owner = await operatorWithInvite(s);
+
+    const friend = await s.signIn("friend@example.test", { inviteToken: owner.token, timezone: "Asia/Tokyo" });
+
+    expect((await friend.get<MeResponse>(API_PATHS.me)).body.timezone).toBe("Asia/Tokyo");
   });
 
   test("the operator signing in again gets the same account", async () => {
@@ -440,11 +463,10 @@ describe("sign-in", () => {
   });
 });
 
-/** The operator, signed in with a confirmed timezone, and an invite they made at "Mon 09:00". */
+/** The operator, signed in from a browser in New York, and an invite they made at "Mon 09:00". */
 async function operatorWithInvite(s: Server) {
   const operator = await s.signIn(OPERATOR);
   if (!operator.accountId) throw new Error("the operator's sign-in was refused");
-  await operator.post(API_PATHS.timezone, { timezone: "America/New_York" });
   const invite = await operator.post<CreateInviteResponse>(API_PATHS.invites);
   expect(invite.status).toBe(200);
   return { ...operator, accountId: operator.accountId, token: invite.body.token };
@@ -577,7 +599,7 @@ describe("invites", () => {
 });
 
 describe("dev sign-in", () => {
-  test("outside production, the operator signs in without Google and lands on Today", async () => {
+  test("outside production, the operator signs in without Google and lands on Today, in New York by default", async () => {
     const s = await server();
 
     const response = await s.request(`${DEV_SIGN_IN_PATH}?as=operator`);
@@ -591,7 +613,7 @@ describe("dev sign-in", () => {
       body: {
         email: OPERATOR,
         name: "owner",
-        timezone: null,
+        timezone: "America/New_York",
         connections: [],
         ouraAvailable: true,
         ankiAvailable: true,
@@ -656,11 +678,13 @@ describe("dev sign-in", () => {
     expect(s.authRows()).toEqual({ user: 0, account: 0, session: 0 });
   });
 
-  test("a second person signs in with an invite token, claims it, and lands on the invite to accept", async () => {
+  test("a second person signs in with an invite token and a timezone, claims it, and lands on the invite to accept", async () => {
     const s = await server();
     const owner = await operatorWithInvite(s);
 
-    const response = await s.request(`${DEV_SIGN_IN_PATH}?email=friend@example.test&name=Friend&invite=${owner.token}`);
+    const response = await s.request(
+      `${DEV_SIGN_IN_PATH}?email=friend@example.test&name=Friend&invite=${owner.token}&timezone=Europe/London`,
+    );
 
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe(APP_PATHS.invite(owner.token));
@@ -668,6 +692,7 @@ describe("dev sign-in", () => {
     expect((await s.api<MeResponse>(API_PATHS.me, { cookie })).body).toMatchObject({
       email: "friend@example.test",
       name: "Friend",
+      timezone: "Europe/London",
     });
     // Claimed: a stranger now sees it as used.
     expect((await s.api(API_PATHS.invite(owner.token))).body).toEqual({ ok: false, reason: "invite-used" });
@@ -1420,12 +1445,9 @@ describe("vacations", () => {
 
     const options = await owner.get<VacationOptionsResponse>(API_PATHS.vacationOptions);
     expect(options.body).toMatchObject({
-      ok: true,
-      options: {
-        today: s.date("Mon"),
-        recurring: [{ id: pactId, reviewers: [{ id: friendId, name: "friend" }] }],
-        oneTime: [],
-      },
+      today: s.date("Mon"),
+      recurring: [{ id: pactId, reviewers: [{ id: friendId, name: "friend" }] }],
+      oneTime: [],
     });
     const preview = await owner.post<VacationPreviewResponse>(API_PATHS.vacationPreview, request);
     expect(preview.body).toMatchObject({ ok: true, preview: { days: 7, summary: { kind: "all" } } });

@@ -349,6 +349,78 @@ test("migration 26: pacts and connections keep their rows and references, and ta
   db.close();
 });
 
+test("migration 30: an account with no timezone gets UTC, and the rebuilt account table keeps its rows, index and references", () => {
+  // At migration 29: an operator who confirmed a zone and an invited friend who never did, with a friendship and a recipient.
+  const seeded = openDatabase(path, migrations.slice(0, 29));
+  seeded.exec(`
+    INSERT INTO account (id, email, email_key, name, timezone, is_operator, created_at, billed_through,
+                         oura_latest_bedtime_start)
+      VALUES ('owner', 'owner@example.test', 'owner@example.test', 'owner', 'America/Chicago', 1,
+              '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', '2026-01-01T22:40:00-06:00'),
+             ('friend', 'friend@example.test', 'friend@example.test', 'friend', NULL, 0,
+              '2026-01-03T00:00:00Z', NULL, NULL);
+    INSERT INTO friendship (account_a_id, account_b_id, created_at) VALUES ('friend', 'owner', '2026-01-03T00:00:00Z');
+    INSERT INTO recipient (id, owner_account_id, name, created_at) VALUES ('sam', 'owner', 'Sam', '2026-01-01T00:00:00Z');
+  `);
+  const accountsBefore = seeded.prepare("SELECT * FROM account ORDER BY id").all() as Record<string, unknown>[];
+  const columnsBefore = seeded.pragma("table_info(account)") as { name: string; notnull: number }[];
+  const indexesBefore = indexesOf(seeded, "account");
+  const restBefore = schemaOutside(seeded, "account");
+  seeded.close();
+
+  const db = openDatabase(path, migrations.slice(0, 30));
+
+  // Only the NULL timezone changes, to UTC; every other column and row is as it was.
+  expect(db.prepare("SELECT * FROM account ORDER BY id").all()).toEqual(
+    accountsBefore.map((row) => (row.timezone === null ? { ...row, timezone: "UTC" } : row)),
+  );
+  // The same columns, now with timezone NOT NULL.
+  expect(db.pragma("table_info(account)")).toEqual(
+    columnsBefore.map((column) => (column.name === "timezone" ? { ...column, notnull: 1 } : column)),
+  );
+  // Its indexes, account_one_operator included, are the same.
+  expect(indexesOf(db, "account")).toEqual(indexesBefore);
+  expect(indexesOf(db, "account").map((index) => index.name)).toContain("account_one_operator");
+  // Every other table, index and view is unchanged, and the references to account still hold.
+  expect(schemaOutside(db, "account")).toEqual(restBefore);
+  expect(db.pragma("foreign_key_check")).toEqual([]);
+
+  // timezone is required now, and there is still only one operator.
+  const insert = db.prepare(
+    "INSERT INTO account (id, email, email_key, name, timezone, is_operator, created_at) VALUES (?, ?, ?, 'x', ?, ?, '2026-01-04T00:00:00Z')",
+  );
+  expect(() => insert.run("nozone", "a@example.test", "a@example.test", null, 0)).toThrow(/NOT NULL constraint failed/);
+  expect(() => insert.run("second", "b@example.test", "b@example.test", "UTC", 1)).toThrow(/UNIQUE constraint failed/);
+  // The references to the rebuilt account are enforced.
+  expect(() =>
+    db
+      .prepare(
+        "INSERT INTO recipient (id, owner_account_id, name, created_at) VALUES ('x', 'none', 'X', '2026-01-04T00:00:00Z')",
+      )
+      .run(),
+  ).toThrow(/FOREIGN KEY constraint failed/);
+  db.close();
+});
+
+/** `table`'s indexes, each with its columns and its definition. */
+function indexesOf(db: ReturnType<typeof openDatabase>, table: string): { name: string }[] {
+  const indexes = db.pragma(`index_list(${table})`) as { name: string }[];
+  return indexes.map((index) => ({
+    ...index,
+    columns: db.pragma(`index_info(${index.name})`),
+    sql: (db.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(index.name) as { sql: string | null }).sql,
+  }));
+}
+
+/** Every table, index, trigger and view by its text, except `table`'s own and the migration record. */
+function schemaOutside(db: ReturnType<typeof openDatabase>, table: string): unknown {
+  return db
+    .prepare(
+      "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE tbl_name NOT IN (?, 'schema_migration') ORDER BY name",
+    )
+    .all(table);
+}
+
 /** Every occurrence row, in date order. */
 function occurrences(db: ReturnType<typeof openDatabase>): Record<string, unknown>[] {
   return db.prepare("SELECT * FROM occurrence ORDER BY date").all() as Record<string, unknown>[];

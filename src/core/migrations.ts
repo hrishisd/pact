@@ -779,4 +779,39 @@ export const migrations: readonly Migration[] = [
            vacation.decided_at, vacation.withdrawn_at
       FROM vacation_day JOIN vacation ON vacation.id = vacation_day.vacation_id;
   `,
+  // 30: every account has a timezone
+  {
+    foreignKeysOff: true,
+    sql: `
+  -- An account now gets its browser's timezone when it is created, so the
+  -- column is NOT NULL. An account that never confirmed one gets UTC (it owns
+  -- no pact: creating one needed a timezone). SQLite can't add NOT NULL to a
+  -- column, so this rebuilds account by SQLite's 12-step procedure, with
+  -- foreign keys off so the old table can be dropped while others reference
+  -- it. Its only index besides its keys' is account_one_operator; it has no
+  -- triggers, and no view reads it. The tables that reference it do so by
+  -- name, so they reference the new table once it's renamed.
+  UPDATE account SET timezone = 'UTC' WHERE timezone IS NULL;
+  CREATE TABLE account_new (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    -- lower-cased email: one account per Google address, matched case-insensitively
+    email_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    -- IANA zone, canonical name
+    timezone TEXT NOT NULL,
+    is_operator INTEGER NOT NULL DEFAULT 0 CHECK (is_operator IN (0, 1)),
+    created_at TEXT NOT NULL,
+    billed_through TEXT,
+    oura_latest_bedtime_start TEXT
+  );
+  INSERT INTO account_new (id, email, email_key, name, timezone, is_operator, created_at, billed_through,
+                           oura_latest_bedtime_start)
+    SELECT id, email, email_key, name, timezone, is_operator, created_at, billed_through, oura_latest_bedtime_start
+    FROM account;
+  DROP TABLE account;
+  ALTER TABLE account_new RENAME TO account;
+  CREATE UNIQUE INDEX account_one_operator ON account (is_operator) WHERE is_operator = 1;
+  `,
+  },
 ];

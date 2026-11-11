@@ -58,7 +58,6 @@ import {
   friendsSortedByName,
   occurrencesOf,
   occurrenceTermsOf,
-  ownerZone,
   ownPact,
   recipientName,
   recordDecision,
@@ -196,7 +195,7 @@ export interface ChangeRequestRow extends ReviewStateRow {
   withdrawn_at: string | null;
   owner_account_id: AccountId;
   owner_name: string;
-  timezone: string | null;
+  timezone: string;
 }
 
 /**
@@ -300,7 +299,7 @@ export function waitingChangeRequestId(ctx: CoreContext, pactId: string): string
 export function checkedChange(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pactId: string,
   change: PactChange,
   now: Date,
@@ -663,9 +662,7 @@ export function changeRequestView(ctx: CoreContext, row: StoredChangeRequest): C
       request.after,
       termDiffs(request.before, request.after, dayClockOf(pact, pact.in_bed_by, pact.due_by)),
     ),
-    start: waiting
-      ? startOfNewTerms(ctx, pact, ownerZone(row.timezone, row.owner_account_id), request.after, ctx.clock.now())
-      : null,
+    start: waiting ? startOfNewTerms(ctx, pact, row.timezone, request.after, ctx.clock.now()) : null,
   };
 }
 
@@ -720,7 +717,7 @@ export function decideChangeRequest(
     for (const removed of before.reviewerIds.filter((id) => !after.reviewerIds.includes(id))) {
       ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ? AND reviewer_account_id = ?`).run(pact.id, removed);
     }
-    const timezone = ownerZone(row.timezone, row.owner_account_id);
+    const { timezone } = row;
     const { appliesFrom } = startOfNewTerms(ctx, pact, timezone, after, now);
     applyTerms(ctx, pact, after, now, timezone);
     body = `${pact.name} · New terms start ${formatDate(appliesFrom)}`;
@@ -750,5 +747,5 @@ export function approvableNow(ctx: CoreContext, row: StoredChangeRequest): boole
   if (request.kind === "end" || request.after.schedule.kind !== "one-time") return true;
   const pact = ctx.db.prepare(`SELECT * FROM pact WHERE id = ?`).get(row.pact_id) as PactRow;
   if (pact.stage === "ended") return true;
-  return deadlineFarEnough(ctx, pact, ownerZone(row.timezone, row.owner_account_id), request.after, ctx.clock.now());
+  return deadlineFarEnough(ctx, pact, row.timezone, request.after, ctx.clock.now());
 }

@@ -189,9 +189,7 @@ export type CreatePactRefusal =
   | "unknown-recipient"
   | "no-reviewers"
   /** A reviewer isn't the owner's friend (the owner can't review their own pact). */
-  | "not-a-friend"
-  /** Days are counted in the owner's timezone, so one must be confirmed first. */
-  | "no-timezone";
+  | "not-a-friend";
 
 /** The most reminders a pact can have. */
 export const MAX_REMINDERS = 5;
@@ -237,7 +235,7 @@ export interface FirstOccurrence {
 
 export type FirstOccurrenceResult =
   | { ok: true; firstOccurrence: FirstOccurrence }
-  | { ok: false; reason: "no-days" | "deadline-too-soon" | "no-timezone" | "pact-not-found" };
+  | { ok: false; reason: "no-days" | "deadline-too-soon" | "pact-not-found" };
 
 /** A card in the Pacts tab. */
 export interface PactSummary {
@@ -753,8 +751,8 @@ export type SavePushSubscriptionResult = { ok: true } | { ok: false; reason: "in
 export interface Profile {
   email: string;
   name: string;
-  /** IANA zone, e.g. "America/New_York". Null until the user confirms one. */
-  timezone: string | null;
+  /** IANA zone, e.g. "America/New_York": the browser's at sign-up, until changed in Profile. */
+  timezone: string;
   /** The connections the account has made, if any. */
   connections: Connection[];
 }
@@ -1403,9 +1401,6 @@ export interface VacationPactOption {
   alreadyOpen: boolean;
 }
 
-/** Plan a vacation counts days in the owner's timezone, so one must be confirmed first. */
-type NoTimezone = "no-timezone";
-
 /** What Plan a vacation offers: the owner's Active pacts whose edit window has closed. */
 export interface VacationOptions {
   /** The owner's today: the first day has to be after it. */
@@ -1415,8 +1410,6 @@ export interface VacationOptions {
   /** Some Active pact is still in its edit window, so it isn't offered yet. */
   inEditWindow: boolean;
 }
-
-export type VacationOptionsResult = { ok: true; options: VacationOptions } | { ok: false; reason: NoTimezone };
 
 /** The days and pacts an owner picks for a vacation. */
 export interface VacationRequest {
@@ -1489,7 +1482,7 @@ export type VacationDatesRefusal =
 export type VacationPreviewResult =
   | { ok: true; preview: VacationPreview }
   /** pact-not-offered: a ticked pact isn't one the options let the owner tick. */
-  | { ok: false; reason: VacationDatesRefusal | "pact-not-offered" | NoTimezone };
+  | { ok: false; reason: VacationDatesRefusal | "pact-not-offered" };
 
 export type FileVacationRefusal =
   | Extract<VacationPreviewResult, { ok: false }>["reason"]

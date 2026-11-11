@@ -21,7 +21,6 @@ import {
   type WithdrawVacationResult,
   type VacationOccurrence,
   type VacationOptions,
-  type VacationOptionsResult,
   type VacationPactOption,
   type VacationPactPreview,
   type VacationPacts,
@@ -47,7 +46,6 @@ import {
   friendsSortedByName,
   occurrencesOf,
   recordDecision,
-  timezoneOf,
   reviewersOf,
   scheduleOf,
   thread,
@@ -56,10 +54,9 @@ import {
   type ReviewOutcome,
 } from "./rows.ts";
 
-export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptionsResult {
+export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationOptions {
   const now = ctx.clock.now();
   const { timezone } = accountRow(ctx, ownerId);
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   const offered = offeredPacts(ctx, ownerId, timezone, now).map((pact): VacationPactOption => ({
     ...pact,
     reviewers: friendsSortedByName(ctx, reviewersOf(ctx, pact.id)),
@@ -70,13 +67,12 @@ export function vacationOptions(ctx: CoreContext, ownerId: AccountId): VacationO
       ownerId,
       editWindowCutoff(ctx, now),
     ) !== undefined;
-  const options: VacationOptions = {
+  return {
     today: localDateOf(now, timezone),
     recurring: offered.filter((pact) => pact.schedule.kind !== "one-time"),
     oneTime: offered.filter((pact) => pact.schedule.kind === "one-time"),
     inEditWindow,
   };
-  return { ok: true, options };
 }
 
 /** The owner's Active pacts whose edit window has closed at `now`: recurring ones first, then One-time, each oldest first. */
@@ -109,7 +105,6 @@ function offeredPacts(
 
 export function previewVacation(ctx: CoreContext, ownerId: AccountId, request: VacationRequest): VacationPreviewResult {
   const { timezone } = accountRow(ctx, ownerId);
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   return vacationPreview(ctx, ownerId, timezone, request, ctx.clock.now());
 }
 
@@ -223,7 +218,6 @@ function summaryOf(
 export function fileVacation(ctx: CoreContext, ownerId: AccountId, vacation: NewVacation): FileVacationResult {
   const now = ctx.clock.now();
   const { timezone } = accountRow(ctx, ownerId);
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   const pactIds = [...new Set(vacation.pactIds)];
   const reviewerIds = [...new Set(vacation.reviewerIds)];
   if (pactIds.length === 0) return { ok: false, reason: "no-pacts" };
@@ -289,7 +283,7 @@ const VACATION_COLUMNS = `vacation.id, vacation.owner_account_id, vacation.first
  * approved whose last day hasn't passed, soonest first.
  */
 export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCard[] {
-  const today = localDateOf(ctx.clock.now(), timezoneOf(ctx, ownerId));
+  const today = localDateOf(ctx.clock.now(), accountRow(ctx, ownerId).timezone);
   const rows = ctx.all<VacationRow>(
     `SELECT ${VACATION_COLUMNS} FROM vacation
      WHERE owner_account_id = ? AND withdrawn_at IS NULL
@@ -307,7 +301,7 @@ export function vacationCards(ctx: CoreContext, ownerId: AccountId): VacationCar
 
 /** The owner's approved vacation whose last day passed most recently, or null when none has. */
 export function lastVacation(ctx: CoreContext, ownerId: AccountId): LastVacation | null {
-  const today = localDateOf(ctx.clock.now(), timezoneOf(ctx, ownerId));
+  const today = localDateOf(ctx.clock.now(), accountRow(ctx, ownerId).timezone);
   const row = ctx.one<{ first_day: LocalDate; last_day: LocalDate }>(
     `SELECT first_day, last_day FROM vacation
      WHERE owner_account_id = ? AND decision = 'approved' AND last_day < ?

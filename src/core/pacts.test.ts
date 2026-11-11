@@ -62,20 +62,6 @@ describe("what a pact needs", () => {
     expect(owner.pacts()).toEqual([]);
   });
 
-  test("an owner needs a confirmed timezone, since days are counted in it", async () => {
-    const s = scenario();
-    const owner = await s.signIn("owner");
-    const reviewer = await s.befriend(owner, "reviewer");
-    const added = ok(await owner.addRecipient({ name: "Sam" }));
-
-    expect(await owner.createPact(gymPact(added.recipient.id, reviewer))).toEqual({ ok: false, reason: "no-timezone" });
-    expect(owner.firstOccurrence({ schedule: { kind: "fixed-days", days: ["mon"] } })).toEqual({
-      ok: false,
-      reason: "no-timezone",
-    });
-    expect(owner.pacts()).toEqual([]);
-  });
-
   test("name and description are stored without surrounding spaces", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await ownerWithReviewers(s);
@@ -121,7 +107,7 @@ describe("when several refusals apply", () => {
     });
   });
 
-  test("with no timezone, a blank description comes first, and the timezone before the recipient", async () => {
+  test("a blank description comes before the recipient, and the evidence source before the terms", async () => {
     const s = scenario();
     const owner = await s.signIn("owner");
     const reviewer = await s.befriend(owner, "reviewer");
@@ -134,7 +120,7 @@ describe("when several refusals apply", () => {
     });
     expect(await owner.createPact(gymPact("no-such-recipient", reviewer, { reviewerIds: [stranger.id] }))).toEqual({
       ok: false,
-      reason: "no-timezone",
+      reason: "unknown-recipient",
     });
     expect(await owner.createPact(bedtimePact(added.recipient.id, reviewer, "25:00"))).toEqual({
       ok: false,

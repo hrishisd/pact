@@ -15,7 +15,7 @@ import type { CoreContext } from "./context.ts";
 import { coverOn, keepsToDo } from "./covers.ts";
 import { lastDayOf, type Occurrence } from "./occurrences.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
-import { occurrencesOf, ownerZone, scheduleOf, termsOn, type PactRow, type ReviewOutcome } from "./rows.ts";
+import { occurrencesOf, scheduleOf, termsOn, type PactRow, type ReviewOutcome } from "./rows.ts";
 
 /** SQL: what judging reads of a `pact` row and its owner's `account` row (PactToJudge). */
 const PACT_TO_JUDGE_COLUMNS = `pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
@@ -26,7 +26,7 @@ export type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence" |
   judged_through: LocalDate | null;
   /** When it Ended; null while Active. */
   ended_at: string | null;
-  timezone: string | null;
+  timezone: string;
   owner_account_id: AccountId;
 };
 
@@ -220,7 +220,7 @@ export function judgingReached(ctx: CoreContext, pactId: string, date: LocalDate
   const [pact] = pactsToJudge(ctx, pactId);
   if (!pact) throw new Error(`no pact ${pactId}`);
   if (pact.judged_through !== null && date <= pact.judged_through) return true;
-  return occurrencesOf(ctx, pactId, ownerZone(pact.timezone, pact.owner_account_id))
+  return occurrencesOf(ctx, pactId, pact.timezone)
     .dueAfter(pact.judged_through, t)
     .some((occurrence) => occurrence.date === date);
 }

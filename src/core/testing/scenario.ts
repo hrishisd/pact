@@ -17,8 +17,9 @@
 // "2026-01-14".
 //
 // NAMES. `s.signIn("owner")` signs in as owner@example.test, display name
-// "owner". The operator (whose first sign-in may create an account without
-// an invite) is "owner".
+// "owner", from a browser in America/New_York unless told otherwise. The
+// operator (whose first sign-in may create an account without an invite) is
+// "owner".
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,9 +41,13 @@ export function changeRequestIdOf(result: ChangePactResult): string {
   return result.outcome.changeRequestId;
 }
 
-/** As on the invite page: sign in carrying the invite link's token. */
+/**
+ * As the browser does: sign in carrying the invite link's token, if any, and
+ * the browser's timezone (America/New_York unless given).
+ */
 interface SignInOptions {
   inviteToken?: string;
+  timezone?: string;
 }
 
 export interface Scenario {
@@ -152,7 +157,8 @@ export function scenario(): Scenario {
     dbPath,
     at,
     date: referenceDate,
-    attemptSignIn: (name, options) => core.signIn({ email: emailFor(name), name }, options),
+    attemptSignIn: (name, options) =>
+      core.signIn({ email: emailFor(name), name }, { timezone: "America/New_York", ...options }),
     async signIn(name, options) {
       const result = await s.attemptSignIn(name, options);
       if (!result.ok) throw new Error(`sign-in as ${name} refused: ${result.reason}`);

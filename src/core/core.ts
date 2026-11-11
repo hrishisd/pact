@@ -72,7 +72,7 @@ import type {
   NewVacation,
   LastVacation,
   VacationCard,
-  VacationOptionsResult,
+  VacationOptions,
   VacationPreviewResult,
   VacationRequest,
   WithdrawChangeRequestResult,
@@ -148,8 +148,13 @@ export interface PactCore {
    * account on the operator's first sign-in, or with a usable invite token,
    * which the new account then claims: no one else can sign in with it or
    * accept it. Signing in doesn't use the invite up (accepting it does).
+   * A new account gets `timezone`, the browser's, under its canonical name,
+   * or UTC when it is missing or not a zone; an existing account keeps its own.
    */
-  signIn(identity: { email: string; name: string }, options?: { inviteToken?: string }): Promise<SignInResult>;
+  signIn(
+    identity: { email: string; name: string },
+    options?: { inviteToken?: string; timezone?: string },
+  ): Promise<SignInResult>;
   /** The invite page's view of `token` for a signed-out visitor: a claimed invite shows as used. */
   invite(token: string): InviteLookup;
   /** The account signed in with `email` (whatever its case), or null if there is none. Never writes. */
@@ -330,9 +335,8 @@ export interface AccountView {
   /**
    * What Plan a vacation offers: the owner's Active pacts whose edit window
    * has closed, recurring and One-time apart, each with its reviewers.
-   * Refused for an account with no timezone, as are the preview and filing.
    */
-  vacationOptions(): VacationOptionsResult;
+  vacationOptions(): VacationOptions;
   /**
    * What a vacation with `request`'s dates and ticked pacts would cover if
    * filed now, for every offered pact, and what it would skip and why: what
@@ -512,7 +516,10 @@ class Core implements PactCore {
     return this.#delivery;
   }
 
-  signIn(identity: { email: string; name: string }, options: { inviteToken?: string } = {}): Promise<SignInResult> {
+  signIn(
+    identity: { email: string; name: string },
+    options: { inviteToken?: string; timezone?: string } = {},
+  ): Promise<SignInResult> {
     return this.#command(() => signIn(this.#ctx, this.#operatorEmailKey, identity, options));
   }
 

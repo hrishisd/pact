@@ -62,7 +62,7 @@ export function excuseOptions(ctx: CoreContext, accountId: AccountId, pactId: st
   const { timezone } = accountRow(ctx, accountId);
   const now = ctx.clock.now();
   const pact = ownPact(ctx, accountId, pactId);
-  if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!pact) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
   const today = localDateOf(now, timezone);
   // Days before today an excuse could cover: Missed in the last 48 hours, or still waiting on evidence.
@@ -229,13 +229,13 @@ export function previewExcuse(
 function excusePreview(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pactId: string,
   dates: ExcuseDates,
   now: Date,
 ): { ok: true; preview: ExcusePreview } | { ok: false; reason: ExcuseDatesRefusal } {
   const pact = ownPact(ctx, ownerId, pactId);
-  if (!pact || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!pact) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
   const { from, to } = dates;
   if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };

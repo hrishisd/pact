@@ -148,7 +148,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 ## Money
 
 - A penalty is owed to its recipient. Owed is unheld penalties less approved payments, never below zero (`ledgerSummaries`, `money.ts:248`).
-- Bills are made each Wednesday at 18:00 in the owner's timezone, one per recipient, due 7 days later (`makeBills`, `money.ts:376`; `BILL_TERM_DAYS`, `bill-math.ts`). The owner is told only if something on it is unpaid. Test: `bills.test.ts`.
+- Bills are made each Wednesday at 18:00 in the owner's timezone, one per recipient, due 7 days later (`makeBills`, `money.ts:377`; `BILL_TERM_DAYS`, `bill-math.ts`). The owner is told only if something on it is unpaid. Test: `bills.test.ts`.
 - A payment needs a screenshot and may not exceed what is owed less payments already waiting (`recordPayment`, `money.ts:93`; `paymentAcceptance`, `money.ts:604`). Test: `payments.test.ts`.
 - Approved payments go to billed penalties first, oldest bill first, then to unbilled ones by when they were added. Held penalties are skipped (`allocate`, `money.ts:310`).
 - An Overdue spell starts when a bill is past due and unpaid. The owner is reminded daily. Reviewers are told when the spell starts and weekly after (`remindOverdue`, `money.ts:444`; `overdueOf`, `bill-math.ts:35`).
@@ -166,7 +166,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
   - Camera: sent while no evidence is in for the occurrence and it is not judged.
   - Weekly count: sent on a day with no evidence, while approved and waiting days are fewer than the target. Test: `reminders.test.ts`.
 - Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows the last 48 hours, without misses from a rejection or covered days (`recentlyMissed`, `today.ts:405`).
-- Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:175`). Test: `invites.test.ts`.
+- Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:179`). Test: `invites.test.ts`.
 
 ## Text and request limits
 
@@ -176,5 +176,5 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 
 ## Time and timezones
 
-- Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:257`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
-- An account with no confirmed timezone gets `no-timezone` from creating a pact and from Plan a vacation's options, preview and filing (`vacationOptions`, `previewVacation`, `fileVacation` in `vacations.ts`). **Known bug:** Profile's vacation cards and "Last one" still throw for such an account. See [ticket 22](../.scratch/design-review/issues/22-vacation-cards-without-timezone.md).
+- Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:243`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
+- Every account has a timezone. A new account gets its browser's timezone at sign-up: the client sends it through Google's redirect in the OAuth state (`TIMEZONE_SIGN_IN_KEY`, `src/shared/api.ts`), and `signIn` stores its canonical name (`accounts.ts:27`). A sign-in with no timezone, or one `Intl` does not accept, gets UTC; it is never refused. Signing in again leaves the timezone alone. The person sees it and can change it in Profile. There is no "Is this your timezone?" screen: this differs from story 2 in `.scratch/pact-v0/spec.md` (ticket 22). Migration 30 gave UTC to accounts made before this that never confirmed one. Test: `sign-in.test.ts`.

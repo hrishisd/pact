@@ -14,7 +14,9 @@
 // Auth keeps bound to this browser's flow across Google's redirect. The hook
 // reads it back and passes it to the core, which decides whether it is still
 // usable. The client supplies it, which is fine: an invite token is itself the
-// credential, and the core checks it.
+// credential, and the core checks it. Every sign-in carries the browser's
+// timezone the same way (TIMEZONE_SIGN_IN_KEY): a new account is created with
+// it, and the core decides what a missing or unknown one means.
 //
 // Development only: `devSignIn` below signs in without Google, for agents and
 // local testing (see docs/agents/local-dev.md). It is server-only (no HTTP
@@ -27,7 +29,7 @@ import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import type { PactCore } from "../core/index.ts";
 import { openWithPragmas } from "../core/db.ts";
-import { AUTH_BASE_PATH, AUTH_ERROR_PATH, INVITE_TOKEN_SIGN_IN_KEY } from "../shared/api.ts";
+import { AUTH_BASE_PATH, AUTH_ERROR_PATH, INVITE_TOKEN_SIGN_IN_KEY, TIMEZONE_SIGN_IN_KEY } from "../shared/api.ts";
 import { object, optional, string } from "./parse.ts";
 
 /** The `error` code Better Auth puts on the error redirect when the core refuses a sign-in. */
@@ -80,10 +82,15 @@ export function createAuth(options: AuthOptions) {
       user: {
         create: {
           before: async (user: { email: string; name: string }) => {
-            const inviteToken = (await getOAuthState())?.[INVITE_TOKEN_SIGN_IN_KEY];
+            const state = await getOAuthState();
+            const inviteToken = state?.[INVITE_TOKEN_SIGN_IN_KEY];
+            const timezone = state?.[TIMEZONE_SIGN_IN_KEY];
             const result = await core.signIn(
               { email: user.email, name: user.name },
-              typeof inviteToken === "string" ? { inviteToken } : {},
+              {
+                ...(typeof inviteToken === "string" && { inviteToken }),
+                ...(typeof timezone === "string" && { timezone }),
+              },
             );
             if (!result.ok) {
               throw new APIError("FORBIDDEN", {
@@ -134,8 +141,11 @@ function devSignInPlugin(core: PactCore) {
         "/dev/sign-in",
         { method: "POST", body: devSignInBody, metadata: { SERVER_ONLY: true } },
         async (ctx) => {
-          const { email, name, inviteToken } = ctx.body;
-          const result = await core.signIn({ email, name }, inviteToken === undefined ? {} : { inviteToken });
+          const { email, name, inviteToken, timezone } = ctx.body;
+          const result = await core.signIn(
+            { email, name },
+            { ...(inviteToken !== undefined && { inviteToken }), timezone },
+          );
           if (!result.ok) throw new APIError("FORBIDDEN", { code: INVITE_REQUIRED_CODE });
           // The core has the account now, so the create hook's own core.signIn finds it and agrees.
           const user =
@@ -157,9 +167,15 @@ interface DevSignInBody {
   email: string;
   name: string;
   inviteToken?: string;
+  timezone: string;
 }
 
-const parseDevSignInBody = object<DevSignInBody>({ email: string, name: string, inviteToken: optional(string) });
+const parseDevSignInBody = object<DevSignInBody>({
+  email: string,
+  name: string,
+  inviteToken: optional(string),
+  timezone: string,
+});
 
 /** A Standard Schema (what Better Auth takes for a body) for DevSignInBody, without a schema library. */
 const devSignInBody = {
@@ -168,7 +184,7 @@ const devSignInBody = {
     vendor: "pact",
     validate: (value: unknown) => {
       const body = parseDevSignInBody(value);
-      return body ? { value: body } : { issues: [{ message: "expected { email, name, inviteToken? }" }] };
+      return body ? { value: body } : { issues: [{ message: "expected { email, name, inviteToken?, timezone }" }] };
     },
     // Type-only, for inference.
     types: undefined as unknown as { input: DevSignInBody; output: DevSignInBody },

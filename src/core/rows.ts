@@ -109,20 +109,6 @@ export function remindersOf(json: string): string[] {
 }
 
 /**
- * A pact owner's timezone. Every pact's owner has one: creating a pact needs
- * it, and a timezone can be changed but never cleared.
- */
-export function ownerZone(timezone: string | null, ownerId: AccountId): string {
-  if (timezone === null) throw new Error(`account ${ownerId} owns a pact but has no timezone`);
-  return timezone;
-}
-
-/** The timezone of an account that owns a pact, read from its row. */
-export function timezoneOf(ctx: CoreContext, accountId: AccountId): string {
-  return ownerZone(accountRow(ctx, accountId).timezone, accountId);
-}
-
-/**
  * Orders people (accounts or recipients) by name the same way on every page:
  * by the en-US collation, so "alice" comes before "Bob", ties broken by id.
  */
@@ -297,11 +283,8 @@ export function lastAnkiCheck(ctx: CoreContext, pactId: string, date: LocalDate,
 }
 
 /** The account's email, name and timezone; throws `UnknownAccountError` when there's no such account. */
-export function accountRow(
-  ctx: CoreContext,
-  accountId: AccountId,
-): { email: string; name: string; timezone: string | null } {
-  const row = ctx.one<{ email: string; name: string; timezone: string | null }>(
+export function accountRow(ctx: CoreContext, accountId: AccountId): { email: string; name: string; timezone: string } {
+  const row = ctx.one<{ email: string; name: string; timezone: string }>(
     `SELECT email, name, timezone FROM account WHERE id = ?`,
     accountId,
   );

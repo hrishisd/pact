@@ -1,6 +1,6 @@
 # 22 An account always has a timezone
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Found while building ticket 04. First filed as "Profile's vacation queries without a timezone"; reworked into a proposal to make that state impossible, at the owner's request.
@@ -77,14 +77,14 @@ If the owner wants new people still to see their zone once (open question 1), ke
 
 ## Acceptance criteria
 
-- [ ] New migration: `account.timezone` is `TEXT NOT NULL`; existing NULLs are backfilled with the agreed default; every other column, row and the `account_one_operator` index survive. A migration test opens a database with a NULL-timezone account at the previous version and finds the default after.
-- [ ] Core scenario: signing in a new account with a timezone stores its canonical name, and `profile().timezone` is it. With a missing or unrecognised timezone it stores the agreed fallback. An existing account's sign-in leaves its timezone as it was.
-- [ ] Google and invite sign-in pass the browser's zone through the OAuth state to `core.signIn`; the dev sign-in takes `timezone` (default `America/New_York`). An `app.test.ts` test signs in through the faked Google flow with a timezone and finds it on `GET /api/me`.
-- [ ] `ownerZone` and `timezoneOf` are gone; no core type has `timezone: string | null`; `"no-timezone"` appears nowhere in `src/`.
-- [ ] `vacations()` and `lastVacation()` work for every account (the original bug): covered by the existing vacation scenarios, with no special case.
-- [ ] The confirm-timezone step is removed or becomes the first-run welcome, as the owner decides (prototype first if kept), and `e2e/smoke.spec.ts` matches.
-- [ ] `docs/behaviour.md` "Time and timezones" says an account gets its browser's timezone at sign-up and can change it in Profile, and the ticket 22 known-bug note is gone. `docs/agents/local-dev.md` describes the dev sign-in's `timezone`.
-- [ ] `npm run check` passes.
+- [x] New migration: `account.timezone` is `TEXT NOT NULL`; existing NULLs are backfilled with the agreed default; every other column, row and the `account_one_operator` index survive. A migration test opens a database with a NULL-timezone account at the previous version and finds the default after.
+- [x] Core scenario: signing in a new account with a timezone stores its canonical name, and `profile().timezone` is it. With a missing or unrecognised timezone it stores the agreed fallback. An existing account's sign-in leaves its timezone as it was.
+- [x] Google and invite sign-in pass the browser's zone through the OAuth state to `core.signIn`; the dev sign-in takes `timezone` (default `America/New_York`). An `app.test.ts` test signs in through the faked Google flow with a timezone and finds it on `GET /api/me`.
+- [x] `ownerZone` and `timezoneOf` are gone; no core type has `timezone: string | null`; `"no-timezone"` appears nowhere in `src/`.
+- [x] `vacations()` and `lastVacation()` work for every account (the original bug): covered by the existing vacation scenarios, with no special case.
+- [x] The confirm-timezone step is removed or becomes the first-run welcome, as the owner decides (prototype first if kept), and `e2e/smoke.spec.ts` matches.
+- [x] `docs/behaviour.md` "Time and timezones" says an account gets its browser's timezone at sign-up and can change it in Profile, and the ticket 22 known-bug note is gone. `docs/agents/local-dev.md` describes the dev sign-in's `timezone`.
+- [x] `npm run check` passes.
 
 ## Open questions for the owner
 

@@ -14,7 +14,7 @@ import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./o
 import { nightStartsAt, noOuraDataPushAt, type Occurrence } from "./occurrences.ts";
 import { deadlineWallClock, nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
 import type { OuraSleepPeriod, OuraSource } from "./ports.ts";
-import { accountRow, connectionProblem, occurrencesOf, ouraOffset, ownerZone, termsOn } from "./rows.ts";
+import { accountRow, connectionProblem, occurrencesOf, ouraOffset, termsOn } from "./rows.ts";
 
 /** The core ignores a check of Oura now this soon after the account's last one. */
 const OURA_CHECK_INTERVAL_MS = 15_000;
@@ -64,16 +64,12 @@ export function noteOuraClock(ctx: CoreContext, sleep: Map<AccountId, OuraSleepP
  * got to, whose window (18:00 that day to 18:00 the next) has started by `t`.
  * An Ended pact still has the nights that fell due before it Ended.
  */
-function nightsWaiting(
-  ctx: CoreContext,
-  t: Date,
-  owner?: AccountId,
-): { pact: PactToJudge & { timezone: string }; night: Occurrence }[] {
+function nightsWaiting(ctx: CoreContext, t: Date, owner?: AccountId): { pact: PactToJudge; night: Occurrence }[] {
   const waiting = [];
   for (const pact of [...pactsToJudge(ctx), ...endedBedtimePacts(ctx)]) {
     if (pact.evidence_kind !== "oura") continue;
     if (owner !== undefined && pact.owner_account_id !== owner) continue;
-    const timezone = ownerZone(pact.timezone, pact.owner_account_id);
+    const { timezone } = pact;
     const endedAt = pact.ended_at === null ? null : new Date(pact.ended_at);
     const until = endedAt !== null && endedAt.getTime() < t.getTime() ? endedAt : t;
     const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
@@ -82,7 +78,7 @@ function nightsWaiting(
     for (const night of occurrencesOf(ctx, pact.id, timezone).between(from, localDateOf(until, timezone))) {
       if (nightStartsAt(night.date, timezone, offset).getTime() > t.getTime()) break;
       if (endedAt !== null && night.dueAt.getTime() > endedAt.getTime()) break;
-      if (!isJudged(ctx, pact.id, night.date)) waiting.push({ pact: { ...pact, timezone }, night });
+      if (!isJudged(ctx, pact.id, night.date)) waiting.push({ pact, night });
     }
   }
   return waiting;

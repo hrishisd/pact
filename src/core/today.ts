@@ -51,12 +51,10 @@ import {
 
 export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
   const { timezone } = accountRow(ctx, accountId);
-  // Every pact's owner has a timezone: creating one needs it.
-  const { alerts, sections } = timezone === null ? { alerts: [], sections: [] } : todayCards(ctx, accountId, timezone);
+  const { alerts, sections } = todayCards(ctx, accountId, timezone);
   const hasPacts = ctx.db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
-  const yesterday = timezone === null ? [] : yesterdayEntries(ctx, accountId, timezone);
-  const vacations =
-    timezone === null ? [] : vacationsOnNow(ctx, accountId, timezone, localDateOf(ctx.clock.now(), timezone));
+  const yesterday = yesterdayEntries(ctx, accountId, timezone);
+  const vacations = vacationsOnNow(ctx, accountId, timezone, localDateOf(ctx.clock.now(), timezone));
   return {
     hasPacts,
     alerts,

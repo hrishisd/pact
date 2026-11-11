@@ -441,7 +441,7 @@ pause "Press Enter once the certificate shows as issued (or to come back to it l
 # ── 14 ────────────────────────────────────────────────────────────────────
 stage "Sign in on the iPhone, and an uptime monitor"
 step "On your iPhone, open https://$DOMAIN in Safari → Share → Add to Home Screen."
-step "Open Pact from the home screen, sign in with $OPERATOR_EMAIL, confirm the timezone, see Today."
+step "Open Pact from the home screen, sign in with $OPERATOR_EMAIL, see Today."
 step "Sign out, sign in with a different Google account: you should land on 'You need an invite'."
 note "Record whether Google sign-in completed inside the home-screen app in the ticket's Comments (ADR 0002 'Still to verify')."
 pause "Press Enter when done."

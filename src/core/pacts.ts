@@ -179,7 +179,6 @@ export function firstOccurrence(
   const { timezone } = accountRow(ctx, accountId);
   const pact = editing === undefined ? undefined : ownPact(ctx, accountId, editing);
   if (editing !== undefined && !pact) return { ok: false, reason: "pact-not-found" };
-  if (timezone === null) return { ok: false, reason: "no-timezone" };
   // An Anki pact keeps the rollover hour it was made with; a new one takes the deck list's.
   const ankiRollover = pact
     ? pact.anki_rollover_hour
@@ -242,7 +241,7 @@ export function pactList(ctx: CoreContext, accountId: AccountId): PactSummary[] 
 export function pactPage(ctx: CoreContext, accountId: AccountId, pactId: string): PactResult {
   const { timezone } = accountRow(ctx, accountId);
   const row = ownPact(ctx, accountId, pactId);
-  if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!row) return { ok: false, reason: "pact-not-found" };
   const now = ctx.clock.now();
   const { first } = occurrencesOf(ctx, pactId, timezone);
   const service = SERVICE_OF_KIND[row.evidence_kind];
@@ -355,7 +354,7 @@ export function waitingSince(item: TodayWaitingItem): Date {
 export function checkedPact(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pact: NewPact,
   createdAt: Date,
   existing?: Pick<PactRow, "anki_deck_id" | "anki_rollover_hour">,

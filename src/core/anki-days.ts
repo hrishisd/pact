@@ -8,7 +8,7 @@ import { judge, noteAnkiResult } from "./judging.ts";
 import { coverOn } from "./covers.ts";
 import { isJudged } from "./occurrence-state.ts";
 import type { AnkiCountsResult, AnkiSource } from "./ports.ts";
-import { accountRow, ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf, ownerZone } from "./rows.ts";
+import { accountRow, ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
 
 /** The core ignores a check of AnkiWeb now this soon after the account's last one. */
 const ANKI_CHECK_INTERVAL_MS = 15_000;
@@ -94,7 +94,7 @@ function ankiDaysWaiting(
   t: Date,
   owner?: AccountId,
 ): { pactId: string; account: AccountId; deckId: string }[] {
-  const pacts = ctx.all<{ id: string; owner_account_id: AccountId; timezone: string | null }>(
+  const pacts = ctx.all<{ id: string; owner_account_id: AccountId; timezone: string }>(
     `SELECT pact.id, pact.owner_account_id, account.timezone
        FROM pact
        JOIN account ON account.id = pact.owner_account_id
@@ -106,7 +106,7 @@ function ankiDaysWaiting(
     owner ?? null,
   );
   return pacts.flatMap((pact) => {
-    const open = occurrencesOf(ctx, pact.id, ownerZone(pact.timezone, pact.owner_account_id)).openAt(t);
+    const open = occurrencesOf(ctx, pact.id, pact.timezone).openAt(t);
     if (!open || t.getTime() >= open.dueAt.getTime() || isJudged(ctx, pact.id, open.date)) return [];
     // An approved excuse or vacation covers it: it's Excused at its due time whatever the deck shows.
     if (coverOn(ctx, pact.id, open.date)?.state === "approved") return [];
@@ -196,14 +196,14 @@ export function recordAnkiChecks(ctx: CoreContext, fetched: FetchedAnki[]): void
           checkedAt.toISOString(),
         );
     }
-    const pacts = ctx.all<{ id: string; timezone: string | null }>(
+    const pacts = ctx.all<{ id: string; timezone: string }>(
       `SELECT pact.id, account.timezone FROM pact JOIN account ON account.id = pact.owner_account_id
          WHERE pact.owner_account_id = ? AND pact.stage = 'active' AND pact.evidence_kind = 'anki'
          ORDER BY pact.created_at, pact.id`,
       account,
     );
     for (const pact of pacts) {
-      const { includes, covering } = occurrencesOf(ctx, pact.id, ownerZone(pact.timezone, account));
+      const { includes, covering } = occurrencesOf(ctx, pact.id, pact.timezone);
       const day = includes(ankiDate) ? covering(ankiDate) : null;
       if (!day || asOf.getTime() >= day.dueAt.getTime() || checkedAt.getTime() >= day.dueAt.getTime()) continue;
       // The deck the day is on: a deck change approved since it opened applies from the next.

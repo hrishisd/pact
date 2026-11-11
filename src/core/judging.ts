@@ -10,7 +10,7 @@ import type { CoreContext } from "./context.ts";
 import { coverOn } from "./covers.ts";
 import { evidenceDecision, isJudged, pactsToJudge, weekProgress, type PactToJudge } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
-import { lastAnkiCheck, occurrencesOf, ownerZone, recipientName, scheduleOf, termsOn, type PactRow } from "./rows.ts";
+import { lastAnkiCheck, occurrencesOf, recipientName, scheduleOf, termsOn, type PactRow } from "./rows.ts";
 
 /**
  * How long a check of AnkiWeb still running can hold judging the account's
@@ -48,8 +48,7 @@ export function judgePactDueBy(
 ): void {
   // Oura reports bedtime nights.
   if (pact.evidence_kind === "oura") return;
-  const timezone = ownerZone(pact.timezone, pact.owner_account_id);
-  const due = occurrencesOf(ctx, pact.id, timezone).dueAfter(pact.judged_through, t);
+  const due = occurrencesOf(ctx, pact.id, pact.timezone).dueAfter(pact.judged_through, t);
   let through: LocalDate | null = null;
   for (const occurrence of due) {
     const judged = isJudged(ctx, pact.id, occurrence.date);
@@ -91,13 +90,12 @@ export function endPastEndDate(ctx: CoreContext, t: Date, ankiChecksRunning: Ank
     end_date: LocalDate;
     evidence_kind: PactRow["evidence_kind"];
     owner_account_id: AccountId;
-    timezone: string | null;
+    timezone: string;
   }>(`SELECT pact.id, pact.end_date, pact.evidence_kind, pact.owner_account_id, account.timezone
        FROM pact JOIN account ON account.id = pact.owner_account_id
        WHERE pact.stage = 'active' AND pact.end_date IS NOT NULL
        ORDER BY pact.created_at, pact.id`);
-  for (const { id, end_date: endDate, evidence_kind: kind, owner_account_id: owner, timezone: zone } of rows) {
-    const timezone = ownerZone(zone, owner);
+  for (const { id, end_date: endDate, evidence_kind: kind, owner_account_id: owner, timezone } of rows) {
     const dayAfter = startOfDay(addDays(endDate, 1), timezone);
     const last = occurrencesOf(ctx, id, timezone).between(addDays(endDate, -7), endDate).at(-1);
     const endsAt = last && last.closesAt.getTime() > dayAfter.getTime() ? last.closesAt : dayAfter;

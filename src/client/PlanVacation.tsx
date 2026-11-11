@@ -12,9 +12,9 @@ import { listNames } from "./change-terms.tsx";
 import { dateSpan, formatDate, money, scheduleText } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { coveredText, firstName, occurrenceNames, pactsText, plural, weekOf } from "./vacation-text.ts";
-import { LoadedFound, settleUnlessDropped, useLoad, useSend } from "./ui.tsx";
+import { Loaded, settleUnlessDropped, useLoad, useSend } from "./ui.tsx";
 
-type Options = Extract<VacationOptionsResponse, { ok: true }>["options"];
+type Options = VacationOptionsResponse;
 type PactOption = Options["recurring"][number];
 type Preview = Extract<VacationPreviewResponse, { ok: true }>["preview"];
 type PactPreview = Preview["pacts"][number];
@@ -32,13 +32,9 @@ export function PlanVacation({
 }) {
   const { state } = useLoad(() => api.vacationOptions());
   return (
-    <LoadedFound
-      state={state}
-      what="Your pacts"
-      notFound={{ title: "No timezone yet", body: "Confirm your timezone first: vacation days are counted in it." }}
-    >
-      {({ options }) => <VacationSteps options={options} onCancel={onCancel} onSent={onSent} />}
-    </LoadedFound>
+    <Loaded state={state} what="Your pacts">
+      {(options) => <VacationSteps options={options} onCancel={onCancel} onSent={onSent} />}
+    </Loaded>
   );
 }
 
@@ -469,8 +465,6 @@ function refusalText(reason: FileVacationRefusal, from: string, to: string): str
       return "A reviewer you ticked doesn't review any of these pacts.";
     case "nothing-to-cover":
       return "There's nothing left for this vacation to cover.";
-    case "no-timezone":
-      return "Confirm your timezone first.";
     case "text-too-long":
       return TEXT_TOO_LONG_TEXT;
   }

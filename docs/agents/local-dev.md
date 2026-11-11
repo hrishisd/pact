@@ -40,7 +40,7 @@ Development only: `GET /api/dev/sign-in` signs in and redirects. It doesn't exis
 | Anyone already with an account | http://localhost:5173/api/dev/sign-in?email=EMAIL | `/` |
 
 - A new account needs an invite token: sign in as the operator, then Profile → Invite a friend, and take the token from the link it shows (`/invite/TOKEN`). Or with curl: `POST /api/invites` with the operator's cookie returns `{ token }`.
-- A new account first confirms its timezone, then sees the app. `name` defaults to the email's local part. No usable invite redirects to `/invite-required`.
+- A new account gets the timezone in `timezone` (an IANA name, such as `&timezone=Europe/London`), as a Google sign-in brings the browser's; it defaults to `America/New_York`. An existing account keeps its own: change it in Profile. `name` defaults to the email's local part. No usable invite redirects to `/invite-required`.
 - To switch person in one browser, visit the URL for the other person; the new session cookie replaces the old one.
 - With curl, keep a cookie jar in your scratchpad: `curl -c JAR "http://localhost:5173/api/dev/sign-in?as=operator"`, then `curl -b JAR http://localhost:5173/api/me`.
 

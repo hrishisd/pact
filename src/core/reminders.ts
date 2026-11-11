@@ -12,7 +12,6 @@ import { hasSchedule, oneTimeReminderAt, reminderAt, type Occurrences } from "./
 import {
   lastAnkiCheck,
   occurrencesOf,
-  ownerZone,
   remindersOf,
   scheduleOf,
   scheduleTermsOf,
@@ -50,7 +49,7 @@ export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
       | "created_at"
     > & {
       owner_account_id: AccountId;
-      timezone: string | null;
+      timezone: string;
     }
   >(`SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
               pact.anki_rollover_hour, pact.in_bed_by, pact.due_by, pact.created_at, pact.owner_account_id,
@@ -65,7 +64,7 @@ export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
     ctx.db.prepare(`UPDATE pact SET reminded_through = ? WHERE id = ?`).run(t.toISOString(), pact.id);
     const times = remindersOf(pact.reminders);
     if (times.length === 0) continue;
-    const timezone = ownerZone(pact.timezone, pact.owner_account_id);
+    const { timezone } = pact;
     // A night's or an Anki day's reminder can go off the morning after, so start a day early.
     const fromDate = addDays(localDateOf(from, timezone), -1);
     const occurrences = occurrencesOf(ctx, pact.id, timezone);

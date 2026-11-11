@@ -293,7 +293,7 @@ export function evidencePhotoIds(ctx: CoreContext, evidenceId: string): string[]
 export function evidenceAcceptance(
   ctx: CoreContext,
   ownerId: AccountId,
-  timezone: string | null,
+  timezone: string,
   pactId: string,
   photoCount: number,
   at: Date,
@@ -303,7 +303,7 @@ export function evidenceAcceptance(
     pactId,
     ownerId,
   );
-  if (!row || timezone === null) return { ok: false, reason: "pact-not-found" };
+  if (!row) return { ok: false, reason: "pact-not-found" };
   // Oura reports a bedtime night; there's never a photo to submit.
   if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
   if (photoCount === 0) return { ok: false, reason: "no-photos" };

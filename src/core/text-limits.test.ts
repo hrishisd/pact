@@ -1,7 +1,6 @@
 // Text limits: every command that takes free text refuses text longer than
 // its cap with `text-too-long`, counted after trimming. Names (pacts and
-// recipients) have MAX_NAME_CHARS; everything else has MAX_TEXT_CHARS. And
-// Plan a vacation answers an account with no timezone with a refusal.
+// recipients) have MAX_NAME_CHARS; everything else has MAX_TEXT_CHARS.
 
 import { describe, expect, test } from "vitest";
 import { MAX_NAME_CHARS, MAX_TEXT_CHARS } from "../shared/types.ts";
@@ -114,18 +113,5 @@ describe("the owner's text", () => {
 
     expect(await owner.fileVacation(vacation(overCap))).toEqual(TOO_LONG);
     expect(await owner.fileVacation(vacation(atCap))).toMatchObject({ ok: true });
-  });
-});
-
-describe("Plan a vacation with no timezone", () => {
-  test("the options, the preview and filing are refused with no-timezone instead of throwing", async () => {
-    const s = scenario();
-    const owner = await s.signIn("owner");
-    const request = { from: s.date("Mon+1"), to: s.date("Fri+1"), pactIds: [] };
-    const refused = { ok: false, reason: "no-timezone" };
-
-    expect(owner.vacationOptions()).toEqual(refused);
-    expect(owner.vacationPreview(request)).toEqual(refused);
-    expect(await owner.fileVacation({ ...request, pactIds: ["gym"], reviewerIds: [] })).toEqual(refused);
   });
 });
