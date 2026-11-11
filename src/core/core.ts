@@ -107,6 +107,7 @@ import { acceptMiss, evidencePage, submitEvidence } from "./evidence.ts";
 import { acceptExcuseRejection, excuseOptions, excusePage, fileExcuse, previewExcuse } from "./excuses.ts";
 import { endPastEndDate } from "./ending.ts";
 import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOverdue } from "./money.ts";
+import { remindStale } from "./stale-items.ts";
 import { deliverPending, enqueue } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
 import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
@@ -641,6 +642,7 @@ class Core implements PactCore {
         endPastEndDate(this.#ctx, t, this.#ankiPolling.checksRunning);
         makeBills(this.#ctx, t);
         remindOverdue(this.#ctx, t);
+        remindStale(this.#ctx, t);
         this.#ctx.db
           .prepare(
             `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)

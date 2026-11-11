@@ -875,4 +875,15 @@ export const migrations: readonly Migration[] = [
            vacation.decided_at, vacation.withdrawn_at
       FROM vacation_day JOIN vacation ON vacation.id = vacation_day.vacation_id;
   `,
+  // 34: stale-item reminders
+  `
+  -- When the account was last pushed about items waiting more than 24 hours
+  -- in its Review Queue, and about reviewers' questions it hasn't answered
+  -- in 24 hours (R2): at most one of each a day, restart or not.
+  CREATE TABLE stale_notice (
+    account_id TEXT PRIMARY KEY REFERENCES account (id),
+    reviewer_reminded_at TEXT,
+    owner_reminded_at TEXT
+  );
+  `,
 ];

@@ -16,7 +16,15 @@ import type { AnkiChecksRunning } from "./judging.ts";
 import { tellAll } from "./outbox.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
 import { REQUEST_HANDLERS } from "./request-kinds.ts";
-import { isWaiting, thread, withdrawalOf, type Decided, type RequestKindHandler, type RequestRow } from "./requests.ts";
+import {
+  isWaiting,
+  thread,
+  withdrawalOf,
+  type Decided,
+  type QueuedItem,
+  type RequestKindHandler,
+  type RequestRow,
+} from "./requests.ts";
 import { textTooLong } from "./text-limits.ts";
 import { accountRow } from "./rows.ts";
 
@@ -44,12 +52,37 @@ export async function viewPhoto(
 
 export function reviewQueue(ctx: CoreContext, accountId: AccountId): ReviewItem[] {
   accountRow(ctx, accountId);
-  return reviewItems(ctx, accountId).filter((item) => !item.thread.waitingOnReply);
+  return queuedItems(ctx, accountId)
+    .filter(({ item }) => !item.thread.waitingOnReply)
+    .map(({ item }) => item);
+}
+
+/**
+ * The reviewer's Review Queue, each item with when it came to them: when it
+ * was sent for a decision, or the owner's latest reply if later, which sent
+ * it back. For the daily reminder about items waiting too long (R2).
+ */
+export function reviewQueueWaits(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
+  return queuedItems(ctx, reviewerId)
+    .filter(({ item }) => !item.thread.waitingOnReply)
+    .map(({ item, since }) => {
+      const reply = item.thread.comments.findLast((comment) => comment.fromOwner);
+      return { item, since: reply && reply.sentAt > since ? reply.sentAt : since };
+    });
 }
 
 export function waitingOnReply(ctx: CoreContext, accountId: AccountId): ReviewItem[] {
   accountRow(ctx, accountId);
-  return reviewItems(ctx, accountId).filter((item) => item.thread.waitingOnReply);
+  return queuedItems(ctx, accountId)
+    .filter(({ item }) => item.thread.waitingOnReply)
+    .map(({ item }) => item);
+}
+
+/** How a notification names the review item `itemId` after "your" or "their", and the owner's page for it. */
+export function describeItem(ctx: CoreContext, itemId: string): { what: string; ownerPath: string } {
+  const item = findItem(ctx, itemId);
+  if (!item) throw new Error(`no review item ${itemId}`);
+  return item.handler.describe(ctx, item.row);
 }
 
 export function askOwner(ctx: CoreContext, accountId: AccountId, itemId: string, question: string): AskOwnerResult {
@@ -196,11 +229,11 @@ function addComment(ctx: CoreContext, itemId: string, authorId: AccountId, fromO
  * the kinds listed first (change requests), then the rest oldest first.
  * Items at the same time keep the registry's order of kinds.
  */
-function reviewItems(ctx: CoreContext, reviewerId: AccountId): ReviewItem[] {
+function queuedItems(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const queued = REQUEST_HANDLERS.flatMap((handler) =>
     handler.queue(ctx, reviewerId).map((entry) => ({ ...entry, first: handler.queueFirst === true })),
   );
   return queued
     .sort((a, b) => Number(b.first) - Number(a.first) || a.since.getTime() - b.since.getTime())
-    .map((entry) => entry.item);
+    .map(({ item, since }) => ({ item, since }));
 }

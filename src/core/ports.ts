@@ -91,6 +91,10 @@ export type NotificationKind =
   | "reviewer-question"
   /** To each reviewer of an item: its owner replied to a question, so it's back in their queue. */
   | "owner-replied"
+  /** To a reviewer, at 09:00 each day while an item in their Review Queue has waited more than 24 hours. */
+  | "stale-review-items"
+  /** To the owner, at 09:00 each day while a reviewer's question to them has gone unanswered more than 24 hours. */
+  | "unanswered-question"
   /** To the owner: an occurrence reached its due time and was judged Missed. */
   | "missed-occurrence"
   /** To the owner: a Wednesday bill to one recipient. */
@@ -131,6 +135,10 @@ interface NotificationDetails {
   "vacation-decided": { itemKind: "vacation"; itemId: string } & DecisionDetails;
   "reviewer-question": { itemKind: ReviewItem["kind"]; itemId: string };
   "owner-replied": { itemKind: ReviewItem["kind"]; itemId: string };
+  /** `count`: the items in the Review Queue; the oldest is the one the push names. */
+  "stale-review-items": { count: number; oldestItemKind: ReviewItem["kind"]; oldestItemId: string };
+  /** The item with the oldest unanswered question, the one the push names. */
+  "unanswered-question": { itemKind: ReviewItem["kind"]; itemId: string };
   /** `occurrenceDate`: "YYYY-MM-DD", the day judged. */
   "missed-occurrence": { pactId: string; occurrenceDate: string };
   "new-bill": { recipientId: string };

@@ -69,7 +69,7 @@ export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
  * Alerts for the owner's items still waiting for a decision whose latest
  * comment is a reviewer's question, with when it was asked.
  */
-function questionAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
+export function questionAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
   return waitingFor(ctx, ownerId, {}).flatMap((item) => {
     const { comments, waitingOnReply } = thread(ctx, item.id, true);
     const question = comments.at(-1);
