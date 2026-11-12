@@ -1,6 +1,6 @@
 # A vacation's "Sent to" names who decides it now
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 ## Problem
@@ -18,9 +18,11 @@ Whether `reviewerNames` should name the current deciders (`vacationDeciders`), o
 
 ## Acceptance criteria
 
-- [ ] A scenario: after the last picked reviewer is removed, the owner's vacation card names the current deciders (or whatever is decided).
-- [ ] `docs/behaviour.md` matches.
+- [x] A scenario: after the last picked reviewer is removed, the owner's vacation card names the current deciders (or whatever is decided).
+- [x] `docs/behaviour.md` matches.
 
 ## Owner decision (2026-11-11)
 
 Ready for an agent.
+
+Decided by the implementing agent: `reviewerNames` names the current deciders (`vacationDeciders`), as a change request's already do.

@@ -22,10 +22,12 @@ export interface Transition {
  * Settles the pact's occurrence dated `date` as of `now`: if it isn't judged
  * and its verdict is final, stores the outcome as of the verdict's time, with
  * the penalty for a Missed one, and ends a One-time pact. An outcome once
- * stored is kept, except that a Missed one an approved cover now excuses
- * becomes Excused, without its penalty. That penalty can't be on a bill yet
- * (the excuse window closes before billing takes it): if it is, this throws,
- * and the command changes nothing.
+ * stored is kept, with two exceptions. A Missed one an approved cover now
+ * excuses becomes Excused, without its penalty. That penalty can't be on a
+ * bill yet (the excuse window closes before billing takes it): if it is,
+ * this throws, and the command changes nothing. And an Excused one that
+ * approved evidence now makes Satisfied (vacation spec, "Judging and money")
+ * becomes Satisfied as of the approval; a One-time pact has Ended already.
  *
  * The owner is told whenever this makes an occurrence Missed, except when
  * a rejection judged a Fixed day or One-time occurrence (the rejection's push
@@ -45,18 +47,18 @@ export function settle(
       pactId,
       date,
     )?.outcome ?? null;
-  // Only a Missed outcome may still change, and only to Excused.
-  if (from !== null && from !== "missed") return null;
+  // Only a Missed outcome may still change, to Excused, and an Excused one, to Satisfied.
+  if (from === "satisfied") return null;
   const facts = occurrenceFacts(ctx, pactId, date, { ankiChecks });
   if (facts === null) return null;
   const verdict = verdictOf(facts, now);
   if (!("at" in verdict)) return null;
-  if (from === "missed") {
-    if (verdict.kind !== "excused") return null;
-    deletePenalties(ctx, pactId, date);
+  if (from !== null) {
+    if (verdict.kind !== (from === "missed" ? "excused" : "satisfied")) return null;
+    if (from === "missed") deletePenalties(ctx, pactId, date);
     ctx.db
-      .prepare(`UPDATE occurrence SET outcome = 'excused', judged_at = ? WHERE pact_id = ? AND date = ?`)
-      .run(verdict.at.toISOString(), pactId, date);
+      .prepare(`UPDATE occurrence SET outcome = ?, judged_at = ? WHERE pact_id = ? AND date = ?`)
+      .run(verdict.kind, verdict.at.toISOString(), pactId, date);
     return { from, to: verdict };
   }
   const owner = ctx.one<{ owner_account_id: string }>(`SELECT owner_account_id FROM pact WHERE id = ?`, pactId)!;
@@ -110,7 +112,8 @@ function deletePenalties(ctx: CoreContext, pactId: string, date: LocalDate): voi
  * just decided or withdrawn, as of `now`, given the checks of AnkiWeb still
  * running. Approved: a Missed one becomes Excused, and one not judged yet
  * whose due time has passed (its evidence was waiting) is judged Excused
- * now; the rest are judged Excused at their due time. Rejected or withdrawn:
+ * now, unless approved evidence makes it Satisfied, as at its due time; the
+ * rest are judged Excused at their due time. Rejected or withdrawn:
  * the cover no longer counts, and nothing changes. A bedtime night not
  * judged yet is left to judging (`judgeNights`), which waits for Oura until
  * the night closes, and takes a period on its first look after the close.

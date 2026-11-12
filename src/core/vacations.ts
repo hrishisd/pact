@@ -338,7 +338,7 @@ export function vacationsOnNow(
   return rows.map((row) => ({ ...vacationBasics(ctx, row), covers: vacationCovers(ctx, row.id, timezone, []) }));
 }
 
-/** What a vacation's Profile card and review item both show: its dates, note, pacts and who it went to. */
+/** What a vacation's Profile card and review item both show: its dates, note, pacts and who decides it now. */
 function vacationSummary(
   ctx: CoreContext,
   row: VacationRow,
@@ -346,7 +346,7 @@ function vacationSummary(
   return {
     ...vacationBasics(ctx, row),
     days: dayCount(row.first_day, row.last_day),
-    reviewerNames: friendsSortedByName(ctx, pickedReviewers(ctx, row.id)).map((reviewer) => reviewer.name),
+    reviewerNames: friendsSortedByName(ctx, vacationDeciders(ctx, row.id)).map((reviewer) => reviewer.name),
   };
 }
 

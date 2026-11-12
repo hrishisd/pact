@@ -756,6 +756,21 @@ describe("who decides a vacation when a covered pact's reviewers change", () => 
     expect(await second.decide(vacationId, { kind: "approve" })).toEqual({ ok: true });
   });
 
+  // Design review ticket 30: the card and review item name who decides it now.
+  test("the owner's card and the review item name who decides it now, not who it was sent to", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer, second] });
+    s.setClockTo("Wed 12:00");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, reviewerNames: ["reviewer"] }]);
+
+    await changeReviewers(owner, second, gym, [second]);
+
+    expect(owner.vacations()).toMatchObject([{ id: vacationId, reviewerNames: ["second"] }]);
+    expect(second.reviewQueue()).toEqual([expect.objectContaining({ id: vacationId, reviewerNames: ["second"] })]);
+  });
+
   test("a reviewer added to a covered pact while a picked reviewer remains doesn't see it", async () => {
     const s = scenario();
     const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
@@ -1008,6 +1023,25 @@ describe("once approved, covered occurrences are Excused", () => {
     expect(penaltyDays(owner)).not.toContain(s.date("Mon+1"));
   });
 
+  test("approved at the due time itself, before the tick, a day whose evidence was approved is Satisfied, not Excused", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Tue 12:00");
+    const { vacationId } = ok(
+      await owner.fileVacation({ from: s.date("Wed"), to: s.date("Wed"), pactIds: [gym], reviewerIds: [reviewer.id] }),
+    );
+    await s.advanceTo("Wed 10:00");
+    ok(await second.decide(ok(await owner.submitEvidence(gym, [photo()])).evidenceId, { kind: "approve" }));
+    s.setClockTo("Thu 00:00");
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(statusOn(owner, gym, s.date("Wed"))).toBe("satisfied");
+    await s.advanceTo("Thu 01:00");
+    expect(statusOn(owner, gym, s.date("Wed"))).toBe("satisfied");
+  });
+
   test("a covered One-time deadline moved outside the vacation isn't covered any more; moved within it, it still is", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
@@ -1082,15 +1116,18 @@ describe("the ledger carries on during an approved vacation", () => {
 /**
  * Ticket 03. The owner's Gym (Mon/Wed/Fri, $5, a reminder at 18:00, from
  * Mon+1) and a vacation for Mon+1 to Sun+1 sent to the reviewer, filed Wed
- * 12:00 and still waiting; the clock is then at `at`.
+ * 12:00 and still waiting; the clock is then at `at`. The scheduler ticks
+ * hourly from `hourlyFrom`. Gym has nothing due before Mon+1, so a test that
+ * asserts nothing before then can pass "Mon+1 00:00": one tick covers the idle
+ * days and the scenario runs much faster.
  */
-async function waitingOverGym(s: Scenario, at = "Tue+1 08:00") {
+async function waitingOverGym(s: Scenario, at = "Tue+1 08:00", hourlyFrom = "Wed 13:00") {
   const setup = await ownerWithReviewers(s);
   const { owner, reviewer, createPact } = setup;
   const gym = await createPact("Gym", MON_WED_FRI, { reminders: ["18:00"], dates: { startDate: s.date("Mon+1") } });
   await s.advanceTo("Wed 12:00");
   const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
-  await tickHourly(s, "Wed 13:00", at);
+  await tickHourly(s, hourlyFrom, at);
   return { ...setup, gym, vacationId };
 }
 
@@ -1217,24 +1254,29 @@ describe("after a rejection", () => {
     expect(owed(owner)).toBe(0);
   });
 
-  test("rejected on Fri+1, long after Mon+1's own 48 hours: an excuse for Mon+1 is accepted within 48 hours of the rejection and refused after (R3)", async () => {
-    const mondayExcuse = { from: "", to: "", reason: "Flight moved" };
-    for (const [at, accepted] of [
-      ["Sun+1 07:59", true],
-      ["Sun+1 08:00", false],
-    ] as const) {
+  // Two scenarios, one per instant: an accepted excuse would change what the second filing finds.
+  test.each([
+    ["Sun+1 07:59", "accepted"],
+    ["Sun+1 08:00", "refused"],
+  ] as const)(
+    "rejected on Fri+1, long after Mon+1's own 48 hours: an excuse for Mon+1 at %s is %s, its 48 hours running from the rejection (R3)",
+    async (at, answer) => {
       const s = scenario();
-      const { owner, reviewer, gym, vacationId } = await waitingOverGym(s, "Fri+1 08:00");
+      const { owner, reviewer, gym, vacationId } = await waitingOverGym(s, "Fri+1 08:00", "Mon+1 00:00");
+      expect(statusOn(owner, gym, s.date("Mon+1"))).toBe("missed");
       ok(await reviewer.decide(vacationId, { kind: "reject", reason: "Not that week" }));
       s.setClockTo(at);
-      const excuse = { ...mondayExcuse, from: s.date("Mon+1"), to: s.date("Mon+1") };
 
-      const filed = await owner.fileExcuse(gym, excuse, []);
+      const filed = await owner.fileExcuse(
+        gym,
+        { from: s.date("Mon+1"), to: s.date("Mon+1"), reason: "Flight moved" },
+        [],
+      );
 
-      if (accepted) expect(filed).toMatchObject({ ok: true });
+      if (answer === "accepted") expect(filed).toMatchObject({ ok: true });
       else expect(filed).toEqual({ ok: false, reason: "nothing-to-excuse" });
-    }
-  });
+    },
+  );
 
   test("a new vacation for days not open yet is accepted and clears the alert", async () => {
     const s = scenario();

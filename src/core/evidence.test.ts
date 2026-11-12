@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
-import { scenario } from "./testing/scenario.ts";
-import { ok } from "./testing/queries.ts";
+import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
+import { scenario, type AccountHandle } from "./testing/scenario.ts";
+import { ok, owed, pactOf, penaltyDays, statusOn } from "./testing/queries.ts";
 
 describe("submitting evidence", () => {
   test("on Monday, for a Mon/Wed/Fri pact, moves the pact from To do to Waiting for approval", async () => {
@@ -209,5 +209,112 @@ describe("a photo of some evidence", () => {
       expect(await viewer.photo(photoId)).toEqual({ ok: false, reason: "photo-not-found" });
     }
     expect(await owner.photo("no-such-photo")).toEqual({ ok: false, reason: "photo-not-found" });
+  });
+});
+
+// The vacation spec (vac:78, decision 4 of the design review): approved
+// evidence still makes an occurrence under a cover Satisfied, even once the
+// cover has made it Excused.
+describe("a late approval on an Excused occurrence", () => {
+  /** How the Weekly count week starting `monday` stands on its heat map. */
+  const weekStatus = (owner: AccountHandle, pactId: string, monday: string) => {
+    const { history } = pactOf(owner, pactId);
+    if (history.kind !== "weekly-count") throw new Error(`a ${history.kind} heat map`);
+    return history.weeks.find((week) => week.date === monday)?.occurrence?.status.kind;
+  };
+  /** How a One-time pact's occurrence stands on its heat map. */
+  const oneTimeStatus = (owner: AccountHandle, pactId: string) => {
+    const { history } = pactOf(owner, pactId);
+    if (history.kind !== "one-time") throw new Error(`a ${history.kind} heat map`);
+    return history.day.occurrence?.status.kind;
+  };
+
+  test("evidence waiting when an approved excuse made the day Excused: its approval makes the day Satisfied, with no penalty", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Thu 20:00");
+    const evidenceId = await submit(owner, gym);
+    await s.advanceTo("Fri 01:00");
+    const excuse = ok(await owner.fileExcuse(gym, { from: s.date("Thu"), to: s.date("Thu"), reason: "Ran late" }, []));
+    ok(await reviewer.decide(excuse.excuseId, { kind: "approve" }));
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("excused");
+    await s.advanceTo("Fri 09:00");
+
+    ok(await reviewer.decide(evidenceId, { kind: "approve" }));
+
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("satisfied");
+    expect(penaltyDays(owner)).not.toContain(s.date("Thu"));
+    expect(s.notifier.sentTo(owner, "missed-occurrence").map((n) => n.payload.occurrenceDate)).not.toContain(
+      s.date("Thu"),
+    );
+  });
+
+  test("a day excused ahead and Excused at its due time with evidence waiting: approval makes it Satisfied, rejection leaves it Excused", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Wed 10:00");
+    const excuse = ok(await owner.fileExcuse(gym, { from: s.date("Thu"), to: s.date("Fri"), reason: "Away" }, []));
+    ok(await reviewer.decide(excuse.excuseId, { kind: "approve" }));
+    await s.advanceTo("Thu 20:00");
+    const approved = await submit(owner, gym);
+    await s.advanceTo("Fri 20:00");
+    const rejected = await submit(owner, gym);
+    await s.advanceTo("Sat 09:00");
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("excused");
+    expect(statusOn(owner, gym, s.date("Fri"))).toBe("excused");
+
+    ok(await reviewer.decide(approved, { kind: "approve" }));
+    ok(await reviewer.decide(rejected, { kind: "reject", reason: "Blurry" }));
+
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("satisfied");
+    expect(statusOn(owner, gym, s.date("Fri"))).toBe("excused");
+    expect(penaltyDays(owner)).not.toContain(s.date("Thu"));
+    expect(penaltyDays(owner)).not.toContain(s.date("Fri"));
+  });
+
+  test("a Weekly count week Excused with evidence waiting is Satisfied once a late approval reaches its target", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", { kind: "weekly-count", target: 2 });
+    s.setClockTo("Tue+1 10:00");
+    const excuse = ok(
+      await owner.fileExcuse(piano, { from: s.date("Thu+1"), to: s.date("Thu+1"), reason: "Recital" }, []),
+    );
+    ok(await reviewer.decide(excuse.excuseId, { kind: "approve" }));
+    s.setClockTo("Wed+1 10:00");
+    ok(await reviewer.decide(await submit(owner, piano), { kind: "approve" }));
+    s.setClockTo("Sun+1 22:00");
+    const late = await submit(owner, piano);
+    await s.advanceTo("Mon+2 09:00");
+    expect(weekStatus(owner, piano, s.date("Mon+1"))).toBe("excused");
+
+    ok(await reviewer.decide(late, { kind: "approve" }));
+
+    expect(weekStatus(owner, piano, s.date("Mon+1"))).toBe("satisfied");
+    expect(owed(owner)).toBe(0);
+    expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([]);
+  });
+
+  test("a One-time occurrence Excused with evidence waiting: approval makes it Satisfied, and the pact stays Ended as of the excuse", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const dentist = await createPact("Dentist", { kind: "one-time", deadline: s.date("Thu"), submitAnytime: false });
+    await s.advanceTo("Thu 10:00");
+    const evidenceId = await submit(owner, dentist);
+    await s.advanceTo("Fri 01:00");
+    const excuse = ok(
+      await owner.fileExcuse(dentist, { from: s.date("Thu"), to: s.date("Thu"), reason: "Ran late" }, []),
+    );
+    ok(await reviewer.decide(excuse.excuseId, { kind: "approve" }));
+    expect(pactOf(owner, dentist)).toMatchObject({ stage: "ended", endedAt: s.at("Fri 01:00") });
+    await s.advanceTo("Fri 09:00");
+
+    ok(await reviewer.decide(evidenceId, { kind: "approve" }));
+
+    expect(oneTimeStatus(owner, dentist)).toBe("satisfied");
+    expect(pactOf(owner, dentist)).toMatchObject({ stage: "ended", endedAt: s.at("Fri 01:00") });
+    expect(owed(owner)).toBe(0);
   });
 });

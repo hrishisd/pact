@@ -487,6 +487,20 @@ function waitingExcuses(ctx: CoreContext, ownerId: AccountId, pactId?: string): 
 }
 
 /**
+ * SQL: the excuse read as `excuse` (a table alias with `excuse`'s columns)
+ * was rejected and its alert stands: the owner hasn't taken the L on it nor
+ * filed a new excuse for any of its days. `rejectedExcuseAlerts` shows such
+ * an excuse, and Today's Missed leaves its days to the alert.
+ */
+export function rejectedExcuseAlertStandsSql(excuse: string): string {
+  return `(${excuse}.decision = 'rejected' AND ${excuse}.rejection_accepted_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM excuse_day AS mine
+                    JOIN excuse_day AS other ON other.pact_id = mine.pact_id AND other.date = mine.date
+                    JOIN excuse AS later ON later.id = other.excuse_id
+                    WHERE mine.excuse_id = ${excuse}.id AND later.filed_at > ${excuse}.filed_at))`;
+}
+
+/**
  * One alert per rejected excuse of the owner's, newest rejection first,
  * until the owner takes the L on it or files a new excuse for any of its
  * days, and while it still covers a day on the schedule. With when it was
@@ -512,11 +526,7 @@ export function rejectedExcuseAlerts(
        JOIN pact ON pact.id = excuse.pact_id
        JOIN account AS owner ON owner.id = pact.owner_account_id
        JOIN account AS reviewer ON reviewer.id = excuse.decided_by_account_id
-       WHERE pact.owner_account_id = ? AND excuse.decision = 'rejected' AND excuse.rejection_accepted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM excuse_day AS mine
-                         JOIN excuse_day AS other ON other.pact_id = mine.pact_id AND other.date = mine.date
-                         JOIN excuse AS later ON later.id = other.excuse_id
-                         WHERE mine.excuse_id = excuse.id AND later.filed_at > excuse.filed_at)
+       WHERE pact.owner_account_id = ? AND ${rejectedExcuseAlertStandsSql("excuse")}
        ORDER BY excuse.decided_at DESC, excuse.id`,
     ownerId,
   );

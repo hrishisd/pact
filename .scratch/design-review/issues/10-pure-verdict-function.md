@@ -54,7 +54,7 @@ One mismatch is expected. The vacation spec (vac:78) says approved evidence stil
 
 ## Comments
 
-- Mismatches found: one, the expected vac:78 case, filed as [ticket 26](26-late-approval-satisfies-excused-day.md) and listed in `KNOWN_MISMATCHES` (`src/core/testing/verdict-check.ts`). No existing scenario reaches it; `verdict-check.test.ts` shows the check finds it.
+- Mismatches found: one, the expected vac:78 case, filed as [ticket 26](26-late-approval-satisfies-excused-day.md) and listed in `KNOWN_MISMATCHES` (`src/core/testing/verdict-check.ts`). Ticket 26 fixed it and removed the entry; `KNOWN_MISMATCHES` is empty now.
 - `verdictOf` keeps the current end rule (an occurrence due after the pact Ended is not the pact's unless judged before the end); ticket 13 changes it.
 - The check skips a run when nothing it reads has changed and no due time, close or Anki hold has passed since the last one, so hourly-ticking scenarios stay fast.
 - Gaps in stored facts (bedtime sleep arrival, Anki answer time) are noted on ticket 12.

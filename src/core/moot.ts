@@ -21,7 +21,9 @@ export interface TouchedOccurrence {
  * Why deciding the waiting evidence, excuse or vacation `itemId` at `now`
  * could no longer change anything, or null while it could. It's moot when
  * approving and rejecting it give every occurrence it touches the same final
- * verdict and penalty, or it touches none any more: `pact-ended` when one of
+ * verdict and penalty (evidence approved with the occurrence's other waiting
+ * evidence, which on a Weekly count week may reach the target only together),
+ * or it touches none any more: `pact-ended` when one of
  * them is past the pact's end (or gone with it), else `no-longer-needed`.
  */
 export function mootReason(

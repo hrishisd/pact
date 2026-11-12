@@ -1,6 +1,6 @@
 # 26 A late evidence approval turns an Excused occurrence Satisfied
 
-Status: ready-for-agent
+Status: done
 Blocked by: 10
 
 Found by ticket 10's verdict check. Expected there (interaction audit probe P5a).
@@ -21,10 +21,10 @@ The vacation spec (vac:78) says approved evidence still makes a covered occurren
 
 ## Acceptance criteria
 
-- [ ] A late approval of waiting evidence on an Excused day or week makes it Satisfied, tested through `scenario()`.
-- [ ] The known-mismatch entry for this ticket is gone and the suite passes.
-- [ ] `docs/behaviour.md` states the rule without the known-bug note.
-- [ ] `npm run check` passes.
+- [x] A late approval of waiting evidence on an Excused day or week makes it Satisfied, tested through `scenario()`.
+- [x] The known-mismatch entry for this ticket is gone and the suite passes.
+- [x] `docs/behaviour.md` states the rule without the known-bug note.
+- [x] `npm run check` passes.
 
 ## Comments
 
@@ -32,4 +32,11 @@ The vacation spec (vac:78) says approved evidence still makes a covered occurren
 
 ## Criterion moved from ticket 20 (owner decision, 2026-11-11)
 
-- [ ] Case 5: a scenario where evidence for a day judged Excused stays in the queue and its approval makes the day Satisfied with no penalty.
+- [x] Case 5: a scenario where evidence for a day judged Excused stays in the queue and its approval makes the day Satisfied with no penalty.
+
+## Built (2026-11-11)
+
+- `settle` (`src/core/settle.ts`) now rewrites a stored Excused outcome as Satisfied, as of the approval, when `verdictOf` says so; it never re-ends a One-time pact (it Ended at the Excused judging). Ticket 12 had already widened it for Missed to Excused, so this is the second exception.
+- Scenarios: `evidence.test.ts`, "a late approval on an Excused occurrence" (a day Excused by an excuse approved after the due time, a day excused ahead with a rejection that leaves its other day Excused, a Weekly count week, a One-time pact). Case 5: `withdrawal.test.ts`, "evidence for a day an approved excuse already made Excused stays, and approving it makes the day Satisfied with no penalty".
+- `KNOWN_MISMATCHES` is empty, and the harness test that showed this mismatch is gone; `knownMismatchTicket` is no longer exported.
+- Differs from the ticket: a Weekly count week that needs two or more late approvals to reach its target can't get there, because the moot rule withdraws each waiting piece on its own. Filed [ticket 32](32-moot-rule-withdraws-evidence-needed-together.md). The scenario covers a week that one late approval brings to its target.

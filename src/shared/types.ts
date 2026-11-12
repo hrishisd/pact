@@ -585,7 +585,7 @@ export type ReviewItem =
       days: number;
       note: string | null;
       pacts: VacationPacts;
-      /** Who it was sent to, by name. Any one of them decides it. */
+      /** Who decides it now (`vacationDeciders`), by name. Any one of them may. */
       reviewerNames: string[];
       /** Each ticked pact with something covered, in the order the owner's pacts were made. */
       covers: VacationCover[];
@@ -1582,7 +1582,7 @@ export interface VacationCard {
   days: number;
   note: string | null;
   pacts: VacationPacts;
-  /** Who it was sent to, by name. */
+  /** Who decides it now (`vacationDeciders`), by name: the picked reviewers still on a covered pact, or the current ones. */
   reviewerNames: string[];
   state: VacationState;
   /** The penalties it holds while it waits, left out when none: withdrawing makes them owed. */

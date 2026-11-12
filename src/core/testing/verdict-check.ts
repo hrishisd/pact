@@ -49,23 +49,10 @@ export interface Mismatch {
  * Mismatches the check skips: each a bug a ticket fixes. Remove an entry
  * with the fix.
  */
-const KNOWN_MISMATCHES: { ticket: string; matches: (m: Mismatch) => boolean }[] = [
-  {
-    // Approved evidence for a day already judged Excused changes nothing; vac:78 says it makes the day Satisfied.
-    ticket: "26-late-approval-satisfies-excused-day.md",
-    matches: ({ stored, verdict, facts }) =>
-      stored.outcome === "excused" &&
-      stored.penalties.length === 0 &&
-      verdict.kind === "satisfied" &&
-      stored.judgedAt !== null &&
-      verdict.at.getTime() >= stored.judgedAt.getTime() &&
-      (facts?.evidence.some((e) => e.decision === "approved" && e.decidedAt?.getTime() === verdict.at.getTime()) ??
-        false),
-  },
-];
+const KNOWN_MISMATCHES: { ticket: string; matches: (m: Mismatch) => boolean }[] = [];
 
 /** The ticket that fixes a known mismatch, or null if it isn't one. */
-export function knownMismatchTicket(mismatch: Mismatch): string | null {
+function knownMismatchTicket(mismatch: Mismatch): string | null {
   return KNOWN_MISMATCHES.find((known) => known.matches(mismatch))?.ticket ?? null;
 }
 

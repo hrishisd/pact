@@ -190,6 +190,15 @@ describe("a Camera day", () => {
       verdict: satisfied("Tue 09:00"),
     },
     {
+      name: "with evidence approved before its due time and a cover approved at it: approved evidence beats the cover",
+      facts: cameraDay({
+        cover: cover("approved", "Tue 00:00"),
+        evidence: [evidence("Mon 20:00", "approved", "Mon 21:00")],
+      }),
+      now: "Tue 09:00",
+      verdict: satisfied("Tue 00:00"),
+    },
+    {
       name: "with a cover waiting: Missed, its penalty held",
       facts: cameraDay({ cover: cover("waiting") }),
       now: "Tue 10:00",
@@ -350,6 +359,27 @@ describe("a Weekly count week of 3", () => {
       facts: week({ evidence: [evidence("Mon 10:00", "rejected", "Mon 11:00")] }),
       now: "Mon 12:00",
       verdict: { kind: "open" },
+    },
+    {
+      name: "at its target with a cover approved at its due time: approved evidence beats the cover",
+      facts: week({
+        cover: cover("approved", "Mon+1 00:00"),
+        evidence: approvedOn("2026-01-05", "2026-01-06", "2026-01-07"),
+      }),
+      now: "Mon+1 09:00",
+      verdict: satisfied("Mon+1 00:00"),
+    },
+    {
+      name: "short with evidence waiting and a cover approved at its due time: Excused",
+      facts: week({
+        cover: cover("approved", "Mon+1 00:00"),
+        evidence: [
+          ...approvedOn("2026-01-05", "2026-01-06"),
+          evidence("Sun 10:00", undefined, undefined, "2026-01-11"),
+        ],
+      }),
+      now: "Mon+1 09:00",
+      verdict: excused("Mon+1 00:00"),
     },
     {
       name: "short with evidence waiting under an approved cover: Excused",

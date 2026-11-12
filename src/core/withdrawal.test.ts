@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import type { AccountId, Schedule } from "../shared/types.ts";
 import type { Notification } from "./ports.ts";
 import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, recordPayment, submit } from "./testing/camera-pact.ts";
-import { changed, ok, pactOf, statusOn } from "./testing/queries.ts";
+import { changed, ok, owed, pactOf, penaltyDays, statusOn } from "./testing/queries.ts";
 import { changeRequestIdOf, scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 
 /** Every notification about `itemId` sent to any of `accounts`. */
@@ -26,6 +26,38 @@ function queued(reviewer: AccountHandle): string[] {
 /** The ids on the owner's waiting list. */
 function waiting(owner: AccountHandle): string[] {
   return owner.today().waiting.map((item) => item.id);
+}
+
+/** How the Weekly count week starting `monday` stands on its heat map. */
+function weekStatus(owner: AccountHandle, pactId: string, monday: string) {
+  const { history } = pactOf(owner, pactId);
+  if (history.kind !== "weekly-count") throw new Error(`a ${history.kind} heat map`);
+  return history.weeks.find((week) => week.date === monday)?.occurrence?.status.kind;
+}
+
+/**
+ * A Weekly count 3× pact with an approved excuse for Thu+1, Wed+1 evidence
+ * approved when `wednesdayApproved`, and evidence submitted Sat+1 22:00 and
+ * Sun+1 22:00 still waiting when the week is judged Excused at Mon+2 00:00.
+ */
+async function excusedWeekWithTwoWaiting(wednesdayApproved: boolean) {
+  const s = scenario();
+  const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+  const piano = await createPact("Piano", { kind: "weekly-count", target: 3 });
+  s.setClockTo("Tue+1 10:00");
+  const excuse = ok(
+    await owner.fileExcuse(piano, { from: s.date("Thu+1"), to: s.date("Thu+1"), reason: "Recital" }, []),
+  );
+  ok(await reviewer.decide(excuse.excuseId, { kind: "approve" }));
+  s.setClockTo("Wed+1 10:00");
+  if (wednesdayApproved) ok(await reviewer.decide(await submit(owner, piano), { kind: "approve" }));
+  s.setClockTo("Sat+1 22:00");
+  const saturday = await submit(owner, piano);
+  s.setClockTo("Sun+1 22:00");
+  const sunday = await submit(owner, piano);
+  await s.advanceTo("Mon+2 00:00");
+  expect(weekStatus(owner, piano, s.date("Mon+1"))).toBe("excused");
+  return { s, owner, reviewer, piano, saturday, sunday };
 }
 
 describe("moot items are withdrawn with their reason, silently", () => {
@@ -184,10 +216,22 @@ describe("moot items are withdrawn with their reason, silently", () => {
     });
     expect(aboutItem(s, [owner, reviewer, second], extra)).toHaveLength(told);
   });
+
+  test("evidence on a Weekly count week judged Excused that couldn't reach the target even with every waiting piece approved is no longer needed", async () => {
+    const { s, owner, reviewer, saturday, sunday } = await excusedWeekWithTwoWaiting(false);
+
+    for (const id of [saturday, sunday]) {
+      expect(queued(reviewer)).not.toContain(id);
+      expect(waiting(owner)).not.toContain(id);
+      expect(owner.evidence(id)).toMatchObject({
+        evidence: { state: { kind: "withdrawn", reason: "no-longer-needed", withdrawnAt: s.at("Mon+2 00:00") } },
+      });
+    }
+  });
 });
 
 describe("items whose decision still matters stay", () => {
-  test("evidence for a day an approved excuse already made Excused stays: approving it would make the day Satisfied", async () => {
+  test("evidence for a day an approved excuse already made Excused stays, and approving it makes the day Satisfied with no penalty", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", EVERY_DAY);
@@ -204,6 +248,40 @@ describe("items whose decision still matters stay", () => {
     expect(queued(reviewer)).toContain(evidenceId);
     expect(waiting(owner)).toContain(evidenceId);
     expect(owner.evidence(evidenceId)).toMatchObject({ evidence: { state: { kind: "waiting" } } });
+
+    ok(await reviewer.decide(evidenceId, { kind: "approve" }));
+
+    expect(statusOn(owner, gym, s.date("Thu"))).toBe("satisfied");
+    expect(penaltyDays(owner)).not.toContain(s.date("Thu"));
+  });
+
+  test("on a Weekly count week judged Excused, two waiting pieces that reach the target only together stay, and approving both makes the week Satisfied with no penalty", async () => {
+    const { s, owner, reviewer, piano, saturday, sunday } = await excusedWeekWithTwoWaiting(true);
+
+    for (const id of [saturday, sunday]) {
+      expect(queued(reviewer)).toContain(id);
+      expect(waiting(owner)).toContain(id);
+    }
+
+    ok(await reviewer.decide(saturday, { kind: "approve" }));
+    expect(queued(reviewer)).toContain(sunday);
+    ok(await reviewer.decide(sunday, { kind: "approve" }));
+
+    expect(weekStatus(owner, piano, s.date("Mon+1"))).toBe("satisfied");
+    expect(owed(owner)).toBe(0);
+  });
+
+  test("on a Weekly count week judged Excused, rejecting one of two pieces that reach the target only together withdraws the other", async () => {
+    const { s, owner, reviewer, piano, saturday, sunday } = await excusedWeekWithTwoWaiting(true);
+
+    ok(await reviewer.decide(saturday, { kind: "reject", reason: "Blurry" }));
+
+    expect(queued(reviewer)).not.toContain(sunday);
+    expect(waiting(owner)).not.toContain(sunday);
+    expect(owner.evidence(sunday)).toMatchObject({
+      evidence: { state: { kind: "withdrawn", reason: "no-longer-needed", withdrawnAt: s.at("Mon+2 00:00") } },
+    });
+    expect(weekStatus(owner, piano, s.date("Mon+1"))).toBe("excused");
   });
 
   test("evidence for an open day, an excuse for a day not judged yet and one for a Missed day, and a payment stay", async () => {
