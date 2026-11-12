@@ -571,8 +571,8 @@ class Core implements PactCore {
     // Every call first checks that the account exists, so no feature function
     // has to: a query as an unknown account throws `UnknownAccountError`, and
     // a command (or `photo`) rejects with it, having written nothing. The
-    // check is per call, since a view may be kept, and synchronous with the
-    // command's transaction, so nothing comes between them.
+    // check runs once per call, since a view may be kept, before the command's
+    // work. It need not share the command's transaction: nothing deletes accounts.
     const exists = () => void accountRow(this.#ctx, accountId);
     const queries: Queries = {
       invite: (token) => invitePage(this.#ctx, accountId, token),

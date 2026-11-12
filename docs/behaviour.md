@@ -99,17 +99,17 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 
 ### Oura Ring
 
-- The first long sleep that starts in the night window decides the night: Satisfied if it starts by the in-bed-by time, Missed if later. No sleep by the time the night closes means Missed at close. The first long sleep is stored on the night as it arrives, with when it arrived, and the night is settled from it (`judgeNights`, `bedtime.ts:168`). Test: `bedtime.test.ts`.
+- The first long sleep that starts in the night window decides the night: Satisfied if it starts by the in-bed-by time, Missed if later. No sleep by the time the night closes means Missed at close. The first long sleep is stored on the night as it arrives, with when it arrived, and the night is settled from it (`judgeNights`, `bedtime.ts:167`). Test: `bedtime.test.ts`.
 - An approved excuse beats a late sleep. A sleep on time beats an excuse (`verdictOf`; decided in pact-v0 ticket 08).
-- If no Oura data has come in by 15:00 the next day, the owner gets one push for that night and a No Oura data card, unless the night is no longer something to do (`noOuraDataPushAt`, `occurrences.ts:525`; `pushNoOuraData`, `bedtime.ts:137`). Test: `oura-no-data.test.ts`.
+- If no Oura data has come in by 15:00 the next day, the owner gets one push for that night and a No Oura data card, unless the night is no longer something to do (`noOuraDataPushAt`, `occurrences.ts:525`; `pushNoOuraData`, `bedtime.ts:136`). Test: `oura-no-data.test.ts`.
 - Oura is asked at most every 15 seconds when the owner checks now (`checkOura`, `bedtime.ts:28`). A failed fetch is logged and retried next tick and affects only that account. A revoked token marks the connection Needs reconnecting and stops calls for that account (decided in pact-v0 tickets 08 and 09). Disconnecting deletes the tokens.
 
 ### Anki
 
-- An Anki day is Satisfied at the first check showing 0 new, 0 learning and 0 review cards left (`recordAnkiChecks`, `anki-days.ts:174`, which settles the day). Test: `anki-days.test.ts`.
+- An Anki day is Satisfied at the first check showing 0 new, 0 learning and 0 review cards left (`recordAnkiChecks`, `anki-days.ts:172`, which settles the day). Test: `anki-days.test.ts`.
 - Days still to do are polled every 10 minutes, and the owner can check now at most every 15 seconds (`ANKI_POLL_INTERVAL_MS`, `anki-days.ts:15`; `ankiDaysWaiting`, `anki-days.ts:91`).
 - A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts:18`).
-- Losing the connection marks it Needs reconnecting (`markDisconnected`, `connections.ts:91`). A deck that no longer exists raises an alert (`anki_pact_deck`).
+- Losing the connection marks it Needs reconnecting (`markDisconnected`, `connections.ts:87`). A deck that no longer exists raises an alert (`anki_pact_deck`).
 
 ## Covers: excuses, vacations and holds
 
@@ -191,7 +191,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
   - Camera: sent while no evidence is in for the occurrence and it is not judged.
   - Weekly count: sent on a day with no evidence, while approved and waiting days are fewer than the target. Test: `reminders.test.ts`.
 - Today shows alerts with connection problems first, then bills, then the rest newest first (`todayAlerts`, `today.ts:128`). Its sections are No Oura data, To do (bills included, by due time), Missed, Automatic and Coming up (`todaySections`, `today.ts:159`). Missed shows days whose excuse window is still open (rule R3), without misses from a rejection, days on a waiting cover, or days on a rejected excuse while its alert stands, whether the day was judged before or after the rejection: the alert files another excuse for them (`recentlyMissed`, `today.ts`; `rejectedExcuseAlertStandsSql`, `excuses.ts`). Test: `excuses.test.ts` "a rejected excuse with days not judged yet".
-- Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:179`). Test: `invites.test.ts`.
+- Invites are single use and last 7 days. Your own invite, or one from someone already a friend, is refused (`INVITE_LIFETIME_MS`, `accounts.ts:168`). Test: `invites.test.ts`.
 
 ## Text and request limits
 
