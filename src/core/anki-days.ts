@@ -4,12 +4,12 @@
 import type { AccountId, AnkiDecksResult } from "../shared/types.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
-import { noteAnkiResult, type AnkiChecksRunning } from "./judging.ts";
+import { noteAnkiResult } from "./judging.ts";
 import { coverOn } from "./covers.ts";
 import { isJudged } from "./occurrence-state.ts";
 import type { AnkiCountsResult, AnkiSource } from "./ports.ts";
-import { runningAnkiChecks, settle } from "./settle.ts";
-import { accountRow, ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
+import { settle } from "./settle.ts";
+import { ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
 
 /** The core ignores a check of AnkiWeb now this soon after the account's last one. */
 const ANKI_CHECK_INTERVAL_MS = 15_000;
@@ -31,7 +31,8 @@ export interface AnkiPolling {
   readonly polls: Map<AccountId, number>;
   /**
    * When each check of AnkiWeb still running started, by account, from a tick
-   * or check now. In memory: a check doesn't outlive the process.
+   * or check now. In memory: a check doesn't outlive the process. Judging
+   * reads it through the context (`ctx.ankiChecksRunning`).
    */
   readonly checksRunning: Map<AccountId, Set<{ startedAt: number }>>;
 }
@@ -42,7 +43,6 @@ export async function ankiDecks(
   ankiSource: AnkiSource,
   command: Command,
 ): Promise<AnkiDecksResult> {
-  accountRow(ctx, accountId);
   if (!hasConnection(ctx, accountId, "anki")) return { ok: false, reason: "not-connected" };
   const askedAt = ctx.clock.now();
   let result;
@@ -76,13 +76,12 @@ export async function checkAnki(
   ankiSource: AnkiSource,
   command: Command,
 ): Promise<void> {
-  accountRow(ctx, accountId);
   const now = ctx.clock.now();
   if (checkedWithin(polling.checks, accountId, now, ANKI_CHECK_INTERVAL_MS)) return;
   if (ankiDaysWaiting(ctx, now, accountId).length === 0) return;
   polling.checks.set(accountId, now.getTime());
   const fetched = await fetchAnki(ctx, ankiSource, polling, now, accountId);
-  await command(() => recordAnkiChecks(ctx, fetched, polling.checksRunning));
+  await command(() => recordAnkiChecks(ctx, fetched));
 }
 
 /**
@@ -166,11 +165,11 @@ export async function fetchAnki(
  * Records each check AnkiWeb answered, deck by deck, and settles the day of
  * each Active Anki pact on a checked deck it found finished (New, Learn and
  * Due all 0) for that day, evaluated before its due time: Satisfied as of
- * the check (`verdictOf`), given the checks of AnkiWeb still running. A deck
+ * the check (`verdictOf`). A deck
  * gone from the collection records nothing. A refused login marks the
  * connection Needs reconnecting.
  */
-export function recordAnkiChecks(ctx: CoreContext, fetched: FetchedAnki[], checksRunning: AnkiChecksRunning): void {
+export function recordAnkiChecks(ctx: CoreContext, fetched: FetchedAnki[]): void {
   for (const { account, result, checkedAt } of fetched) {
     if (!result.ok) {
       markDisconnected(ctx, "anki", account, checkedAt);
@@ -211,7 +210,7 @@ export function recordAnkiChecks(ctx: CoreContext, fetched: FetchedAnki[], check
       // The deck the day is on: a deck change approved since it opened applies from the next.
       const counts = result.decks[ankiDeckOn(ctx, pact.id, day.date)];
       if (!counts || counts.new + counts.learn + counts.review > 0) continue;
-      const settled = settle(ctx, pact.id, day.date, checkedAt, runningAnkiChecks(checksRunning, account));
+      const settled = settle(ctx, pact.id, day.date, checkedAt);
       if (settled?.to.kind === "satisfied") noteAnkiResult(ctx, pact.id, day.date, { cardsLeft: 0, checkedAt });
     }
   }

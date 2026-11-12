@@ -550,7 +550,7 @@ export interface HealthResponse {
   commit: string | null;
 }
 
-/** Body of every non-2xx /api response. */
+/** Body of every non-2xx /api response. `server-error` is a 500: a handler threw. */
 export interface ApiErrorResponse {
-  error: "unauthenticated" | "invalid-request" | "not-found" | "photo-too-large" | "body-too-large";
+  error: "unauthenticated" | "invalid-request" | "not-found" | "photo-too-large" | "body-too-large" | "server-error";
 }

@@ -21,7 +21,7 @@ import type {
 import type { CoreContext } from "./context.ts";
 import { notificationSettings } from "./outbox.ts";
 import { isPushDevice } from "./push-devices.ts";
-import { accountRow, areFriends, byName, friendshipPair, selectRecipients } from "./rows.ts";
+import { areFriends, byName, friendshipPair, selectRecipients } from "./rows.ts";
 import { nameTooLong } from "./text-limits.ts";
 
 export function signIn(
@@ -60,7 +60,6 @@ export function accountIdForEmail(ctx: CoreContext, email: string): AccountId | 
 }
 
 export function setTimezone(ctx: CoreContext, accountId: AccountId, timezone: string): SetTimezoneResult {
-  accountRow(ctx, accountId);
   const zone = canonicalTimezone(timezone);
   if (zone === null) return { ok: false, reason: "invalid-timezone" };
   ctx.db.prepare(`UPDATE account SET timezone = ? WHERE id = ?`).run(zone, accountId);
@@ -68,7 +67,6 @@ export function setTimezone(ctx: CoreContext, accountId: AccountId, timezone: st
 }
 
 export function createInvite(ctx: CoreContext, accountId: AccountId): Invite {
-  accountRow(ctx, accountId);
   const token = randomBytes(24).toString("base64url");
   const now = ctx.clock.now();
   const expiresAt = new Date(now.getTime() + INVITE_LIFETIME_MS);
@@ -79,12 +77,10 @@ export function createInvite(ctx: CoreContext, accountId: AccountId): Invite {
 }
 
 export function invitePage(ctx: CoreContext, accountId: AccountId, token: string): InviteLookup {
-  accountRow(ctx, accountId);
   return inviteLookup(ctx, inviteRow(ctx, token), accountId);
 }
 
 export function acceptInvite(ctx: CoreContext, accountId: AccountId, token: string): AcceptInviteResult {
-  accountRow(ctx, accountId);
   const row = inviteRow(ctx, token);
   if (!row) return { ok: false, reason: "invite-not-found" };
   const lookup = inviteLookup(ctx, row, accountId);
@@ -102,7 +98,6 @@ export function acceptInvite(ctx: CoreContext, accountId: AccountId, token: stri
 }
 
 export function friendList(ctx: CoreContext, accountId: AccountId): Friend[] {
-  accountRow(ctx, accountId);
   const friends = ctx.all<Friend>(
     `SELECT account.id, account.name FROM friendship
        JOIN account ON account.id =
@@ -116,7 +111,6 @@ export function friendList(ctx: CoreContext, accountId: AccountId): Friend[] {
 }
 
 export function addRecipient(ctx: CoreContext, accountId: AccountId, recipient: NewRecipient): AddRecipientResult {
-  accountRow(ctx, accountId);
   const name = recipient.name.trim();
   if (name === "") return { ok: false, reason: "blank-name" };
   if (nameTooLong(name)) return { ok: false, reason: "text-too-long" };
@@ -128,12 +122,10 @@ export function addRecipient(ctx: CoreContext, accountId: AccountId, recipient: 
 }
 
 export function recipientList(ctx: CoreContext, accountId: AccountId): Recipient[] {
-  accountRow(ctx, accountId);
   return selectRecipients(ctx, `owner_account_id = ?`, accountId);
 }
 
 export function notificationSettingList(ctx: CoreContext, accountId: AccountId): NotificationSettingState[] {
-  accountRow(ctx, accountId);
   return notificationSettings(ctx, accountId);
 }
 
@@ -143,7 +135,6 @@ export function setNotificationSetting(
   setting: NotificationSetting,
   enabled: boolean,
 ): NotificationSettingState[] {
-  accountRow(ctx, accountId);
   if (enabled) {
     ctx.db.prepare(`DELETE FROM notification_setting_off WHERE account_id = ? AND setting = ?`).run(accountId, setting);
   } else {
@@ -159,7 +150,6 @@ export function savePushSubscription(
   accountId: AccountId,
   device: PushDevice,
 ): SavePushSubscriptionResult {
-  accountRow(ctx, accountId);
   if (!isPushDevice(device)) return { ok: false, reason: "invalid-subscription" };
   ctx.db
     .prepare(
@@ -172,7 +162,6 @@ export function savePushSubscription(
 }
 
 export function removePushSubscription(ctx: CoreContext, accountId: AccountId, endpoint: string): void {
-  accountRow(ctx, accountId);
   ctx.db.prepare(`DELETE FROM push_subscription WHERE endpoint = ? AND account_id = ?`).run(endpoint, accountId);
 }
 

@@ -34,7 +34,6 @@ import {
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { coveredSql, coverOn, coversOn, excusableUntil, excuseWindowOpensSql } from "./covers.ts";
-import type { AnkiChecksRunning } from "./judging.ts";
 import { dueAfterEnd, occurrenceSpan } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
@@ -665,11 +664,10 @@ export function decideVacation(
   vacation: VacationToDecide,
   decided: Decided,
   reviewerId: AccountId,
-  ankiChecksRunning: AnkiChecksRunning,
 ): void {
   const now = ctx.clock.now();
   recordDecision(ctx, "vacation", vacation.id, decided, reviewerId, now);
-  settleVacationDays(ctx, vacation.id, now, ankiChecksRunning);
+  settleVacationDays(ctx, vacation.id, now);
   const { first_day: from, last_day: to } = vacation;
   const released = decided.outcome === "rejected" ? releasedDays(ctx, vacation.id, now.toISOString(), now) : null;
   const { timezone } = accountRow(ctx, vacation.owner_account_id);
@@ -694,12 +692,7 @@ export function decideVacation(
 }
 
 /** The owner withdraws their vacation `vacationId` while it waits for approval. */
-export function withdrawVacation(
-  ctx: CoreContext,
-  ownerId: AccountId,
-  vacationId: string,
-  ankiChecksRunning: AnkiChecksRunning,
-): WithdrawVacationResult {
+export function withdrawVacation(ctx: CoreContext, ownerId: AccountId, vacationId: string): WithdrawVacationResult {
   const row = ctx.one<{ decision: string | null; withdrawn_at: string | null }>(
     `SELECT decision, withdrawn_at FROM vacation WHERE id = ? AND owner_account_id = ?`,
     vacationId,
@@ -711,19 +704,19 @@ export function withdrawVacation(
   ctx.db
     .prepare(`UPDATE vacation SET withdrawn_at = ?, withdrawn_reason = 'owner' WHERE id = ?`)
     .run(now.toISOString(), vacationId);
-  settleVacationDays(ctx, vacationId, now, ankiChecksRunning);
+  settleVacationDays(ctx, vacationId, now);
   return { ok: true };
 }
 
 /** Settles every day the vacation covers, pact by pact (`settleCoverDays`). */
-function settleVacationDays(ctx: CoreContext, vacationId: string, now: Date, anki: AnkiChecksRunning): void {
+function settleVacationDays(ctx: CoreContext, vacationId: string, now: Date): void {
   const days = ctx.all<{ pact_id: string; date: LocalDate }>(
     `SELECT pact_id, date FROM vacation_day WHERE vacation_id = ? ORDER BY pact_id, date`,
     vacationId,
   );
   for (const pactId of new Set(days.map((day) => day.pact_id))) {
     const dates = days.filter((day) => day.pact_id === pactId).map((day) => day.date);
-    settleCoverDays(ctx, pactId, dates, now, anki);
+    settleCoverDays(ctx, pactId, dates, now);
   }
 }
 

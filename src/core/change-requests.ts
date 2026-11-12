@@ -159,7 +159,6 @@ export function changeRequestPage(
   accountId: AccountId,
   changeRequestId: string,
 ): ChangeRequestResult {
-  accountRow(ctx, accountId);
   const row = changeRequestRow(ctx, changeRequestId);
   if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
   const state = itemStateOf(
@@ -180,7 +179,6 @@ export function withdrawChangeRequest(
   accountId: AccountId,
   changeRequestId: string,
 ): WithdrawChangeRequestResult {
-  accountRow(ctx, accountId);
   const row = changeRequestRow(ctx, changeRequestId);
   if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };
@@ -759,13 +757,13 @@ export const changeRequestKind: RequestKindHandler<StoredChangeRequest> = {
   reviewable: (ctx, row) =>
     (ctx.db.prepare(`SELECT stage FROM pact WHERE id = ?`).get(row.pact_id) as Pick<PactRow, "stage">).stage ===
     "active",
-  checkDecision(ctx, row, decided, ankiChecksRunning) {
+  checkDecision(ctx, row, decided) {
     if (decided.outcome === "rejected") return null;
     // Judging catches up on the pact first, as the scheduler would have: a change never
     // rescues an occurrence already due, and an end approved with nothing open leaves none
     // unjudged. Judging may End it, which withdraws the request.
     const [pact] = pactsToJudge(ctx, row.pact_id);
-    settlePactDueBy(ctx, pact!, ctx.clock.now(), ankiChecksRunning);
+    settlePactDueBy(ctx, pact!, ctx.clock.now());
     if (waitingChangeRequestId(ctx, row.pact_id) !== row.id) return "item-not-found";
     return approvableNow(ctx, row) ? null : "deadline-too-soon";
   },

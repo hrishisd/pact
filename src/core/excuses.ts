@@ -29,7 +29,6 @@ import {
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { coversOn, excuseWindowOpensSql } from "./covers.ts";
-import type { AnkiChecksRunning } from "./judging.ts";
 import { dueAfterEnd, occurrenceSpan, occurrenceStatus, skipReason } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
@@ -150,7 +149,6 @@ export async function fileExcuse(
 }
 
 export function excusePage(ctx: CoreContext, accountId: AccountId, excuseId: string): ExcuseResult {
-  accountRow(ctx, accountId);
   const pact = excusePact(ctx, excuseId);
   if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
   const row = ctx.db
@@ -186,7 +184,6 @@ export function acceptExcuseRejection(
   accountId: AccountId,
   excuseId: string,
 ): AcceptExcuseRejectionResult {
-  accountRow(ctx, accountId);
   const pact = excusePact(ctx, excuseId);
   if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
   const now = ctx.clock.now().toISOString();
@@ -346,20 +343,14 @@ export function excuseDatesText(ctx: CoreContext, excuseId: string): string {
  * excused. Rejected: nothing to change, as its holds are released by no
  * longer waiting and its days are judged as usual.
  */
-export function decideExcuse(
-  ctx: CoreContext,
-  excuse: ExcuseToDecide,
-  decided: Decided,
-  reviewerId: AccountId,
-  ankiChecksRunning: AnkiChecksRunning,
-): void {
+export function decideExcuse(ctx: CoreContext, excuse: ExcuseToDecide, decided: Decided, reviewerId: AccountId): void {
   const { outcome, reason } = decided;
   const now = ctx.clock.now();
   recordDecision(ctx, "excuse", excuse.id, decided, reviewerId, now);
   const days = ctx
     .all<{ date: LocalDate }>(`SELECT date FROM excuse_day WHERE excuse_id = ?`, excuse.id)
     .map((row) => row.date);
-  settleCoverDays(ctx, excuse.pact_id, days, now, ankiChecksRunning);
+  settleCoverDays(ctx, excuse.pact_id, days, now);
   const dates = excuseDatesText(ctx, excuse.id);
   ctx.enqueue({
     recipient: excuse.owner_account_id,

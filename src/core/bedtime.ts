@@ -13,7 +13,7 @@ import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./o
 import { nightStartsAt, noOuraDataPushAt, type Occurrence } from "./occurrences.ts";
 import { nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
 import type { OuraSleepPeriod, OuraSource } from "./ports.ts";
-import { accountRow, connectionProblem, occurrencesOf, ouraOffset } from "./rows.ts";
+import { connectionProblem, occurrencesOf, ouraOffset } from "./rows.ts";
 import { settle } from "./settle.ts";
 
 /** The core ignores a check of Oura now this soon after the account's last one. */
@@ -26,7 +26,6 @@ export async function checkOura(
   ouraSource: OuraSource,
   command: Command,
 ): Promise<void> {
-  accountRow(ctx, accountId);
   const now = ctx.clock.now();
   if (checkedWithin(ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS)) return;
   ouraChecks.set(accountId, now.getTime());

@@ -244,7 +244,7 @@ export class VerdictCheck {
       for (const date of new Set([...opened, ...storedDates])) {
         const stored = storedOf(ctx, pact.id, date);
         const checks = this.#watch.ankiChecks(pact.owner);
-        const facts = occurrenceFacts(ctx, pact.id, date, { ankiChecks: checks, occurrences });
+        const facts = occurrenceFacts(ctx, pact.id, date, { occurrences });
         if (facts === null) {
           if (stored.outcome !== null || stored.penalties.length > 0) {
             found.push({ pactId: pact.id, date, stored, verdict: { kind: "not-the-pacts" }, facts: null });
@@ -259,6 +259,8 @@ export class VerdictCheck {
             arrivedAt: sleep?.arrivedAt ?? null,
           };
         }
+        // The checks as the watch saw them, answered ones too: the context here has none.
+        if (facts.automatic?.kind === "anki") facts.automatic = { ...facts.automatic, checks };
         if (facts.automatic?.kind === "anki" && facts.automatic.finishedAt !== null) {
           // The check that found the deck finished was recorded when it was answered.
           const finishedAt = facts.automatic.finishedAt.getTime();
@@ -284,7 +286,15 @@ export class VerdictCheck {
     const unused = () => {
       throw new Error("the verdict check only reads");
     };
-    return createContext({ db: this.#db, clock: this.#clock, newId: unused, log: unused, enqueue: unused });
+    return createContext({
+      db: this.#db,
+      clock: this.#clock,
+      newId: unused,
+      log: unused,
+      enqueue: unused,
+      // The check reads the checks of AnkiWeb from its own watch, not the core's memory.
+      ankiChecksRunning: new Map(),
+    });
   }
 }
 

@@ -109,7 +109,6 @@ export function acceptMiss(
   pactId: string,
   occurrenceDate: string,
 ): AcceptMissResult {
-  accountRow(ctx, accountId);
   const isOwn = ctx.db.prepare(`SELECT 1 FROM pact WHERE id = ? AND owner_account_id = ?`).get(pactId, accountId);
   if (!isOwn) return { ok: false, reason: "pact-not-found" };
   const now = ctx.clock.now().toISOString();
@@ -132,7 +131,6 @@ export function acceptMiss(
 }
 
 export function evidencePage(ctx: CoreContext, accountId: AccountId, evidenceId: string): EvidenceResult {
-  accountRow(ctx, accountId);
   const row = ctx.one<ReviewStateRow & EvidenceViewRow & Pick<RequestRow, "withdrawn_at" | "withdrawn_reason">>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, evidence.occurrence_date, evidence.day,
               evidence.submitted_at, evidence.withdrawn_at, evidence.withdrawn_reason, ${reviewStateColumns("evidence")}

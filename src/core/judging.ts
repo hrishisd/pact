@@ -1,5 +1,5 @@
-// Judging's helpers for `settle`: when a running check of AnkiWeb holds
-// judging, the Missed push, and what decided an Anki day. Ending pacts is
+// Judging's helpers for `settle`: how long a running check of AnkiWeb can
+// hold judging, the Missed push, and what decided an Anki day. Ending pacts is
 // `ending.ts`.
 
 import { APP_PATHS } from "../shared/api.ts";
@@ -19,24 +19,10 @@ export const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
 
 /**
  * When each check of AnkiWeb still running started, by account. `Core` keeps
- * it in memory; judging only reads it.
+ * it in memory; judging only reads it, from the context
+ * (`ctx.ankiChecksRunning`).
  */
 export type AnkiChecksRunning = ReadonlyMap<AccountId, ReadonlySet<{ startedAt: number }>>;
-
-/**
- * Whether a check of the account's AnkiWeb that started before `day`'s due
- * time is still running at `t`, and not for so long it's given up.
- */
-export function ankiCheckHolds(
-  ankiChecksRunning: AnkiChecksRunning,
-  account: AccountId,
-  day: Occurrence,
-  t: Date,
-): boolean {
-  return [...(ankiChecksRunning.get(account) ?? [])].some(
-    ({ startedAt }) => startedAt < day.dueAt.getTime() && t.getTime() - startedAt < ANKI_CHECK_HOLDS_JUDGING_MS,
-  );
-}
 
 /** Tells the owner the occurrence is Missed, with what it costs; `settle` decides when. */
 export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate): void {

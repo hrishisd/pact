@@ -18,7 +18,6 @@ import type {
   WithdrawnReason,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
-import type { AnkiChecksRunning } from "./judging.ts";
 
 export type RequestKind = ReviewItem["kind"];
 
@@ -61,14 +60,9 @@ export interface RequestKindHandler<P extends RequestRow> {
    * A refusal a decision meets besides the shared ones, or null. May catch
    * judging up first (change request), as the scheduler would have.
    */
-  checkDecision?(
-    ctx: CoreContext,
-    item: P,
-    decided: Decided,
-    ankiChecksRunning: AnkiChecksRunning,
-  ): DecideRefusal | null;
+  checkDecision?(ctx: CoreContext, item: P, decided: Decided): DecideRefusal | null;
   /** Records the decision and does what it does: plain code, per kind. */
-  apply(ctx: CoreContext, item: P, decided: Decided, reviewerId: AccountId, ankiChecksRunning: AnkiChecksRunning): void;
+  apply(ctx: CoreContext, item: P, decided: Decided, reviewerId: AccountId): void;
   /**
    * How a notification names the item after "your" or "their" ("evidence for
    * Gym", "$10 payment to Sam"), and the owner's page for it.

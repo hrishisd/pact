@@ -10,7 +10,7 @@
 // approved evidence (Excused to Satisfied, vacation spec "Judging and money")
 // moves it after that.
 
-import type { ClockTime, LocalDate, Schedule } from "../shared/types.ts";
+import type { AccountId, ClockTime, LocalDate, Schedule } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { coverOn, type Cover } from "./covers.ts";
 import { ANKI_CHECK_HOLDS_JUDGING_MS } from "./judging.ts";
@@ -270,20 +270,31 @@ export function dueJudgedFrom(facts: OccurrenceFacts, now: Date): Date | null {
 }
 
 /**
+ * Whether a check of AnkiWeb holds judging the pact's Anki day dated `date`,
+ * due by `t`: `dueJudgedFrom` has no time for it yet. The tick stops at such
+ * a day, and a pact whose last day it is doesn't end yet.
+ */
+export function ankiCheckHolds(ctx: CoreContext, pactId: string, date: LocalDate, t: Date): boolean {
+  const facts = occurrenceFacts(ctx, pactId, date);
+  return facts !== null && dueJudgedFrom(facts, t) === null;
+}
+
+/**
  * The facts `verdictOf` judges the pact's occurrence dated `date` by, as
  * stored, or null if the pact has no occurrence that day. One fact isn't
  * stored: the checks of AnkiWeb and when each was answered, which only the
- * core holds, in memory (`ankiChecks`, none unless given; a finished check's
- * answer reads as recorded when it started). A bedtime night's first sleep
+ * core holds, in memory. The ones still running are read from the context
+ * (`ctx.ankiChecksRunning`); a finished check's answer reads as recorded
+ * when it started. A bedtime night's first sleep
  * period is stored on the occurrence when it arrives (`judgeNights`).
  */
 export function occurrenceFacts(
   ctx: CoreContext,
   pactId: string,
   date: LocalDate,
-  known: { ankiChecks?: AnkiCheckRun[]; occurrences?: Occurrences; supposing?: SupposedDecision } = {},
+  known: { occurrences?: Occurrences; supposing?: SupposedDecision } = {},
 ): OccurrenceFacts | null {
-  const pact = ctx.one<{ timezone: string; ended_at: string | null; evidence_kind: string; owner: string }>(
+  const pact = ctx.one<{ timezone: string; ended_at: string | null; evidence_kind: string; owner: AccountId }>(
     `SELECT account.timezone, pact.ended_at, pact.evidence_kind, pact.owner_account_id AS owner
        FROM pact JOIN account ON account.id = pact.owner_account_id WHERE pact.id = ?`,
     pactId,
@@ -360,7 +371,10 @@ export function occurrenceFacts(
       kind: "anki",
       finishedAt: finished ? new Date(finished.checked_at) : null,
       recordedAt: finished ? new Date(finished.checked_at) : null,
-      checks: known.ankiChecks ?? [],
+      checks: [...(ctx.ankiChecksRunning.get(pact.owner) ?? [])].map(({ startedAt }) => ({
+        startedAt: new Date(startedAt),
+        finishedAt: null,
+      })),
     };
   }
   return {
