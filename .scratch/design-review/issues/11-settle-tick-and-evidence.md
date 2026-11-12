@@ -7,24 +7,24 @@ Closes: F4 and rule R4 (`../interaction-audit.md` finding 4, probe P2); H3 steps
 
 ## Problem
 
-A Weekly count week judged Missed by a late evidence decision gets no Missed push. `decideEvidence` judges the week with `tell=false` (`src/core/evidence.ts:245-252`) on the assumption in the comment at `src/core/judging.ts:142-147` that the decision push tells the owner enough. Scenario: the owner did 2 of 3 sessions; the reviewer approves the second photo late. The owner sees "Sam approved your evidence" and never learns the week cost $10 until the bill. Probe P2 (`../probes/audit-probes.test.ts.txt`, "probe 2") showed exactly that push and a $10 penalty.
+A Weekly count week judged Missed by a late evidence decision gets no Missed push. `decideEvidence` judges the week with `tell=false` (`src/core/evidence.ts`) on the assumption in the comment at `src/core/judging.ts` that the decision push tells the owner enough. Scenario: the owner did 2 of 3 sessions; the reviewer approves the second photo late. The owner sees "Sam approved your evidence" and never learns the week cost $10 until the bill. Probe P2 (`../probes/audit-probes.test.ts.txt`, "probe 2") showed exactly that push and a $10 penalty.
 
-The cause is structural: four judging paths each decide for themselves whether the owner hears about a Missed outcome (`judging.ts:138`, `judging.ts:156`, `src/core/bedtime.ts:203` and `207`), and two decide nothing (`decideEvidence`, `excuseApprovedDays`).
+The cause is structural: four judging paths each decide for themselves whether the owner hears about a Missed outcome (`judging.ts`, `judging.ts`, `src/core/bedtime.ts` and `207`), and two decide nothing (`decideEvidence`, `excuseApprovedDays`).
 
 ## What to build
 
 - `src/core/settle.ts`: `settle(ctx, pactId, date, now): Transition | null` loads the facts (ticket 10's loader), computes `verdictOf`, compares it with the stored row, and applies the difference: insert or update the `occurrence` row, insert or delete the `penalty`. It returns the transition, and enqueues the Missed push from it (rule R4 below). `settleAll(ctx, t, anki)` replaces the tick's judging for Fixed days, One-time and Weekly count.
 - Rule R4: the owner gets the Missed push whenever an occurrence or week becomes Missed, whatever caused it, with two exceptions that stay as they are: a Fixed-day or One-time rejection tells the owner through the rejection push alone (v0:324), and nobody is told about an occurrence on a waiting cover (`.scratch/pact-v0/issues/07-excuses.md`, and vac:80). The `tell` flag disappears.
-- Replace `judgeAtDueTime` and `judgeWeek` in the tick (`judging.ts:38-157`) with `settleAll`. One-time's end (`judging.ts:210`) is still called from `settle` for now; ticket 13 moves it.
-- Replace the judging in `decideEvidence` (`evidence.ts:240-259`) with `settle`. `excusedAhead`, `judgingReached` and the `isWeekly` branch go.
+- Replace `judgeAtDueTime` and `judgeWeek` in the tick (`judging.ts`) with `settleAll`. One-time's end (`judging.ts`) is still called from `settle` for now; ticket 13 moves it.
+- Replace the judging in `decideEvidence` (`evidence.ts`) with `settle`. `excusedAhead`, `judgingReached` and the `isWeekly` branch go.
 - `judged_through` stays as the tick's cursor.
 - The ticket-10 scenario hook stays on and its known-mismatch list should not grow.
 
 ## Where to start
 
-- `src/core/judging.ts:38-245`, `src/core/evidence.ts:224-275`.
+- `src/core/judging.ts`, `src/core/evidence.ts`.
 - `../architecture-review.md`, H3 "Target design" and "What it makes worse" (every fact change must call `settle`).
-- `weekly-count.test.ts:310` (a week waiting on evidence), `rejection.test.ts:46`.
+- `weekly-count.test.ts` (a week waiting on evidence), `rejection.test.ts`.
 
 ## Acceptance criteria
 

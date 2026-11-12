@@ -7,30 +7,30 @@ Closes: F11, C2 and rule R10 (`../interaction-audit.md` finding 11, `../code-str
 
 ## Decision
 
-Decision 5 in `../spec.md` (rule R10), decided 2026-11-11: the owner has one waiting list with the same rows everywhere, covering all five kinds, vacations included. Today shows all of them and a pact page those that concern the pact, and every row opens the item's own page. This overrides the vacation spec's choice to keep waiting vacations, and questions about them, off Today (vac:104, vac:145, and vac:71 "The question shows on the vacation's Profile card, not on Today"). Because Today's question alerts are built from the waiting list (`src/core/today.ts:81-99`), a question about a vacation also appears on Today; the Profile card keeps its Reply too.
+Decision 5 in `../spec.md` (rule R10), decided 2026-11-11: the owner has one waiting list with the same rows everywhere, covering all five kinds, vacations included. Today shows all of them and a pact page those that concern the pact, and every row opens the item's own page. This overrides the vacation spec's choice to keep waiting vacations, and questions about them, off Today (vac:104, vac:145, and vac:71 "The question shows on the vacation's Profile card, not on Today"). Because Today's question alerts are built from the waiting list (`src/core/today.ts`), a question about a vacation also appears on Today; the Profile card keeps its Reply too.
 
 ## Problem
 
-- Core: Today's waiting list is change requests, evidence, excuses and payments (`src/core/today.ts:102-111`); the pact page's is change requests, evidence and excuses (`src/core/pacts.ts:255-261`). Neither has vacations. `TodayWaitingItem` (`src/shared/types.ts:1064`) has no vacation variant, and not-judged days hide vacation-waiting (`src/core/occurrence-state.ts:180`).
-- Client: Today's Waiting for approval (`src/client/Today.tsx:1077-1139`) handles four kinds: evidence opens the pact, a payment opens the ledger. The pact page's Waiting on (`src/client/PactPage.tsx:335-385`) is a near copy for three kinds, where evidence opens nothing, with the comment "evidence has no page" (`PactPage.tsx:339`), false since `EvidencePage` was added (`src/client/App.tsx:356`). A reviewer's question on Today routes evidence to `EvidencePage` and a payment to `PaymentPage` (`Today.tsx:128-139`). So the same waiting evidence opens three different things, or nothing, depending on where it is tapped. `questionSubject` (`Today.tsx:812-823`) and `openItem` have no vacation case. The three rejection alerts (`Today.tsx:896-1070`) each carry their own refusal table with the same sentence.
+- Core: Today's waiting list is change requests, evidence, excuses and payments (`src/core/today.ts`); the pact page's is change requests, evidence and excuses (`src/core/pacts.ts`). Neither has vacations. `TodayWaitingItem` (`src/shared/types.ts`) has no vacation variant, and not-judged days hide vacation-waiting (`src/core/occurrence-state.ts`).
+- Client: Today's Waiting for approval (`src/client/Today.tsx`) handles four kinds: evidence opens the pact, a payment opens the ledger. The pact page's Waiting on (`src/client/PactPage.tsx`) is a near copy for three kinds, where evidence opens nothing, with the comment "evidence has no page" (`PactPage.tsx`), false since `EvidencePage` was added (`src/client/App.tsx`). A reviewer's question on Today routes evidence to `EvidencePage` and a payment to `PaymentPage` (`Today.tsx`). So the same waiting evidence opens three different things, or nothing, depending on where it is tapped. `questionSubject` (`Today.tsx`) and `openItem` have no vacation case. The three rejection alerts (`Today.tsx`) each carry their own refusal table with the same sentence.
 
 ## What to build
 
 - Core: `waitingFor(ctx, ownerId, scope: { pactId?: string })` written once over the registry (ticket 17), returning one `TodayWaitingItem` union with a vacation variant. Today uses it with no scope; the pact page with `pactId`, where a vacation is included if it covers the pact. Each row carries the item's kind, id, title, detail line and since-time.
-- Client: one `WaitingItemRow` and one `openItem(item)` in `src/client/item-page.tsx`, keyed by `Record<ReviewItem["kind"], ...>` like `ITEM_KINDS` (`item-page.tsx:16-22`), so a missing kind is a type error. Every row opens the item's own page: evidence `EvidencePage`, excuse its page, payment `PaymentPage`, change request its page, vacation the Profile sheet's card (or its own page, if one is cheap; note the choice). Today, the pact page and the question alert all use them. Delete the stale comment at `PactPage.tsx:339` with the code it describes.
+- Client: one `WaitingItemRow` and one `openItem(item)` in `src/client/item-page.tsx`, keyed by `Record<ReviewItem["kind"], ...>` like `ITEM_KINDS` (`item-page.tsx`), so a missing kind is a type error. Every row opens the item's own page: evidence `EvidencePage`, excuse its page, payment `PaymentPage`, change request its page, vacation the Profile sheet's card (or its own page, if one is cheap; note the choice). Today, the pact page and the question alert all use them. Delete the stale comment at `PactPage.tsx` with the code it describes.
 - One shared refusal table for the rejection alerts' Take the L.
 
 ## Where to start
 
-- `src/core/today.ts:81-111`, `src/core/pacts.ts:250-262`, `src/shared/types.ts:1064` and the `PactWaitingItem` type.
-- `src/client/Today.tsx:128-139`, `:812-823`, `:896-1139`; `src/client/PactPage.tsx:335-385`; `src/client/item-page.tsx:16-22`; `src/client/App.tsx:356`.
+- `src/core/today.ts`, `src/core/pacts.ts`, `src/shared/types.ts` and the `PactWaitingItem` type.
+- `src/client/Today.tsx`, `:812-823`, `:896-1139`; `src/client/PactPage.tsx`; `src/client/item-page.tsx`; `src/client/App.tsx`.
 - `../architecture-review.md`, H1 "Migration order" step 2.
 
 ## Acceptance criteria
 
 - [x] New core scenario: a waiting vacation appears in Today's waiting list and on the pact page of each pact it covers, and not on another pact's page.
 - [x] New core scenario: a question about a waiting vacation raises Today's question alert.
-- [x] Rewritten tests that pinned the old rule: the vacation tests asserting Today lists no vacation (`vacations.test.ts`, search "Waiting for approval never" and "questionAlerts"), and the waiting object in `src/server/app.test.ts:1007-1016` if it changes.
+- [x] Rewritten tests that pinned the old rule: the vacation tests asserting Today lists no vacation (`vacations.test.ts`, search "Waiting for approval never" and "questionAlerts"), and the waiting object in `src/server/app.test.ts` if it changes.
 - [x] `Today.test.tsx` and `PactPage.test.tsx`: tapping a waiting evidence row opens `EvidencePage` from both screens; a vacation row opens the vacation.
 - [x] Removing a kind from the client record fails `tsc`; shown by trying it.
 - [x] Update `docs/behaviour.md`.
@@ -54,6 +54,6 @@ Built 2026-11-11.
 - `TodayWaitingItem` gained `{ kind: "vacation", id, firstDate, lastDate, filedAt }`. Rows keep their kind's own fields rather than a core-made title and detail line: the client words dates and money, as everywhere else.
 - Client: `ItemOpeners`, `openItem` and `WaitingItemRow` (with its `WAITING_ROWS` record) in `item-page.tsx`. App builds the openers once and passes them to Today and the pact page. A vacation opens the Profile sheet, where its card and Reply are; no vacation page was added. Evidence rows now show the day on Today too. The three Take the L refusal tables are one `TAKE_THE_L_REFUSAL_TEXT`.
 - Removing `vacation` from `WAITING_ROWS` or from App's openers fails `tsc` with TS2741 (tried, then restored).
-- Where the ticket no longer matched the code: `occurrence-state.ts:180` no longer hides vacation-waiting (days already read "Vacation waiting for approval", `docs/behaviour.md`); `vacations.test.ts` had no "Waiting for approval never" test, only the question test asserting Today empty, which was rewritten; `app.test.ts`'s waiting objects (now at :1077 and :1375) are evidence and excuse rows and did not change.
+- Where the ticket no longer matched the code: `occurrence-state.ts` no longer hides vacation-waiting (days already read "Vacation waiting for approval", `docs/behaviour.md`); `vacations.test.ts` had no "Waiting for approval never" test, only the question test asserting Today empty, which was rewritten; `app.test.ts`'s waiting objects (now at :1077 and :1375) are evidence and excuse rows and did not change.
 
 Owner decision (2026-11-11): accept rows that carry each kind's own fields, formatted by the client, in place of a core-made title and detail line. One row component keyed by kind keeps every screen the same.

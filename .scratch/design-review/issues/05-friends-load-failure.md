@@ -7,16 +7,16 @@ Closes: C3 (`../code-structure-review.md`, section 1).
 
 ## Problem
 
-`AddReviewerSheet` loads friends with `api.friends().then(setFriends, () => setFriends([]))` (`src/client/PactPage.tsx:530`). On a failed load the empty list renders "Only friends can review your pacts. Invite another, and they show up here once they accept." (`PactPage.tsx:551-567`). On a bad connection the owner is told something false and prompted to invite a friend they already have. It breaks the standard that error copy says what failed (`CODING_STANDARDS.md`, "Results and errors").
+`AddReviewerSheet` loads friends with `api.friends().then(setFriends, () => setFriends([]))` (`src/client/PactPage.tsx`). On a failed load the empty list renders "Only friends can review your pacts. Invite another, and they show up here once they accept." (`PactPage.tsx`). On a bad connection the owner is told something false and prompted to invite a friend they already have. It breaks the standard that error copy says what failed (`CODING_STANDARDS.md`, "Results and errors").
 
 ## What to build
 
-Load with `useLoad(api.friends)` and show `loadFailure` on failure, as `src/client/pact-form-steps.tsx:93-109` does.
+Load with `useLoad(api.friends)` and show `loadFailure` on failure, as `src/client/pact-form-steps.tsx` does.
 
 ## Where to start
 
-- `src/client/PactPage.tsx:520-570`.
-- `src/client/pact-form-steps.tsx:93-109` for the pattern; `useLoad` in `src/client/ui.tsx:55-210`.
+- `src/client/PactPage.tsx`.
+- `src/client/pact-form-steps.tsx` for the pattern; `useLoad` in `src/client/ui.tsx`.
 
 ## Acceptance criteria
 

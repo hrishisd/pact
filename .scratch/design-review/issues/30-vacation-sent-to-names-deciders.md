@@ -7,8 +7,8 @@ Blocked by: none
 
 Found while building ticket 19 (rule R5). A vacation's deciders now follow the covered pacts' reviewers (`vacationDeciders`, `src/core/vacations.ts`), but `vacationSummary` still fills `reviewerNames` from `pickedReviewers`, the reviewers picked at filing. So once a picked reviewer is removed from every covered pact:
 
-- the Profile card's "Sent to …" (`VacationSection.tsx:148`) and the review item still name them;
-- the owner's reply toast says "It's back with …" naming them (`VacationSection.tsx:50`), though the reply push went to the current deciders.
+- the Profile card's "Sent to …" (`VacationSection.tsx`) and the review item still name them;
+- the owner's reply toast says "It's back with …" naming them (`VacationSection.tsx`), though the reply push went to the current deciders.
 
 Scenario: Gym reviewed by Alex and Sam; the vacation is sent to Alex only. A change removing Alex is approved. Sam now decides it and got its push, but Profile still says "Sent to Alex".
 
