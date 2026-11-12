@@ -7,10 +7,10 @@
 import type { AccountId, EvidenceKind, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { endPact } from "./ending.ts";
-import { ankiCheckHolds, enqueueMissed, noteAnkiMiss } from "./judging.ts";
+import { enqueueMissed, noteAnkiMiss } from "./judging.ts";
 import { isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { occurrencesOf } from "./rows.ts";
-import { occurrenceFacts, verdictOf, type Verdict } from "./verdict.ts";
+import { ankiCheckHolds, occurrenceFacts, verdictOf, type Verdict } from "./verdict.ts";
 
 /** What settling changed: the occurrence's stored outcome before, and its verdict now. */
 export interface Transition {
@@ -153,7 +153,7 @@ export function settlePactDueBy(ctx: CoreContext, pact: PactToJudge, t: Date): v
   for (const occurrence of due) {
     const isAnki = pact.evidence_kind === "anki";
     if (isAnki && !isJudged(ctx, pact.id, occurrence.date)) {
-      if (ankiCheckHolds(ctx, pact.owner_account_id, occurrence, t)) break;
+      if (ankiCheckHolds(ctx, pact.id, occurrence.date, t)) break;
       if (settle(ctx, pact.id, occurrence.date, t)?.to.kind === "missed") noteAnkiMiss(ctx, pact, occurrence);
     } else {
       settle(ctx, pact.id, occurrence.date, t);

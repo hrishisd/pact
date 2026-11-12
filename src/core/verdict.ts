@@ -270,6 +270,16 @@ export function dueJudgedFrom(facts: OccurrenceFacts, now: Date): Date | null {
 }
 
 /**
+ * Whether a check of AnkiWeb holds judging the pact's Anki day dated `date`,
+ * due by `t`: `dueJudgedFrom` has no time for it yet. The tick stops at such
+ * a day, and a pact whose last day it is doesn't end yet.
+ */
+export function ankiCheckHolds(ctx: CoreContext, pactId: string, date: LocalDate, t: Date): boolean {
+  const facts = occurrenceFacts(ctx, pactId, date);
+  return facts !== null && dueJudgedFrom(facts, t) === null;
+}
+
+/**
  * The facts `verdictOf` judges the pact's occurrence dated `date` by, as
  * stored, or null if the pact has no occurrence that day. One fact isn't
  * stored: the checks of AnkiWeb and when each was answered, which only the
