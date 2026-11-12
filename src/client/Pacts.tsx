@@ -2,7 +2,7 @@
 // then their Ended pacts folded away, each opening its page.
 
 import { api } from "./api.ts";
-import type { PactsResponse } from "../shared/api.ts";
+import { API_PATHS, type PactsResponse } from "../shared/api.ts";
 import { minutesLeft, money, scheduleText } from "./format.ts";
 import { EditWindowChip, Empty, LoadFailed, loadFailure, loadedData, useLoad, useNow } from "./ui.tsx";
 
@@ -13,7 +13,7 @@ export function Pacts({
   onOpenPact: (id: string, name: string) => void;
   onCreate: () => void;
 }) {
-  const { state } = useLoad(api.pacts);
+  const { state } = useLoad(api.pacts, API_PATHS.pacts);
   const all = loadedData(state);
   // A failed reload keeps the pacts shown, under what failed.
   const failed = loadFailure(state);

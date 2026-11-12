@@ -4,7 +4,7 @@
 // about it with the reply box while one waits on the owner's reply, and
 // Withdraw change while it waits.
 
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { DiffList, endsWhenText, EverythingElse, listNames, startsText } from "./change-terms.tsx";
@@ -22,7 +22,7 @@ export function ChangeRequestPage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { state, reload } = useLoad(() => api.changeRequest(changeRequestId));
+  const { state, reload } = useLoad(() => api.changeRequest(changeRequestId), API_PATHS.changeRequest(changeRequestId));
   // Here rather than in the view, like the load, so a refusal's words outlast the reload after it.
   const withdrawal = useSend(
     async (id: string) => {

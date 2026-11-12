@@ -4,7 +4,7 @@
 // one waits on the owner's reply. It opens from Today, a pact's page, an
 // approved excuse's push and a reviewer's question.
 
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
@@ -21,7 +21,7 @@ export function ExcusePage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { state, reload } = useLoad(() => api.excuse(excuseId));
+  const { state, reload } = useLoad(() => api.excuse(excuseId), API_PATHS.excuse(excuseId));
 
   return (
     <LoadedFound

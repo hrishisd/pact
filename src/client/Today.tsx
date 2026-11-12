@@ -14,7 +14,7 @@
 // app comes back to the foreground, so a deck just finished and synced clears.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptExcuseRejectionResult,
@@ -97,7 +97,7 @@ export function Today({
   onCreate: () => void;
   onInvite: () => void;
 }) {
-  const { state, reload } = useLoad(api.today);
+  const { state, reload } = useLoad(api.today, API_PATHS.today);
   const today = loadedData(state);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);

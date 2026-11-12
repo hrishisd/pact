@@ -35,7 +35,7 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 ## Settled decisions (don't re-flag)
 
 - Google Fonts load from Google, matching the prototype.
-- `db.prepare` per call is fine at this scale; cache statements only when profiling says so.
+- `ctx.one` and `ctx.all` keep one prepared statement per SQL text (`src/core/context.ts`), because profiling put re-preparing at about 37% of an idle tick (683 prepares a tick) and the cache cut `vacations.test.ts` from about 20 s to 11 s; elsewhere `db.prepare` per call is fine at this scale, and other statements are cached only when profiling says so.
 - Commands don't wait for outbox delivery, so a slow push service never delays a tap; the scheduler's tick does wait. Scenarios wait through their account handles (`deliveriesSettled`).
 - `src/server/pages.ts` has its own hex colours: those pages are plain HTML with no shared stylesheet.
 - Light theme only.

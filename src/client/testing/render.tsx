@@ -9,6 +9,7 @@ import { afterEach, vi, type MockInstance } from "vitest";
 import type { Json } from "../../shared/api.ts";
 import type { PactTerms } from "../../shared/types.ts";
 import { api, ApiError } from "../api.ts";
+import { forgetLoaded, stopReloading } from "../last-loaded.ts";
 
 type Api = typeof api;
 type PactPage = Json<PactTerms>;
@@ -94,4 +95,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.useRealTimers();
+  // Tests in one file share the module, so what one test loaded mustn't show in the next.
+  stopReloading();
+  forgetLoaded();
 });

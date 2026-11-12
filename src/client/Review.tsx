@@ -5,7 +5,7 @@
 // reviewer can still open and decide.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { DecideResponse, Json, ReviewQueueResponse } from "../shared/api.ts";
+import { API_PATHS, type DecideResponse, type Json, type ReviewQueueResponse } from "../shared/api.ts";
 import { MAX_TEXT_CHARS, type DecideRefusal, type ReviewDecision, type ReviewItem } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { dateSpan, formatDate, formatDayTime, money, weekdayName } from "./format.ts";
@@ -25,9 +25,9 @@ export function Review({
   timezone: string;
   onQueue: (length: number) => void;
 }) {
-  const { state, reload } = useLoad(api.reviewQueue);
+  const { state, reload } = useLoad(api.reviewQueue, API_PATHS.reviewQueue);
   const queue = loadedData(state);
-  const { state: waitingState, reload: reloadWaiting } = useLoad(api.waitingOnReply);
+  const { state: waitingState, reload: reloadWaiting } = useLoad(api.waitingOnReply, API_PATHS.waitingOnReply);
   const waiting = loadedData(waitingState);
   const [index, setIndex] = useState(0);
   // Says why the last decision didn't go through, above the next item.

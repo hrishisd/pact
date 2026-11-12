@@ -1,6 +1,6 @@
 # Stale-item reminders recompute every account's queue on every tick
 
-Status: needs-triage
+Status: wontfix
 Blocked by: none
 
 ## Problem
@@ -16,3 +16,7 @@ Skip the queue and question reads when they can't produce a reminder, for exampl
 - [ ] `remindStale` does not build an account's review queue or question alerts more than once per 09:00 period when nothing was stale.
 - [ ] `stale-items.test.ts` passes unchanged.
 - [ ] `npm run check` passes.
+
+## Comments
+
+2026-11-12: Measured on a simulated 90-day database (10 accounts, 38 pacts), `remindStale` is 7–9 ms of a 96 ms idle tick (about 7%), and about 4 ms of a 19–20 ms tick once `src/core/calendar.ts` keeps one date formatter per timezone (ticket 35). The 1.4 s above was mostly making a new `Intl.DateTimeFormat` inside `latestReminderTime` and the queue reads, which ticket 35 fixes. Skipping the reads isn't worth the extra state: won't fix.

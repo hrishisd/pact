@@ -886,4 +886,10 @@ export const migrations: readonly Migration[] = [
     owner_reminded_at TEXT
   );
   `,
+  // 35: a bill's penalties, by bill
+  `
+  -- Every tick reads each bill's penalties; without this each read scans
+  -- every penalty ever charged.
+  CREATE INDEX penalty_bill ON penalty (bill_id);
+  `,
 ];

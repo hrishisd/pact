@@ -61,6 +61,7 @@ export function PactPage({
   onInvite: () => void;
 }) {
   // Reloaded after a change made here, keeping the pact shown meanwhile and if the reload fails.
+  // No key: the at-once changes send the pact's whole terms, so they must be the current ones.
   const { state, reload } = useLoad(() => api.pact(pactId));
   const result = loadedData(state);
   // One clock for the page: the edit window's countdown, what it allows, and the heat map's today.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { APP_PATHS, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
+import { API_PATHS, APP_PATHS, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { ChangePact } from "./ChangePact.tsx";
@@ -14,6 +14,7 @@ import { InvitePage } from "./InvitePage.tsx";
 import type { ItemOpeners } from "./item-page.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
 import { forgetThisDevice, usePush, type Push } from "./push.ts";
+import { loadAndRemember, reloadWhenForgotten } from "./last-loaded.ts";
 import { LedgerPage, Ledgers } from "./Ledgers.tsx";
 import { inviteTokenFromPath, opensProfileSheet, useNavigation, type Page, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
@@ -186,6 +187,7 @@ function Shell({
   // What the Profile sheet's Vacation section says when it opens, after a vacation is sent.
   const [vacationMessage, setVacationMessage] = useState<string | null>(null);
   const reviewCount = useReviewCount(tab);
+  useLoadTabs(tab);
   const push = usePush();
   // Pact and recipient names learnt by loading their pages, for a page opened from a link.
   const [pactNames, pactLoaded] = useLearntNames();
@@ -435,15 +437,45 @@ function useLearntNames(): [Record<string, string>, (id: string, name: string) =
   return [names, learn];
 }
 
+/** What each tab loads, so the shell can have it loaded before the tab is visited. */
+const TAB_LOADS: Record<TabId, [string, () => Promise<unknown>][]> = {
+  today: [[API_PATHS.today, () => api.today()]],
+  pacts: [[API_PATHS.pacts, () => api.pacts()]],
+  review: [
+    [API_PATHS.reviewQueue, () => api.reviewQueue()],
+    [API_PATHS.waitingOnReply, () => api.waitingOnReply()],
+  ],
+  ledgers: [[API_PATHS.ledgers, () => api.ledgers()]],
+};
+
+/**
+ * Loads the tabs other than `tab` when the shell opens (the badge loads the
+ * review queue), and every tab again after each command (last-loaded.ts).
+ * One that fails just loads when visited.
+ */
+function useLoadTabs(tab: TabId) {
+  useEffect(() => {
+    const stops = Object.entries(TAB_LOADS).flatMap(([id, loads]) =>
+      loads.map(([key, load]) => {
+        if (id !== tab && key !== API_PATHS.reviewQueue) loadAndRemember(key, load).catch(() => {});
+        return reloadWhenForgotten(key, load);
+      }),
+    );
+    return () => stops.forEach((stop) => stop());
+  }, []);
+}
+
 /**
  * The Review tab's badge: how many items wait for this account's decision.
- * Loaded on each tab change; the Review tab sets it whenever its queue loads.
+ * Loaded on each change to another tab, sharing the Review tab's load
+ * (last-loaded.ts); the Review tab sets it whenever its queue loads.
  */
 function useReviewCount(tab: TabId): { value: number; set: (length: number) => void } {
   const [value, set] = useState(0);
   useEffect(() => {
+    if (tab === "review") return;
     // A badge that fails to load just keeps its last count.
-    api.reviewQueue().then(
+    loadAndRemember(API_PATHS.reviewQueue, api.reviewQueue).then(
       (queue) => set(queue.length),
       () => {},
     );
@@ -480,7 +512,7 @@ function ProfileSheet({
     onProfile(next);
     setChanging(false);
   });
-  const lastVacation = loadedData(useLoad(api.lastVacation).state) ?? null;
+  const lastVacation = loadedData(useLoad(api.lastVacation, API_PATHS.lastVacation).state) ?? null;
 
   return (
     <Sheet title="Profile" closeLabel="Done" onClose={onClose}>

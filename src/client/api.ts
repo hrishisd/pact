@@ -89,6 +89,7 @@ import {
   type SubmitEvidenceResponse,
   type TodayResponse,
 } from "../shared/api.ts";
+import { forgetLoaded, stopReloading } from "./last-loaded.ts";
 
 export const authClient = createAuthClient({ basePath: AUTH_BASE_PATH });
 
@@ -121,8 +122,19 @@ export function signInWithInvite(token: string): Promise<unknown> {
   });
 }
 
+/**
+ * Also forgets what the screens loaded, so whoever signs in next on this
+ * device never sees it, and first stops the tabs' reloads, which would
+ * otherwise run against the ended session. A failed sign-out stops them too:
+ * the tabs then load when visited, until the app opens again.
+ */
 export async function signOut(): Promise<void> {
-  await authClient.signOut();
+  try {
+    await authClient.signOut();
+  } finally {
+    stopReloading();
+    forgetLoaded();
+  }
 }
 
 export class ApiError extends Error {
@@ -168,26 +180,47 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function post<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
+/**
+ * `post` and `postForm` send the user's commands. Once the answer comes back,
+ * refused or not (or failed), what the screens loaded is forgotten
+ * (last-loaded.ts), so no screen shows what was there before the user's own
+ * action. `postQuietly` is for POSTs that aren't the user's commands and so
+ * forget nothing: checks and push subscriptions the app sends by itself, on
+ * opening and on timers, and previews, which only read.
+ */
+async function post<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
+  try {
+    return await postQuietly<T>(path, body, method);
+  } finally {
+    forgetLoaded();
+  }
+}
+
+/** A multipart command; the browser sets the Content-Type with its boundary. */
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  try {
+    return await call<T>(path, { method: "POST", body: form });
+  } finally {
+    forgetLoaded();
+  }
+}
+
+/** A POST that isn't the user's command (see `post`). */
+function postQuietly<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
   return call<T>(path, {
     method,
     ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   });
 }
 
-/** A multipart POST; the browser sets the Content-Type with its boundary. */
-function postForm<T>(path: string, form: FormData): Promise<T> {
-  return call<T>(path, { method: "POST", body: form });
-}
-
 export const api = {
   me: () => call<MeResponse>(API_PATHS.me),
   today: () => call<TodayResponse>(API_PATHS.today),
-  checkOura: () => post<CheckOuraResponse>(API_PATHS.ouraCheck),
+  checkOura: () => postQuietly<CheckOuraResponse>(API_PATHS.ouraCheck),
   disconnectOura: () => post<DisconnectOuraResponse>(API_PATHS.ouraDisconnect),
   connectAnki: (login: ConnectAnkiRequest) => post<ConnectAnkiResponse>(API_PATHS.ankiConnect, login),
   ankiDecks: () => call<AnkiDecksResponse>(API_PATHS.ankiDecks),
-  checkAnki: () => post<CheckAnkiResponse>(API_PATHS.ankiCheck),
+  checkAnki: () => postQuietly<CheckAnkiResponse>(API_PATHS.ankiCheck),
   disconnectAnki: () => post<DisconnectAnkiResponse>(API_PATHS.ankiDisconnect),
   setTimezone: (timezone: string) =>
     post<SetTimezoneResponse>(API_PATHS.timezone, { timezone } satisfies SetTimezoneRequest),
@@ -203,12 +236,12 @@ export const api = {
   editPact: (pactId: string, pact: EditPactRequest) =>
     post<EditPactResponse>(API_PATHS.pact(encodeURIComponent(pactId)), pact, "PUT"),
   deletePact: (pactId: string) =>
-    call<DeletePactResponse>(API_PATHS.pact(encodeURIComponent(pactId)), { method: "DELETE" }),
+    post<DeletePactResponse>(API_PATHS.pact(encodeURIComponent(pactId)), undefined, "DELETE"),
   firstOccurrence: (request: FirstOccurrenceRequest) =>
-    post<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
+    postQuietly<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
   pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),
   changePreview: (pactId: string, change: ChangePactRequest) =>
-    post<ChangePreviewResponse>(API_PATHS.changePreview(encodeURIComponent(pactId)), change),
+    postQuietly<ChangePreviewResponse>(API_PATHS.changePreview(encodeURIComponent(pactId)), change),
   changePact: (pactId: string, change: ChangePactRequest) =>
     post<ChangePactResponse>(API_PATHS.changePact(encodeURIComponent(pactId)), change),
   endPact: (pactId: string, request: EndPactRequest) =>
@@ -242,7 +275,7 @@ export const api = {
     post<AcceptExcuseRejectionResponse>(API_PATHS.acceptExcuseRejection(encodeURIComponent(excuseId))),
   vacationOptions: () => call<VacationOptionsResponse>(API_PATHS.vacationOptions),
   vacationPreview: (request: VacationPreviewRequest) =>
-    post<VacationPreviewResponse>(API_PATHS.vacationPreview, request),
+    postQuietly<VacationPreviewResponse>(API_PATHS.vacationPreview, request),
   fileVacation: (vacation: FileVacationRequest) => post<FileVacationResponse>(API_PATHS.vacations, vacation),
   vacations: () => call<VacationsResponse>(API_PATHS.vacations),
   lastVacation: () => call<LastVacationResponse>(API_PATHS.lastVacation),
@@ -276,11 +309,11 @@ export const api = {
   setNotificationSetting: (request: SetNotificationSettingRequest) =>
     post<SetNotificationSettingResponse>(API_PATHS.notifications, request),
   savePushSubscription: (device: SavePushSubscriptionRequest) =>
-    post<SavePushSubscriptionResponse>(API_PATHS.pushSubscriptions, device),
+    postQuietly<SavePushSubscriptionResponse>(API_PATHS.pushSubscriptions, device),
   removePushSubscription: (endpoint: string) =>
-    call<RemovePushSubscriptionResponse>(API_PATHS.pushSubscriptions, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint } satisfies RemovePushSubscriptionRequest),
-    }),
+    postQuietly<RemovePushSubscriptionResponse>(
+      API_PATHS.pushSubscriptions,
+      { endpoint } satisfies RemovePushSubscriptionRequest,
+      "DELETE",
+    ),
 };

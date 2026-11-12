@@ -155,3 +155,15 @@ describe("Waiting on", () => {
     expect(openers.vacation).toHaveBeenCalledWith("trip");
   });
 });
+
+// The at-once changes (name, reviewers, reminders) send the pact's whole terms,
+// so the page mustn't start from terms remembered from an earlier visit.
+test("a pact page opened again starts blank until its load answers", async () => {
+  stubApi({ pact: answers({ ok: true, pact: cameraPact() }) });
+  const { unmount } = renderPactPage();
+  await screen.findByRole("button", { name: "Request change" });
+  unmount();
+  stubApi({ pact: () => new Promise(() => undefined) });
+  const { container } = renderPactPage();
+  expect(container.textContent).toBe("");
+});
