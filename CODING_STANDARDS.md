@@ -11,7 +11,7 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 
 ## Results and errors
 
-- A domain refusal is a result, `{ ok: false, reason }`, returned as HTTP 200. HTTP error codes are for malformed requests (400), no session (401) and unknown routes (404).
+- A domain refusal is a result, `{ ok: false, reason }`, returned as HTTP 200. HTTP error codes are for malformed requests (400), no session (401), unknown routes (404) and a handler that threw (500 `server-error`, logged by `app.onError`).
 - Paths, the API's and the app's own pages alike (`API_PATHS`, `APP_PATHS`), and request/response types live once in `src/shared/` and both sides import them.
 - Error copy says what failed: a network failure asks the user to check their connection; a server error says it's on our side (`failureText` in `src/client/api.ts`). Never blame the connection for a 500.
 

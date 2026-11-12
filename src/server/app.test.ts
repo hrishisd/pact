@@ -2048,6 +2048,37 @@ describe("api", () => {
     expect(photo).toEqual({ status: 200, body: expect.objectContaining({ ok: true }) });
   });
 
+  test("a handler that throws answers 500 server-error as JSON and logs the request with the stack", async () => {
+    const s = await server();
+    const operator = await s.signIn(OPERATOR);
+    vi.spyOn(s.core, "as").mockImplementation(() => {
+      throw new Error("database is locked");
+    });
+
+    const today = await operator.get(API_PATHS.today);
+
+    expect(today).toEqual({ status: 500, body: { error: "server-error" } });
+    expect(s.logs).toEqual([
+      expect.stringMatching(/^request failed: GET \/api\/today Error: database is locked\n\s+at /),
+    ]);
+  });
+
+  test("a throw outside /api is a plain 500, logged the same way", async () => {
+    const s = await server({
+      diskUsedFraction: () => {
+        throw new Error("statfs failed");
+      },
+    });
+
+    const health = await s.request("/health");
+
+    expect({ status: health.status, body: await health.text() }).toEqual({
+      status: 500,
+      body: "Internal Server Error",
+    });
+    expect(s.logs).toEqual([expect.stringMatching(/^request failed: GET \/health Error: statfs failed\n/)]);
+  });
+
   test("a timezone request without a timezone is an invalid request", async () => {
     const s = await server();
     const operator = await s.signIn(OPERATOR);

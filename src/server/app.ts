@@ -10,6 +10,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 import type { AccountId, AnkiConnector, DevClock, OuraConnector, PactCore, Photo, Schedule } from "../core/index.ts";
 import {
@@ -307,6 +308,16 @@ export function createApp({
     logUpload(upload, { ...outcome, ...sizes, receiveMs, storeMs });
     return c.json(body);
   };
+
+  // A handler or middleware that threw: logged with its request and stack, and
+  // answered 500, as JSON under /api (Better Auth's routes included, for what
+  // its own handler doesn't catch) and as plain text elsewhere. The path is as
+  // the request sent it, still percent-encoded, so it can't break the line.
+  app.onError((error, c) => {
+    if (error instanceof HTTPException) return error.getResponse();
+    log(`request failed: ${c.req.method} ${c.req.path} ${error.stack ?? String(error)}`);
+    return c.req.path.startsWith("/api/") ? apiError(c, 500, "server-error") : c.text("Internal Server Error", 500);
+  });
 
   // Liveness, for Fly's check: the process serves and the database answers.
   // It ignores the scheduler and the disk, so a stuck scheduler or a filling
@@ -777,7 +788,7 @@ function fromThisMachine(c: Context<Env>): boolean {
   );
 }
 
-function apiError(c: Context, status: 400 | 401 | 404 | 413, error: ApiErrorResponse["error"]) {
+function apiError(c: Context, status: 400 | 401 | 404 | 413 | 500, error: ApiErrorResponse["error"]) {
   const body: ApiErrorResponse = { error };
   return c.json(body, status);
 }
