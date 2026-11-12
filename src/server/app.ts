@@ -5,7 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type Handler } from "hono";
 import type { HttpBindings } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { bodyLimit } from "hono/body-limit";
@@ -184,13 +184,6 @@ const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
  * request whose text is within MAX_NAME_CHARS and MAX_TEXT_CHARS.
  */
 const MAX_JSON_BODY_BYTES = 64 * 1024;
-
-/** The routes that take photos: each has its own, larger body limit (`photoBodyLimit`). */
-const PHOTO_UPLOAD_ROUTES = new Set<string>([
-  API_PATHS.evidence(":id"),
-  API_PATHS.payments(":id"),
-  API_PATHS.excuses(":id"),
-]);
 
 /** /health fails once the volume is fuller than this (ADR 0003). */
 const MAX_DISK_USED_FRACTION = 0.8;
@@ -411,17 +404,36 @@ export function createApp({
   });
 
   // Every other /api body is read only up to MAX_JSON_BODY_BYTES; past it,
-  // a 413 before the session is even looked up. The photo upload routes have
-  // their own, larger limits.
+  // a 413 before the session is even looked up. The photo upload routes
+  // (`postPhotos`) have their own, larger limits.
   const jsonBodyLimit = bodyLimit({
     maxSize: MAX_JSON_BODY_BYTES,
     onError: (c) => apiError(c, 413, "body-too-large"),
   });
+  /** The paths `postPhotos` registered: the routes that take photos. */
+  const photoUploadPaths = new Set<string>();
   app.use("/api/*", (c, next) =>
-    matchedRoutes(c).some((route) => route.method === "POST" && PHOTO_UPLOAD_ROUTES.has(route.path))
+    matchedRoutes(c).some((route) => route.method === "POST" && photoUploadPaths.has(route.path))
       ? next()
       : jsonBodyLimit(c, next),
   );
+  /**
+   * Registers a POST route that takes up to `photos` photos, the only way to
+   * register one: it is exempt from the JSON body limit above and has its own
+   * instead. Past that, some photo must be over the size cap (or there are too
+   * many), so the body isn't read at all.
+   */
+  const postPhotos = <Path extends string>(path: Path, photos: number, handler: Handler<Env, Path>) => {
+    photoUploadPaths.add(path);
+    app.post(
+      path,
+      bodyLimit({
+        maxSize: photos * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
+        onError: (c) => apiError(c, 400, "photo-too-large"),
+      }),
+      handler,
+    );
+  };
 
   // Every other /api route is made as the signed-in account. Better Auth
   // creates a user only after the core has made the account (see auth.ts), so
@@ -582,7 +594,7 @@ export function createApp({
   // the core is called, which decides how many photos evidence may have. The
   // body limit stops a huge upload being read at all: past it, some photo
   // must be over the cap, or there are too many.
-  app.post(API_PATHS.evidence(":id"), photoBodyLimit(MAX_EVIDENCE_PHOTOS), (c) =>
+  postPhotos(API_PATHS.evidence(":id"), MAX_EVIDENCE_PHOTOS, (c) =>
     receivePhotos(c, "evidence", {
       parse: () => ({}),
       send: (_fields, photos): Promise<SubmitEvidenceResponse> => account(c).submitEvidence(c.req.param("id"), photos),
@@ -593,7 +605,7 @@ export function createApp({
   // Transport and shape checks only, as for evidence: the amount must be a
   // number, and there may be at most one screenshot, under the size cap. The
   // core decides the rest, a missing screenshot included.
-  app.post(API_PATHS.payments(":id"), photoBodyLimit(1), (c) =>
+  postPhotos(API_PATHS.payments(":id"), 1, (c) =>
     receivePhotos(c, "payment", {
       parse: (form, photoCount): RecordPaymentRequest | null => {
         const amount = form[PAYMENT_AMOUNT_FIELD];
@@ -612,7 +624,7 @@ export function createApp({
   // Transport and shape checks only, as for evidence: the dates and reason
   // must be text. The core decides the rest, how many photos included; the
   // body limit lets one more photo than allowed through, so that's its refusal.
-  app.post(API_PATHS.excuses(":id"), photoBodyLimit(MAX_EXCUSE_PHOTOS + 1), (c) =>
+  postPhotos(API_PATHS.excuses(":id"), MAX_EXCUSE_PHOTOS + 1, (c) =>
     receivePhotos(c, "excuse", {
       parse: (form): FileExcuseRequest | null => {
         const [from, to, reason] = [form[EXCUSE_FROM_FIELD], form[EXCUSE_TO_FIELD], form[EXCUSE_REASON_FIELD]];
@@ -791,17 +803,6 @@ function fromThisMachine(c: Context<Env>): boolean {
 function apiError(c: Context, status: 400 | 401 | 404 | 413 | 500, error: ApiErrorResponse["error"]) {
   const body: ApiErrorResponse = { error };
   return c.json(body, status);
-}
-
-/**
- * The body limit for an upload of up to `photos` photos: past it, some photo
- * must be over the size cap (or there are too many), so it isn't read at all.
- */
-function photoBodyLimit(photos: number) {
-  return bodyLimit({
-    maxSize: photos * MAX_PHOTO_BYTES + MULTIPART_OVERHEAD_BYTES,
-    onError: (c) => apiError(c, 400, "photo-too-large"),
-  });
 }
 
 /** The request's JSON body as `parse` reads it: null when it isn't JSON or `parse` refuses it. */

@@ -196,7 +196,7 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 ## Text and request limits
 
 - Free text is capped, counted after trimming: a pact's or a recipient's name at 80 characters (`MAX_NAME_CHARS`), and every other text at 2,000 (`MAX_TEXT_CHARS`, both in `src/shared/types.ts`): a pact's description, change request and end request notes, excuse reasons, vacation and payment notes, reject reasons, questions and replies. Longer text is refused with `text-too-long` (`text-limits.ts`). The client's text fields stop at the same caps (`maxLength`). Test: `text-limits.test.ts`.
-- An /api request body over 64 KB is refused with HTTP 413 (`body-too-large`) before it is read. The three photo upload routes (evidence, excuses, payments) have their own larger limits (`MAX_JSON_BODY_BYTES`, `photoBodyLimit`, `src/server/app.ts`). Test: `app.test.ts`, "a JSON body over 64 KB".
+- An /api request body over 64 KB is refused with HTTP 413 (`body-too-large`) before it is read. The three photo upload routes (evidence, excuses, payments) have their own larger limits (`MAX_JSON_BODY_BYTES`, `postPhotos`, `src/server/app.ts`). Test: `app.test.ts`, "a JSON body over 64 KB".
 - Text stored before these caps is left as it is.
 
 ## Time and timezones
