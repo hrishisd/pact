@@ -1,6 +1,6 @@
 import { act, screen } from "@testing-library/react";
-import { expect, test } from "vitest";
-import { forgetLoaded } from "./last-loaded.ts";
+import { describe, expect, test, vi } from "vitest";
+import { forgetLoaded, reloadWhenForgotten, stopReloading } from "./last-loaded.ts";
 import { onOurSide, renderWithUser } from "./testing/render.tsx";
 import { Loaded, useLoad } from "./ui.tsx";
 
@@ -75,4 +75,40 @@ test("a load that began before everything was forgotten shows but isn't remember
   unmount();
   const { container } = renderWithUser(<Screen load={deferred().load} path={PATH} />);
   expect(container.textContent).toBe("");
+});
+
+describe("loads reloaded when everything is forgotten", () => {
+  test("run again after forgetting, so a screen opened afterwards shows what they loaded at once", async () => {
+    await openAndClose("Monday's", PATH);
+    const load = vi.fn(async () => "Tuesday's");
+    reloadWhenForgotten(PATH, load);
+    forgetLoaded();
+    await act(async () => undefined);
+    expect(load).toHaveBeenCalledTimes(1);
+    renderWithUser(<Screen load={deferred().load} path={PATH} />);
+    expect(screen.getByText("Tuesday's")).toBeTruthy();
+  });
+
+  test("one that fails after forgetting leaves the screen to start blank, and throws nothing", async () => {
+    await openAndClose("Monday's", PATH);
+    reloadWhenForgotten(PATH, async () => {
+      throw onOurSide;
+    });
+    forgetLoaded();
+    await act(async () => undefined);
+    const { container } = renderWithUser(<Screen load={deferred().load} path={PATH} />);
+    expect(container.textContent).toBe("");
+  });
+
+  test("once stopped, forgetting runs nothing", () => {
+    const load = vi.fn(async () => "Tuesday's");
+    const stop = reloadWhenForgotten(PATH, load);
+    const other = vi.fn(async () => "Wednesday's");
+    reloadWhenForgotten("/api/other", other);
+    stop();
+    stopReloading();
+    forgetLoaded();
+    expect(load).not.toHaveBeenCalled();
+    expect(other).not.toHaveBeenCalled();
+  });
 });

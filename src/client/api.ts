@@ -89,7 +89,7 @@ import {
   type SubmitEvidenceResponse,
   type TodayResponse,
 } from "../shared/api.ts";
-import { forgetLoaded } from "./last-loaded.ts";
+import { forgetLoaded, stopReloading } from "./last-loaded.ts";
 
 export const authClient = createAuthClient({ basePath: AUTH_BASE_PATH });
 
@@ -122,11 +122,17 @@ export function signInWithInvite(token: string): Promise<unknown> {
   });
 }
 
-/** Also forgets what the screens loaded, so whoever signs in next on this device never sees it. */
+/**
+ * Also forgets what the screens loaded, so whoever signs in next on this
+ * device never sees it, and first stops the tabs' reloads, which would
+ * otherwise run against the ended session. A failed sign-out stops them too:
+ * the tabs then load when visited, until the app opens again.
+ */
 export async function signOut(): Promise<void> {
   try {
     await authClient.signOut();
   } finally {
+    stopReloading();
     forgetLoaded();
   }
 }
