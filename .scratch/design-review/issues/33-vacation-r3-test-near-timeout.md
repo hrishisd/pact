@@ -1,6 +1,6 @@
 # A vacation test runs close to Vitest's 5-second timeout
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 ## Problem
@@ -13,5 +13,9 @@ Make the test fast enough to stay well under the timeout: for example split the 
 
 ## Acceptance criteria
 
-- [ ] The test (or its parts) runs in under 2 s on its own.
-- [ ] `npm run check` passes.
+- [x] The test (or its parts) runs in under 2 s on its own.
+- [x] `npm run check` passes.
+
+## Comments
+
+2026-11-12: Split into two tests (`test.each`, one scenario per instant) and the scenario now ticks hourly from Mon+1 00:00, not Wed 13:00: Gym has nothing due before Mon+1, so one tick covers the idle days (`waitingOverGym` takes an optional `hourlyFrom`). The test also checks Mon+1 is Missed before the rejection. Run on its own: 3.7 s before, about 0.87 s per part after. Profiling the old run, the verdict check was minor (about 0.5 s of 3.7 s); `remindStale` was the largest part of each tick (about 1.4 s), filed as ticket 34.
