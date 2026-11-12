@@ -7,10 +7,10 @@
 import type { AccountId, EvidenceKind, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { endPact } from "./ending.ts";
-import { ankiCheckHolds, enqueueMissed, noteAnkiMiss, type AnkiChecksRunning } from "./judging.ts";
+import { ankiCheckHolds, enqueueMissed, noteAnkiMiss } from "./judging.ts";
 import { isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { occurrencesOf } from "./rows.ts";
-import { occurrenceFacts, verdictOf, type AnkiCheckRun, type Verdict } from "./verdict.ts";
+import { occurrenceFacts, verdictOf, type Verdict } from "./verdict.ts";
 
 /** What settling changed: the occurrence's stored outcome before, and its verdict now. */
 export interface Transition {
@@ -34,13 +34,7 @@ export interface Transition {
  * told them, with the reason), or when a cover is filed for it (they asked for
  * it to be excused). Returns what changed, or null if nothing did.
  */
-export function settle(
-  ctx: CoreContext,
-  pactId: string,
-  date: LocalDate,
-  now: Date,
-  ankiChecks: AnkiCheckRun[] = [],
-): Transition | null {
+export function settle(ctx: CoreContext, pactId: string, date: LocalDate, now: Date): Transition | null {
   const from =
     ctx.one<{ outcome: Transition["from"] }>(
       `SELECT outcome FROM occurrence WHERE pact_id = ? AND date = ?`,
@@ -49,7 +43,7 @@ export function settle(
     )?.outcome ?? null;
   // Only a Missed outcome may still change, to Excused, and an Excused one, to Satisfied.
   if (from === "satisfied") return null;
-  const facts = occurrenceFacts(ctx, pactId, date, { ankiChecks });
+  const facts = occurrenceFacts(ctx, pactId, date);
   if (facts === null) return null;
   const verdict = verdictOf(facts, now);
   if (!("at" in verdict)) return null;
@@ -109,8 +103,7 @@ function deletePenalties(ctx: CoreContext, pactId: string, date: LocalDate): voi
 
 /**
  * Settles the pact's occurrences that take in `dates`, the days of a cover
- * just decided or withdrawn, as of `now`, given the checks of AnkiWeb still
- * running. Approved: a Missed one becomes Excused, and one not judged yet
+ * just decided or withdrawn, as of `now`. Approved: a Missed one becomes Excused, and one not judged yet
  * whose due time has passed (its evidence was waiting) is judged Excused
  * now, unless approved evidence makes it Satisfied, as at its due time; the
  * rest are judged Excused at their due time. Rejected or withdrawn:
@@ -118,33 +111,21 @@ function deletePenalties(ctx: CoreContext, pactId: string, date: LocalDate): voi
  * judged yet is left to judging (`judgeNights`), which waits for Oura until
  * the night closes, and takes a period on its first look after the close.
  */
-export function settleCoverDays(
-  ctx: CoreContext,
-  pactId: string,
-  dates: readonly LocalDate[],
-  now: Date,
-  anki: AnkiChecksRunning,
-): void {
-  const pact = ctx.one<{ timezone: string; evidence_kind: EvidenceKind; owner_account_id: AccountId }>(
-    `SELECT account.timezone, pact.evidence_kind, pact.owner_account_id
+export function settleCoverDays(ctx: CoreContext, pactId: string, dates: readonly LocalDate[], now: Date): void {
+  const pact = ctx.one<{ timezone: string; evidence_kind: EvidenceKind }>(
+    `SELECT account.timezone, pact.evidence_kind
        FROM pact JOIN account ON account.id = pact.owner_account_id WHERE pact.id = ?`,
     pactId,
   )!;
   const { covering } = occurrencesOf(ctx, pactId, pact.timezone);
-  const running = runningAnkiChecks(anki, pact.owner_account_id);
   const settled = new Set<LocalDate>();
   for (const day of dates) {
     const occurrence = covering(day);
     if (occurrence === null || settled.has(occurrence.date)) continue;
     settled.add(occurrence.date);
     if (pact.evidence_kind === "oura" && !isJudged(ctx, pactId, occurrence.date)) continue;
-    settle(ctx, pactId, occurrence.date, now, running);
+    settle(ctx, pactId, occurrence.date, now);
   }
-}
-
-/** The checks of the account's AnkiWeb still running, as `verdictOf` reads them. */
-export function runningAnkiChecks(anki: AnkiChecksRunning, account: AccountId): AnkiCheckRun[] {
-  return [...(anki.get(account) ?? [])].map(({ startedAt }) => ({ startedAt: new Date(startedAt), finishedAt: null }));
 }
 
 /**
@@ -153,8 +134,8 @@ export function runningAnkiChecks(anki: AnkiChecksRunning, account: AccountId): 
  * `judged_through`), so a stopped scheduler catches up. Oura reports bedtime
  * nights (`judgeNights`).
  */
-export function settleAll(ctx: CoreContext, t: Date, anki: AnkiChecksRunning): void {
-  for (const pact of pactsToJudge(ctx)) settlePactDueBy(ctx, pact, t, anki);
+export function settleAll(ctx: CoreContext, t: Date): void {
+  for (const pact of pactsToJudge(ctx)) settlePactDueBy(ctx, pact, t);
 }
 
 /**
@@ -164,19 +145,18 @@ export function settleAll(ctx: CoreContext, t: Date, anki: AnkiChecksRunning): v
  * due time is still running: judging stops there, and a later tick judges
  * it once the check is recorded.
  */
-export function settlePactDueBy(ctx: CoreContext, pact: PactToJudge, t: Date, anki: AnkiChecksRunning): void {
+export function settlePactDueBy(ctx: CoreContext, pact: PactToJudge, t: Date): void {
   if (pact.evidence_kind === "oura") return;
   settleBehindCursor(ctx, pact, t);
   const due = occurrencesOf(ctx, pact.id, pact.timezone).dueAfter(pact.judged_through, t);
-  const running = runningAnkiChecks(anki, pact.owner_account_id);
   let through: LocalDate | null = null;
   for (const occurrence of due) {
     const isAnki = pact.evidence_kind === "anki";
     if (isAnki && !isJudged(ctx, pact.id, occurrence.date)) {
-      if (ankiCheckHolds(anki, pact.owner_account_id, occurrence, t)) break;
-      if (settle(ctx, pact.id, occurrence.date, t, running)?.to.kind === "missed") noteAnkiMiss(ctx, pact, occurrence);
+      if (ankiCheckHolds(ctx, pact.owner_account_id, occurrence, t)) break;
+      if (settle(ctx, pact.id, occurrence.date, t)?.to.kind === "missed") noteAnkiMiss(ctx, pact, occurrence);
     } else {
-      settle(ctx, pact.id, occurrence.date, t, running);
+      settle(ctx, pact.id, occurrence.date, t);
     }
     through = occurrence.date;
   }

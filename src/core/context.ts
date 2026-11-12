@@ -1,8 +1,9 @@
-// What the core's parts share: the database, the one clock, ids, the log and
-// the outbox. `Core` makes one and hands it to each part.
+// What the core's parts share: the database, the one clock, ids, the log,
+// the outbox and the checks of AnkiWeb still running. `Core` makes one and hands it to each part.
 
 import type { Statement } from "better-sqlite3";
 import type { Db } from "./db.ts";
+import type { AnkiChecksRunning } from "./judging.ts";
 import type { Clock, NotificationKind, NotificationOf } from "./ports.ts";
 
 export interface CoreContext {
@@ -13,13 +14,20 @@ export interface CoreContext {
   log(line: string): void;
   /** Queues a notification in the current command's transaction. */
   enqueue<K extends NotificationKind>(notification: NotificationOf<K>): void;
+  /**
+   * The checks of AnkiWeb still running, as they are now: `Core`'s own map,
+   * which only it changes. Judging reads it here (`occurrenceFacts`).
+   */
+  readonly ankiChecksRunning: AnkiChecksRunning;
   /** The first row `sql` reads with `params`, or undefined when there's none. */
   one<T>(sql: string, ...params: unknown[]): T | undefined;
   /** Every row `sql` reads with `params`. */
   all<T>(sql: string, ...params: unknown[]): T[];
 }
 
-export function createContext(parts: Pick<CoreContext, "db" | "clock" | "newId" | "log" | "enqueue">): CoreContext {
+export function createContext(
+  parts: Pick<CoreContext, "db" | "clock" | "newId" | "log" | "enqueue" | "ankiChecksRunning">,
+): CoreContext {
   const { db } = parts;
   // One statement per SQL text. Safe because migrations run before the context exists.
   const statements = new Map<string, Statement>();

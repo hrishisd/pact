@@ -19,7 +19,8 @@ export const ANKI_CHECK_HOLDS_JUDGING_MS = 3 * 60 * 1000;
 
 /**
  * When each check of AnkiWeb still running started, by account. `Core` keeps
- * it in memory; judging only reads it.
+ * it in memory; judging only reads it, from the context
+ * (`ctx.ankiChecksRunning`).
  */
 export type AnkiChecksRunning = ReadonlyMap<AccountId, ReadonlySet<{ startedAt: number }>>;
 
@@ -27,13 +28,8 @@ export type AnkiChecksRunning = ReadonlyMap<AccountId, ReadonlySet<{ startedAt: 
  * Whether a check of the account's AnkiWeb that started before `day`'s due
  * time is still running at `t`, and not for so long it's given up.
  */
-export function ankiCheckHolds(
-  ankiChecksRunning: AnkiChecksRunning,
-  account: AccountId,
-  day: Occurrence,
-  t: Date,
-): boolean {
-  return [...(ankiChecksRunning.get(account) ?? [])].some(
+export function ankiCheckHolds(ctx: CoreContext, account: AccountId, day: Occurrence, t: Date): boolean {
+  return [...(ctx.ankiChecksRunning.get(account) ?? [])].some(
     ({ startedAt }) => startedAt < day.dueAt.getTime() && t.getTime() - startedAt < ANKI_CHECK_HOLDS_JUDGING_MS,
   );
 }

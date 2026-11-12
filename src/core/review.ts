@@ -12,7 +12,6 @@ import type {
   Withdrawal,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
-import type { AnkiChecksRunning } from "./judging.ts";
 import { tellAll } from "./outbox.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
 import { REQUEST_HANDLERS } from "./request-kinds.ts";
@@ -129,13 +128,7 @@ export function ownerReply(ctx: CoreContext, accountId: AccountId, itemId: strin
   return { ok: true };
 }
 
-export function decide(
-  ctx: CoreContext,
-  accountId: AccountId,
-  itemId: string,
-  decision: ReviewDecision,
-  ankiChecksRunning: AnkiChecksRunning,
-): DecideResult {
+export function decide(ctx: CoreContext, accountId: AccountId, itemId: string, decision: ReviewDecision): DecideResult {
   accountRow(ctx, accountId);
   const found = findItem(ctx, itemId);
   const withdrawn = found && mayDecide(ctx, accountId, found) ? withdrawalOfItem(ctx, found) : null;
@@ -147,14 +140,14 @@ export function decide(
   if (reason === "") return { ok: false, reason: "blank-reason" };
   if (reason !== null && textTooLong(reason)) return { ok: false, reason: "text-too-long" };
   const decided: Decided = reason === null ? { outcome: "approved", reason: null } : { outcome: "rejected", reason };
-  const refusal = item.handler.checkDecision?.(ctx, item.row, decided, ankiChecksRunning) ?? null;
+  const refusal = item.handler.checkDecision?.(ctx, item.row, decided) ?? null;
   if (refusal !== null) {
     // Catching judging up may have Ended the pact, which withdrew the item.
     const reloaded = findItem(ctx, itemId);
     const withdrawal = reloaded ? withdrawalOfItem(ctx, reloaded) : null;
     return withdrawal ? { ok: false, reason: "withdrawn", withdrawal } : { ok: false, reason: refusal };
   }
-  item.handler.apply(ctx, item.row, decided, accountId, ankiChecksRunning);
+  item.handler.apply(ctx, item.row, decided, accountId);
   return { ok: true };
 }
 

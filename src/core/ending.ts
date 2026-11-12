@@ -5,7 +5,7 @@ import { addDays } from "../shared/calendar.ts";
 import type { AccountId, EndTiming, LocalDate } from "../shared/types.ts";
 import { localDateOf, startOfDay } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { ankiCheckHolds, type AnkiChecksRunning } from "./judging.ts";
+import { ankiCheckHolds } from "./judging.ts";
 import { isJudged } from "./occurrence-state.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
 
@@ -105,7 +105,7 @@ export function endingOf(
  * check holds (`ankiCheckHolds`) ends on a later tick, once it's judged. An
  * end date an approved end request set Ends it for that request.
  */
-export function endPastEndDate(ctx: CoreContext, t: Date, ankiChecksRunning: AnkiChecksRunning): void {
+export function endPastEndDate(ctx: CoreContext, t: Date): void {
   const rows = ctx.all<{
     id: string;
     end_date: LocalDate;
@@ -124,8 +124,7 @@ export function endPastEndDate(ctx: CoreContext, t: Date, ankiChecksRunning: Ank
     const last = occurrencesOf(ctx, id, timezone).between(addDays(endDate, -7), endDate).at(-1);
     const endsAt = last && last.closesAt.getTime() > dayAfter.getTime() ? last.closesAt : dayAfter;
     if (endsAt.getTime() > t.getTime()) continue;
-    if (kind === "anki" && last && !isJudged(ctx, id, last.date) && ankiCheckHolds(ankiChecksRunning, owner, last, t))
-      continue;
+    if (kind === "anki" && last && !isJudged(ctx, id, last.date) && ankiCheckHolds(ctx, owner, last, t)) continue;
     endPact(ctx, id, row.end_approved_at === null ? "end-date" : "end-request", endsAt);
   }
 }

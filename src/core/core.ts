@@ -500,6 +500,7 @@ class Core implements PactCore {
       newId: options.newId ?? randomUUID,
       log: options.log ?? ((line) => console.log(line)),
       enqueue: (notification) => enqueue(this.#ctx, notification),
+      ankiChecksRunning: this.#ankiPolling.checksRunning,
     });
     this.#notifier = options.notifier;
     this.#photoStore = options.photoStore;
@@ -603,8 +604,7 @@ class Core implements PactCore {
       fileVacation: (vacation) => this.#command(() => fileVacation(this.#ctx, accountId, vacation)),
       vacations: () => vacationCards(this.#ctx, accountId),
       lastVacation: () => lastVacation(this.#ctx, accountId),
-      withdrawVacation: (vacationId) =>
-        this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId, this.#ankiPolling.checksRunning)),
+      withdrawVacation: (vacationId) => this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId)),
       acceptVacationRejection: (vacationId) =>
         this.#command(() => acceptVacationRejection(this.#ctx, accountId, vacationId)),
       recordPayment: (payment, screenshot) =>
@@ -616,8 +616,7 @@ class Core implements PactCore {
       payment: (paymentId) => paymentPage(this.#ctx, accountId, paymentId),
       askOwner: (itemId, question) => this.#command(() => askOwner(this.#ctx, accountId, itemId, question)),
       reply: (itemId, reply) => this.#command(() => ownerReply(this.#ctx, accountId, itemId, reply)),
-      decide: (itemId, decision) =>
-        this.#command(() => decide(this.#ctx, accountId, itemId, decision, this.#ankiPolling.checksRunning)),
+      decide: (itemId, decision) => this.#command(() => decide(this.#ctx, accountId, itemId, decision)),
       ledgers: () => ledgerList(this.#ctx, accountId),
       ledger: (recipientId) => ledgerPage(this.#ctx, accountId, recipientId),
     };
@@ -632,14 +631,14 @@ class Core implements PactCore {
       () => {
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
-        recordAnkiChecks(this.#ctx, checked, this.#ankiPolling.checksRunning);
-        settleAll(this.#ctx, t, this.#ankiPolling.checksRunning);
+        recordAnkiChecks(this.#ctx, checked);
+        settleAll(this.#ctx, t);
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
         noteOuraClock(this.#ctx, fetched.sleep);
         judgeNights(this.#ctx, t, fetched.sleep);
         pushNoOuraData(this.#ctx, t);
         const dropped = remind(this.#ctx, t);
-        endPastEndDate(this.#ctx, t, this.#ankiPolling.checksRunning);
+        endPastEndDate(this.#ctx, t);
         makeBills(this.#ctx, t);
         remindOverdue(this.#ctx, t);
         remindStale(this.#ctx, t);
