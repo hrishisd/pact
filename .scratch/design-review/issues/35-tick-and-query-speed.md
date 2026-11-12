@@ -22,10 +22,30 @@ The client refetches a tab's data on every visit; the next agent describes that 
 
 ## Acceptance criteria
 
-- [ ] `offsetMs` and `localDateOf` reuse one formatter per timezone; every existing test passes unchanged.
-- [ ] `SELECT ... FROM penalty WHERE bill_id = ?` uses an index (`EXPLAIN QUERY PLAN`).
-- [ ] The statement cache is kept or reverted on the measured numbers, recorded below.
+- [x] `offsetMs` and `localDateOf` reuse one formatter per timezone; every existing test passes unchanged.
+- [x] `SELECT ... FROM penalty WHERE bill_id = ?` uses an index (`EXPLAIN QUERY PLAN`).
+- [x] The statement cache is kept or reverted on the measured numbers, recorded below.
 - [ ] The client tab cache (next agent).
 - [ ] `npm run check` passes.
 
 ## Comments
+
+2026-11-12: The server side is done; the client tab cache and `npm run check` for the whole ticket are left for the next agent.
+
+- Formatter cache (`src/core/calendar.ts`): `offsetMs` and `localDateOf` each keep one formatter per zone in a module-level `Map`. `partsIn` (`src/shared/format.ts`) and `canonicalTimezone` (`accounts.ts`) still make one per call: they run when a notification's text is written or a timezone is set, not per occurrence on every tick, and weren't in the profile.
+- Penalty index: migration 35 adds `penalty_bill` on `penalty (bill_id)`. `EXPLAIN QUERY PLAN` for `billsOf`'s read went from `SCAN penalty` to `SEARCH penalty USING INDEX penalty_bill (bill_id=?)`.
+- Statement cache (`src/core/context.ts`): kept. `ctx.one` and `ctx.all` keep one prepared statement per SQL text; every SQL text they get is built from constants, so the map stays small. The context is made after `openDatabase` runs migrations, and nothing in the core changes the schema or calls `.iterate()`. Measured twice each against the formatter cache alone: the suite took 32.0 and 33.3 s without it and 26.4 and 27.5 s with it; `vacations.test.ts` 20.4 and 20.8 s without, 10.5 and 11.8 s with. `CODING_STANDARDS.md`'s settled decision says so.
+
+Timings from `npx vitest run`, wall time on this machine:
+
+| | Suite | `vacations.test.ts` |
+| --- | --- | --- |
+| Before | 67.7 s | 59.8 s |
+| Formatter cache | 30.2 s | 20.2 s |
+| And the statement cache | 26.4–27.5 s | 10.5–11.8 s |
+
+The slowest test in `vacations.test.ts` was 4.25 s; it is now 0.51 s, and none is over 2 s.
+
+On the simulated 90-day database, with the formatter cache (the scratch experiment's numbers, not measured again): an idle tick 96 ms to 19 ms, `pact(id)` 17 ms to 8 ms (median).
+
+`docs/behaviour.md` needs no change: nothing a user sees changes.
