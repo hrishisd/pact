@@ -1,6 +1,6 @@
 # The moot rule withdraws Weekly count evidence that only counts together
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 ## Problem
@@ -19,7 +19,7 @@ When judging whether evidence on a Weekly count week is moot, suppose the other 
 
 ## Acceptance criteria
 
-- [ ] The scenario above: both pieces stay in the Review Queue and the waiting list, and approving both makes the week Satisfied with no penalty.
-- [ ] Evidence that couldn't reach the target even with every waiting piece approved is still withdrawn.
-- [ ] `docs/behaviour.md` "Withdrawn items" says so.
-- [ ] `npm run check` passes.
+- [x] The scenario above: both pieces stay in the Review Queue and the waiting list, and approving both makes the week Satisfied with no penalty.
+- [x] Evidence that couldn't reach the target even with every waiting piece approved is still withdrawn.
+- [x] `docs/behaviour.md` "Withdrawn items" says so.
+- [x] `npm run check` passes.

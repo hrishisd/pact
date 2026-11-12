@@ -295,30 +295,31 @@ export function occurrenceFacts(
   const terms = termsOn(ctx, pactId, date);
   const { supposing } = known;
   // Withdrawn evidence was moot: it never counts.
-  const evidence = ctx
-    .all<{
-      id: string;
-      day: LocalDate;
-      submitted_at: string;
-      decision: ReviewOutcome | null;
-      decided_at: string | null;
-    }>(
-      `SELECT id, day, submitted_at, decision, decided_at FROM evidence
+  const rows = ctx.all<{
+    id: string;
+    day: LocalDate;
+    submitted_at: string;
+    decision: ReviewOutcome | null;
+    decided_at: string | null;
+  }>(
+    `SELECT id, day, submitted_at, decision, decided_at FROM evidence
          WHERE pact_id = ? AND occurrence_date = ? AND withdrawn_at IS NULL
          ORDER BY submitted_at, id`,
-      pactId,
-      date,
-    )
-    .map((row) => {
-      const supposed = row.id === supposing?.id && row.decision === null ? supposing : null;
-      const decidedAt = supposed?.at ?? (row.decided_at === null ? null : new Date(row.decided_at));
-      return {
-        day: row.day,
-        submittedAt: new Date(row.submitted_at),
-        decision: supposed?.decision ?? row.decision,
-        decidedAt,
-      };
-    });
+    pactId,
+    date,
+  );
+  // Supposing evidence decided `withWaitingEvidence`, the occurrence's other waiting evidence is decided with it.
+  const alongside = supposing?.withWaitingEvidence === true && rows.some((row) => row.id === supposing.id);
+  const evidence = rows.map((row) => {
+    const supposed = row.decision === null && (row.id === supposing?.id || alongside) ? supposing! : null;
+    const decidedAt = supposed?.at ?? (row.decided_at === null ? null : new Date(row.decided_at));
+    return {
+      day: row.day,
+      submittedAt: new Date(row.submitted_at),
+      decision: supposed?.decision ?? row.decision,
+      decidedAt,
+    };
+  });
   const found = coverOn(ctx, pactId, date, supposing);
   const cover: CoverFact | null = found && {
     ...found,
@@ -384,6 +385,8 @@ export interface SupposedDecision {
   id: string;
   decision: ReviewOutcome;
   at: Date;
+  /** When `id` is evidence: suppose the occurrence's other waiting evidence decided the same way at `at`. */
+  withWaitingEvidence?: boolean;
 }
 
 /**
@@ -392,7 +395,9 @@ export interface SupposedDecision {
  * approving and rejecting it give different verdicts or penalties, or a
  * verdict that isn't final yet; else `not-the-pacts` when it's due after the
  * pact Ended, and `settled` otherwise. `gone` when the pact has no occurrence
- * that day any more.
+ * that day any more. Evidence is supposed approved together with the
+ * occurrence's other waiting evidence, since on a Weekly count week pieces
+ * can reach the target only together (design review ticket 32).
  */
 export function decisionEffect(
   ctx: CoreContext,
@@ -402,7 +407,9 @@ export function decisionEffect(
   now: Date,
 ): "matters" | "settled" | "not-the-pacts" | "gone" {
   const [approved, rejected] = (["approved", "rejected"] as const).map((decision) => {
-    const facts = occurrenceFacts(ctx, pactId, date, { supposing: { id: itemId, decision, at: now } });
+    const facts = occurrenceFacts(ctx, pactId, date, {
+      supposing: { id: itemId, decision, at: now, withWaitingEvidence: decision === "approved" },
+    });
     return facts && verdictOf(facts, now);
   });
   if (!approved || !rejected) return "gone";
