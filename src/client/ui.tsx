@@ -54,9 +54,10 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
  *
  * With a `key` (the API path it loads), what it loads is remembered
  * (last-loaded.ts), and the screen opened again starts with that while it
- * loads afresh. Pass one only for a screen that shows what it loads. A form
- * or picker that copies the loaded data into what the user edits gets no
- * key: it would start from old data, and the reload would never reach it.
+ * loads afresh. Pass one only for a screen that shows what it loads. No key
+ * for a form or picker that copies the loaded data into what the user edits
+ * (the reload would never reach it), nor for a screen that sends what it
+ * loaded back in a command (PactPage's at-once changes send the whole terms).
  */
 export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<T>; reload: () => void } {
   const [state, setState] = useState<Load<T>>(() => {

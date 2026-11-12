@@ -22,13 +22,15 @@ export function Ledgers({
   onOpenLedger: (recipientId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(api.ledgers, API_PATHS.ledgers);
-  // The ledger whose Record a payment sheet is open, outside the cards.
-  const [paying, setPaying] = useState<Json<LedgerSummary> | null>(null);
+  // The recipient whose Record a payment sheet is open, outside the cards. By id,
+  // so the sheet gets the ledger as reloaded, not as it was when tapped.
+  const [paying, setPaying] = useState<string | null>(null);
 
   return (
     <Loaded state={state} what="Ledgers">
-      {(ledgers) =>
-        ledgers.length === 0 ? (
+      {(ledgers) => {
+        const payingLedger = ledgers.find((ledger) => ledger.recipientId === paying);
+        return ledgers.length === 0 ? (
           <Empty title="No ledgers yet" body="Each recipient gets a ledger once a pact names them." />
         ) : (
           <>
@@ -42,13 +44,13 @@ export function Ledgers({
                       <Summary ledger={ledger} timezone={timezone} />
                     </span>
                   </button>
-                  <RecordPaymentButton ledger={ledger} onRecord={() => setPaying(ledger)} />
+                  <RecordPaymentButton ledger={ledger} onRecord={() => setPaying(ledger.recipientId)} />
                 </div>
               ))}
             </div>
-            {paying && (
+            {payingLedger && (
               <RecordPaymentSheet
-                ledger={paying}
+                ledger={payingLedger}
                 onClose={() => setPaying(null)}
                 onSent={() => {
                   setPaying(null);
@@ -57,8 +59,8 @@ export function Ledgers({
               />
             )}
           </>
-        )
-      }
+        );
+      }}
     </Loaded>
   );
 }
