@@ -1,6 +1,6 @@
 # A cover approved at the exact due instant beats approved evidence
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 ## Problem

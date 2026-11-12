@@ -1023,6 +1023,25 @@ describe("once approved, covered occurrences are Excused", () => {
     expect(penaltyDays(owner)).not.toContain(s.date("Mon+1"));
   });
 
+  test("approved at the due time itself, before the tick, a day whose evidence was approved is Satisfied, not Excused", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Tue 12:00");
+    const { vacationId } = ok(
+      await owner.fileVacation({ from: s.date("Wed"), to: s.date("Wed"), pactIds: [gym], reviewerIds: [reviewer.id] }),
+    );
+    await s.advanceTo("Wed 10:00");
+    ok(await second.decide(ok(await owner.submitEvidence(gym, [photo()])).evidenceId, { kind: "approve" }));
+    s.setClockTo("Thu 00:00");
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(statusOn(owner, gym, s.date("Wed"))).toBe("satisfied");
+    await s.advanceTo("Thu 01:00");
+    expect(statusOn(owner, gym, s.date("Wed"))).toBe("satisfied");
+  });
+
   test("a covered One-time deadline moved outside the vacation isn't covered any more; moved within it, it still is", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);

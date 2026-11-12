@@ -112,7 +112,8 @@ function deletePenalties(ctx: CoreContext, pactId: string, date: LocalDate): voi
  * just decided or withdrawn, as of `now`, given the checks of AnkiWeb still
  * running. Approved: a Missed one becomes Excused, and one not judged yet
  * whose due time has passed (its evidence was waiting) is judged Excused
- * now; the rest are judged Excused at their due time. Rejected or withdrawn:
+ * now, unless approved evidence makes it Satisfied, as at its due time; the
+ * rest are judged Excused at their due time. Rejected or withdrawn:
  * the cover no longer counts, and nothing changes. A bedtime night not
  * judged yet is left to judging (`judgeNights`), which waits for Oura until
  * the night closes, and takes a period on its first look after the close.
