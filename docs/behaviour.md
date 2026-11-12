@@ -203,3 +203,8 @@ The five kinds are evidence, excuses, vacations, payments and change requests.
 
 - Everything runs on the account's timezone except Oura Ring nights, which use the offset Oura reports (`ouraOffset`, `rows.ts:217`; `noteOuraClock`, `bedtime.ts:52`). Test: `timezone.test.ts`.
 - Every account has a timezone. A new account gets its browser's timezone at sign-up: the client sends it through Google's redirect in the OAuth state (`TIMEZONE_SIGN_IN_KEY`, `src/shared/api.ts`), and `signIn` stores its canonical name (`accounts.ts:27`). A sign-in with no timezone, or one `Intl` does not accept, gets UTC; it is never refused. Signing in again leaves the timezone alone. The person sees it and can change it in Profile. There is no "Is this your timezone?" screen: this differs from story 2 in `.scratch/pact-v0/spec.md` (ticket 22). Migration 30 gave UTC to accounts made before this that never confirmed one. Test: `sign-in.test.ts`.
+
+## Loading screens
+
+- A tab or page opened again shows what it last loaded at once while it loads afresh; if that load fails, it keeps showing it with "couldn't load" above. When the app opens it loads the tabs not shown, so the first visit to each is quick too. Forms and pickers (editing or changing a pact, planning a vacation, the deck and reviewer pickers, notification settings) always load afresh (`useLoad`'s `key`, `src/client/ui.tsx`; `src/client/last-loaded.ts`). Test: `last-loaded.test.tsx`.
+- Any command the person sends, refused or not, and signing out forget everything loaded, so no screen shows what was there before their own action. The app's own checks, push subscriptions and previews forget nothing (`post` and `postQuietly`, `src/client/api.ts`). Test: `api.test.ts`.

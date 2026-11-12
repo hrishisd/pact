@@ -3,7 +3,7 @@
 // the photos, the questions so far, and the reply box while a question waits
 // on the owner's reply.
 
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import type { EvidenceDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { formatDate } from "./format.ts";
@@ -20,7 +20,7 @@ export function EvidencePage({
   timezone: string;
   onOpenPact: (pactId: string, name: string) => void;
 }) {
-  const { state, reload } = useLoad(() => api.evidence(evidenceId));
+  const { state, reload } = useLoad(() => api.evidence(evidenceId), API_PATHS.evidenceItem(evidenceId));
 
   return (
     <LoadedFound state={state} what="This evidence" notFound={{ title: "Evidence not found", body: "It isn't yours." }}>

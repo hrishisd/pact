@@ -3,7 +3,7 @@
 // and screenshot, the questions so far, and the reply box while a question
 // waits on the owner's reply.
 
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import type { PaymentDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { money } from "./format.ts";
@@ -20,7 +20,7 @@ export function PaymentPage({
   timezone: string;
   onOpenLedger: (recipientId: string, name: string) => void;
 }) {
-  const { state, reload } = useLoad(() => api.payment(paymentId));
+  const { state, reload } = useLoad(() => api.payment(paymentId), API_PATHS.paymentItem(paymentId));
 
   return (
     <LoadedFound

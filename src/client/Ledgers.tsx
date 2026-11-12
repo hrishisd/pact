@@ -6,7 +6,7 @@
 // payments, and which penalties those have paid.
 
 import { useEffect, useState, type ReactNode } from "react";
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import type { LedgerPayment, LedgerPenalty, LedgerSummary } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { formatDate, formatDay, money } from "./format.ts";
@@ -21,7 +21,7 @@ export function Ledgers({
   timezone: string;
   onOpenLedger: (recipientId: string, name: string) => void;
 }) {
-  const { state, reload } = useLoad(api.ledgers);
+  const { state, reload } = useLoad(api.ledgers, API_PATHS.ledgers);
   // The ledger whose Record a payment sheet is open, outside the cards.
   const [paying, setPaying] = useState<Json<LedgerSummary> | null>(null);
 
@@ -77,7 +77,7 @@ export function LedgerPage({
   onOpenPact: (pactId: string, name: string) => void;
 }) {
   // Reloaded after a payment, keeping the ledger shown meanwhile and if the reload fails.
-  const { state, reload } = useLoad(() => api.ledger(recipientId));
+  const { state, reload } = useLoad(() => api.ledger(recipientId), API_PATHS.ledger(recipientId));
   const result = loadedData(state);
   const [paying, setPaying] = useState(false);
 

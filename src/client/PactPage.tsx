@@ -7,7 +7,7 @@
 // right here, with no review, even while a change request waits.
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import { termsOf } from "../shared/terms.ts";
 import {
   MAX_NAME_CHARS,
@@ -61,7 +61,7 @@ export function PactPage({
   onInvite: () => void;
 }) {
   // Reloaded after a change made here, keeping the pact shown meanwhile and if the reload fails.
-  const { state, reload } = useLoad(() => api.pact(pactId));
+  const { state, reload } = useLoad(() => api.pact(pactId), API_PATHS.pact(pactId));
   const result = loadedData(state);
   // One clock for the page: the edit window's countdown, what it allows, and the heat map's today.
   const now = useNow();

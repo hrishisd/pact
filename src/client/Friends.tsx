@@ -1,13 +1,13 @@
 // The Profile sheet's Friends section: who you're friends with, and an invite link to share.
 
 import { useState } from "react";
-import { APP_PATHS } from "../shared/api.ts";
+import { API_PATHS, APP_PATHS } from "../shared/api.ts";
 import { api, failureText } from "./api.ts";
 import { initial } from "./format.ts";
 import { loadFailure, loadedData, useLoad } from "./ui.tsx";
 
 export function FriendsSection() {
-  const { state } = useLoad(api.friends);
+  const { state } = useLoad(api.friends, API_PATHS.friends);
   const friends = loadedData(state);
   const failed = loadFailure(state);
 

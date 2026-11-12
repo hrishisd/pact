@@ -4,7 +4,7 @@
 // has Withdraw; one waiting on the owner's reply also has Reply.
 
 import { useState } from "react";
-import type { Json } from "../shared/api.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import type { LastVacation, VacationCard } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { listNames } from "./change-terms.tsx";
@@ -25,7 +25,7 @@ export function VacationSection({
   lastOne?: Json<LastVacation> | null;
   onPlan: () => void;
 }) {
-  const { state, reload } = useLoad(api.vacations);
+  const { state, reload } = useLoad(api.vacations, API_PATHS.vacations);
   const vacations = loadedData(state);
   const [said, setSaid] = useState(message);
   const saying = (text: string) => () => {
