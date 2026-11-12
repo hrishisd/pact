@@ -122,6 +122,7 @@ import {
   withdrawMoot,
   type PhotoResult,
 } from "./review.ts";
+import { accountRow } from "./rows.ts";
 import { settleAll } from "./settle.ts";
 import { todayPage } from "./today.ts";
 import { waitingFor } from "./waiting.ts";
@@ -467,6 +468,20 @@ export interface AccountView {
   removePushSubscription(endpoint: string): Promise<void>;
 }
 
+/** The synchronous calls of an AccountView: its queries, `photo` apart. */
+type Queries = {
+  [K in keyof AccountView as AccountView[K] extends (...args: never[]) => Promise<unknown> ? never : K]: AccountView[K];
+};
+/** The asynchronous ones: its commands, and `photo`. */
+type Commands = Omit<AccountView, keyof Queries>;
+
+type Call = (...args: never[]) => unknown;
+
+/** `calls` with each one replaced by what `wrap` makes of it. */
+function eachCall<T extends Record<string, Call>>(calls: T, wrap: (call: Call) => Call): T {
+  return Object.fromEntries(Object.entries(calls).map(([name, call]) => [name, wrap(call)])) as T;
+}
+
 export function createPactCore(options: PactCoreOptions): PactCore {
   const db = openDatabase(options.dbPath);
   return new Core(db, options);
@@ -553,27 +568,50 @@ class Core implements PactCore {
   }
 
   as(accountId: AccountId): AccountView {
-    return {
-      setTimezone: (timezone) => this.#command(() => setTimezone(this.#ctx, accountId, timezone)),
-      createInvite: () => this.#command(() => createInvite(this.#ctx, accountId)),
+    // Every call first checks that the account exists, so no feature function
+    // has to: a query as an unknown account throws `UnknownAccountError`, and
+    // a command (or `photo`) rejects with it, having written nothing. The
+    // check is per call, since a view may be kept, and synchronous with the
+    // command's transaction, so nothing comes between them.
+    const exists = () => void accountRow(this.#ctx, accountId);
+    const queries: Queries = {
       invite: (token) => invitePage(this.#ctx, accountId, token),
-      acceptInvite: (token) => this.#command(() => acceptInvite(this.#ctx, accountId, token)),
       friends: () => friendList(this.#ctx, accountId),
-      addRecipient: (recipient) => this.#command(() => addRecipient(this.#ctx, accountId, recipient)),
       recipients: () => recipientList(this.#ctx, accountId),
-      createPact: (pact) => this.#command(() => createPact(this.#ctx, accountId, pact)),
-      editPact: (pactId, pact) => this.#command(() => editPact(this.#ctx, accountId, pactId, pact)),
-      deletePact: (pactId) => this.#command(() => deletePact(this.#ctx, accountId, pactId)),
       firstOccurrence: (timing, editing) => firstOccurrence(this.#ctx, accountId, timing, editing),
       pacts: () => pactList(this.#ctx, accountId),
       pact: (pactId) => pactPage(this.#ctx, accountId, pactId, waitingFor),
       changePreview: (pactId, change) => changePreview(this.#ctx, accountId, pactId, change),
+      changeRequest: (changeRequestId) => changeRequestPage(this.#ctx, accountId, changeRequestId),
+      profile: () => profile(this.#ctx, accountId),
+      today: () => todayPage(this.#ctx, accountId),
+      notificationSettings: () => notificationSettingList(this.#ctx, accountId),
+      excusePreview: (pactId, dates) => previewExcuse(this.#ctx, accountId, pactId, dates),
+      excuseOptions: (pactId) => excuseOptions(this.#ctx, accountId, pactId),
+      excuse: (excuseId) => excusePage(this.#ctx, accountId, excuseId),
+      vacationOptions: () => vacationOptions(this.#ctx, accountId),
+      vacationPreview: (request) => previewVacation(this.#ctx, accountId, request),
+      vacations: () => vacationCards(this.#ctx, accountId),
+      lastVacation: () => lastVacation(this.#ctx, accountId),
+      reviewQueue: () => reviewQueue(this.#ctx, accountId),
+      waitingOnReply: () => waitingOnReply(this.#ctx, accountId),
+      evidence: (evidenceId) => evidencePage(this.#ctx, accountId, evidenceId),
+      payment: (paymentId) => paymentPage(this.#ctx, accountId, paymentId),
+      ledgers: () => ledgerList(this.#ctx, accountId),
+      ledger: (recipientId) => ledgerPage(this.#ctx, accountId, recipientId),
+    };
+    const commands: Commands = {
+      setTimezone: (timezone) => this.#command(() => setTimezone(this.#ctx, accountId, timezone)),
+      createInvite: () => this.#command(() => createInvite(this.#ctx, accountId)),
+      acceptInvite: (token) => this.#command(() => acceptInvite(this.#ctx, accountId, token)),
+      addRecipient: (recipient) => this.#command(() => addRecipient(this.#ctx, accountId, recipient)),
+      createPact: (pact) => this.#command(() => createPact(this.#ctx, accountId, pact)),
+      editPact: (pactId, pact) => this.#command(() => editPact(this.#ctx, accountId, pactId, pact)),
+      deletePact: (pactId) => this.#command(() => deletePact(this.#ctx, accountId, pactId)),
       changePact: (pactId, change) => this.#command(() => changePact(this.#ctx, accountId, pactId, change)),
       requestEnd: (pactId, note) => this.#command(() => requestEnd(this.#ctx, accountId, pactId, note)),
-      changeRequest: (changeRequestId) => changeRequestPage(this.#ctx, accountId, changeRequestId),
       withdrawChangeRequest: (changeRequestId) =>
         this.#command(() => withdrawChangeRequest(this.#ctx, accountId, changeRequestId)),
-      profile: () => profile(this.#ctx, accountId),
       checkOura: () =>
         checkOura(this.#ctx, accountId, this.#ouraChecks, this.#ouraSource, (change) => this.#command(change)),
       disconnectOura: () => this.#command(() => disconnectOura(this.#ctx, accountId)),
@@ -583,8 +621,6 @@ class Core implements PactCore {
         checkAnki(this.#ctx, accountId, this.#ankiPolling, this.#ankiSource, (change) => this.#command(change)),
       disconnectAnki: () => this.#command(() => disconnectAnki(this.#ctx, accountId)),
       connectOura: () => this.#command(() => connectOura(this.#ctx, accountId)),
-      today: () => todayPage(this.#ctx, accountId),
-      notificationSettings: () => notificationSettingList(this.#ctx, accountId),
       setNotificationSetting: (setting, enabled) =>
         this.#command(() => setNotificationSetting(this.#ctx, accountId, setting, enabled)),
       savePushSubscription: (device) => this.#command(() => savePushSubscription(this.#ctx, accountId, device)),
@@ -593,32 +629,33 @@ class Core implements PactCore {
         submitEvidence(this.#ctx, accountId, pactId, photos, this.#photoStore, (change) => this.#command(change)),
       acceptMiss: (pactId, occurrenceDate) =>
         this.#command(() => acceptMiss(this.#ctx, accountId, pactId, occurrenceDate)),
-      excusePreview: (pactId, dates) => previewExcuse(this.#ctx, accountId, pactId, dates),
-      excuseOptions: (pactId) => excuseOptions(this.#ctx, accountId, pactId),
       fileExcuse: (pactId, excuse, photos) =>
         fileExcuse(this.#ctx, accountId, pactId, excuse, photos, this.#photoStore, (change) => this.#command(change)),
-      excuse: (excuseId) => excusePage(this.#ctx, accountId, excuseId),
       acceptExcuseRejection: (excuseId) => this.#command(() => acceptExcuseRejection(this.#ctx, accountId, excuseId)),
-      vacationOptions: () => vacationOptions(this.#ctx, accountId),
-      vacationPreview: (request) => previewVacation(this.#ctx, accountId, request),
       fileVacation: (vacation) => this.#command(() => fileVacation(this.#ctx, accountId, vacation)),
-      vacations: () => vacationCards(this.#ctx, accountId),
-      lastVacation: () => lastVacation(this.#ctx, accountId),
       withdrawVacation: (vacationId) => this.#command(() => withdrawVacation(this.#ctx, accountId, vacationId)),
       acceptVacationRejection: (vacationId) =>
         this.#command(() => acceptVacationRejection(this.#ctx, accountId, vacationId)),
       recordPayment: (payment, screenshot) =>
         recordPayment(this.#ctx, accountId, payment, screenshot, this.#photoStore, (change) => this.#command(change)),
       photo: (photoId) => viewPhoto(this.#ctx, accountId, photoId, this.#photoStore),
-      reviewQueue: () => reviewQueue(this.#ctx, accountId),
-      waitingOnReply: () => waitingOnReply(this.#ctx, accountId),
-      evidence: (evidenceId) => evidencePage(this.#ctx, accountId, evidenceId),
-      payment: (paymentId) => paymentPage(this.#ctx, accountId, paymentId),
       askOwner: (itemId, question) => this.#command(() => askOwner(this.#ctx, accountId, itemId, question)),
       reply: (itemId, reply) => this.#command(() => ownerReply(this.#ctx, accountId, itemId, reply)),
       decide: (itemId, decision) => this.#command(() => decide(this.#ctx, accountId, itemId, decision)),
-      ledgers: () => ledgerList(this.#ctx, accountId),
-      ledger: (recipientId) => ledgerPage(this.#ctx, accountId, recipientId),
+    };
+    return {
+      ...eachCall(queries, (call) => (...args) => {
+        exists();
+        return call(...args);
+      }),
+      ...eachCall(commands, (call) => (...args) => {
+        try {
+          exists();
+        } catch (error) {
+          return Promise.reject(error);
+        }
+        return call(...args);
+      }),
     };
   }
 

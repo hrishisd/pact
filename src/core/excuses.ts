@@ -149,7 +149,6 @@ export async function fileExcuse(
 }
 
 export function excusePage(ctx: CoreContext, accountId: AccountId, excuseId: string): ExcuseResult {
-  accountRow(ctx, accountId);
   const pact = excusePact(ctx, excuseId);
   if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
   const row = ctx.db
@@ -185,7 +184,6 @@ export function acceptExcuseRejection(
   accountId: AccountId,
   excuseId: string,
 ): AcceptExcuseRejectionResult {
-  accountRow(ctx, accountId);
   const pact = excusePact(ctx, excuseId);
   if (!pact || pact.owner_account_id !== accountId) return { ok: false, reason: "excuse-not-found" };
   const now = ctx.clock.now().toISOString();

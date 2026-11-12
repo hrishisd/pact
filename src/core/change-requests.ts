@@ -159,7 +159,6 @@ export function changeRequestPage(
   accountId: AccountId,
   changeRequestId: string,
 ): ChangeRequestResult {
-  accountRow(ctx, accountId);
   const row = changeRequestRow(ctx, changeRequestId);
   if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
   const state = itemStateOf(
@@ -180,7 +179,6 @@ export function withdrawChangeRequest(
   accountId: AccountId,
   changeRequestId: string,
 ): WithdrawChangeRequestResult {
-  accountRow(ctx, accountId);
   const row = changeRequestRow(ctx, changeRequestId);
   if (!row || row.owner_account_id !== accountId) return { ok: false, reason: "change-request-not-found" };
   if (row.decision !== null || row.withdrawn_at !== null) return { ok: false, reason: "not-waiting" };

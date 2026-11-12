@@ -37,24 +37,20 @@ export function profile(ctx: CoreContext, accountId: AccountId): Profile {
 }
 
 export function connectOura(ctx: CoreContext, accountId: AccountId): void {
-  accountRow(ctx, accountId);
   connect(ctx, accountId, "oura");
 }
 
 export function disconnectOura(ctx: CoreContext, accountId: AccountId): void {
-  accountRow(ctx, accountId);
   disconnect(ctx, accountId, "oura");
 }
 
 export function connectAnki(ctx: CoreContext, accountId: AccountId, ankiPolls: Map<AccountId, number>): void {
-  accountRow(ctx, accountId);
   // A new login: the next tick checks at once, whenever the last check was.
   ankiPolls.delete(accountId);
   connect(ctx, accountId, "anki");
 }
 
 export function disconnectAnki(ctx: CoreContext, accountId: AccountId): void {
-  accountRow(ctx, accountId);
   disconnect(ctx, accountId, "anki");
 }
 

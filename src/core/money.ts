@@ -136,7 +136,6 @@ export async function recordPayment(
 }
 
 export function paymentPage(ctx: CoreContext, accountId: AccountId, paymentId: string): PaymentResult {
-  accountRow(ctx, accountId);
   const row = ctx.one<ReviewStateRow & PaymentViewRow & { recipient_id: string }>(
     `SELECT payment.id, payment.recipient_id, recipient.name AS recipient_name, payment.amount_cents,
               payment.note, payment.photo_id, payment.recorded_at, ${reviewStateColumns("payment")}
@@ -163,7 +162,6 @@ export function paymentPage(ctx: CoreContext, accountId: AccountId, paymentId: s
 }
 
 export function ledgerList(ctx: CoreContext, accountId: AccountId): LedgerSummary[] {
-  accountRow(ctx, accountId);
   return ledgerSummaries(ctx, accountId);
 }
 

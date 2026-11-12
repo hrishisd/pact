@@ -9,7 +9,7 @@ import { coverOn } from "./covers.ts";
 import { isJudged } from "./occurrence-state.ts";
 import type { AnkiCountsResult, AnkiSource } from "./ports.ts";
 import { settle } from "./settle.ts";
-import { accountRow, ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
+import { ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
 
 /** The core ignores a check of AnkiWeb now this soon after the account's last one. */
 const ANKI_CHECK_INTERVAL_MS = 15_000;
@@ -43,7 +43,6 @@ export async function ankiDecks(
   ankiSource: AnkiSource,
   command: Command,
 ): Promise<AnkiDecksResult> {
-  accountRow(ctx, accountId);
   if (!hasConnection(ctx, accountId, "anki")) return { ok: false, reason: "not-connected" };
   const askedAt = ctx.clock.now();
   let result;
@@ -77,7 +76,6 @@ export async function checkAnki(
   ankiSource: AnkiSource,
   command: Command,
 ): Promise<void> {
-  accountRow(ctx, accountId);
   const now = ctx.clock.now();
   if (checkedWithin(polling.checks, accountId, now, ANKI_CHECK_INTERVAL_MS)) return;
   if (ankiDaysWaiting(ctx, now, accountId).length === 0) return;

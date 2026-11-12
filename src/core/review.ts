@@ -35,7 +35,6 @@ export async function viewPhoto(
   photoId: string,
   photoStore: PhotoStore,
 ): Promise<PhotoResult> {
-  accountRow(ctx, accountId);
   // Those who may see a photo: the item's owner and whoever may decide it.
   const viewable = REQUEST_HANDLERS.some((handler) =>
     (handler.itemsWithPhoto?.(ctx, photoId) ?? []).some((itemId) => {
@@ -50,7 +49,6 @@ export async function viewPhoto(
 }
 
 export function reviewQueue(ctx: CoreContext, accountId: AccountId): ReviewItem[] {
-  accountRow(ctx, accountId);
   return queuedItems(ctx, accountId)
     .filter(({ item }) => !item.thread.waitingOnReply)
     .map(({ item }) => item);
@@ -71,7 +69,6 @@ export function reviewQueueWaits(ctx: CoreContext, reviewerId: AccountId): Queue
 }
 
 export function waitingOnReply(ctx: CoreContext, accountId: AccountId): ReviewItem[] {
-  accountRow(ctx, accountId);
   return queuedItems(ctx, accountId)
     .filter(({ item }) => item.thread.waitingOnReply)
     .map(({ item }) => item);
@@ -129,7 +126,6 @@ export function ownerReply(ctx: CoreContext, accountId: AccountId, itemId: strin
 }
 
 export function decide(ctx: CoreContext, accountId: AccountId, itemId: string, decision: ReviewDecision): DecideResult {
-  accountRow(ctx, accountId);
   const found = findItem(ctx, itemId);
   const withdrawn = found && mayDecide(ctx, accountId, found) ? withdrawalOfItem(ctx, found) : null;
   if (withdrawn) return { ok: false, reason: "withdrawn", withdrawal: withdrawn };

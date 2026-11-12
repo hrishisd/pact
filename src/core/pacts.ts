@@ -156,7 +156,6 @@ export function editPact(ctx: CoreContext, accountId: AccountId, pactId: string,
 }
 
 export function deletePact(ctx: CoreContext, accountId: AccountId, pactId: string): DeletePactResult {
-  accountRow(ctx, accountId);
   const row = ownPact(ctx, accountId, pactId);
   if (!row) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(row, ctx.clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
@@ -202,7 +201,6 @@ export function firstOccurrence(
 }
 
 export function pactList(ctx: CoreContext, accountId: AccountId): PactSummary[] {
-  accountRow(ctx, accountId);
   const pacts = activePacts(ctx, accountId).map(
     ({ id, name, terms, penaltyCents, editWindowClosesAt }): PactSummary => ({
       id,

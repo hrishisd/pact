@@ -127,4 +127,13 @@ describe("sign-in", () => {
     await expect(nobody.setTimezone("Europe/London")).rejects.toThrow(UnknownAccountError);
     await expect(nobody.submitEvidence("no-such-pact", [])).rejects.toThrow(UnknownAccountError);
   });
+
+  test("every call as an account that doesn't exist is refused, whatever it is given", async () => {
+    const nobody = scenario().core.as("no-such-account");
+
+    for (const [name, call] of Object.entries(nobody) as [string, () => unknown][]) {
+      const outcome = new Promise((resolve) => resolve(call()));
+      await expect(outcome, name).rejects.toThrow(UnknownAccountError);
+    }
+  });
 });
