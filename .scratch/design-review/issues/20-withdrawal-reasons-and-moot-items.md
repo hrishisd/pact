@@ -11,8 +11,8 @@ Decision 4 in `../spec.md` (rule R8), decided 2026-11-11: when deciding an item 
 
 ## Problem
 
-- F8: items that can no longer change anything stay in Review Queues and on the owner's waiting list. P5a: evidence for a day an approved excuse already made Excused stays in the queue, and rejecting it still pushes "rejected your evidence". P5b: an excuse whose only day a change removed shows with `days: []` in the queue (`src/core/excuses.ts:402-426` does not filter) and on the owner's waiting list (`excuses.ts:429-457`). P5c: evidence for the day open when an end was approved stays in the queue and its decision does nothing (`src/core/evidence.ts:243`). Vacations over Ended pacts stay decidable (`src/core/review.ts:212` requires an active pact only for change requests).
-- F10: `endPact` withdraws a waiting change request (`src/core/judging.ts:234-243`) with no reason recorded; the page reads "withdrawn" as if the owner did it. `change-requests.test.ts:771` and `:803` assert there is no push, which the owner confirmed on 2026-11-08 and which stays.
+- F8: items that can no longer change anything stay in Review Queues and on the owner's waiting list. P5a: evidence for a day an approved excuse already made Excused stays in the queue, and rejecting it still pushes "rejected your evidence". P5b: an excuse whose only day a change removed shows with `days: []` in the queue (`src/core/excuses.ts` does not filter) and on the owner's waiting list (`excuses.ts`). P5c: evidence for the day open when an end was approved stays in the queue and its decision does nothing (`src/core/evidence.ts`). Vacations over Ended pacts stay decidable (`src/core/review.ts` requires an active pact only for change requests).
+- F10: `endPact` withdraws a waiting change request (`src/core/judging.ts`) with no reason recorded; the page reads "withdrawn" as if the owner did it. `change-requests.test.ts` and `:803` assert there is no push, which the owner confirmed on 2026-11-08 and which stays.
 
 ## Rule
 
@@ -24,17 +24,17 @@ Cases, checked against that definition with the code as it will be after tickets
 
 | # | Case | Moot? | Why |
 |---|---|---|---|
-| 1 | An excuse or vacation with no covered day left: every day removed by a change (P5b; ticket 14 deletes the rows) or due after the pact Ended (approval skips them, `excuses.ts:379`) | Yes, `no-longer-needed` (or `pact-ended` when the end did it) | Neither decision touches any occurrence. For a vacation, only when no day is left on any pact. |
+| 1 | An excuse or vacation with no covered day left: every day removed by a change (P5b; ticket 14 deletes the rows) or due after the pact Ended (approval skips them, `excuses.ts`) | Yes, `no-longer-needed` (or `pact-ended` when the end did it) | Neither decision touches any occurrence. For a vacation, only when no day is left on any pact. |
 | 2 | An excuse or vacation whose every remaining covered day is Satisfied by approved evidence | Yes, `no-longer-needed` | Approved evidence beats a cover, so approving or rejecting leaves Satisfied. |
 | 3 | A waiting change request when the pact Ends (end date, One-time judged, or an approved end taking effect) | Yes, `pact-ended` | Nothing is left for it to change. Today's behaviour, with the reason added. |
-| 4 | Evidence for a Weekly count week already Satisfied by other approved evidence (`judgeWeek` judges Satisfied once the target is met, `judging.ts:153`) | Yes, `no-longer-needed`, if the core accepts evidence after the target is met; check | The week stays Satisfied either way. |
-| 5 | Evidence for a day already judged Excused (P5a) | No | Approval turns the day Satisfied (decision 4, vac:78). Today a late approval changes nothing (`evidence.ts:254-258` skips judged days); that is the bug to fix. |
+| 4 | Evidence for a Weekly count week already Satisfied by other approved evidence (`judgeWeek` judges Satisfied once the target is met, `judging.ts`) | Yes, `no-longer-needed`, if the core accepts evidence after the target is met; check | The week stays Satisfied either way. |
+| 5 | Evidence for a day already judged Excused (P5a) | No | Approval turns the day Satisfied (decision 4, vac:78). Today a late approval changes nothing (`evidence.ts` skips judged days); that is the bug to fix. |
 | 6 | Evidence for an occurrence not the pact's because it fell due after the end (P5c) | Yes, `pact-ended`, but after ticket 13 it should not arise | An approved end now waits for the open occurrence. Keep the case for safety. |
 | 7 | Evidence or a cover on an occurrence still open, deferred on that evidence, or Missed and inside its window | No | The decision changes the outcome or the penalty. |
 | 8 | An excuse or vacation with at least one covered day not judged yet or Missed | No | Approval would excuse it. |
 | 9 | A payment | No, never | Approving always changes the ledger, even when owed is $0 (it becomes credit, ticket 16). |
 | 10 | A change request on an Active pact | No | Approving always changes the terms. |
-| 11 | Any item waiting on the owner's reply | Same as its kind | The question does not affect moot-ness. Withdrawing it ends the question alert, as `reviewer-questions.test.ts:345` already shows for an owner's withdrawal. |
+| 11 | Any item waiting on the owner's reply | Same as its kind | The question does not affect moot-ness. Withdrawing it ends the question alert, as `reviewer-questions.test.ts` already shows for an owner's withdrawal. |
 
 ## What to build
 
@@ -48,16 +48,16 @@ Cases, checked against that definition with the code as it will be after tickets
 
 ## Where to start
 
-- `src/core/judging.ts:230-245`, `src/core/review.ts:120-220` (or the registry after ticket 17), `src/core/excuses.ts:369-460`, `src/core/vacations.ts:583-600`.
+- `src/core/judging.ts`, `src/core/review.ts` (or the registry after ticket 17), `src/core/excuses.ts`, `src/core/vacations.ts`.
 - Probes P5a to P5c in `../probes/audit-probes.test.ts.txt`, "probe 5".
-- `change-requests.test.ts:771`, `:803`.
+- `change-requests.test.ts`, `:803`.
 
 ## Acceptance criteria
 
 - [x] Scenarios for each "Yes" case above (1 to 4, and 6 if constructible): the item leaves the queue and the waiting list, carries its reason, and no push is sent.
 - [x] Scenarios for cases 7, 8 and 9: the item stays.
 - [x] Case 5: moved to ticket 26 by the owner (2026-11-11), because it needs 26's fix to pass.
-- [x] `change-requests.test.ts:771` and `:803` extended to assert the `pact-ended` reason on the change request's page.
+- [x] `change-requests.test.ts` and `:803` extended to assert the `pact-ended` reason on the change request's page.
 - [x] A reviewer deciding a withdrawn item gets the reason in the refusal (core scenario and `Review.test.tsx`).
 - [x] Update `docs/behaviour.md`.
 - [x] `npm run check` passes.

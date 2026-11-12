@@ -11,7 +11,7 @@ Decision 3 in `../spec.md` (rule R5), decided 2026-11-11: a vacation is decided 
 
 ## Problem
 
-`vacationToDecide` checks only `vacation_reviewer` (`src/core/vacations.ts:524-539`), while evidence, excuses and change requests use the pact's current reviewers (`src/core/review.ts:177-217`). A reviewer removed from every covered pact can still decide the vacation, and one added later cannot see it. Scenario: the only picked reviewer goes quiet. The owner adds a second reviewer, who cannot see the vacation. Withdrawing and refiling cannot cover days already open (`vacations.ts:186-187`), and by then those days may be past their excuse window. Pinned by `vacations.test.ts:1372`.
+`vacationToDecide` checks only `vacation_reviewer` (`src/core/vacations.ts`), while evidence, excuses and change requests use the pact's current reviewers (`src/core/review.ts`). A reviewer removed from every covered pact can still decide the vacation, and one added later cannot see it. Scenario: the only picked reviewer goes quiet. The owner adds a second reviewer, who cannot see the vacation. Withdrawing and refiling cannot cover days already open (`vacations.ts`), and by then those days may be past their excuse window. Pinned by `vacations.test.ts`.
 
 ## What to build
 
@@ -21,12 +21,12 @@ Decision 3 in `../spec.md` (rule R5), decided 2026-11-11: a vacation is decided 
 
 ## Where to start
 
-- `src/core/vacations.ts:383-395` (`pickedReviewers`), `:468-545`.
-- `vacations.test.ts:1372`, and the picked-reviewers scenarios in `vacations.test.ts` (search "picked").
+- `src/core/vacations.ts` (`pickedReviewers`), `:468-545`.
+- `vacations.test.ts`, and the picked-reviewers scenarios in `vacations.test.ts` (search "picked").
 
 ## Acceptance criteria
 
-- [x] Rewritten `vacations.test.ts:1372` to the new rule. (No test at that line, or anywhere, pinned frozen deciders after a reviewer change; the closest, "a reviewer of a covered pact who wasn't picked can't decide or ask about it", is renamed to say it holds while a picked reviewer still reviews a covered pact.)
+- [x] Rewritten `vacations.test.ts` to the new rule. (No test at that line, or anywhere, pinned frozen deciders after a reviewer change; the closest, "a reviewer of a covered pact who wasn't picked can't decide or ask about it", is renamed to say it holds while a picked reviewer still reviews a covered pact.)
 - [x] New scenario: a picked reviewer removed from every covered pact can no longer decide or see the vacation; another picked reviewer still can.
 - [x] New scenario: the only picked reviewer is removed; a current reviewer of a covered pact gets the push, sees the item and can decide it.
 - [x] New scenario: a reviewer added to a covered pact while a picked reviewer remains does not see it.

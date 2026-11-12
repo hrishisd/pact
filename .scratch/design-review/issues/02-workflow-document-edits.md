@@ -11,9 +11,9 @@ Decision 7 in `../spec.md`, decided 2026-11-11: the owner approved every block o
 
 ## Problem
 
-- W3: `CLAUDE.md` does not mention `CODING_STANDARDS.md`, the layer split or `npm run check`, and `CODING_STANDARDS.md:3` says it is "Read at review time". Its most important rule, "A rule decided in a route or a component is a finding" (`CODING_STANDARDS.md:7`), reaches a session only after the code is written. C1 and C2 are the kind of thing it exists to stop.
-- W5: `docs/agents/domain.md` describes `GLOSSARY-MAP.md`, multi-context layouts and skills that do not exist here; `docs/agents/issue-tracker.md:26-39` specifies `/wayfinder` map files no feature uses; `docs/agents/triage-labels.md` is an identity table ending "Edit the column to match"; `docs/agents/prototype-first.md:13` names `/grill-with-docs`, while the installed skill is `grilling`; the `domain-modeling` skill writes a `CONTEXT.md`, while this repo uses `GLOSSARY.md` and the lint reads only that (`scripts/check-conventions.ts:35`); `docs/agents/local-dev.md` assumes `fnm` and an iCloud folder.
-- T2: server tests re-walk domain flows the core tests own (`src/server/app.test.ts:1373-1450`, `1281-1334`, `1519-1555`, `1591-1630`).
+- W3: `CLAUDE.md` does not mention `CODING_STANDARDS.md`, the layer split or `npm run check`, and `CODING_STANDARDS.md` says it is "Read at review time". Its most important rule, "A rule decided in a route or a component is a finding" (`CODING_STANDARDS.md`), reaches a session only after the code is written. C1 and C2 are the kind of thing it exists to stop.
+- W5: `docs/agents/domain.md` describes `GLOSSARY-MAP.md`, multi-context layouts and skills that do not exist here; `docs/agents/issue-tracker.md` specifies `/wayfinder` map files no feature uses; `docs/agents/triage-labels.md` is an identity table ending "Edit the column to match"; `docs/agents/prototype-first.md` names `/grill-with-docs`, while the installed skill is `grilling`; the `domain-modeling` skill writes a `CONTEXT.md`, while this repo uses `GLOSSARY.md` and the lint reads only that (`scripts/check-conventions.ts`); `docs/agents/local-dev.md` assumes `fnm` and an iCloud folder.
+- T2: server tests re-walk domain flows the core tests own (`src/server/app.test.ts`, `1281-1334`, `1519-1555`, `1591-1630`).
 - W1: nothing checks that a `Status:` line uses a known value.
 
 ## Approved text
@@ -84,8 +84,8 @@ Add under its first heading: "The `fnm` and iCloud notes apply to the owner's Ma
 
 ## Where to start
 
-- `CLAUDE.md`, `CODING_STANDARDS.md:3`, `docs/agents/*.md`.
-- `scripts/check-conventions.ts:1-80` for how existing checks read files and report.
+- `CLAUDE.md`, `CODING_STANDARDS.md`, `docs/agents/*.md`.
+- `scripts/check-conventions.ts` for how existing checks read files and report.
 
 ## Acceptance criteria
 

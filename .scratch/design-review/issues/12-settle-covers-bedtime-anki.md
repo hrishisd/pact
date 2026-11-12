@@ -9,11 +9,11 @@ Closes: H3 steps 4 and 5 (`../architecture-review.md`, H3), and the billed-penal
 
 Three more paths write outcomes and penalties with their own copy of the rules:
 
-- `excuseApprovedDays` (`src/core/excuses.ts:369-399`), used by excuse and vacation approval (`src/core/vacations.ts:561-564`), rewrites Missed to Excused and deletes the penalty directly.
-- `judgeNights` (`src/core/bedtime.ts:180-215`) has its own excuse precedence, and writes the observed bedtime only after judging (`bedtime.ts:201-203`).
-- `recordAnkiChecks` (`src/core/anki-days.ts:170-220`) judges Satisfied without consulting covers.
+- `excuseApprovedDays` (`src/core/excuses.ts`), used by excuse and vacation approval (`src/core/vacations.ts`), rewrites Missed to Excused and deletes the penalty directly.
+- `judgeNights` (`src/core/bedtime.ts`) has its own excuse precedence, and writes the observed bedtime only after judging (`bedtime.ts`).
+- `recordAnkiChecks` (`src/core/anki-days.ts`) judges Satisfied without consulting covers.
 
-Separately, the rule "an excuse never reaches a billed penalty" rests on 48-hour arithmetic: bills take penalties older than 48 hours (`src/core/money.ts:396-420`) and the excuse window is 48 hours. If it ever breaks, owed is clamped at zero (`money.ts:281`) and the violation is invisible (F13). Ticket 15 (R3) would break it unless it is careful.
+Separately, the rule "an excuse never reaches a billed penalty" rests on 48-hour arithmetic: bills take penalties older than 48 hours (`src/core/money.ts`) and the excuse window is 48 hours. If it ever breaks, owed is clamped at zero (`money.ts`) and the violation is invisible (F13). Ticket 15 (R3) would break it unless it is careful.
 
 ## What to build
 
@@ -25,8 +25,8 @@ Separately, the rule "an excuse never reaches a billed penalty" rests on 48-hour
 
 ## Where to start
 
-- `src/core/excuses.ts:334-399`, `src/core/vacations.ts:548-580`, `src/core/bedtime.ts:147-215`, `src/core/anki-days.ts:170-220`.
-- `bedtime.test.ts:237-330` (excuse precedence for nights), `anki-days.test.ts`, `excuses.test.ts:446-577`, `vacations.test.ts` "deciding a vacation after its first day".
+- `src/core/excuses.ts`, `src/core/vacations.ts`, `src/core/bedtime.ts`, `src/core/anki-days.ts`.
+- `bedtime.test.ts` (excuse precedence for nights), `anki-days.test.ts`, `excuses.test.ts`, `vacations.test.ts` "deciding a vacation after its first day".
 
 ## Acceptance criteria
 

@@ -9,14 +9,14 @@ Closes: C1 (`../code-structure-review.md`, section 1); the client half of archit
 
 The core sends an `OccurrenceStatus` with raw fields, and each screen decides what to call the occurrence by comparing `opensAt` and `dueAt` with the browser clock in its own order:
 
-- `squareOf` (`src/client/history.tsx:31-39`): vacation, outcome, approved excuse, then ahead/open/not judged. Ignores a waiting excuse and waiting evidence.
-- `DayChip` (`src/client/excuse-days.tsx:20-58`): approved excuse, waiting excuse, waiting evidence, then ahead/open/not judged.
-- `dayNote` (`excuse-days.tsx:70-83`): ahead/open/not judged only, with its own "Due by Sunday".
-- `OccurrenceChip` (`history.tsx:51-65`): vacation first, then `DayChip`.
-- `missedLine` (`src/client/Today.tsx:615-630`) and `recentNote` (`src/client/ExcuseSheet.tsx:578-583`).
-- `DayCard` decides which Weekly count week a day belongs to by Monday plus six days (`ExcuseSheet.tsx:510`), a rule the core owns.
+- `squareOf` (`src/client/history.tsx`): vacation, outcome, approved excuse, then ahead/open/not judged. Ignores a waiting excuse and waiting evidence.
+- `DayChip` (`src/client/excuse-days.tsx`): approved excuse, waiting excuse, waiting evidence, then ahead/open/not judged.
+- `dayNote` (`excuse-days.tsx`): ahead/open/not judged only, with its own "Due by Sunday".
+- `OccurrenceChip` (`history.tsx`): vacation first, then `DayChip`.
+- `missedLine` (`src/client/Today.tsx`) and `recentNote` (`src/client/ExcuseSheet.tsx`).
+- `DayCard` decides which Weekly count week a day belongs to by Monday plus six days (`ExcuseSheet.tsx`), a rule the core owns.
 
-So the heat map square and the chip beside it can disagree: a day with a waiting excuse is a plain open square with an "Excuse waiting for approval" chip. And `DayChip` can only say "Excuse waiting for approval" (`excuse-days.tsx:50`) for a waiting vacation too, because the old `excuse` field could not tell them apart.
+So the heat map square and the chip beside it can disagree: a day with a waiting excuse is a plain open square with an "Excuse waiting for approval" chip. And `DayChip` can only say "Excuse waiting for approval" (`excuse-days.tsx`) for a waiting vacation too, because the old `excuse` field could not tell them apart.
 
 ## What to build
 
@@ -27,7 +27,7 @@ So the heat map square and the chip beside it can disagree: a day with a waiting
 
 ## Where to start
 
-- `src/client/excuse-days.tsx`, `src/client/history.tsx:31-65`, `src/client/Today.tsx:615-630`, `src/client/ExcuseSheet.tsx:505-583`.
+- `src/client/excuse-days.tsx`, `src/client/history.tsx`, `src/client/Today.tsx`, `src/client/ExcuseSheet.tsx`.
 - The tests: `src/client/history.test.tsx`, `src/client/excuse-days.test.tsx`.
 
 ## Acceptance criteria

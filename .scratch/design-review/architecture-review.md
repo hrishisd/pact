@@ -20,25 +20,25 @@ Partly right. The lifecycle is genuinely shared and is already half-unified by a
 
 ### Evidence
 
-The five kinds have the same lifecycle columns, copied five times with the same CHECK constraints: `evidence` (migrations.ts:142), `payment` (migrations.ts:220), `excuse` (migrations.ts:282), `change_request` (migrations.ts:408) and `vacation` (migrations.ts:718) each carry `decision`, `decided_by_account_id`, `decided_at` and `reject_reason`. Withdrawal exists on two (`change_request.withdrawn_at`, `vacation.withdrawn_at`) and "take the L" on three (`excuse.rejection_accepted_at`, `vacation.rejection_accepted_at`, `evidence.rejection_accepted_at`).
+The five kinds have the same lifecycle columns, copied five times with the same CHECK constraints: `evidence` (migrations.ts), `payment` (migrations.ts), `excuse` (migrations.ts), `change_request` (migrations.ts) and `vacation` (migrations.ts) each carry `decision`, `decided_by_account_id`, `decided_at` and `reject_reason`. Withdrawal exists on two (`change_request.withdrawn_at`, `vacation.withdrawn_at`) and "take the L" on three (`excuse.rejection_accepted_at`, `vacation.rejection_accepted_at`, `evidence.rejection_accepted_at`).
 
-The code already treats them as one item in two places. The `comment` table keys threads by a bare `item_id` with no foreign key, relying on UUIDs not colliding across five tables (migrations.ts:437). `recordDecision` takes a table name and writes the same four columns on any of the five (rows.ts:501-515).
+The code already treats them as one item in two places. The `comment` table keys threads by a bare `item_id` with no foreign key, relying on UUIDs not colliding across five tables (migrations.ts). `recordDecision` takes a table name and writes the same four columns on any of the five (rows.ts).
 
-Everything else is written five times. `review.ts` has six switches or sequential probes over the kinds: `decide` (review.ts:138-166), `itemToDecide` probing five tables in turn (review.ts:177-217), `ownItem` (review.ts:224-264), `itemWhat` (review.ts:267-290), `itemPath` (review.ts:349-362) and `reviewItemSince` (review.ts:365-378). `viewPhoto` checks three photo stores separately (review.ts:58-71). Each kind has its own queue query (`evidenceToReview` evidence.ts:196, `excusesToReview` excuses.ts:402, `paymentsToReview` money.ts:623, `changeRequestsToReview` change-requests.ts:670, `vacationsToReview` vacations.ts:468) and its own owner "waiting" query (`waitingEvidence` evidence.ts:333, `waitingExcuses` excuses.ts:429, `waitingPayments` money.ts:728, `waitingChangeRequests` rows.ts:472, and none for vacations).
+Everything else is written five times. `review.ts` has six switches or sequential probes over the kinds: `decide` (review.ts), `itemToDecide` probing five tables in turn (review.ts), `ownItem` (review.ts), `itemWhat` (review.ts), `itemPath` (review.ts) and `reviewItemSince` (review.ts). `viewPhoto` checks three photo stores separately (review.ts). Each kind has its own queue query (`evidenceToReview` evidence.ts, `excusesToReview` excuses.ts, `paymentsToReview` money.ts, `changeRequestsToReview` change-requests.ts, `vacationsToReview` vacations.ts) and its own owner "waiting" query (`waitingEvidence` evidence.ts, `waitingExcuses` excuses.ts, `waitingPayments` money.ts, `waitingChangeRequests` rows.ts, and none for vacations).
 
 The duplication has already caused drift, which is the audit's evidence:
 
-- Who decides is answered three different ways: current pact reviewers for evidence, excuses and change requests (review.ts:177-217), picked reviewers frozen at filing for vacations (vacations.ts:525-539), and reviewers of any pact with the recipient for payments (money.ts:72-83). F5 is the visible cost.
-- The owner's waiting lists disagree. Today lists change requests, evidence, excuses and payments but not vacations (today.ts:102-111). The pact page lists change requests, evidence and excuses but not vacations (pacts.ts:255-261). F11.
-- Waiting-ness itself is computed per kind. `waitingExcuses` uses raw rows and so shows an excuse with no days left (excuses.ts:429-457, F8 P5b), while `excusesToReview` also does not filter (excuses.ts:402-426).
-- Only change requests are withdrawn by the system, silently, in `endPact` (judging.ts:234-243, F10). There is no shared notion of "moot", so evidence for an excused or ended day stays in queues (F8 P5a, P5c).
+- Who decides is answered three different ways: current pact reviewers for evidence, excuses and change requests (review.ts), picked reviewers frozen at filing for vacations (vacations.ts), and reviewers of any pact with the recipient for payments (money.ts). F5 is the visible cost.
+- The owner's waiting lists disagree. Today lists change requests, evidence, excuses and payments but not vacations (today.ts). The pact page lists change requests, evidence and excuses but not vacations (pacts.ts). F11.
+- Waiting-ness itself is computed per kind. `waitingExcuses` uses raw rows and so shows an excuse with no days left (excuses.ts, F8 P5b), while `excusesToReview` also does not filter (excuses.ts).
+- Only change requests are withdrawn by the system, silently, in `endPact` (judging.ts, F10). There is no shared notion of "moot", so evidence for an excused or ended day stays in queues (F8 P5a, P5c).
 - Cross-kind features the audit recommends (F2 stale-item reminders, F6 payment pause limit, F8 auto-withdrawal, F10 withdrawal reasons) would each have to be written five times today.
 
 ### Do evidence and payments belong?
 
 In the lifecycle, yes. F2 is mostly about evidence (a reviewer who never decides defers every penalty) and F6 is about payments (a waiting payment pauses Overdue forever). Those are exactly the items that most need stale reminders and a queue written once. They are also the two highest-volume kinds in the Review Queue.
 
-In the payload and effects, no. Evidence is per occurrence, has a uniqueness rule per occurrence and day (`evidence_one_waiting`, `evidence_one_approved`, migrations.ts:158-159), and its decision is an input to judging. A payment is per recipient ledger and its decision only changes a derived total. An excuse and a vacation are covers (see H2). A change request rewrites terms. The handler interface should let each kind say what its decision does; it should not try to describe that in data.
+In the payload and effects, no. Evidence is per occurrence, has a uniqueness rule per occurrence and day (`evidence_one_waiting`, `evidence_one_approved`, migrations.ts), and its decision is an input to judging. A payment is per recipient ledger and its decision only changes a derived total. An excuse and a vacation are covers (see H2). A change request rewrites terms. The handler interface should let each kind say what its decision does; it should not try to describe that in data.
 
 The right cut is therefore "one lifecycle, five payloads, five handlers", not "one request record with a JSON payload". A narrower cut (only excuse, vacation and change request) would leave F2 and F6, the two findings with the most money at stake, outside the shared mechanism.
 
@@ -157,23 +157,23 @@ Right that excuse and vacation are one mechanism, and the code already says so. 
 
 ### Evidence that they are one mechanism
 
-- Storage is the same shape. `excuse_day (excuse_id, pact_id, date)` (migrations.ts:301) and `vacation_day (vacation_id, pact_id, date)` (migrations.ts:761) both key a covered occurrence by its date, a Weekly count week by its Monday, and the vacation migration says "as excuse_day".
-- The SQL already aliases one as the other: `vacationCoversSql` joins `vacation AS excuse` so the same condition text works for both (occurrence-state.ts:302-306), and `excuseCoversSql` covers both (occurrence-state.ts:286-295). `PENALTY_HELD` is built on it (money.ts:85).
-- Approval runs the same code: `decideVacation` calls `excuseApprovedDays` per pact (vacations.ts:561-564).
-- The occurrence-level reads already merge them, but inconsistently: `excuseOn` returns `waiting`, `approved` or `vacation-waiting` (occurrence-state.ts:67-80), `vacationOn` returns its own view (occurrence-state.ts:97-109), `stillToDo` treats a waiting excuse and a waiting vacation differently (occurrence-state.ts:88-91), and the reminder check reads only `approved` (reminders.ts:125).
-- The naming is misleading: the shared helpers are named after excuses, so a reader of `judging.ts:131` cannot see that vacations are included.
+- Storage is the same shape. `excuse_day (excuse_id, pact_id, date)` (migrations.ts) and `vacation_day (vacation_id, pact_id, date)` (migrations.ts) both key a covered occurrence by its date, a Weekly count week by its Monday, and the vacation migration says "as excuse_day".
+- The SQL already aliases one as the other: `vacationCoversSql` joins `vacation AS excuse` so the same condition text works for both (occurrence-state.ts), and `excuseCoversSql` covers both (occurrence-state.ts). `PENALTY_HELD` is built on it (money.ts).
+- Approval runs the same code: `decideVacation` calls `excuseApprovedDays` per pact (vacations.ts).
+- The occurrence-level reads already merge them, but inconsistently: `excuseOn` returns `waiting`, `approved` or `vacation-waiting` (occurrence-state.ts), `vacationOn` returns its own view (occurrence-state.ts), `stillToDo` treats a waiting excuse and a waiting vacation differently (occurrence-state.ts), and the reminder check reads only `approved` (reminders.ts).
+- The naming is misleading: the shared helpers are named after excuses, so a reader of `judging.ts` cannot see that vacations are included.
 
 ### Are the differences deliberate?
 
 | Difference | Where | Deliberate? |
 |---|---|---|
-| Deciders fixed at filing, picked by the owner | vacations.ts:525-539 | Yes, vac:69 ("The picked reviewers are fixed when the vacation is filed") and vac:70. F5 shows the cost; I would change the rule (any picked reviewer or any current reviewer of a covered pact), but that is a product call, not an accident. |
-| Weekly count: a vacation covers a week only if its Thursday is inside; an excuse covers it from any day | vacations.ts:167-172, judging.ts:153 | Yes, vac:58 gives the reason. It is a filing rule: both store the Monday, so coverage is evaluated identically once filed. |
-| Visibility: vacations on Profile, not on Today or the pact page | today.ts:102-111, pacts.ts:255-261 | Today: yes, vac:104. Pact page: not specified (F11). |
-| A waiting vacation keeps To do cards; a waiting excuse hides them | occurrence-state.ts:88-91 | Yes for vacations, vac:104. For excuses, the card is hidden while the reminder still fires (F7): that half is an accident. |
-| Vacation covers only occurrences not yet open; excuse covers not judged or Missed within 48 hours | vacations.ts:187, occurrence-state.ts:251-264 | Yes, vac:56 and v0 excuses section. |
-| Vacation can be withdrawn; excuse cannot | vacations.ts:583, v0:257 | Yes for v0. |
-| Vacation spans pacts; excuse is one pact | migrations.ts:744 | Yes, and already modelled by `pact_id` on the day row. |
+| Deciders fixed at filing, picked by the owner | vacations.ts | Yes, vac:69 ("The picked reviewers are fixed when the vacation is filed") and vac:70. F5 shows the cost; I would change the rule (any picked reviewer or any current reviewer of a covered pact), but that is a product call, not an accident. |
+| Weekly count: a vacation covers a week only if its Thursday is inside; an excuse covers it from any day | vacations.ts, judging.ts | Yes, vac:58 gives the reason. It is a filing rule: both store the Monday, so coverage is evaluated identically once filed. |
+| Visibility: vacations on Profile, not on Today or the pact page | today.ts, pacts.ts | Today: yes, vac:104. Pact page: not specified (F11). |
+| A waiting vacation keeps To do cards; a waiting excuse hides them | occurrence-state.ts | Yes for vacations, vac:104. For excuses, the card is hidden while the reminder still fires (F7): that half is an accident. |
+| Vacation covers only occurrences not yet open; excuse covers not judged or Missed within 48 hours | vacations.ts, occurrence-state.ts | Yes, vac:56 and v0 excuses section. |
+| Vacation can be withdrawn; excuse cannot | vacations.ts, v0:257 | Yes for v0. |
+| Vacation spans pacts; excuse is one pact | migrations.ts | Yes, and already modelled by `pact_id` on the day row. |
 
 So every difference except F7 and F11 is a deliberate rule, and every one of them is about filing (which days, which deciders) or display (where the owner sees it). None is about what a cover does to an occurrence once filed. That is the boundary to draw.
 
@@ -212,12 +212,12 @@ CREATE VIEW cover_day_v AS
 
 If H1 step 5 happens, the full merge is cheap to add at the same time: `cover (id REFERENCES request, kind, reason_or_note, pacts_summary)`, `cover_day (cover_id, pact_id, date)`, `cover_reviewer (cover_id, reviewer_account_id)` used only by vacations. Do it then, not before.
 
-F9 needs a rule in `coverOn`, not a new table: a cover counts for an occurrence only if that occurrence was on the schedule when the cover was filed. The cheapest correct version is the audit's option A (delete `excuse_day` and `vacation_day` rows for days an approved change removes, in `applyTerms`, change-requests.ts:437). Doing it inside `coverOn` would require comparing `filed_at` with the terms epoch in `pact_earlier_terms`, which is more code for the same result.
+F9 needs a rule in `coverOn`, not a new table: a cover counts for an occurrence only if that occurrence was on the schedule when the cover was filed. The cheapest correct version is the audit's option A (delete `excuse_day` and `vacation_day` rows for days an approved change removes, in `applyTerms`, change-requests.ts). Doing it inside `coverOn` would require comparing `filed_at` with the terms epoch in `pact_earlier_terms`, which is more code for the same result.
 
 ### Migration order
 
 1. Add `cover_day_v`. Rewrite `excuseCoversSql` and `vacationCoversSql` as `coveredSql` over it. Behaviour identical, no test changes.
-2. Add `coverOn` and replace `excuseOn`, `vacationOn` and `stillToDo` at their call sites (anki-days.ts:111, bedtime.ts:152, bedtime.ts:193, evidence.ts:241, excuses.ts:270, history.ts:112, judging.ts:131, judging.ts:151, reminders.ts:125, today.ts:192, today.ts:243, today.ts:299, today.ts:338, today.ts:400, vacations.ts:189-190). Behaviour identical.
+2. Add `coverOn` and replace `excuseOn`, `vacationOn` and `stillToDo` at their call sites (anki-days.ts, bedtime.ts, bedtime.ts, evidence.ts, excuses.ts, history.ts, judging.ts, judging.ts, reminders.ts, today.ts, today.ts, today.ts, today.ts, today.ts, vacations.ts). Behaviour identical.
 3. Add `keepsToDoWhileWaiting` and read it from both Today and `worthReminding`. This fixes F7; one or two tests change, one is added.
 4. Delete cover day rows in `applyTerms` for removed days (F9). One test added.
 5. Only with H1 step 5: merge the tables.
@@ -244,21 +244,21 @@ Right. This is the change with the highest value per line, because it is where m
 
 There are seven call sites that decide whether and how to judge an occurrence, each with its own copy of the precedence rules (approved evidence beats an approved cover, which beats a miss; waiting evidence defers):
 
-1. `judgeAtDueTime` for Fixed days and One-time (judging.ts:124-139).
-2. `judgeWeek` for Weekly count, with a `tell` flag (judging.ts:149-157).
-3. `decideEvidence`, with its own `excusedAhead` rule, its own `judgingReached` and `dueAfterEnd` checks, and a call to `judgeWeek` with `tell=false` (evidence.ts:240-259).
-4. `excuseApprovedDays`, used by both excuse and vacation approval, which rewrites Missed to Excused and deletes the penalty directly (excuses.ts:369-399).
-5. `judgeNights` for bedtime, with its own excuse precedence (bedtime.ts:179-215).
-6. `recordAnkiChecks`, which judges Satisfied without consulting covers (anki-days.ts:206-213).
-7. The change-request branch of `decide`, which runs a catch-up `judgePactDueBy` before approving (review.ts:151-160), something no other decision does.
+1. `judgeAtDueTime` for Fixed days and One-time (judging.ts).
+2. `judgeWeek` for Weekly count, with a `tell` flag (judging.ts).
+3. `decideEvidence`, with its own `excusedAhead` rule, its own `judgingReached` and `dueAfterEnd` checks, and a call to `judgeWeek` with `tell=false` (evidence.ts).
+4. `excuseApprovedDays`, used by both excuse and vacation approval, which rewrites Missed to Excused and deletes the penalty directly (excuses.ts).
+5. `judgeNights` for bedtime, with its own excuse precedence (bedtime.ts).
+6. `recordAnkiChecks`, which judges Satisfied without consulting covers (anki-days.ts).
+7. The change-request branch of `decide`, which runs a catch-up `judgePactDueBy` before approving (review.ts), something no other decision does.
 
-Notifications about outcomes are emitted by four of these, each deciding for itself whether the owner should hear (judging.ts:138, judging.ts:156, bedtime.ts:203 and 207, and nowhere in `decideEvidence` or `excuseApprovedDays`). Ending a pact is a side effect hidden inside `judge` for One-time (judging.ts:210), and ending silently withdraws change requests (judging.ts:238-242).
+Notifications about outcomes are emitted by four of these, each deciding for itself whether the owner should hear (judging.ts, judging.ts, bedtime.ts and 207, and nowhere in `decideEvidence` or `excuseApprovedDays`). Ending a pact is a side effect hidden inside `judge` for One-time (judging.ts), and ending silently withdraws change requests (judging.ts).
 
-"Belongs to the pact" is asked through `dueAfterEnd` in five places (evidence.ts:243, excuses.ts:85, excuses.ts:250, excuses.ts:379, vacations.ts:164), and its rule (due after `ended_at`, occurrence-state.ts:202-208) combines with `endPact(now)` in `decideChangeRequest` (change-requests.ts:713) to produce F1.
+"Belongs to the pact" is asked through `dueAfterEnd` in five places (evidence.ts, excuses.ts, excuses.ts, excuses.ts, vacations.ts), and its rule (due after `ended_at`, occurrence-state.ts) combines with `endPact(now)` in `decideChangeRequest` (change-requests.ts) to produce F1.
 
 ### Would it have prevented the four findings?
 
-- F4 (Weekly count week judged Missed by a late decision gets no push): yes. The bug is a `tell=false` passed by the second call site on the comment's assumption that the decision push says enough (judging.ts:145-147, evidence.ts:251). If the missed push is produced by comparing the old outcome (none) with the new one (Missed, not covered), there is no flag to get wrong.
+- F4 (Weekly count week judged Missed by a late decision gets no push): yes. The bug is a `tell=false` passed by the second call site on the comment's assumption that the decision push says enough (judging.ts, evidence.ts). If the missed push is produced by comparing the old outcome (none) with the new one (Missed, not covered), there is no flag to get wrong.
 - F1 (approving an end drops the open occurrence): partly. The bug is a rule choice: `endPact(now)` combined with "occurrences due after the end are not the pact's". With one verdict function the rule is stated once ("an occurrence that opened before the end is judged"), and the three end paths would all go through one `endPact(pactId, cause)` that sets `ended_at` itself. That makes the fix one line and the inconsistency visible. It would not have stopped an author from writing the wrong rule once.
 - F8 (dead items stay in queues): partly, and in combination with H1. A pure verdict lets `isMoot` be computed instead of hand-written: evidence is moot when the verdict is final and the same whether the evidence is approved or rejected; a cover is moot when none of its days' verdicts would change. Without H3 each moot rule is another hand copy of the precedence rules.
 - F9 (a row re-covers a day a change adds back): no. That is a data identity problem (cover rows keyed by date, not by the occurrence as it existed). H3 gives one facts loader where the filter would go, but the fix is H2 step 4.
@@ -267,8 +267,8 @@ Notifications about outcomes are emitted by four of these, each deciding for its
 
 Keep the stored `occurrence.outcome`, `occurrence.judged_at` and `penalty` rows. Reasons:
 
-- Bills point at penalty rows (`penalty.bill_id`, migrations.ts:364) and a bill never changes once made (GLOSSARY "Bill"). Derived penalties would need their own immutability story.
-- `judged_at` drives the 48-hour excuse window, the Missed alerts and history, and money queries aggregate penalties in SQL (money.ts:206, 260, 325, 401, 418). Deriving at read time would move the whole verdict into SQL or recompute it in TypeScript on every ledger read.
+- Bills point at penalty rows (`penalty.bill_id`, migrations.ts) and a bill never changes once made (GLOSSARY "Bill"). Derived penalties would need their own immutability story.
+- `judged_at` drives the 48-hour excuse window, the Missed alerts and history, and money queries aggregate penalties in SQL (money.ts). Deriving at read time would move the whole verdict into SQL or recompute it in TypeScript on every ledger read.
 - A verdict depends on time and on facts that arrive late (Oura, Anki, decisions), so "when was it judged" is history, which a stored row records naturally.
 
 What changes is that the rows become a cache with exactly one writer. Keep "held" derived, through `coverOn`; it changes with cover decisions and withdrawals, and storing it would add a second write path for no gain.
@@ -307,7 +307,7 @@ type Transition = { from: Verdict["kind"] | null; to: Verdict };
 
 `settle` loads the facts, computes the verdict, compares it with the stored row and applies the difference: insert or update the occurrence row, insert or delete the penalty, end a One-time pact, and enqueue the missed push when the transition is into Missed and no cover holds it. Commands that change a fact call `settle` for the occurrences they touch: evidence submitted or decided, cover filed, decided or withdrawn, change approved, pact ended, Oura or Anki data recorded. `judged_through` stays as the tick's cursor; `judgingReached` disappears, since "due by now" is part of the verdict.
 
-Two prerequisites. Bedtime must store the first qualifying sleep period as a fact when it arrives (today it is written to `occurrence.bedtime_start` only after judging, bedtime.ts:201-203). Anki already stores checks in `anki_check`; the in-memory running checks are passed in as now.
+Two prerequisites. Bedtime must store the first qualifying sleep period as a fact when it arrives (today it is written to `occurrence.bedtime_start` only after judging, bedtime.ts). Anki already stores checks in `anki_check`; the in-memory running checks are passed in as now.
 
 Add a guard to `scripts/check-conventions.ts`: `INSERT INTO penalty`, `DELETE FROM penalty` and `SET outcome` may appear only in `settle.ts` (and migrations). For a codebase maintained by an AI this mechanical rule is worth more than the comment that explains it.
 
@@ -320,7 +320,7 @@ Add a guard to `scripts/check-conventions.ts`: `INSERT INTO penalty`, `DELETE FR
 3. Replace the judging in `decideEvidence` with `settle`. Fix F4 here; add the test the audit's P2 probe describes.
 4. Replace `excuseApprovedDays` with `settle` over the cover's days, for excuses and vacations.
 5. Move bedtime and Anki onto `settle` (store the sleep fact first).
-6. Remove the change-request catch-up in `review.ts` (the tick and `settle` make it unnecessary) and route all three end paths through one `endPact(pactId, cause)`. Fix F1 here; change the test at change-requests.test.ts:671-721 and the confirmation copy.
+6. Remove the change-request catch-up in `review.ts` (the tick and `settle` make it unnecessary) and route all three end paths through one `endPact(pactId, cause)`. Fix F1 here; change the test at change-requests.test.ts and the confirmation copy.
 7. Add the conventions guard.
 
 ### Cost
@@ -339,15 +339,15 @@ Not a problem. Leave `AccountView` as it is. `types.ts` and `rows.ts` have small
 
 ### Evidence
 
-`AccountView` has 56 methods (core.ts:182-451). Every one is a one-line delegation to a feature function, wrapped in `#command` for writes (core.ts:526-594). In `src/server/app.ts` each route makes exactly one call through `account(c)` (app.ts:200, then app.ts:444-677), so the interface is the application layer the HTTP routes map onto, and the mirroring is the design (`CODING_STANDARDS.md`, "The core owns every domain rule"). Reads and commands are already separated: 31 commands return `Promise` and run in one transaction; 24 queries are synchronous; `photo` is the one documented async query. The tests use the same surface through `AccountHandle` (testing/scenario.ts:34), with `decide` (207 uses), `today` (180) and `reviewQueue` (95) dominating.
+`AccountView` has 56 methods (core.ts). Every one is a one-line delegation to a feature function, wrapped in `#command` for writes (core.ts). In `src/server/app.ts` each route makes exactly one call through `account(c)` (app.ts, then app.ts), so the interface is the application layer the HTTP routes map onto, and the mirroring is the design (`CODING_STANDARDS.md`, "The core owns every domain rule"). Reads and commands are already separated: 31 commands return `Promise` and run in one transaction; 24 queries are synchronous; `photo` is the one documented async query. The tests use the same surface through `AccountHandle` (testing/scenario.ts), with `decide` (207 uses), `today` (180) and `reviewQueue` (95) dominating.
 
-The doc comments on the interface are the only place several rules are stated in full (for example `decide`, core.ts:379-398, and `fileExcuse`, core.ts:309-321). That is valuable for an AI reader and argues for keeping one interface.
+The doc comments on the interface are the only place several rules are stated in full (for example `decide`, core.ts, and `fileExcuse`, core.ts). That is valuable for an AI reader and argues for keeping one interface.
 
 What to change, and only as a consequence of H1: the per-kind owner commands collapse. `withdrawChangeRequest` and `withdrawVacation` become `withdraw(itemId)`; `acceptExcuseRejection` and `acceptVacationRejection` become `acceptRejection(itemId)`; `evidence`, `payment`, `excuse` and `changeRequest` pages could become `request(itemId)`. That removes four to six methods and their routes. It is optional.
 
 Do not split `AccountView` into sub-objects or separate read and write interfaces. It would change 60 routes and about 600 test call sites to buy nothing a reader cannot already get from the method signature.
 
-`src/shared/types.ts` (1,702 lines, 161 exports) is the JSON contract both sides import. Its size comes from screen-shaped read models and from per-kind duplication: five `ReviewItem` variants (types.ts:512), the `TodayWaitingItem` variants (types.ts:1064), five accept and withdraw result types, and the parallel `OccurrenceStatus` fields `held` and `heldByVacation` (types.ts:1263-1285). H1 and H2 shrink it where it matters. Splitting the file by feature with a barrel is harmless but buys little, since an agent finds types by name, not by scrolling; do it only if a feature touches it heavily anyway.
+`src/shared/types.ts` (1,702 lines, 161 exports) is the JSON contract both sides import. Its size comes from screen-shaped read models and from per-kind duplication: five `ReviewItem` variants (types.ts), the `TodayWaitingItem` variants (types.ts), five accept and withdraw result types, and the parallel `OccurrenceStatus` fields `held` and `heldByVacation` (types.ts). H1 and H2 shrink it where it matters. Splitting the file by feature with a barrel is harmless but buys little, since an agent finds types by name, not by scrolling; do it only if a feature touches it heavily anyway.
 
 `rows.ts` (515 lines) describes itself as "reads the other parts of the core share". Most of it is genuinely shared (terms, names, occurrences, accounts). Three things are misplaced and would move with H1: `recordDecision`, `reviewStateColumns`, `reviewStateOf`, `thread` and `Decided` (the request lifecycle), and `waitingChangeRequests` and `todayKeeps` (change-request features). Moving them is part of H1 step 1, not a task on its own.
 
@@ -355,13 +355,13 @@ Do not split `AccountView` into sub-objects or separate read and write interface
 
 The write side has seven judging paths (H3). The read side has more. Where an occurrence stands for its owner, especially its cover state, is answered by five predicates that each pick a different subset:
 
-- `excuseOn` (occurrence-state.ts:67): waiting excuse, then approved excuse or vacation, then waiting vacation.
-- `vacationOn` (occurrence-state.ts:97): vacation only.
-- `stillToDo` (occurrence-state.ts:88): hides the card for a waiting excuse, keeps it for a waiting vacation.
-- `excuseCoversSql` and `vacationCoversSql` (occurrence-state.ts:286-306): SQL versions with caller-supplied conditions, used with three different condition strings in `evidence.ts:383`, `evidence.ts:439` and `today.ts:441`.
-- Reminders read only `excuseOn(...) === "approved"` (reminders.ts:125).
+- `excuseOn` (occurrence-state.ts): waiting excuse, then approved excuse or vacation, then waiting vacation.
+- `vacationOn` (occurrence-state.ts): vacation only.
+- `stillToDo` (occurrence-state.ts): hides the card for a waiting excuse, keeps it for a waiting vacation.
+- `excuseCoversSql` and `vacationCoversSql` (occurrence-state.ts): SQL versions with caller-supplied conditions, used with three different condition strings in `evidence.ts`, `evidence.ts` and `today.ts`.
+- Reminders read only `excuseOn(...) === "approved"` (reminders.ts).
 
-These are consulted in about 25 places across Today, reminders, history, money, bedtime, Anki, evidence and excuses. F7 is a direct result (Today uses `stillToDo`, reminders use their own test), F11 is a variant (the pact page and `occurrenceStatus` hide vacation-waiting, occurrence-state.ts:180), and every new screen or notification will pick its own subset again.
+These are consulted in about 25 places across Today, reminders, history, money, bedtime, Anki, evidence and excuses. F7 is a direct result (Today uses `stillToDo`, reminders use their own test), F11 is a variant (the pact page and `occurrenceStatus` hide vacation-waiting, occurrence-state.ts), and every new screen or notification will pick its own subset again.
 
 The fix is a single derived view of an occurrence, built on `coverOn` and, once H3 lands, on `verdictOf`:
 
@@ -378,12 +378,12 @@ export interface OccurrenceView {
 export function occurrenceView(ctx: CoreContext, pactId: string, occurrence: Occurrence, now: Date): OccurrenceView;
 ```
 
-`occurrenceStatus` (occurrence-state.ts:148) is already a partial version of this; it should become the only one, with the per-kind display flags from `CoverPolicy`. This is H2 steps 1 to 3 in practice, so it costs nothing extra if H2 is done in that order.
+`occurrenceStatus` (occurrence-state.ts) is already a partial version of this; it should become the only one, with the per-kind display flags from `CoverPolicy`. This is H2 steps 1 to 3 in practice, so it costs nothing extra if H2 is done in that order.
 
 Two smaller structural points that will cause real bugs:
 
-- Occurrence identity is `(pact_id, date)`, and facts reference it without a foreign key on cover rows. Re-dating a One-time deadline rewrites keys in four tables by hand (`moveOneTimeOccurrence`, pacts.ts:528-550), and a day removed and re-added by changes is the same key (F9). Any new fact table about occurrences must remember to join `moveOneTimeOccurrence` and the F9 cleanup. Write that down at the top of `occurrence-state.ts` and in the conventions check if possible (a new table with `pact_id` and `date` columns must appear in `moveOneTimeOccurrence`).
-- The rule "a held penalty is never billed, so an excuse never reaches a billed penalty" rests on 48-hour arithmetic (audit row "Waiting excuse" 7) and owed is clamped at zero (money.ts:281), which hides any violation (F13). After H3, `settle` should throw if it would delete a penalty with a `bill_id`. A loud failure is better than an invisible credit.
+- Occurrence identity is `(pact_id, date)`, and facts reference it without a foreign key on cover rows. Re-dating a One-time deadline rewrites keys in four tables by hand (`moveOneTimeOccurrence`, pacts.ts), and a day removed and re-added by changes is the same key (F9). Any new fact table about occurrences must remember to join `moveOneTimeOccurrence` and the F9 cleanup. Write that down at the top of `occurrence-state.ts` and in the conventions check if possible (a new table with `pact_id` and `date` columns must appear in `moveOneTimeOccurrence`).
+- The rule "a held penalty is never billed, so an excuse never reaches a billed penalty" rests on 48-hour arithmetic (audit row "Waiting excuse" 7) and owed is clamped at zero (money.ts), which hides any violation (F13). After H3, `settle` should throw if it would delete a penalty with a `bill_id`. A loud failure is better than an invisible credit.
 
 ## Ranked list of what to do
 

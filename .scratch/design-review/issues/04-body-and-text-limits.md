@@ -7,8 +7,8 @@ Closes: S2 and the vacation preview 500 (`../code-structure-review.md`, section 
 
 ## Problem
 
-- `bodyLimit` is applied only to the three photo routes (`src/server/app.ts:522`, `533`, `552`). JSON routes read the whole body (`app.ts:745-747`), and the core caps no text length: names, notes, reasons, questions and replies are unbounded. Push text is truncated (`src/core/web-push.ts:68`); screens are not. Any signed-in friend can write a reject reason or question of many megabytes that then loads on the owner's Today and item pages on every visit. Sign-up is invite-only, so the realistic risk is a bug or a paste.
-- `previewVacation` for an account with no confirmed timezone throws "account ... owns a pact but has no timezone" (`src/core/vacations.ts:104-107` via `timezoneOf` and `ownerZone`, `src/core/rows.ts:111-117`). That is a 500 with a misleading message. The client always confirms the timezone first, so only a direct call reaches it.
+- `bodyLimit` is applied only to the three photo routes (`src/server/app.ts`, `533`, `552`). JSON routes read the whole body (`app.ts`), and the core caps no text length: names, notes, reasons, questions and replies are unbounded. Push text is truncated (`src/core/web-push.ts`); screens are not. Any signed-in friend can write a reject reason or question of many megabytes that then loads on the owner's Today and item pages on every visit. Sign-up is invite-only, so the realistic risk is a bug or a paste.
+- `previewVacation` for an account with no confirmed timezone throws "account ... owns a pact but has no timezone" (`src/core/vacations.ts` via `timezoneOf` and `ownerZone`, `src/core/rows.ts`). That is a 500 with a misleading message. The client always confirms the timezone first, so only a direct call reaches it.
 
 ## What to build
 
@@ -18,9 +18,9 @@ Closes: S2 and the vacation preview 500 (`../code-structure-review.md`, section 
 
 ## Where to start
 
-- `src/server/app.ts:522-552` (photo routes), `app.ts:745-747` (JSON body read).
-- Every command in `src/core/core.ts:182-451` that takes a string.
-- `src/core/vacations.ts:55-60`, `104-107`, `217`.
+- `src/server/app.ts` (photo routes), `app.ts` (JSON body read).
+- Every command in `src/core/core.ts` that takes a string.
+- `src/core/vacations.ts`, `104-107`, `217`.
 
 ## Acceptance criteria
 

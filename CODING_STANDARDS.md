@@ -32,6 +32,10 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 
 - Better Auth's tables are prefixed `auth_*` (the core owns `account`). Better Auth creates a user only after `core.signIn` accepts the identity (`databaseHooks.user.create.before`).
 
+## Docs
+
+- Point at code by file and symbol name (`editPact` in `pacts.ts`), never by line number. A line number goes stale on any edit above it, and nothing checks it.
+
 ## Settled decisions (don't re-flag)
 
 - Google Fonts load from Google, matching the prototype.
