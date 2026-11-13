@@ -116,6 +116,8 @@ import {
   type ReviewQueueResponse,
   type SavePushSubscriptionRequest,
   type SavePushSubscriptionResponse,
+  type SetDailySummaryRequest,
+  type SetDailySummaryResponse,
   type SetNotificationSettingRequest,
   type SetNotificationSettingResponse,
   type SetTimezoneRequest,
@@ -752,6 +754,7 @@ export function createApp({
   app.get(API_PATHS.notifications, (c) =>
     c.json<NotificationsResponse>({
       settings: account(c).notificationSettings(),
+      dailySummary: account(c).dailySummary(),
       vapidPublicKey,
     }),
   );
@@ -762,6 +765,12 @@ export function createApp({
     return c.json<SetNotificationSettingResponse>(
       await account(c).setNotificationSetting(request.setting, request.enabled),
     );
+  });
+
+  app.post(API_PATHS.dailySummary, async (c) => {
+    const request = await readJson(c, parseSetDailySummary);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<SetDailySummaryResponse>(await account(c).setDailySummary(request.enabled));
   });
 
   app.post(API_PATHS.pushSubscriptions, async (c) => {
@@ -905,6 +914,7 @@ const parseSetNotificationSetting = object<SetNotificationSettingRequest>({
   setting: oneOf(NOTIFICATION_SETTINGS),
   enabled: boolean,
 });
+const parseSetDailySummary = object<SetDailySummaryRequest>({ enabled: boolean });
 const parsePushDevice = object<SavePushSubscriptionRequest>({ endpoint: string, p256dh: string, auth: string });
 const parseRemovePushSubscription = object<RemovePushSubscriptionRequest>({ endpoint: string });
 

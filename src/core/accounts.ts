@@ -1,11 +1,12 @@
 // Accounts: signing in, invites, friends, recipients, the timezone, notification
-// settings and push subscriptions.
+// settings (the daily summary's too) and push subscriptions.
 
 import { randomBytes } from "node:crypto";
 import type {
   AcceptInviteResult,
   AccountId,
   AddRecipientResult,
+  DailySummarySetting,
   Friend,
   Invite,
   InviteLookup,
@@ -21,7 +22,7 @@ import type {
 import type { CoreContext } from "./context.ts";
 import { notificationSettings } from "./outbox.ts";
 import { isPushDevice } from "./push-devices.ts";
-import { areFriends, byName, friendshipPair, selectRecipients } from "./rows.ts";
+import { accountRow, areFriends, byName, friendshipPair, selectRecipients } from "./rows.ts";
 import { nameTooLong } from "./text-limits.ts";
 
 export function signIn(
@@ -143,6 +144,16 @@ export function setNotificationSetting(
       .run(accountId, setting);
   }
   return notificationSettings(ctx, accountId);
+}
+
+export function dailySummarySetting(ctx: CoreContext, accountId: AccountId): DailySummarySetting {
+  const row = ctx.one<{ daily_summary: number }>(`SELECT daily_summary FROM account WHERE id = ?`, accountId);
+  return { enabled: row?.daily_summary === 1, to: accountRow(ctx, accountId).email };
+}
+
+export function setDailySummary(ctx: CoreContext, accountId: AccountId, enabled: boolean): DailySummarySetting {
+  ctx.db.prepare(`UPDATE account SET daily_summary = ? WHERE id = ?`).run(enabled ? 1 : 0, accountId);
+  return dailySummarySetting(ctx, accountId);
 }
 
 export function savePushSubscription(

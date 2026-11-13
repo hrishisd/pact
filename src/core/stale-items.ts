@@ -2,15 +2,23 @@
 // can move one are pushed once a day while it waits. A reviewer while an item
 // in their Review Queue has waited more than 24 hours; an owner while a
 // reviewer's question to them has gone unanswered that long. Both at 09:00 in
-// the recipient's timezone.
+// the recipient's timezone. The daily summary, for those who turn it on, is
+// one email at the same moment listing all of both.
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
-import type { AccountId } from "../shared/types.ts";
+import { dateSpan } from "../shared/format.ts";
+import type { AccountId, ReviewItem, TodayAlert, TodayWaitingItem } from "../shared/types.ts";
 import { localDateOf, wallTime } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
+import { enqueueEmail } from "./outbox.ts";
+import type { QueuedItem } from "./requests.ts";
 import { describeItem, reviewQueueWaits } from "./review.ts";
+import { summaryEmail, type SummaryLine } from "./summary-email.ts";
 import { questionAlerts } from "./today.ts";
+
+/** A reviewer's question the owner hasn't answered, as Today's alert has it. */
+type Question = Extract<TodayAlert, { kind: "reviewer-question" }>;
 
 /** How long an item waits, or a question goes unanswered, before its daily reminder starts. */
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -18,50 +26,66 @@ const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 const REMINDER_HOUR = 9;
 
 /**
- * For each account at `t`, once the day's 09:00 in its timezone has passed:
- * pushes the reviewer reminder if an item in its Review Queue had waited more
- * than 24 hours by then, and the owner reminder if a reviewer's question to
- * it had gone unanswered that long. At most one of each since that 09:00,
- * restart or not (`stale_notice`).
+ * For each account at `t`, once the day's 09:00 in its timezone has passed,
+ * if an item in its Review Queue had waited more than 24 hours by then, or a
+ * reviewer's question to it had gone unanswered that long: pushes the
+ * reviewer reminder, pushes the owner reminder, and with the daily summary
+ * on, queues the email listing both. At most one of each since that 09:00,
+ * restart or not (`stale_notice`). Links in the email start with `appUrl`.
  */
-export function remindStale(ctx: CoreContext, t: Date): void {
-  const accounts = ctx.all<{ id: AccountId; timezone: string }>(`SELECT id, timezone FROM account ORDER BY id`);
-  for (const { id, timezone } of accounts) {
+export function remindStale(ctx: CoreContext, t: Date, appUrl: string): void {
+  const accounts = ctx.all<{ id: AccountId; email: string; timezone: string; daily_summary: number }>(
+    `SELECT id, email, timezone, daily_summary FROM account ORDER BY id`,
+  );
+  for (const { id, email, timezone, daily_summary } of accounts) {
     const nine = latestReminderTime(t, timezone);
-    const staleBefore = new Date(nine.getTime() - STALE_AFTER_MS);
     const notice = staleNotice(ctx, id);
     const notYet = (at: Date | null) => at === null || at < nine;
-    const reviewer = notYet(notice.reviewerRemindedAt) && remindReviewer(ctx, id, timezone, t, staleBefore);
-    const owner = notYet(notice.ownerRemindedAt) && remindOwner(ctx, id, timezone, t, staleBefore);
-    if (!reviewer && !owner) continue;
+    const due = {
+      reviewer: notYet(notice.reviewerRemindedAt),
+      owner: notYet(notice.ownerRemindedAt),
+      summary: daily_summary === 1 && notYet(notice.summarySentAt),
+    };
+    if (!due.reviewer && !due.owner && !due.summary) continue;
+    const staleBefore = new Date(nine.getTime() - STALE_AFTER_MS);
+    const queue = reviewQueueWaits(ctx, id).sort((a, b) => a.since.getTime() - b.since.getTime());
+    const waiting = queue.filter((entry) => entry.since < staleBefore);
+    const questions = questionAlerts(ctx, id)
+      .flatMap(({ alert }) => (alert.kind === "reviewer-question" && alert.askedAt < staleBefore ? [alert] : []))
+      .sort((a, b) => a.askedAt.getTime() - b.askedAt.getTime());
+    const sent = {
+      reviewer: due.reviewer && waiting.length > 0,
+      owner: due.owner && questions.length > 0,
+      summary: due.summary && (waiting.length > 0 || questions.length > 0),
+    };
+    if (sent.reviewer) remindReviewer(ctx, id, timezone, t, queue);
+    if (sent.owner) remindOwner(ctx, id, timezone, t, questions[0]!);
+    if (sent.summary) {
+      const lines = summaryLines(timezone, t, waiting, questions);
+      enqueueEmail(ctx, id, "daily-summary", summaryEmail(email, appUrl, lines));
+    }
+    if (!sent.reviewer && !sent.owner && !sent.summary) continue;
+    const at = (now: boolean, before: Date | null) => (now ? t.toISOString() : (before?.toISOString() ?? null));
     ctx.db
       .prepare(
-        `INSERT INTO stale_notice (account_id, reviewer_reminded_at, owner_reminded_at) VALUES (?, ?, ?)
+        `INSERT INTO stale_notice (account_id, reviewer_reminded_at, owner_reminded_at, summary_sent_at)
+         VALUES (?, ?, ?, ?)
          ON CONFLICT (account_id) DO UPDATE
-         SET reviewer_reminded_at = excluded.reviewer_reminded_at, owner_reminded_at = excluded.owner_reminded_at`,
+         SET reviewer_reminded_at = excluded.reviewer_reminded_at, owner_reminded_at = excluded.owner_reminded_at,
+             summary_sent_at = excluded.summary_sent_at`,
       )
       .run(
         id,
-        reviewer ? t.toISOString() : (notice.reviewerRemindedAt?.toISOString() ?? null),
-        owner ? t.toISOString() : (notice.ownerRemindedAt?.toISOString() ?? null),
+        at(sent.reviewer, notice.reviewerRemindedAt),
+        at(sent.owner, notice.ownerRemindedAt),
+        at(sent.summary, notice.summarySentAt),
       );
   }
 }
 
-/** Pushes the reviewer's reminder if an item in their queue came to them before `staleBefore`; whether it did. */
-function remindReviewer(
-  ctx: CoreContext,
-  reviewerId: AccountId,
-  timezone: string,
-  t: Date,
-  staleBefore: Date,
-): boolean {
-  const queue = reviewQueueWaits(ctx, reviewerId);
-  const oldest = queue.reduce<(typeof queue)[number] | undefined>(
-    (older, entry) => (older === undefined || entry.since < older.since ? entry : older),
-    undefined,
-  );
-  if (!oldest || oldest.since >= staleBefore) return false;
+/** Pushes the reviewer's reminder about their Review Queue, `queue`, oldest first: its count and its oldest. */
+function remindReviewer(ctx: CoreContext, reviewerId: AccountId, timezone: string, t: Date, queue: QueuedItem[]): void {
+  const oldest = queue[0]!;
   const { what } = describeItem(ctx, oldest.item.id);
   ctx.enqueue({
     recipient: reviewerId,
@@ -75,19 +99,10 @@ function remindReviewer(
       url: APP_PATHS.review,
     },
   });
-  return true;
 }
 
-/** Pushes the owner's reminder if a reviewer's question to them was asked before `staleBefore`; whether it did. */
-function remindOwner(ctx: CoreContext, ownerId: AccountId, timezone: string, t: Date, staleBefore: Date): boolean {
-  const questions = questionAlerts(ctx, ownerId).flatMap(({ alert }) =>
-    alert.kind === "reviewer-question" ? [alert] : [],
-  );
-  const oldest = questions.reduce<(typeof questions)[number] | undefined>(
-    (older, question) => (older === undefined || question.askedAt < older.askedAt ? question : older),
-    undefined,
-  );
-  if (!oldest || oldest.askedAt >= staleBefore) return false;
+/** Pushes the owner's reminder about the oldest reviewer's question to them they haven't answered. */
+function remindOwner(ctx: CoreContext, ownerId: AccountId, timezone: string, t: Date, oldest: Question): void {
   const { what, ownerPath } = describeItem(ctx, oldest.item.id);
   ctx.enqueue({
     recipient: ownerId,
@@ -100,7 +115,61 @@ function remindOwner(ctx: CoreContext, ownerId: AccountId, timezone: string, t: 
       url: ownerPath,
     },
   });
-  return true;
+}
+
+/**
+ * The daily summary's lines: who, what the item is, and the pact (a
+ * payment's recipient, a vacation's dates), with no free text.
+ */
+function summaryLines(
+  timezone: string,
+  t: Date,
+  waiting: QueuedItem[],
+  questions: Question[],
+): { waiting: SummaryLine[]; questions: SummaryLine[] } {
+  return {
+    waiting: waiting.map(({ item, since }) => ({
+      title: `${item.ownerName}'s ${ITEM_NAMES[item.kind]}`,
+      about: reviewItemAbout(item),
+      age: `waited ${daysText(since, t, timezone)}`,
+    })),
+    questions: questions.map(({ item, reviewerName, askedAt }) => ({
+      title: `${reviewerName} asked about your ${ITEM_NAMES[item.kind]}`,
+      about: waitingItemAbout(item),
+      age: `asked ${daysText(askedAt, t, timezone)} ago`,
+    })),
+  };
+}
+
+/** What a review item is, in a daily summary. */
+const ITEM_NAMES: Record<ReviewItem["kind"], string> = {
+  evidence: "evidence",
+  excuse: "excuse",
+  payment: "payment",
+  "change-request": "change request",
+  vacation: "vacation",
+};
+
+function reviewItemAbout(item: ReviewItem): string {
+  switch (item.kind) {
+    case "payment":
+      return `To ${item.recipientName}`;
+    case "vacation":
+      return dateSpan(item.from, item.to);
+    default:
+      return item.pactName;
+  }
+}
+
+function waitingItemAbout(item: TodayWaitingItem): string {
+  switch (item.kind) {
+    case "payment":
+      return `To ${item.recipientName}`;
+    case "vacation":
+      return dateSpan(item.firstDate, item.lastDate);
+    default:
+      return item.name;
+  }
 }
 
 /** The latest 09:00 in `timezone` at or before `t`. */
@@ -116,15 +185,23 @@ function daysText(since: Date, t: Date, timezone: string): string {
   return days === 1 ? "1 day" : `${days} days`;
 }
 
-/** When the account was last sent each stale-item reminder, or null if never. */
+/** When the account was last sent each stale-item reminder and the daily summary, or null if never. */
 function staleNotice(
   ctx: CoreContext,
   accountId: AccountId,
-): { reviewerRemindedAt: Date | null; ownerRemindedAt: Date | null } {
-  const row = ctx.one<{ reviewer_reminded_at: string | null; owner_reminded_at: string | null }>(
-    `SELECT reviewer_reminded_at, owner_reminded_at FROM stale_notice WHERE account_id = ?`,
+): { reviewerRemindedAt: Date | null; ownerRemindedAt: Date | null; summarySentAt: Date | null } {
+  const row = ctx.one<{
+    reviewer_reminded_at: string | null;
+    owner_reminded_at: string | null;
+    summary_sent_at: string | null;
+  }>(
+    `SELECT reviewer_reminded_at, owner_reminded_at, summary_sent_at FROM stale_notice WHERE account_id = ?`,
     accountId,
   );
   const date = (at: string | null | undefined) => (at ? new Date(at) : null);
-  return { reviewerRemindedAt: date(row?.reviewer_reminded_at), ownerRemindedAt: date(row?.owner_reminded_at) };
+  return {
+    reviewerRemindedAt: date(row?.reviewer_reminded_at),
+    ownerRemindedAt: date(row?.owner_reminded_at),
+    summarySentAt: date(row?.summary_sent_at),
+  };
 }

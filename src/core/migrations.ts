@@ -892,4 +892,15 @@ export const migrations: readonly Migration[] = [
   -- every penalty ever charged.
   CREATE INDEX penalty_bill ON penalty (bill_id);
   `,
+  // 36: the daily summary email
+  `
+  -- The daily summary: an email the account turns on. Every push setting
+  -- starts on (a row in notification_setting_off turns one off); this one
+  -- starts off.
+  ALTER TABLE account ADD COLUMN daily_summary INTEGER NOT NULL DEFAULT 0 CHECK (daily_summary IN (0, 1));
+  -- When the account was last sent it: at most one a day, restart or not.
+  ALTER TABLE stale_notice ADD COLUMN summary_sent_at TEXT;
+  -- An email that kept failing for 24 hours is given up: never tried again.
+  ALTER TABLE outbox ADD COLUMN given_up_at TEXT;
+  `,
 ];

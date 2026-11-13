@@ -29,6 +29,7 @@ import type {
   ChangePreviewResult,
   ChangeRequestResult,
   CreatePactResult,
+  DailySummarySetting,
   DecideResult,
   DeletePactResult,
   EditPactResult,
@@ -87,6 +88,7 @@ import {
   accountIdForEmail,
   addRecipient,
   createInvite,
+  dailySummarySetting,
   emailKey,
   friendList,
   inviteLookup,
@@ -96,6 +98,7 @@ import {
   recipientList,
   removePushSubscription,
   savePushSubscription,
+  setDailySummary,
   setNotificationSetting,
   setTimezone,
   signIn,
@@ -120,10 +123,10 @@ import { acceptExcuseRejection, excuseOptions, excusePage, fileExcuse, previewEx
 import { endPastEndDate } from "./ending.ts";
 import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOverdue } from "./money.ts";
 import { remindStale } from "./stale-items.ts";
-import { deliverPending, enqueue } from "./outbox.ts";
+import { deliverPending, enqueue, giveUpEmails } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
 import type { RaiseOperatorAlert } from "./operator-alerts.ts";
-import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
+import type { AnkiSource, Clock, Mailer, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
 import {
   askOwner,
@@ -154,6 +157,10 @@ export interface PactCoreOptions {
   dbPath: string;
   clock: Clock;
   notifier: Notifier;
+  /** Sends the daily summary, through the outbox. Operator alert emails go through `raiseOperatorAlert` instead. */
+  mailer: Mailer;
+  /** The app's address, such as "https://pact.example.com": the links in an email start with it. */
+  appUrl: string;
   /**
    * The operator alert path (operator-alerts.ts): the log line and the email,
    * which must go to the same operator as `operatorEmail`. The server shares
@@ -501,6 +508,10 @@ export interface AccountView {
   notificationSettings(): NotificationSettingState[];
   /** Off, that kind records nothing for this account until it's turned back on. */
   setNotificationSetting(setting: NotificationSetting, enabled: boolean): Promise<NotificationSettingState[]>;
+  /** The daily summary email's setting, off until turned on, and the address it goes to. */
+  dailySummary(): DailySummarySetting;
+  /** Turns the daily summary on or off. It doesn't follow the push settings, nor they it. */
+  setDailySummary(enabled: boolean): Promise<DailySummarySetting>;
   /**
    * Notifications for this account go to this device too, from now on. Only
    * the known push services are accepted, since the server sends to whatever
@@ -536,6 +547,8 @@ const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 class Core implements PactCore {
   readonly #ctx: CoreContext;
   readonly #notifier: Notifier;
+  readonly #mailer: Mailer;
+  readonly #appUrl: string;
   readonly #photoStore: PhotoStore;
   readonly #ouraSource: OuraSource;
   readonly #ankiSource: AnkiSource;
@@ -562,6 +575,8 @@ class Core implements PactCore {
       ankiChecksRunning: this.#ankiPolling.checksRunning,
     });
     this.#notifier = options.notifier;
+    this.#mailer = options.mailer;
+    this.#appUrl = options.appUrl;
     this.#photoStore = options.photoStore;
     this.#ouraSource = options.ouraSource;
     this.#ankiSource = options.ankiSource;
@@ -592,7 +607,7 @@ class Core implements PactCore {
 
   #deliverOutbox(): Promise<void> {
     this.#delivery = this.#delivery
-      .then(() => deliverPending(this.#ctx, this.#notifier))
+      .then(() => deliverPending(this.#ctx, this.#notifier, this.#mailer))
       .catch((error: unknown) => this.#ctx.log(`outbox delivery stopped, will retry: ${String(error)}`));
     return this.#delivery;
   }
@@ -631,6 +646,7 @@ class Core implements PactCore {
       profile: () => profile(this.#ctx, accountId),
       today: () => todayPage(this.#ctx, accountId),
       notificationSettings: () => notificationSettingList(this.#ctx, accountId),
+      dailySummary: () => dailySummarySetting(this.#ctx, accountId),
       excusePreview: (pactId, dates) => previewExcuse(this.#ctx, accountId, pactId, dates),
       excuseOptions: (pactId) => excuseOptions(this.#ctx, accountId, pactId),
       excuse: (excuseId) => excusePage(this.#ctx, accountId, excuseId),
@@ -672,6 +688,7 @@ class Core implements PactCore {
       connectOura: () => this.#command(() => connectOura(this.#ctx, accountId)),
       setNotificationSetting: (setting, enabled) =>
         this.#command(() => setNotificationSetting(this.#ctx, accountId, setting, enabled)),
+      setDailySummary: (enabled) => this.#command(() => setDailySummary(this.#ctx, accountId, enabled)),
       savePushSubscription: (device) => this.#command(() => savePushSubscription(this.#ctx, accountId, device)),
       removePushSubscription: (endpoint) => this.#command(() => removePushSubscription(this.#ctx, accountId, endpoint)),
       submitEvidence: (pactId, photos) =>
@@ -713,8 +730,10 @@ class Core implements PactCore {
     // An account whose call throws has no data this tick; the next one retries.
     const fetched = await fetchSleep(this.#ctx, this.#ouraSource, t);
     const checked = await fetchAnki(this.#ctx, this.#ankiSource, this.#ankiPolling, t);
-    const dropped = await this.#command(
+    const { dropped, givenUp } = await this.#command(
       () => {
+        // Before the outbox is delivered after this tick: an email 24 hours old is never tried again.
+        const givenUp = giveUpEmails(this.#ctx, t);
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
         recordAnkiChecks(this.#ctx, checked);
@@ -727,16 +746,16 @@ class Core implements PactCore {
         endPastEndDate(this.#ctx, t);
         makeBills(this.#ctx, t);
         remindOverdue(this.#ctx, t);
-        remindStale(this.#ctx, t);
+        remindStale(this.#ctx, t, this.#appUrl);
         this.#ctx.db
           .prepare(
             `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)
              ON CONFLICT (id) DO UPDATE SET last_tick_at = excluded.last_tick_at`,
           )
           .run(t.toISOString());
-        return dropped;
+        return { dropped, givenUp };
       },
-      (dropped) => {
+      ({ dropped }) => {
         for (const drop of dropped) {
           this.#ctx.log(
             `reminder dropped: pact ${drop.pactId}, ${drop.time} for ${drop.date}, ` +
@@ -753,6 +772,7 @@ class Core implements PactCore {
         text: `${droppedText(dropped.length)} after downtime`,
       });
     }
+    for (const text of givenUp) this.#raiseOperatorAlert({ title: "daily summary given up", text, withoutEmail: true });
     await this.#delivery;
   }
 

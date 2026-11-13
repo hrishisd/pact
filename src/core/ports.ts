@@ -122,7 +122,10 @@ type DecisionDetails = { decision: "approved" } | { decision: "rejected"; reason
  */
 interface NotificationDetails {
   "operator-alert":
-    { alert: "reminders-dropped"; dropped: number } | { alert: "database-restored"; lastTick: string | null };
+    | { alert: "reminders-dropped"; dropped: number }
+    | { alert: "database-restored"; lastTick: string | null }
+    /** `to`: the address of an email that failed for 24 hours and was given up. */
+    | { alert: "email-given-up"; to: string };
   "picked-as-reviewer": { pactId: string };
   "review-item":
     | { itemKind: "evidence" | "excuse" | "change-request"; itemId: string; pactId: string }

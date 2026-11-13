@@ -15,7 +15,14 @@ import { localDateOf } from "./calendar.ts";
 import { createPactCore, type PactCore } from "./core.ts";
 import { openDatabase } from "./db.ts";
 import { migrations } from "./migrations.ts";
-import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./testing/fakes.ts";
+import {
+  FakeAnkiSource,
+  FakeClock,
+  FakeOuraSource,
+  InMemoryPhotoStore,
+  RecordingMailer,
+  RecordingNotifier,
+} from "./testing/fakes.ts";
 import { ok } from "./testing/queries.ts";
 
 let dir: string;
@@ -35,6 +42,8 @@ function coreAt(start: Date): { core: PactCore; clock: FakeClock; notifier: Reco
     dbPath: path,
     clock,
     notifier,
+    mailer: new RecordingMailer(),
+    appUrl: "https://pact.example.test",
     raiseOperatorAlert: () => {},
     ouraSource: new FakeOuraSource(),
     ankiSource: new FakeAnkiSource(),

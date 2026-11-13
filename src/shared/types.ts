@@ -773,6 +773,13 @@ export interface NotificationSettingState {
   enabled: boolean;
 }
 
+/** The daily summary email's setting: off until the account turns it on, apart from the push settings. */
+export interface DailySummarySetting {
+  enabled: boolean;
+  /** Where it goes: the account's Google sign-in email. */
+  to: string;
+}
+
 /** One device's push subscription, as the browser reports it. Keys are base64url. */
 export interface PushDevice {
   endpoint: string;

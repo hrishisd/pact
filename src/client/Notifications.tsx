@@ -1,8 +1,9 @@
 // Turning notifications on (story 3) and choosing which ones you get (story 88):
-// an alert above Today, the page it opens, and the profile's Notifications section.
+// an alert above Today, the page it opens, and the profile's Notifications
+// section, with the daily summary email in an Email section below it.
 
 import { useState } from "react";
-import type { NotificationSetting, NotificationSettingState } from "../shared/types.ts";
+import type { DailySummarySetting, NotificationSetting, NotificationSettingState } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { AddIcon, ShareIcon } from "./icons.tsx";
 import { deviceName, isIos, type Push } from "./push.ts";
@@ -200,7 +201,10 @@ function Guide({ push: { state, turnOn }, onDone }: { push: Push; onDone: () => 
   }
 }
 
-/** The profile's section: this device's state, then one switch per kind, grouped in one block. */
+/**
+ * The profile's section: this device's state, then one switch per kind,
+ * grouped in one block. Below it, the Email section's one switch.
+ */
 export function NotificationsSection({ push: { state }, onSetUp }: { push: Push; onSetUp: () => void }) {
   const { state: load } = useLoad(api.notifications);
   const data = loadedData(load);
@@ -208,6 +212,21 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
   const [changed, setChanged] = useState<NotificationSettingState[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const settings = changed ?? data?.settings ?? null;
+  const [changedSummary, setChangedSummary] = useState<DailySummarySetting | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const summary = changedSummary ?? data?.dailySummary ?? null;
+
+  const toggleSummary = async (enabled: boolean) => {
+    if (!summary) return;
+    setSummaryError(null);
+    setChangedSummary({ ...summary, enabled });
+    try {
+      setChangedSummary(await api.setDailySummary({ enabled }));
+    } catch (cause) {
+      setChangedSummary(summary);
+      setSummaryError(`Couldn't save. ${failureText(cause, "Check your connection and try again.")}`);
+    }
+  };
 
   const toggle = async (setting: NotificationSetting, enabled: boolean) => {
     if (!settings) return;
@@ -222,34 +241,61 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
   };
 
   return (
-    <section className="stack">
-      <div className="label">Notifications</div>
-      <DeviceLine state={state} onSetUp={onSetUp} />
-      {failed && <p className="muted small">Notification settings couldn't load.</p>}
-      {settings && (
-        <>
+    <>
+      <section className="stack">
+        <div className="label">Notifications</div>
+        <DeviceLine state={state} onSetUp={onSetUp} />
+        {failed && <p className="muted small">Notification settings couldn't load.</p>}
+        {settings && (
+          <>
+            <div className="list">
+              {settings.map(({ setting, enabled }) => (
+                <label key={setting} className="switch-row">
+                  <span className="rt">
+                    <b>{SETTING_COPY[setting].label}</b>
+                    <small>{SETTING_COPY[setting].hint}</small>
+                  </span>
+                  <input
+                    className="switch"
+                    type="checkbox"
+                    role="switch"
+                    checked={enabled}
+                    onChange={(e) => void toggle(setting, e.target.checked)}
+                  />
+                </label>
+              ))}
+            </div>
+            {error && <p className="error">{error}</p>}
+            <p className="muted small">These apply to all your devices. Reminders are set on each pact.</p>
+          </>
+        )}
+      </section>
+      {summary && (
+        <section className="stack">
+          <div className="label">Email</div>
           <div className="list">
-            {settings.map(({ setting, enabled }) => (
-              <label key={setting} className="switch-row">
-                <span className="rt">
-                  <b>{SETTING_COPY[setting].label}</b>
-                  <small>{SETTING_COPY[setting].hint}</small>
-                </span>
-                <input
-                  className="switch"
-                  type="checkbox"
-                  role="switch"
-                  checked={enabled}
-                  onChange={(e) => void toggle(setting, e.target.checked)}
-                />
-              </label>
-            ))}
+            <label className="switch-row">
+              <span className="rt">
+                <b>Daily summary</b>
+                <small>
+                  An email at 09:00 when items in your Review Queue, or reviewers' questions to you, have waited more
+                  than a day
+                </small>
+              </span>
+              <input
+                className="switch"
+                type="checkbox"
+                role="switch"
+                checked={summary.enabled}
+                onChange={(e) => void toggleSummary(e.target.checked)}
+              />
+            </label>
           </div>
-          {error && <p className="error">{error}</p>}
-          <p className="muted small">These apply to all your devices. Reminders are set on each pact.</p>
-        </>
+          {summaryError && <p className="error">{summaryError}</p>}
+          <p className="muted small">Sent to {summary.to}, your Google address.</p>
+        </section>
       )}
-    </section>
+    </>
   );
 }
 

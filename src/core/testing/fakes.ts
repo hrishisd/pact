@@ -107,12 +107,26 @@ export class RecordingNotifier implements Notifier {
   }
 }
 
-/** Records every email it is given, in order. A send `failOnCall` makes fail is not recorded. */
+/**
+ * Records every email it sends, in order. A send to an address `fail` named,
+ * or one `failOnCall` makes fail, rejects and is not recorded.
+ */
 export class RecordingMailer implements Mailer {
   readonly sent: Email[] = [];
+  readonly #failing = new Set<string>();
 
   async send(email: Email): Promise<void> {
+    if (this.#failing.has(email.to)) throw new Error(`injected failure: mail to ${email.to}`);
     this.sent.push(structuredClone(email));
+  }
+
+  /** From now on (or until `recover`) sending to `address` fails. */
+  fail(address: string): void {
+    this.#failing.add(address);
+  }
+
+  recover(address: string): void {
+    this.#failing.delete(address);
   }
 }
 

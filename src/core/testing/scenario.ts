@@ -112,6 +112,8 @@ const TIMEZONE = "America/New_York";
 const REFERENCE_WEEK_MONDAY = "2026-01-05";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const OPERATOR = "owner";
+/** Where the app is: links in emails start with it. */
+const APP_URL = "https://pact.example.test";
 
 export function scenario(): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "pact-test-"));
@@ -141,6 +143,8 @@ export function scenario(): Scenario {
       dbPath,
       clock,
       notifier,
+      mailer,
+      appUrl: APP_URL,
       raiseOperatorAlert: alerts.raise,
       ouraSource: watch.oura(ouraSource),
       ankiSource: watch.anki(ankiSource),

@@ -88,6 +88,8 @@ import {
   type ReviewQueueResponse,
   type SavePushSubscriptionRequest,
   type SavePushSubscriptionResponse,
+  type SetDailySummaryRequest,
+  type SetDailySummaryResponse,
   type SetNotificationSettingRequest,
   type SetNotificationSettingResponse,
   type SetTimezoneRequest,
@@ -325,6 +327,7 @@ export const api = {
   notifications: () => call<NotificationsResponse>(API_PATHS.notifications),
   setNotificationSetting: (request: SetNotificationSettingRequest) =>
     post<SetNotificationSettingResponse>(API_PATHS.notifications, request),
+  setDailySummary: (request: SetDailySummaryRequest) => post<SetDailySummaryResponse>(API_PATHS.dailySummary, request),
   savePushSubscription: (device: SavePushSubscriptionRequest) =>
     postQuietly<SavePushSubscriptionResponse>(API_PATHS.pushSubscriptions, device),
   removePushSubscription: (endpoint: string) =>

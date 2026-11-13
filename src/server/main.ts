@@ -99,6 +99,8 @@ const core = createPactCore({
   dbPath: config.dbPath,
   clock,
   notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, clock),
+  mailer,
+  appUrl: config.auth.url,
   raiseOperatorAlert: alerts.raise,
   ouraSource: oura ?? unavailableOura,
   ankiSource: anki ?? unavailableAnki,
