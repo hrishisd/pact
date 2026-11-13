@@ -12,7 +12,7 @@ A person can turn on one email, the daily summary. At 09:00 in their timezone, i
 ### Core
 - **A new setting, off to start with,** independent of the push settings. Today every setting starts on, stored as a row in `notification_setting_off`; this one starts off, so it needs its own storage or an inverted row. Exposed through `AccountView` beside `notificationSettings`, with a command to turn it on and off.
 - **Building the email** in `stale-items.ts`, beside `remindStale`: at most one per account per day since that day's 09:00, restart or not (extend `stale_notice`), none when both lists are empty. It's queued whatever the push settings are, and the two pushes stay as they are.
-- **Contents.** Subject "Pact Daily Summary". Section "Waiting for your review": every item in the Review Queue that had waited more than 24 hours at 09:00, oldest first, each with the owner, what it is, the pact (a payment's recipient, a vacation's dates) and how long it has waited; one link to the Review Queue. Section "Waiting for your reply": every reviewer question unanswered that long, oldest first, each with the reviewer who asked, the item and pact, and how long ago; one link to Today. Each section only when it has something. No photos and no free text. A footer saying why they got it and linking to Profile. Plain text and simple HTML.
+- **Contents.** Subject "Pact Daily Summary". Section "Items waiting for your review": every item in the Review Queue that had waited more than 24 hours at 09:00, oldest first, each with the owner, what it is, the pact (a payment's recipient, a vacation's dates) and how long it has waited; one link to the Review Queue. Section "Questions waiting for your reply": every reviewer question unanswered that long, oldest first, each with the reviewer who asked, the item and pact, and how long ago; one link to Today. Each section only when it has something. No photos and no free text. A one-line count first ("4 items wait for your review. 2 questions wait for your reply."), which Mail shows as the preview. Each section's link is a button. A footer saying why they got it, with "Turn it off in Profile" linking to Profile. Plain text and simple HTML; the email copy follows the prototype.
 - **Through the outbox** as a row with channel `'email'`, to the account's Google sign-in email. Delivery calls the email port from ticket 01, not `Notifier`. A failed send is retried each tick; 24 hours after it was queued it's given up, logged, and raised as an operator alert by log and push only (not by email).
 
 ### Client
@@ -25,8 +25,8 @@ A person can turn on one email, the daily summary. At 09:00 in their timezone, i
 ## Acceptance criteria (core scenarios)
 
 - [ ] Off by default: a new account gets no email, whatever waits.
-- [ ] Sam turns it on. Jordan's evidence has waited 25 hours at Sam's 09:00: Sam gets one email listing it under "Waiting for your review", and none the next day once it's decided.
-- [ ] Only the questions section: Jordan has a question from Sam unanswered for 25 hours and nothing in their queue; the email has only "Waiting for your reply".
+- [ ] Sam turns it on. Jordan's evidence has waited 25 hours at Sam's 09:00: Sam gets one email listing it under "Items waiting for your review", and none the next day once it's decided.
+- [ ] Only the questions section: Jordan has a question from Sam unanswered for 25 hours and nothing in their queue; the email has only "Questions waiting for your reply".
 - [ ] Both sections in one email for someone who is an owner and a reviewer; never two emails on one day, across a restart too.
 - [ ] Nothing older than 24 hours: no email.
 - [ ] With the Review item and Comment push settings off, the email still goes; with the summary off, the pushes still go.
