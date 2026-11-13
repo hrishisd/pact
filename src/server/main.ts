@@ -64,7 +64,7 @@ if (!config.production) {
 
 // Production refuses to start without a Gmail account (loadConfig); development without one logs each email.
 const mailer = config.gmail ? gmailMailer(config.gmail) : devMailer((line) => console.log(line));
-// The adapters' operator alerts, which have no push: the log line and the email, apart from the core and its outbox.
+// The one operator alert path, for the core and the adapters: the log line and the email, apart from the outbox.
 const raiseOperatorAlert = operatorAlerts({
   mailer,
   operatorEmail: config.operatorEmail,
@@ -99,7 +99,7 @@ const core = createPactCore({
   dbPath: config.dbPath,
   clock,
   notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, clock),
-  mailer,
+  raiseOperatorAlert,
   ouraSource: oura ?? unavailableOura,
   ankiSource: anki ?? unavailableAnki,
   photoStore:

@@ -36,14 +36,8 @@ export function gmailMailer(account: GmailAccount, options: GmailOptions = {}): 
   });
   return {
     async send({ to, subject, text, html }) {
-      const info = await transport.sendMail({
-        from: { name: "Pact", address: account.address },
-        to,
-        subject,
-        text,
-        ...(html !== undefined && { html }),
-      });
-      if (info.rejected.length > 0) throw new Error(`the mail server refused ${info.rejected.join(", ")}`);
+      // One recipient, so a refusal rejects.
+      await transport.sendMail({ from: { name: "Pact", address: account.address }, to, subject, text, html });
     },
   };
 }

@@ -67,7 +67,7 @@ export interface Scenario {
   readonly mailer: RecordingMailer;
   /** The operator's address, OPERATOR_EMAIL: where operator alert emails go. */
   readonly operatorEmail: string;
-  /** The operator alert path as the server hands it to the Oura and Anki adapters: to `mailer` and `logs`. */
+  /** The operator alert path the core has, to `mailer` and `logs`, for the Oura and Anki adapters too. */
   readonly raiseOperatorAlert: RaiseOperatorAlert;
   readonly ouraSource: FakeOuraSource;
   readonly ankiSource: FakeAnkiSource;
@@ -114,10 +114,15 @@ export function scenario(): Scenario {
   const clock = new FakeClock(at("Mon 09:00"));
   const notifier = new RecordingNotifier();
   const mailer = new RecordingMailer();
+  const logs: string[] = [];
+  const raiseOperatorAlert = operatorAlerts({
+    mailer,
+    operatorEmail: emailFor(OPERATOR),
+    log: (line) => logs.push(line),
+  });
   const ouraSource = new FakeOuraSource();
   const ankiSource = new FakeAnkiSource();
   const photoStore = new InMemoryPhotoStore(clock);
-  const logs: string[] = [];
   // After every command and tick, judging's stored outcomes must be what verdictOf says (verdict-check.ts).
   const watch = new SourceWatch(clock);
   const verdicts = new VerdictCheck(dbPath, clock, watch);
@@ -131,7 +136,7 @@ export function scenario(): Scenario {
       dbPath,
       clock,
       notifier,
-      mailer,
+      raiseOperatorAlert,
       ouraSource: watch.oura(ouraSource),
       ankiSource: watch.anki(ankiSource),
       photoStore,
@@ -178,7 +183,7 @@ export function scenario(): Scenario {
     notifier,
     mailer,
     operatorEmail: emailFor(OPERATOR),
-    raiseOperatorAlert: operatorAlerts({ mailer, operatorEmail: emailFor(OPERATOR), log: (line) => logs.push(line) }),
+    raiseOperatorAlert,
     ouraSource,
     ankiSource,
     photoStore,

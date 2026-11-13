@@ -122,8 +122,8 @@ import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOv
 import { remindStale } from "./stale-items.ts";
 import { deliverPending, enqueue } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
-import { operatorAlerts, type RaiseOperatorAlert } from "./operator-alerts.ts";
-import type { AnkiSource, Clock, Mailer, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
+import type { RaiseOperatorAlert } from "./operator-alerts.ts";
+import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
 import {
   askOwner,
@@ -154,17 +154,14 @@ export interface PactCoreOptions {
   dbPath: string;
   clock: Clock;
   notifier: Notifier;
-  /** Sends email: operator alerts, to `operatorEmail`. */
-  mailer: Mailer;
+  /** The operator alert path (operator-alerts.ts): the log line and the email. The server shares it with the adapters. */
+  raiseOperatorAlert: RaiseOperatorAlert;
   ouraSource: OuraSource;
   ankiSource: AnkiSource;
   photoStore: PhotoStore;
-  /**
-   * The operator's email; their first sign-in may create an account without
-   * an invite, and operator alerts are emailed to it.
-   */
+  /** The operator's email; their first sign-in may create an account without an invite. */
   operatorEmail: string;
-  /** Where the core writes log lines (including OPERATOR_ALERT). Default: console.log. */
+  /** Where the core writes log lines. Default: console.log. */
   log?: (line: string) => void;
   /**
    * Makes the id of each new row: unique, URL-safe. Default: randomUUID. Ties on
@@ -565,11 +562,7 @@ class Core implements PactCore {
     this.#ouraSource = options.ouraSource;
     this.#ankiSource = options.ankiSource;
     this.#operatorEmailKey = emailKey(options.operatorEmail);
-    this.#raiseOperatorAlert = operatorAlerts({
-      mailer: options.mailer,
-      operatorEmail: options.operatorEmail,
-      log: this.#ctx.log,
-    });
+    this.#raiseOperatorAlert = options.raiseOperatorAlert;
   }
 
   /**
