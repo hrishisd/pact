@@ -45,9 +45,15 @@ import {
   type DisconnectAnkiResponse,
   type ChangePactRequest,
   type ChangePactResponse,
+  type AddReviewersRequest,
+  type AddReviewersResponse,
   type ChangePreviewResponse,
   type ChangeRequestResponse,
   type EndPactResponse,
+  type RenamePactRequest,
+  type RenamePactResponse,
+  type SetRemindersRequest,
+  type SetRemindersResponse,
   type CreateInviteResponse,
   type CreatePactRequest,
   type CreatePactResponse,
@@ -1012,11 +1018,11 @@ describe("pacts", () => {
     });
 
     s.setClockTo("Tue 10:00");
-    const changed = { ...pact, reminders: ["19:30"] };
+    const changed = { ...pact, reminders: ["19:30"], penaltyCents: 1000 };
     const preview = await owner.post(API_PATHS.changePreview(pactId), changed);
     expect(preview).toEqual({ status: 200, body: serialized(core.changePreview(pactId, changed)) });
     const sent = await owner.post(API_PATHS.changePact(pactId), changed);
-    expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" } });
+    expect(sent.body).toMatchObject({ ok: true, outcome: { kind: "stricter", appliesNow: ["reminders"] } });
     expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
       ok: true,
       pact: { reminders: ["19:30"] },
@@ -1644,6 +1650,69 @@ describe("change requests", () => {
       const ended = await owner.post(API_PATHS.endPact(pactId), sent);
       expect({ sent, ...ended }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
     }
+  });
+
+  test("a rename sends only the name; the core's refusals are 200s, a body of another shape a 400", async () => {
+    const { owner, pactId } = await ownerWithPact();
+    const path = API_PATHS.renamePact(pactId);
+
+    expect(await owner.post(path, { name: 5 })).toEqual({ status: 400, body: { error: "invalid-request" } });
+    expect(await owner.post(path, { name: " " } satisfies RenamePactRequest)).toEqual({
+      status: 200,
+      body: { ok: false, reason: "blank-name" } satisfies RenamePactResponse,
+    });
+    expect(await owner.post(path, { name: "Morning gym" } satisfies RenamePactRequest)).toEqual({
+      status: 200,
+      body: { ok: true } satisfies RenamePactResponse,
+    });
+    expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
+      ok: true,
+      pact: { name: "Morning gym" },
+    });
+  });
+
+  test("adding reviewers sends only those added; the core's refusals are 200s, a body of another shape a 400", async () => {
+    const { s, owner, pactId } = await ownerWithPact();
+    const path = API_PATHS.addReviewers(pactId);
+    const invite = async () => (await owner.post<CreateInviteResponse>(API_PATHS.invites)).body.token;
+    // Signed in with an invite they haven't accepted: not a friend yet.
+    const stranger = await s.signIn("stranger@example.test", { inviteToken: await invite() });
+    const token = await invite();
+    const second = await s.signIn("second@example.test", { inviteToken: token });
+    await second.post(API_PATHS.acceptInvite(token));
+
+    expect(await owner.post(path, { reviewerIds: "x" })).toEqual({ status: 400, body: { error: "invalid-request" } });
+    expect(await owner.post(path, { reviewerIds: [stranger.accountId!] } satisfies AddReviewersRequest)).toEqual({
+      status: 200,
+      body: { ok: false, reason: "not-a-friend" } satisfies AddReviewersResponse,
+    });
+    expect(await owner.post(path, { reviewerIds: [second.accountId!] } satisfies AddReviewersRequest)).toEqual({
+      status: 200,
+      body: { ok: true } satisfies AddReviewersResponse,
+    });
+    expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
+      ok: true,
+      pact: { reviewers: [expect.objectContaining({ name: "friend" }), expect.objectContaining({ name: "second" })] },
+    });
+  });
+
+  test("setting reminders sends only them; the core's refusals are 200s, a body of another shape a 400", async () => {
+    const { owner, pactId } = await ownerWithPact();
+    const path = API_PATHS.setReminders(pactId);
+
+    expect(await owner.post(path, { reminders: [7] })).toEqual({ status: 400, body: { error: "invalid-request" } });
+    expect(await owner.post(path, { reminders: ["6pm"] } satisfies SetRemindersRequest)).toEqual({
+      status: 200,
+      body: { ok: false, reason: "invalid-reminders" } satisfies SetRemindersResponse,
+    });
+    expect(await owner.post(path, { reminders: ["19:30", "07:00"] } satisfies SetRemindersRequest)).toEqual({
+      status: 200,
+      body: { ok: true } satisfies SetRemindersResponse,
+    });
+    expect((await owner.get<PactResponse>(API_PATHS.pact(pactId))).body).toMatchObject({
+      ok: true,
+      pact: { reminders: ["07:00", "19:30"] },
+    });
   });
 });
 
@@ -2521,7 +2590,7 @@ describe("connecting AnkiWeb", () => {
     });
   });
 
-  test("a rename sent as the pact page sends it, its deck unchanged among the terms, applies at once", async () => {
+  test("a rename sent as the pact page sends it applies at once, and the pact keeps its deck", async () => {
     const { s, owner, pact, createPact } = await ownerWithFriend();
     await login(owner, "right");
     s.ankiSource.setDeck(owner.accountId, { id: "1", name: "Spanish" });
@@ -2535,14 +2604,10 @@ describe("connecting AnkiWeb", () => {
     });
     const path = API_PATHS.pact(pactId);
     s.setClockTo("Wed 20:00");
-    const before = (await owner.get<PactResponse>(path)).body;
-    if (!before.ok) throw new Error(before.reason);
 
-    const change = { ...termsOf(before.pact), name: "Spanish daily" };
-    expect(change).toMatchObject({ ankiDeckId: "1" });
-    const sent = await owner.post<ChangePactResponse>(API_PATHS.changePact(pactId), change);
+    const sent = await owner.post(API_PATHS.renamePact(pactId), { name: "Spanish daily" } satisfies RenamePactRequest);
 
-    expect(sent.body).toEqual({ ok: true, outcome: { kind: "at-once" } });
+    expect(sent.body).toEqual({ ok: true });
     expect((await owner.get<PactResponse>(path)).body).toMatchObject({
       ok: true,
       pact: { name: "Spanish daily", anki: { deckId: "1" }, waiting: [] },

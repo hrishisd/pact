@@ -394,8 +394,13 @@ export function checkedPeople(
   if (!isOwnRecipient) return { ok: false, reason: "unknown-recipient" };
   const reviewerIds = [...new Set(pact.reviewerIds)];
   if (reviewerIds.length === 0) return { ok: false, reason: "no-reviewers" };
-  if (!reviewerIds.every((id) => areFriends(ctx, ownerId, id))) return { ok: false, reason: "not-a-friend" };
+  if (!mayReview(ctx, ownerId, reviewerIds)) return { ok: false, reason: "not-a-friend" };
   return { ok: true, reviewerIds };
+}
+
+/** Whether each of `reviewerIds` may review the owner's pacts: each is their friend. */
+export function mayReview(ctx: CoreContext, ownerId: AccountId, reviewerIds: readonly AccountId[]): boolean {
+  return reviewerIds.every((id) => areFriends(ctx, ownerId, id));
 }
 
 export function setReviewers(ctx: CoreContext, pactId: string, reviewerIds: AccountId[]): void {

@@ -7,6 +7,7 @@ import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
 import type {
   ApprovalReason,
+  AtOnceChangeRefusal,
   ChangeRequestView,
   CurrentTerms,
   EndTiming,
@@ -14,9 +15,16 @@ import type {
   Schedule,
   TermChange,
 } from "../shared/types.ts";
-import { clockText, formatDate, money, remindersText, scheduleText } from "./format.ts";
+import { clockText, EDIT_WINDOW_TEXT, formatDate, money, remindersText, scheduleText } from "./format.ts";
 
 export type Term = TermChange["term"];
+
+/** Why any change to a pact past its edit window is refused, whatever it changes: Request change and the pact page's own. */
+export const AT_ONCE_REFUSAL_TEXT: Record<AtOnceChangeRefusal, string> = {
+  "pact-not-found": "This pact wasn't found.",
+  "edit-window-open": `It's still in its first ${EDIT_WINDOW_TEXT}. Edit it instead.`,
+  "pact-ended": "This pact has Ended.",
+};
 type Change = Json<TermChange>;
 type Current = Json<CurrentTerms>;
 /** A change request that changes terms rather than ending the pact. */

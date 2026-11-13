@@ -1768,6 +1768,31 @@ export type ChangePactOutcome =
 
 export type ChangePactResult = { ok: true; outcome: ChangePactOutcome } | { ok: false; reason: ChangePactRefusal };
 
+/**
+ * Why a change that applies at once (the name, added reviewers or the
+ * reminders) is refused whatever it changes: the pact must be the owner's,
+ * Active and past its edit window.
+ */
+export type AtOnceChangeRefusal =
+  /** Not this owner's pact, or no pact. */
+  | "pact-not-found"
+  | "pact-ended"
+  /** In the edit window the pact is edited instead. */
+  | "edit-window-open";
+
+export type RenamePactResult =
+  { ok: true } | { ok: false; reason: AtOnceChangeRefusal | Extract<CreatePactRefusal, "blank-name" | TextTooLong> };
+
+export type AddReviewersResult =
+  { ok: true } | { ok: false; reason: AtOnceChangeRefusal | Extract<CreatePactRefusal, "not-a-friend"> };
+
+export type SetRemindersResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: AtOnceChangeRefusal | Extract<CreatePactRefusal, "invalid-reminders" | "reminder-after-due-time">;
+    };
+
 export type RequestEndResult =
   | { ok: true; changeRequestId: string }
   | {

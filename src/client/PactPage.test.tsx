@@ -156,14 +156,101 @@ describe("Waiting on", () => {
   });
 });
 
-// The at-once changes (name, reviewers, reminders) send the pact's whole terms,
-// so the page mustn't start from terms remembered from an earlier visit.
-test("a pact page opened again starts blank until its load answers", async () => {
+test("a pact page opened again shows the pact as last loaded while it loads afresh", async () => {
   stubApi({ pact: answers({ ok: true, pact: cameraPact() }) });
   const { unmount } = renderPactPage();
   await screen.findByRole("button", { name: "Request change" });
   unmount();
-  stubApi({ pact: () => new Promise(() => undefined) });
-  const { container } = renderPactPage();
-  expect(container.textContent).toBe("");
+  const loading = vi.fn(() => new Promise<never>(() => undefined));
+  stubApi({ pact: loading });
+  renderPactPage();
+  expect(screen.getByRole("button", { name: "Request change" })).toBeTruthy();
+  expect(loading).toHaveBeenCalledTimes(1);
+});
+
+// Each sends only its own term, so terms changed since the page loaded stay as they are.
+describe("the sheets that change a term at once", () => {
+  test("Name sends only the name", async () => {
+    const { renamePact } = stubApi({
+      pact: answers({ ok: true, pact: cameraPact() }),
+      renamePact: answers({ ok: true }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "Change name" }));
+    await user.clear(screen.getByDisplayValue("Gym"));
+    await user.type(screen.getByPlaceholderText("e.g. Gym"), "Morning gym");
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(renamePact).toHaveBeenCalledWith("gym", "Morning gym");
+    expect(await screen.findByRole("button", { name: "Change name" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save name" })).toBeNull();
+  });
+
+  test("Name says why a refused name was refused", async () => {
+    stubApi({
+      pact: answers({ ok: true, pact: cameraPact() }),
+      renamePact: answers({ ok: false, reason: "pact-ended" }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "Change name" }));
+    await user.click(screen.getByRole("button", { name: "Save name" }));
+
+    expect(await screen.findByText("This pact has Ended.")).toBeTruthy();
+  });
+
+  test("Add a reviewer sends only the friends picked", async () => {
+    const { addReviewers } = stubApi({
+      pact: answers({ ok: true, pact: cameraPact() }),
+      friends: answers([
+        { id: "ana", name: "Ana" },
+        { id: "bo", name: "Bo" },
+      ]),
+      addReviewers: answers({ ok: true }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "Add a reviewer" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Bo" }));
+    await user.click(screen.getByRole("button", { name: "Add Bo" }));
+
+    expect(addReviewers).toHaveBeenCalledWith("gym", ["bo"]);
+  });
+
+  test("Add a reviewer says why it was refused", async () => {
+    stubApi({
+      pact: answers({ ok: true, pact: cameraPact() }),
+      friends: answers([{ id: "bo", name: "Bo" }]),
+      addReviewers: answers({ ok: false, reason: "not-a-friend" }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "Add a reviewer" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Bo" }));
+    await user.click(screen.getByRole("button", { name: "Add Bo" }));
+
+    expect(await screen.findByText("Only friends can be reviewers.")).toBeTruthy();
+  });
+
+  test("Reminders sends only the reminders", async () => {
+    const { setReminders } = stubApi({
+      pact: answers({ ok: true, pact: { ...cameraPact(), reminders: ["18:00"] } }),
+      setReminders: answers({ ok: true }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "Change reminders" }));
+    await user.click(screen.getByRole("button", { name: "+ Add reminder" }));
+    await user.click(screen.getByRole("button", { name: "Save reminders" }));
+
+    expect(setReminders).toHaveBeenCalledWith("gym", ["18:00", "20:00"]);
+  });
+
+  test("Reminders says why they were refused", async () => {
+    stubApi({
+      pact: answers({ ok: true, pact: cameraPact() }),
+      setReminders: answers({ ok: false, reason: "reminder-after-due-time" }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "Change reminders" }));
+    await user.click(screen.getByRole("button", { name: "Save reminders" }));
+
+    expect(await screen.findByText(/A reminder is at or after the due time/)).toBeTruthy();
+  });
 });

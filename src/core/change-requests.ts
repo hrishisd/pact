@@ -7,6 +7,8 @@ import { addDays } from "../shared/calendar.ts";
 import { formatDate } from "../shared/format.ts";
 import type {
   AccountId,
+  AddReviewersResult,
+  AtOnceChangeRefusal,
   ChangeOutcome,
   ChangePactRefusal,
   ChangePactResult,
@@ -19,7 +21,9 @@ import type {
   LocalDate,
   PactChange,
   PactTerms,
+  RenamePactResult,
   RequestEndResult,
+  SetRemindersResult,
   TermChange,
   TodayWaitingItem,
   WithdrawChangeRequestResult,
@@ -39,17 +43,20 @@ import {
 } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import {
+  checkedName,
   dayClockOf,
   editWindowClosesAt,
   firstDayNotOpen,
   firstOccurrenceAfterChange,
-  remindersGoOffInTime,
+  remindersInTime,
   storedTerms,
   TERM_LABELS,
+  wellFormedReminders,
 } from "./pact-rules.ts";
 import {
   checkedPact,
   currentTerms,
+  mayReview,
   moveOneTimeOccurrence,
   setReviewers,
   tellPickedAsReviewer,
@@ -117,16 +124,10 @@ export function changePact(
   const { pact, before, after, outcome } = checked;
   if (outcome.kind === "nothing") return { ok: false, reason: "nothing-changed" };
   // The name, the reminders and added reviewers apply at once, even inside a change that waits.
-  if (after.name !== before.name) ctx.db.prepare(`UPDATE pact SET name = ? WHERE id = ?`).run(after.name, pactId);
-  ctx.db.prepare(`UPDATE pact SET reminders = ? WHERE id = ?`).run(JSON.stringify(after.reminders), pactId);
+  if (after.name !== before.name) rename(ctx, pactId, after.name);
+  saveReminders(ctx, pact, after.reminders);
   const added = after.reviewerIds.filter((id) => !before.reviewerIds.includes(id));
-  setReviewers(ctx, pactId, added);
-  tellPickedAsReviewer(ctx, added, `${ownerName} added you as a reviewer`, {
-    id: pactId,
-    name: after.name,
-    schedule: before.schedule,
-    penaltyCents: before.penaltyCents,
-  });
+  addReviewersNow(ctx, { ...pact, name: after.name }, ownerName, added);
   if (outcome.kind === "needs-approval") {
     const sent = {
       ...before,
@@ -139,6 +140,101 @@ export function changePact(
   }
   if (outcome.kind === "stricter") applyTerms(ctx, pact, after, now, checked.timezone);
   return { ok: true, outcome };
+}
+
+/** The owner renames a pact past its edit window: it applies at once, to the terms as they stand. */
+export function renamePact(ctx: CoreContext, accountId: AccountId, pactId: string, name: string): RenamePactResult {
+  const changeable = changeablePact(ctx, accountId, pactId, ctx.clock.now());
+  if (!changeable.ok) return changeable;
+  const named = checkedName(name);
+  if (!named.ok) return named;
+  rename(ctx, pactId, named.name);
+  return { ok: true };
+}
+
+/**
+ * The owner adds reviewers to a pact past its edit window: they join at
+ * once, and each is told. Those who already review it are left as they are.
+ */
+export function addReviewers(
+  ctx: CoreContext,
+  accountId: AccountId,
+  pactId: string,
+  reviewerIds: AccountId[],
+): AddReviewersResult {
+  const changeable = changeablePact(ctx, accountId, pactId, ctx.clock.now());
+  if (!changeable.ok) return changeable;
+  const { pact } = changeable;
+  const current = reviewersOf(ctx, pactId);
+  const added = [...new Set(reviewerIds)].filter((id) => !current.includes(id));
+  if (!mayReview(ctx, accountId, added)) return { ok: false, reason: "not-a-friend" };
+  addReviewersNow(ctx, pact, accountRow(ctx, accountId).name, added);
+  return { ok: true };
+}
+
+/** The owner sets a pact's reminders past its edit window: the whole list, applied at once. */
+export function setReminders(
+  ctx: CoreContext,
+  accountId: AccountId,
+  pactId: string,
+  reminders: string[],
+): SetRemindersResult {
+  const changeable = changeablePact(ctx, accountId, pactId, ctx.clock.now());
+  if (!changeable.ok) return changeable;
+  const { pact } = changeable;
+  const unique = wellFormedReminders(reminders, scheduleOf(pact.schedule).kind === "one-time");
+  if (unique === null) return { ok: false, reason: "invalid-reminders" };
+  const inTime = remindersInTimeNow(ctx, pact, accountRow(ctx, accountId).timezone, unique);
+  if (inTime === null) return { ok: false, reason: "reminder-after-due-time" };
+  saveReminders(ctx, pact, inTime);
+  return { ok: true };
+}
+
+/**
+ * The owner's pact, if a change may be sent to it at `now`: Active and past
+ * its edit window. A change that applies at once is refused for no other reason.
+ */
+function changeablePact(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  pactId: string,
+  now: Date,
+): { ok: true; pact: PactRow } | { ok: false; reason: AtOnceChangeRefusal } {
+  const pact = ownPact(ctx, ownerId, pactId);
+  if (!pact) return { ok: false, reason: "pact-not-found" };
+  if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
+  if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
+  return { ok: true, pact };
+}
+
+/**
+ * Well-formed `reminders` in the order they go off, or null when one goes off
+ * at or after the due time in force now: reminders apply at once.
+ */
+function remindersInTimeNow(ctx: CoreContext, pact: PactRow, timezone: string, reminders: string[]): string[] | null {
+  const currentDueAt = occurrencesOf(ctx, pact.id, timezone).first.dueAt;
+  return remindersInTime(reminders, occurrenceTermsOf(pact), currentDueAt, timezone);
+}
+
+function rename(ctx: CoreContext, pactId: string, name: string): void {
+  ctx.db.prepare(`UPDATE pact SET name = ? WHERE id = ?`).run(name, pactId);
+}
+
+/** Stores the pact's reminders, when they differ from those it has. */
+function saveReminders(ctx: CoreContext, pact: PactRow, reminders: string[]): void {
+  const json = JSON.stringify(reminders);
+  if (json !== pact.reminders) ctx.db.prepare(`UPDATE pact SET reminders = ? WHERE id = ?`).run(json, pact.id);
+}
+
+/** Adds `added` to the pact's reviewers, and tells each about the pact (named `pact.name`) as it stands. */
+function addReviewersNow(ctx: CoreContext, pact: PactRow, ownerName: string, added: AccountId[]): void {
+  setReviewers(ctx, pact.id, added);
+  tellPickedAsReviewer(ctx, added, `${ownerName} added you as a reviewer`, {
+    id: pact.id,
+    name: pact.name,
+    schedule: scheduleOf(pact.schedule),
+    penaltyCents: pact.penalty_cents,
+  });
 }
 
 export function requestEnd(ctx: CoreContext, accountId: AccountId, pactId: string, note?: string): RequestEndResult {
@@ -331,10 +427,9 @@ export function checkedChange(
       outcome: ChangeOutcome;
     }
   | { ok: false; reason: ChangePactRefusal } {
-  const pact = ownPact(ctx, ownerId, pactId);
-  if (!pact) return { ok: false, reason: "pact-not-found" };
-  if (pact.stage === "ended") return { ok: false, reason: "pact-ended" };
-  if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
+  const changeable = changeablePact(ctx, ownerId, pactId, now);
+  if (!changeable.ok) return changeable;
+  const { pact } = changeable;
   if (textTooLong(change.note)) return { ok: false, reason: "text-too-long" };
   const { note: _note, ankiDeckId: newDeckId, ...terms } = change;
   // An Anki pact keeps its deck unless the change names another.
@@ -354,8 +449,7 @@ export function checkedChange(
   if (checked.terms.schedule.kind !== before.schedule.kind) return { ok: false, reason: "schedule-kind-fixed" };
   const after = changeableTermsOf(checked, change);
   // Reminders apply at once, so they go off before the due time in force now as well as the new one.
-  const currentDueAt = occurrencesOf(ctx, pact.id, zone).first.dueAt;
-  if (!remindersGoOffInTime(after.reminders, occurrenceTermsOf(pact), currentDueAt, zone)) {
+  if (remindersInTimeNow(ctx, pact, zone, after.reminders) === null) {
     return { ok: false, reason: "reminder-after-due-time" };
   }
   const diffs = termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by));

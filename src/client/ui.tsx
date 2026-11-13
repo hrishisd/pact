@@ -57,7 +57,7 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
  * loads afresh. Pass one only for a screen that shows what it loads. No key
  * for a form or picker that copies the loaded data into what the user edits
  * (the reload would never reach it), nor for a screen that sends what it
- * loaded back in a command (PactPage's at-once changes send the whole terms).
+ * loaded back in a command: remembered data could undo a change made since.
  */
 export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<T>; reload: () => void } {
   const [state, setState] = useState<Load<T>>(() => {

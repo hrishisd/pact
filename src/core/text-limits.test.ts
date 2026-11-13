@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { MAX_NAME_CHARS, MAX_TEXT_CHARS } from "../shared/types.ts";
 import { cameraPact, gymEvidenceWaiting, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
-import { changed, ok } from "./testing/queries.ts";
+import { changed, ok, pactOf } from "./testing/queries.ts";
 import { scenario } from "./testing/scenario.ts";
 
 const atCap = "x".repeat(MAX_TEXT_CHARS);
@@ -79,7 +79,11 @@ describe("the owner's text", () => {
 
     expect(owner.changePreview(gym, relaxed(overCap))).toEqual(TOO_LONG);
     expect(await owner.changePact(gym, relaxed(overCap))).toEqual(TOO_LONG);
-    expect(await owner.changePact(gym, changed(owner, gym, { name: nameOverCap }))).toEqual(TOO_LONG);
+    expect(await owner.renamePact(gym, nameOverCap)).toEqual(TOO_LONG);
+    expect(pactOf(owner, gym).name).toBe("Gym");
+    // Counted once trimmed.
+    expect(await owner.renamePact(gym, ` ${nameAtCap} `)).toEqual({ ok: true });
+    expect(pactOf(owner, gym).name).toBe(nameAtCap);
     expect(await owner.requestEnd(gym, overCap)).toEqual(TOO_LONG);
     expect(await owner.requestEnd(gym, atCap)).toMatchObject({ ok: true });
   });

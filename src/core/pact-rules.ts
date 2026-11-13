@@ -128,16 +128,15 @@ export function checkedTerms(
   if (pact.endDate !== undefined && (oneTime || !isLocalDate(pact.endDate))) {
     return { ok: false, reason: "invalid-end-date" };
   }
-  const unique = [...new Set(pact.reminders ?? [])];
-  if (unique.length > MAX_REMINDERS || !unique.every(oneTime ? isDatedReminder : isClockTime)) {
-    return { ok: false, reason: "invalid-reminders" };
-  }
-  const name = pact.name.trim();
+  const unique = wellFormedReminders(pact.reminders ?? [], oneTime);
+  if (unique === null) return { ok: false, reason: "invalid-reminders" };
+  const named = checkedName(pact.name);
+  if (!named.ok) return named;
+  const { name } = named;
   // Oura Ring and Anki pacts have no photo to describe.
   const description = oura || anki ? "" : pact.description.trim();
-  if (name === "") return { ok: false, reason: "blank-name" };
   if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
-  if (nameTooLong(name) || textTooLong(description)) return { ok: false, reason: "text-too-long" };
+  if (textTooLong(description)) return { ok: false, reason: "text-too-long" };
   const dueBy = pact.dueBy ?? null;
   // The day clock is for Fixed days: Oura Ring and Anki pacts were refused any other schedule above.
   const day = dayClockOf(
@@ -148,10 +147,8 @@ export function checkedTerms(
   const terms = newTermsOf(pact.schedule, day, dueBy);
   const timing = newOccurrenceTerms(terms, createdAt, timezone, pact.startDate ?? null);
   if (!timing.ok) return timing;
-  const reminders = sortedReminders(unique, timing.terms);
-  if (!remindersGoOffInTime(reminders, timing.terms, timing.first.dueAt, timezone)) {
-    return { ok: false, reason: "reminder-after-due-time" };
-  }
+  const reminders = remindersInTime(unique, timing.terms, timing.first.dueAt, timezone);
+  if (reminders === null) return { ok: false, reason: "reminder-after-due-time" };
   const endDate = pact.endDate ?? null;
   // The first occurrence has to end by the end date: a whole week, for Weekly count.
   if (endDate !== null && endDate < lastDayOf(timing.terms.schedule, timing.terms.firstOccurrence)) {
@@ -169,6 +166,40 @@ export function checkedTerms(
     startDate: pact.startDate ?? null,
     reminders,
   };
+}
+
+/** A pact's name, trimmed, or why it's refused: blank, or over `MAX_NAME_CHARS`. */
+export function checkedName(
+  name: string,
+): { ok: true; name: string } | { ok: false; reason: Extract<CreatePactRefusal, "blank-name" | "text-too-long"> } {
+  const trimmed = name.trim();
+  if (trimmed === "") return { ok: false, reason: "blank-name" };
+  if (nameTooLong(trimmed)) return { ok: false, reason: "text-too-long" };
+  return { ok: true, name: trimmed };
+}
+
+/**
+ * A pact's reminders without repeats, or null when there are more than
+ * `MAX_REMINDERS` or one isn't a clock time (on a One-time pact, a dated
+ * reminder).
+ */
+export function wellFormedReminders(reminders: string[], oneTime: boolean): string[] | null {
+  const unique = [...new Set(reminders)];
+  return unique.length > MAX_REMINDERS || !unique.every(oneTime ? isDatedReminder : isClockTime) ? null : unique;
+}
+
+/**
+ * Well-formed `reminders` in the order they go off on a pact with `terms`,
+ * or null when one goes off at or after its due time (`dueAt` for One-time).
+ */
+export function remindersInTime(
+  reminders: string[],
+  terms: OccurrenceTerms,
+  dueAt: Date,
+  timezone: string,
+): string[] | null {
+  const sorted = sortedReminders(reminders, terms);
+  return remindersGoOffInTime(sorted, terms, dueAt, timezone) ? sorted : null;
 }
 
 /**

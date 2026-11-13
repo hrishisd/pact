@@ -7,15 +7,16 @@
 // right here, with no review, even while a change request waits.
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { Json } from "../shared/api.ts";
-import { termsOf } from "../shared/terms.ts";
+import { API_PATHS, type Json } from "../shared/api.ts";
 import {
   MAX_NAME_CHARS,
   MAX_TEXT_CHARS,
-  type ChangePactRefusal,
-  type PactChange,
+  type AddReviewersResult,
   type PactTerms,
   type PactWaitingItem,
+  type Refusal,
+  type RenamePactResult,
+  type SetRemindersResult,
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
@@ -23,7 +24,7 @@ import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { datesText } from "./excuse-days.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
-import { endsWhenText, listNames, openOccurrenceText } from "./change-terms.tsx";
+import { AT_ONCE_REFUSAL_TEXT, endsWhenText, listNames, openOccurrenceText } from "./change-terms.tsx";
 import { formOf } from "./pact-form.ts";
 import { PROBLEMS, ReviewersStep } from "./pact-form-steps.tsx";
 import { clockText, EDIT_WINDOW_TEXT, formatDate, formatDay, minutesLeft, money } from "./format.ts";
@@ -60,9 +61,9 @@ export function PactPage({
   openers: ItemOpeners;
   onInvite: () => void;
 }) {
-  // Reloaded after a change made here, keeping the pact shown meanwhile and if the reload fails.
-  // No key: the at-once changes send the pact's whole terms, so they must be the current ones.
-  const { state, reload } = useLoad(() => api.pact(pactId));
+  // Opened again, it starts from the pact as last loaded while it loads afresh. Reloaded after a change made
+  // here, keeping the pact shown meanwhile and if the reload fails. The at-once changes send only their own term.
+  const { state, reload } = useLoad(() => api.pact(pactId), API_PATHS.pact(pactId));
   const result = loadedData(state);
   // One clock for the page: the edit window's countdown, what it allows, and the heat map's today.
   const now = useNow();
@@ -427,45 +428,40 @@ function Terms({
   );
 }
 
-/** A change that applies at once: the terms a sheet changes. */
-type AtOnceChange = Partial<Pick<PactChange, "name" | "reviewerIds" | "reminders">>;
-
 /**
- * Sends a change that applies at once from a sheet: the pact's terms as they
- * stand, with `run(change)`'s in place of their own, then `onSaved`.
- * `refusals` words the refusals the sheet expects; any other, and a failure,
- * start with `couldnt` ("Couldn't save it."). With `unchangedSaves`, a change
- * that changes nothing counts as saved. The name and reviewer sheets use the
- * create form's PROBLEMS.
+ * Sends a change that applies at once from a sheet, which carries only its
+ * own term, then `onSaved`. `refusals` words each refusal it can have; a
+ * failure starts with `couldnt` ("Couldn't save it.").
  */
-function useChangeAtOnce(
-  pact: Pact,
-  {
-    refusals,
-    couldnt,
-    unchangedSaves,
-    onSaved,
-  }: {
-    refusals: Partial<Record<ChangePactRefusal, string>>;
-    couldnt: string;
-    unchangedSaves: boolean;
-    onSaved: () => void;
-  },
+function useChangeAtOnce<Args extends unknown[], Reason extends string>(
+  send: (...args: Args) => Promise<{ ok: true } | { ok: false; reason: Reason }>,
+  { refusals, couldnt, onSaved }: { refusals: Record<Reason, string>; couldnt: string; onSaved: () => void },
 ) {
   return useSend(
-    async (change: AtOnceChange) => {
-      const result = await api.changePact(pact.id, { ...termsOf(pact), ...change });
-      if (!result.ok && !(unchangedSaves && result.reason === "nothing-changed")) {
-        return refusals[result.reason] ?? `${couldnt} Reopen the pact and try again.`;
-      }
+    async (...args: Args) => {
+      const result = await send(...args);
+      if (!result.ok) return refusals[result.reason];
       onSaved();
     },
     (cause) => `${couldnt} ${failureText(cause, "Check your connection and try again.")}`,
   );
 }
 
-/** The reminders step's words for its refusals; the reminders sheet has its own for the rest. */
-const REMINDERS_PROBLEMS: Partial<Record<ChangePactRefusal, string>> = REMINDER_PROBLEMS;
+const NAME_REFUSALS: Record<Refusal<RenamePactResult>, string> = {
+  ...AT_ONCE_REFUSAL_TEXT,
+  "blank-name": PROBLEMS["blank-name"],
+  "text-too-long": PROBLEMS["text-too-long"],
+};
+
+const ADD_REVIEWER_REFUSALS: Record<Refusal<AddReviewersResult>, string> = {
+  ...AT_ONCE_REFUSAL_TEXT,
+  "not-a-friend": PROBLEMS["not-a-friend"],
+};
+
+const REMINDERS_REFUSALS: Record<Refusal<SetRemindersResult>, string> = {
+  ...AT_ONCE_REFUSAL_TEXT,
+  ...REMINDER_PROBLEMS,
+};
 
 function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(pact.name);
@@ -473,10 +469,9 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
     busy: saving,
     error,
     run: save,
-  } = useChangeAtOnce(pact, {
-    refusals: PROBLEMS,
+  } = useChangeAtOnce((newName: string) => api.renamePact(pact.id, newName), {
+    refusals: NAME_REFUSALS,
     couldnt: "Couldn't save it.",
-    unchangedSaves: true,
     onSaved,
   });
 
@@ -494,7 +489,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
         <small>Shown on Today. A new name applies at once, with no approval.</small>
       </label>
       {error && <p className="error">{error}</p>}
-      <button className="btn primary block" disabled={saving} onClick={() => save({ name: name.trim() })}>
+      <button className="btn primary block" disabled={saving} onClick={() => save(name)}>
         Save name
       </button>
     </Sheet>
@@ -529,15 +524,14 @@ function AddReviewerSheet({
   const reviewerNames = pact.reviewers.map((r) => r.name);
   const pickedNames = (others ?? []).filter((f) => picked.includes(f.id)).map((f) => f.name);
 
-  // Add stays off until someone is picked, so the change always changes something.
+  // Add stays off until someone is picked. Only those picked are sent.
   const {
     busy: saving,
     error,
     run: save,
-  } = useChangeAtOnce(pact, {
-    refusals: PROBLEMS,
+  } = useChangeAtOnce((reviewerIds: string[]) => api.addReviewers(pact.id, reviewerIds), {
+    refusals: ADD_REVIEWER_REFUSALS,
     couldnt: "Couldn't add them.",
-    unchangedSaves: false,
     onSaved,
   });
 
@@ -588,11 +582,7 @@ function AddReviewerSheet({
           />
         </div>
         {error && <p className="error">{error}</p>}
-        <button
-          className="btn primary block"
-          disabled={saving || picked.length === 0}
-          onClick={() => save({ reviewerIds: [...current, ...picked] })}
-        >
+        <button className="btn primary block" disabled={saving || picked.length === 0} onClick={() => save(picked)}>
           {picked.length === 0 ? "Add reviewer" : `Add ${listNames(pickedNames)}`}
         </button>
       </>
@@ -613,16 +603,15 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
     error,
     setError,
     run: send,
-  } = useChangeAtOnce(pact, {
-    refusals: REMINDERS_PROBLEMS,
+  } = useChangeAtOnce((newReminders: string[]) => api.setReminders(pact.id, newReminders), {
+    refusals: REMINDERS_REFUSALS,
     couldnt: "Couldn't save them.",
-    unchangedSaves: true,
     onSaved,
   });
 
   const save = () => {
     if (reminders.includes("")) return setError(REMINDER_PROBLEMS["invalid-reminders"]);
-    send({ reminders });
+    send(reminders);
   };
 
   return (
