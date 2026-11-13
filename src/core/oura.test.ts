@@ -98,7 +98,7 @@ class FakeOura {
 
 /** The adapter on the scenario's database, with `options`; it closes when the test ends. */
 function adapterOn(s: Scenario, options: Partial<OuraAdapterOptions> = {}) {
-  const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock, { raiseOperatorAlert: s.raiseOperatorAlert, ...options });
+  const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock, { raiseOperatorAlert: s.operatorAlerts.raise, ...options });
   onTestFinished(() => adapter.close());
   return adapter;
 }

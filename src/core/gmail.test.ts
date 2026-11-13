@@ -19,12 +19,19 @@ interface Received {
   data: string;
 }
 
-/** A mail server that accepts every message, or refuses `refusedRecipient`. Closes when the test ends. */
+/**
+ * A mail server that accepts every message, or refuses `refusedRecipient`.
+ * `received` holds the messages it took; `logins`, every AUTH line's argument,
+ * decoded, by connection, whether or not a message followed. Closes when the test ends.
+ */
 async function fakeSmtp(refusedRecipient?: string) {
   const received: Received[] = [];
+  const logins: string[][] = [];
   const server = createServer((socket) => {
     socket.setEncoding("utf8");
     const session: Received = { auth: null, mailFrom: null, rcptTo: [], data: "" };
+    const connectionLogins: string[] = [];
+    logins.push(connectionLogins);
     let buffered = "";
     let inData = false;
     const reply = (line: string) => socket.write(`${line}\r\n`);
@@ -48,6 +55,7 @@ async function fakeSmtp(refusedRecipient?: string) {
           reply("250 AUTH PLAIN");
         } else if (verb === "AUTH") {
           session.auth = Buffer.from(line.split(" ")[2] ?? "", "base64").toString("utf8");
+          connectionLogins.push(session.auth);
           reply("235 2.7.0 Accepted");
         } else if (verb === "MAIL") {
           session.mailFrom = line;
@@ -71,7 +79,7 @@ async function fakeSmtp(refusedRecipient?: string) {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  return { received, port: (server.address() as AddressInfo).port };
+  return { received, logins, port: (server.address() as AddressInfo).port };
 }
 
 test("sends from the Pact account, logged in with its app password, to the address given", async () => {
@@ -118,6 +126,7 @@ test("never sends the app password over a connection that STARTTLS hasn't secure
   const mailer = gmailMailer(ACCOUNT, { host: "127.0.0.1", port: smtp.port });
 
   await expect(mailer.send(EMAIL)).rejects.toThrow(/STARTTLS/);
+  expect(smtp.logins).toEqual([[]]);
   expect(smtp.received).toEqual([]);
 });
 

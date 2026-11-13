@@ -53,6 +53,7 @@ describe("operator alert after a restore", () => {
     failOnCall(s.mailer, "send", 1, new Error("421 try again later"));
 
     await s.core.raiseRestoreAlert();
+    await s.operatorAlerts.settled();
 
     expect(s.mailer.sent).toEqual([]);
     expect(s.logs).toContainEqual(expect.stringMatching(OPERATOR_ALERT_WITH_TICK));
@@ -78,6 +79,26 @@ describe("operator alert after a restore", () => {
       },
     ]);
     expect(s.logs).toContainEqual(expect.stringMatching(/OPERATOR_ALERT.*none/));
+  });
+
+  test("is still logged and emailed when the database can't say its last tick", async () => {
+    const s = scenario();
+    await s.signIn("owner");
+    await s.advanceTo("Mon 18:00");
+    failOnCall(s.core, "lastTick", 1, new Error("SQLITE_CORRUPT: database disk image is malformed"));
+
+    await expect(s.core.raiseRestoreAlert()).rejects.toThrow("SQLITE_CORRUPT");
+
+    expect(s.logs).toContainEqual(
+      expect.stringMatching(/^OPERATOR_ALERT database restored .*: unknown, .*SQLITE_CORRUPT/),
+    );
+    expect(s.mailer.sent).toEqual([
+      {
+        to: "owner@example.test",
+        subject: "Pact operator alert: database restored from backup",
+        text: expect.stringMatching(/^database restored .*: unknown, reading it failed: .*SQLITE_CORRUPT/),
+      },
+    ]);
   });
 
   test("a failed delivery loses nothing: the alert is delivered on the next tick, even after a restart", async () => {

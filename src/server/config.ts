@@ -134,7 +134,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ? { tokenKey: env.ANKI_TOKEN_KEY.trim(), python: env.ANKI_PYTHON?.trim() || "python3" }
       : null,
     gmail:
-      production || env.GMAIL_ADDRESS?.trim()
+      production || env.GMAIL_ADDRESS?.trim() || env.GMAIL_APP_PASSWORD?.trim()
         ? {
             address: read("GMAIL_ADDRESS", ""),
             // Google shows an app password in groups of four; Gmail takes it without the spaces.
@@ -160,8 +160,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (config.anki && Buffer.from(config.anki.tokenKey, "base64").length !== 32) {
     throw new Error("ANKI_TOKEN_KEY must be 32 bytes, base64");
   }
-  if (config.gmail && !config.gmail.appPassword) {
-    throw new Error("GMAIL_APP_PASSWORD is required with GMAIL_ADDRESS");
+  if (config.gmail && !(config.gmail.address && config.gmail.appPassword)) {
+    throw new Error("GMAIL_ADDRESS and GMAIL_APP_PASSWORD go together: set both, or neither in development");
   }
   if (production && config.auth.secret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");

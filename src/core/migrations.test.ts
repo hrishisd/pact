@@ -35,7 +35,7 @@ function coreAt(start: Date): { core: PactCore; clock: FakeClock; notifier: Reco
     dbPath: path,
     clock,
     notifier,
-    raiseOperatorAlert: async () => {},
+    raiseOperatorAlert: () => {},
     ouraSource: new FakeOuraSource(),
     ankiSource: new FakeAnkiSource(),
     photoStore: new InMemoryPhotoStore(clock),

@@ -44,4 +44,5 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 - `src/server/pages.ts` has its own hex colours: those pages are plain HTML with no shared stylesheet.
 - Light theme only.
 - `Notification.recipient` is the account being notified, and predates the glossary's Recipient (a penalty's payee, never notified). The type makes clear which one it is.
+- Operator alert emails skip the outbox on purpose (`operator-alerts.ts`): the outbox lives in the database, and the restore alert must reach the operator after a restore from an old backup, when the database may have lost the operator's push subscription and the queued rows. They're sent at once, not waited for, and a failed one is logged, not retried.
 - The photo bytes route (`GET /api/photos/:id`) answers 404 for a photo the account may not see, not a 200 refusal: an `<img>` can't read a refusal body. The core still returns `photo-not-found`.

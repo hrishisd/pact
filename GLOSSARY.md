@@ -140,7 +140,7 @@ An email a person can turn on, sent at 09:00 in their timezone only when somethi
 _Avoid_: Newsletter, digest email, daily email
 
 **Operator alert**:
-A message to the operator, the person who runs Pact, about a problem only they can fix, such as a restore from backup or reminders dropped after downtime. It's a log line tagged `OPERATOR_ALERT`, an email to the operator's address and, for most alerts, a push to the operator's account. Nobody can turn it off.
+A message to the operator, the person who runs Pact, about a problem only they can fix, such as a restore from backup or reminders dropped after downtime. It's a log line tagged `OPERATOR_ALERT`, an email to the operator's address and, for reminders dropped and a restore, a push to the operator's account. Nobody can turn it off.
 
 ### Money
 

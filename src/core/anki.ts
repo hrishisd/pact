@@ -178,6 +178,12 @@ class Anki implements AnkiAdapter {
   readonly #loginEndpoint: string | undefined;
   readonly #log: (line: string) => void;
   readonly #raiseOperatorAlert: RaiseOperatorAlert;
+  /**
+   * Accounts whose protocol error has been emailed since AnkiWeb last answered
+   * them: each further one is only logged, as a check every 10 minutes would
+   * otherwise email each time. In memory: a restart costs at most one more email.
+   */
+  readonly #protocolErrorEmailed = new Set<AccountId>();
   /** The operation running for each account: the next waits for it. */
   readonly #running = new Map<AccountId, Promise<unknown>>();
 
@@ -215,6 +221,7 @@ class Anki implements AnkiAdapter {
         else this.#log(`AnkiWeb login failed for account ${account}: ${answer.error} error: ${answer.message}`);
         return { ok: false, reason: "unreachable" };
       }
+      this.#protocolErrorEmailed.delete(account);
       this.#db
         .prepare(
           `INSERT INTO anki_connection (account_id, host_key, endpoint, updated_at) VALUES (?, ?, ?, ?)
@@ -281,6 +288,7 @@ class Anki implements AnkiAdapter {
         if (answer.error === "protocol") this.#alertProtocolError(account, answer.message);
         throw new Error(`AnkiWeb ${answer.error} error: ${answer.message}`);
       }
+      this.#protocolErrorEmailed.delete(account);
       if (answer.endpoint !== row.endpoint && answer.endpoint !== null) {
         this.#db.prepare(`UPDATE anki_connection SET endpoint = ? WHERE account_id = ?`).run(answer.endpoint, account);
       }
@@ -289,13 +297,14 @@ class Anki implements AnkiAdapter {
   }
 
   #alertProtocolError(account: AccountId, message: string): void {
-    // Not waited for: a slow mail server doesn't hold up the account's AnkiWeb operations.
-    void this.#raiseOperatorAlert({
+    this.#raiseOperatorAlert({
       title: "AnkiWeb protocol error",
       text:
         `AnkiWeb protocol error for account ${account}: ${message}. ` +
         `AnkiWeb may have changed its sync protocol; the pinned anki package may need updating.`,
+      withoutEmail: this.#protocolErrorEmailed.has(account),
     });
+    this.#protocolErrorEmailed.add(account);
   }
 
   /**

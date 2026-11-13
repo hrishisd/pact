@@ -255,8 +255,7 @@ class Oura implements OuraAdapter {
       const latest = this.#load(account);
       if (latest && latest.generation !== current.generation) return latest;
       if (!tokens && latest?.refreshOutcomeUnknownAt) {
-        // Not waited for: a slow mail server doesn't hold up the account's Oura calls.
-        void this.#raiseOperatorAlert({
+        this.#raiseOperatorAlert({
           title: "Oura refresh token refused",
           text:
             `Oura refresh token for account ${account} was refused after a refresh at ` +

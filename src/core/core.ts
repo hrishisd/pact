@@ -154,7 +154,11 @@ export interface PactCoreOptions {
   dbPath: string;
   clock: Clock;
   notifier: Notifier;
-  /** The operator alert path (operator-alerts.ts): the log line and the email. The server shares it with the adapters. */
+  /**
+   * The operator alert path (operator-alerts.ts): the log line and the email,
+   * which must go to the same operator as `operatorEmail`. The server shares
+   * it with the adapters.
+   */
   raiseOperatorAlert: RaiseOperatorAlert;
   ouraSource: OuraSource;
   ankiSource: AnkiSource;
@@ -742,9 +746,9 @@ class Core implements PactCore {
       },
       t,
     );
-    // Raised once committed, like any operator alert: neither the log line nor the email depends on delivery.
+    // Raised once committed. Neither the log line nor the email depends on delivery, and the tick doesn't wait for the email.
     if (dropped.length > 0) {
-      await this.#raiseOperatorAlert({
+      this.#raiseOperatorAlert({
         title: "reminders dropped after downtime",
         text: `${droppedText(dropped.length)} after downtime`,
       });
@@ -768,8 +772,19 @@ class Core implements PactCore {
   }
 
   async raiseRestoreAlert(): Promise<void> {
-    const lastTick = await this.#command(() => {
-      const lastTick = this.lastTick()?.toISOString() ?? null;
+    // The log line and the email go first, and even when the database can't say its last tick:
+    // they are the channels that never depend on it. The push may not reach a restored database's operator.
+    const title = "database restored from backup";
+    const said = "database restored from backup; last scheduler tick before the restore";
+    let lastTick: string | null;
+    try {
+      lastTick = this.lastTick()?.toISOString() ?? null;
+    } catch (error) {
+      this.#raiseOperatorAlert({ title, text: `${said}: unknown, reading it failed: ${String(error)}` });
+      throw error;
+    }
+    this.#raiseOperatorAlert({ title, text: `${said}: ${lastTick ?? "none"}` });
+    await this.#command(() => {
       const operator = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE is_operator = 1`);
       if (operator) {
         this.#ctx.enqueue({
@@ -784,12 +799,6 @@ class Core implements PactCore {
           },
         });
       }
-      return lastTick;
-    });
-    // The log line and the email never depend on the database: the push may not reach a restored one's operator.
-    await this.#raiseOperatorAlert({
-      title: "database restored from backup",
-      text: `database restored from backup; last scheduler tick before the restore: ${lastTick ?? "none"}`,
     });
     await this.#delivery;
   }

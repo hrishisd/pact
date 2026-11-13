@@ -29,10 +29,10 @@ export function gmailMailer(account: GmailAccount, options: GmailOptions = {}): 
     secure: false,
     requireTLS: options.requireTLS ?? true,
     auth: { user: account.address, pass: account.appPassword },
-    // Milliseconds. An operator alert waits for its email, so a mail server that hangs mustn't hold it up for long.
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 30_000,
+    // Milliseconds. Short, so a mail server that hangs can't keep a send open long: shutdown waits for sends in flight.
+    connectionTimeout: 5_000,
+    greetingTimeout: 5_000,
+    socketTimeout: 10_000,
   });
   return {
     async send({ to, subject, text, html }) {

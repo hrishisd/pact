@@ -114,11 +114,6 @@ export class RecordingMailer implements Mailer {
   async send(email: Email): Promise<void> {
     this.sent.push(structuredClone(email));
   }
-
-  /** Every email sent to `address`, in order. */
-  sentTo(address: string): Email[] {
-    return this.sent.filter((email) => email.to === address);
-  }
 }
 
 /** Keeps photos in memory; the received time comes from the given clock. */

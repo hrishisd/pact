@@ -3,7 +3,8 @@
 // A scenario is one Pact core on its own temporary SQLite file (production
 // pragmas, WAL), with fakes for the six ports. Tests act as named accounts,
 // issue commands, move time with `advanceTo`, and assert only on query
-// results, on what `s.notifier` recorded, and on `s.logs`. Never on storage.
+// results, on what `s.notifier` and `s.mailer` recorded, and on `s.logs`.
+// Never on storage.
 //
 // TIME STRINGS. Wherever the harness takes a time, "Mon 18:00" means that
 // wall-clock time in America/New_York during the reference week
@@ -28,7 +29,7 @@ import { onTestFinished } from "vitest";
 import { wallTime } from "../calendar.ts";
 import { addDays } from "../../shared/calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
-import { operatorAlerts, type RaiseOperatorAlert } from "../operator-alerts.ts";
+import { operatorAlerts, type OperatorAlerts } from "../operator-alerts.ts";
 import type { AccountId, ChangePactResult, LocalDate, SignInResult } from "../../shared/types.ts";
 import {
   FakeAnkiSource,
@@ -67,8 +68,12 @@ export interface Scenario {
   readonly mailer: RecordingMailer;
   /** The operator's address, OPERATOR_EMAIL: where operator alert emails go. */
   readonly operatorEmail: string;
-  /** The operator alert path the core has, to `mailer` and `logs`, for the Oura and Anki adapters too. */
-  readonly raiseOperatorAlert: RaiseOperatorAlert;
+  /**
+   * The operator alert path the core has, to `mailer` and `logs`, for the Oura
+   * and Anki adapters too. `advanceTo` waits for its emails; after anything
+   * else, `settled()` does.
+   */
+  readonly operatorAlerts: OperatorAlerts;
   readonly ouraSource: FakeOuraSource;
   readonly ankiSource: FakeAnkiSource;
   readonly photoStore: InMemoryPhotoStore;
@@ -115,7 +120,7 @@ export function scenario(): Scenario {
   const notifier = new RecordingNotifier();
   const mailer = new RecordingMailer();
   const logs: string[] = [];
-  const raiseOperatorAlert = operatorAlerts({
+  const alerts = operatorAlerts({
     mailer,
     operatorEmail: emailFor(OPERATOR),
     log: (line) => logs.push(line),
@@ -136,7 +141,7 @@ export function scenario(): Scenario {
       dbPath,
       clock,
       notifier,
-      raiseOperatorAlert,
+      raiseOperatorAlert: alerts.raise,
       ouraSource: watch.oura(ouraSource),
       ankiSource: watch.anki(ankiSource),
       photoStore,
@@ -183,7 +188,7 @@ export function scenario(): Scenario {
     notifier,
     mailer,
     operatorEmail: emailFor(OPERATOR),
-    raiseOperatorAlert,
+    operatorAlerts: alerts,
     ouraSource,
     ankiSource,
     photoStore,
@@ -209,6 +214,7 @@ export function scenario(): Scenario {
       clock.set(at(when));
       watch.tick(clock.now());
       await core.advanceTo(clock.now());
+      await alerts.settled();
       verdicts.check();
     },
     setClockTo(when) {

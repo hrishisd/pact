@@ -28,7 +28,7 @@ function adapterFor(s: Scenario, run: AnkiScriptRunner) {
   const adapter = ankiAdapter(s.dbPath, { tokenKey: TOKEN_KEY, collectionsDir }, s.clock, {
     run,
     log: (line) => s.logs.push(line),
-    raiseOperatorAlert: s.raiseOperatorAlert,
+    raiseOperatorAlert: s.operatorAlerts.raise,
   });
   onTestFinished(() => adapter.close());
   return { adapter, collectionsDir };
@@ -153,6 +153,35 @@ test("an auth error is disconnected; a network error throws; a protocol error th
   ]);
   answer = "not json at all";
   await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow();
+});
+
+test("a protocol error is logged every time but emailed once per account, until AnkiWeb answers it again", async () => {
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  const friend = await s.befriend(owner, "friend");
+  let answer: unknown = { ok: false, error: "protocol", message: "DecodeError: unexpected field" };
+  const { adapter } = adapterFor(s, fakeScript((request) => okLogin(request) ?? answer).run);
+  await adapter.login(owner.id, "owner@example.test", "right");
+  await adapter.login(friend.id, "friend@example.test", "right");
+  const emailedAbout = () =>
+    s.mailer.sent.map((email) =>
+      email.text.includes(owner.id) ? "owner" : email.text.includes(friend.id) ? "friend" : "?",
+    );
+
+  for (let check = 0; check < 3; check++) await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow();
+  await expect(adapter.deckCounts(friend.id, ["1"])).rejects.toThrow();
+
+  expect(s.logs.filter((line) => line.startsWith("OPERATOR_ALERT"))).toHaveLength(4);
+  expect(emailedAbout()).toEqual(["owner", "friend"]);
+
+  answer = { ok: true, decks: DECKS, rolloverHour: 4, endpoint: null };
+  await adapter.decks(owner.id);
+  answer = { ok: false, error: "protocol", message: "DecodeError: unexpected field" };
+  await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow();
+  await expect(adapter.deckCounts(friend.id, ["1"])).rejects.toThrow();
+
+  expect(s.logs.filter((line) => line.startsWith("OPERATOR_ALERT"))).toHaveLength(6);
+  expect(emailedAbout()).toEqual(["owner", "friend", "owner"]);
 });
 
 test("an answer that isn't one is a login AnkiWeb can't answer; a success without a host key throws", async () => {

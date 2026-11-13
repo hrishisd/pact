@@ -149,9 +149,12 @@ describe("Gmail", () => {
     expect(loadConfig({}).gmail).toBeNull();
   });
 
-  test("development with an address needs the app password too", () => {
+  test("development with only one of the two refuses to start", () => {
     expect(() => loadConfig({ GMAIL_ADDRESS: "pact.sender@gmail.example" })).toThrow(
-      "GMAIL_APP_PASSWORD is required with GMAIL_ADDRESS",
+      "GMAIL_ADDRESS and GMAIL_APP_PASSWORD go together: set both, or neither in development",
+    );
+    expect(() => loadConfig({ GMAIL_APP_PASSWORD: "abcdefghijklmnop" })).toThrow(
+      "GMAIL_ADDRESS and GMAIL_APP_PASSWORD go together: set both, or neither in development",
     );
     expect(
       loadConfig({ GMAIL_ADDRESS: "pact.sender@gmail.example", GMAIL_APP_PASSWORD: "abcdefghijklmnop" }).gmail,
