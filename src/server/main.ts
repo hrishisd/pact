@@ -159,8 +159,12 @@ async function shutdown(signal: string): Promise<void> {
     new Promise<void>((resolve) => setTimeout(resolve, 5000).unref()),
   ]);
   await scheduler.stop();
-  // An operator alert email still sending gets a few seconds, so it isn't lost mid-send, but can't hold up the stop.
-  await Promise.race([alerts.settled(), new Promise<void>((resolve) => setTimeout(resolve, 3000).unref())]);
+  // An email still sending (an operator alert, a daily summary) gets a few seconds, so it isn't lost mid-send,
+  // but can't hold up the stop. A daily summary cut off is tried again by the next run's tick.
+  await Promise.race([
+    Promise.all([alerts.settled(), core.emailsSettled()]),
+    new Promise<void>((resolve) => setTimeout(resolve, 3000).unref()),
+  ]);
   await core.close();
   oura?.close();
   anki?.close();

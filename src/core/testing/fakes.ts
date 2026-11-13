@@ -114,10 +114,19 @@ export class RecordingNotifier implements Notifier {
 export class RecordingMailer implements Mailer {
   readonly sent: Email[] = [];
   readonly #failing = new Set<string>();
+  #held: Promise<void> = Promise.resolve();
 
   async send(email: Email): Promise<void> {
+    await this.#held;
     if (this.#failing.has(email.to)) throw new Error(`injected failure: mail to ${email.to}`);
     this.sent.push(structuredClone(email));
+  }
+
+  /** Sends stall, as a hung mail server's would, until the returned function is called. */
+  hold(): () => void {
+    let release = () => {};
+    this.#held = new Promise((resolve) => (release = resolve));
+    return release;
   }
 
   /** From now on (or until `recover`) sending to `address` fails. */

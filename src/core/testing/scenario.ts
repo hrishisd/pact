@@ -70,8 +70,8 @@ export interface Scenario {
   readonly operatorEmail: string;
   /**
    * The operator alert path the core has, to `mailer` and `logs`, for the Oura
-   * and Anki adapters too. `advanceTo` waits for its emails; after anything
-   * else, `settled()` does.
+   * and Anki adapters too. `advanceTo` waits for its emails, and the tick's
+   * own; after anything else, `settled()` does.
    */
   readonly operatorAlerts: OperatorAlerts;
   readonly ouraSource: FakeOuraSource;
@@ -218,6 +218,7 @@ export function scenario(): Scenario {
       clock.set(at(when));
       watch.tick(clock.now());
       await core.advanceTo(clock.now());
+      await core.emailsSettled();
       await alerts.settled();
       verdicts.check();
     },

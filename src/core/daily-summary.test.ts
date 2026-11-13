@@ -1,7 +1,7 @@
 // The daily summary: an email a person turns on, at 09:00 in their timezone,
 // listing the items in their Review Queue that have waited more than 24 hours
 // and the reviewers' questions to them unanswered that long. Off to start
-// with, apart from the push settings, at most one a day.
+// with, apart from the push settings, at most one a local day.
 
 import { describe, expect, test } from "vitest";
 import { EVERY_DAY, fifteenOwed, ownerWithReviewers, recordPayment, submit } from "./testing/camera-pact.ts";
@@ -12,6 +12,15 @@ const FOOTER = [
   "You're getting this because you turned on the daily summary in Pact. It comes at 09:00 your time, only on days something has waited more than a day.",
   "Turn it off in Profile: https://pact.example.test/profile",
 ].join("\n");
+
+/** The operator alert's words for the reviewer's summary queued on Wednesday, given up. */
+const GIVEN_UP =
+  "The Pact Daily Summary for Wed Jan 7 to reviewer (reviewer@example.test) failed for 24 hours and was given up.";
+
+/** The log lines saying a daily summary's send failed and waits for the next tick. */
+function failuresIn(s: Scenario) {
+  return s.logs.filter((line) => /^email \d+ \(daily-summary to .*\) not sent, will retry next tick: /.test(line));
+}
 
 /** The daily summaries sent to `name`'s address, in order. */
 function summariesTo(s: Scenario, name: string) {
@@ -291,6 +300,56 @@ describe("an owner who is also a reviewer", () => {
   });
 });
 
+describe("when it goes", () => {
+  test("turned on at 22:00: nothing until the next 09:00, however long things have waited", async () => {
+    const s = scenario();
+    const { reviewer } = await evidenceAt(s, "Mon 10:00");
+    s.setClockTo("Wed 22:00");
+    await reviewer.setDailySummary(true);
+
+    await s.advanceTo("Wed 22:00");
+    await s.advanceTo("Thu 08:59");
+    expect(summariesTo(s, "reviewer")).toEqual([]);
+
+    await s.advanceTo("Thu 09:00");
+    expect(summariesTo(s, "reviewer")).toHaveLength(1);
+  });
+
+  test("turned on at 08:00: sent at 09:00 that day", async () => {
+    const s = scenario();
+    const { reviewer } = await evidenceAt(s, "Mon 10:00");
+    s.setClockTo("Thu 08:00");
+    await reviewer.setDailySummary(true);
+
+    await s.advanceTo("Thu 08:00");
+    await s.advanceTo("Thu 08:59");
+    expect(summariesTo(s, "reviewer")).toEqual([]);
+
+    await s.advanceTo("Thu 09:00");
+    expect(summariesTo(s, "reviewer")).toHaveLength(1);
+  });
+
+  test("at most one a local day, with the pushes, even after a move west makes 09:00 come round again", async () => {
+    const s = scenario();
+    const { reviewer } = await evidenceAt(s, "Mon 10:00");
+    await reviewer.setTimezone("Europe/London");
+    await reviewer.setDailySummary(true);
+
+    await s.advanceTo("Wed 04:00"); // 09:00 in London
+    expect(summariesTo(s, "reviewer")).toHaveLength(1);
+    expect(s.notifier.sentTo(reviewer, "stale-review-items")).toHaveLength(1);
+
+    await reviewer.setTimezone("America/Los_Angeles");
+    await s.advanceTo("Wed 12:00"); // 09:00 in Los Angeles, still Wednesday
+    expect(summariesTo(s, "reviewer")).toHaveLength(1);
+    expect(s.notifier.sentTo(reviewer, "stale-review-items")).toHaveLength(1);
+
+    await s.advanceTo("Thu 12:00");
+    expect(summariesTo(s, "reviewer")).toHaveLength(2);
+    expect(s.notifier.sentTo(reviewer, "stale-review-items")).toHaveLength(2);
+  });
+});
+
 describe("a send that keeps failing", () => {
   test("is retried each tick, and given up 24 hours after it was queued, with an operator alert by log and push, not email", async () => {
     const s = scenario();
@@ -300,7 +359,7 @@ describe("a send that keeps failing", () => {
     s.mailer.fail("reviewer@example.test");
     s.setClockTo("Tue 08:00");
     await submit(owner, gym);
-    const failures = () => s.logs.filter((line) => /daily-summary .*not delivered, will retry/.test(line));
+    const failures = () => failuresIn(s);
 
     await s.advanceTo("Wed 09:00");
     await s.advanceTo("Wed 09:01");
@@ -311,7 +370,7 @@ describe("a send that keeps failing", () => {
     await s.advanceTo("Thu 09:00");
 
     expect(s.logs.filter((line) => line.startsWith("OPERATOR_ALERT"))).toEqual([
-      "OPERATOR_ALERT daily summary to reviewer@example.test given up after 24 hours of failed sends; last error: injected failure: mail to reviewer@example.test",
+      `OPERATOR_ALERT ${GIVEN_UP} Last error: injected failure: mail to reviewer@example.test`,
     ]);
     expect(s.notifier.sentTo(owner, "operator-alert")).toEqual([
       {
@@ -321,7 +380,7 @@ describe("a send that keeps failing", () => {
           alert: "email-given-up",
           to: "reviewer@example.test",
           title: "Operator alert",
-          body: "A daily summary to reviewer@example.test failed for 24 hours and was given up.",
+          body: GIVEN_UP,
           url: "/",
         },
       },
@@ -333,5 +392,116 @@ describe("a send that keeps failing", () => {
     await s.advanceTo("Thu 09:01");
     await s.advanceTo("Fri 08:00");
     expect(summariesTo(s, "reviewer").map((email) => email.text.split("\n").at(6))).toEqual(["Gym · waited 2 days"]);
+  });
+
+  test("is retried only by the tick: a command after the failure doesn't send it", async () => {
+    const s = scenario();
+    const { owner, reviewer } = await evidenceAt(s, "Tue 08:00");
+    await reviewer.setDailySummary(true);
+    s.mailer.fail("reviewer@example.test");
+    await s.advanceTo("Wed 09:00");
+    s.mailer.recover("reviewer@example.test");
+
+    s.setClockTo("Wed 09:02");
+    await owner.addRecipient({ name: "Ana" });
+    await reviewer.setTimezone("America/New_York");
+    expect(failuresIn(s)).toHaveLength(1);
+    expect(summariesTo(s, "reviewer")).toEqual([]);
+
+    await s.advanceTo("Wed 09:03");
+    expect(summariesTo(s, "reviewer")).toHaveLength(1);
+  });
+
+  test("not sent after its 24 hours, however long the server was down: given up at the restart's first tick", async () => {
+    const s = scenario();
+    const { owner, reviewer } = await evidenceAt(s, "Tue 08:00");
+    await reviewer.setDailySummary(true);
+    s.mailer.fail("reviewer@example.test");
+    await s.advanceTo("Wed 09:00");
+    expect(failuresIn(s)).toHaveLength(1);
+
+    await s.restart();
+    s.mailer.recover("reviewer@example.test");
+    s.setClockTo("Thu 10:00");
+    await owner.addRecipient({ name: "Ana" });
+    await s.advanceTo("Thu 10:00");
+
+    expect(s.logs.filter((line) => line.startsWith("OPERATOR_ALERT"))).toEqual([
+      `OPERATOR_ALERT ${GIVEN_UP} Last error: injected failure: mail to reviewer@example.test`,
+    ]);
+    expect(s.notifier.sentTo(owner, "operator-alert").map((sent) => sent.payload.body)).toEqual([GIVEN_UP]);
+    // Only Thursday's own, queued at this tick.
+    expect(summariesTo(s, "reviewer").map((email) => email.text.split("\n").at(6))).toEqual(["Gym · waited 2 days"]);
+  });
+
+  test("past its 24 hours by the time a slow pass reaches it: not sent, and given up at the next tick", async () => {
+    const s = scenario();
+    const { owner, reviewer, second } = await evidenceAt(s, "Tue 08:00");
+    await reviewer.setDailySummary(true);
+    await second.setDailySummary(true);
+    s.mailer.fail("reviewer@example.test");
+    s.mailer.fail("second@example.test");
+    await s.advanceTo("Wed 09:00");
+    s.mailer.recover("reviewer@example.test");
+    s.mailer.recover("second@example.test");
+
+    // The pass sends the reviewer's first, and that send hangs past the 24 hours of both.
+    const release = s.mailer.hold();
+    s.setClockTo("Thu 08:59");
+    await s.core.advanceTo(s.clock.now());
+    s.setClockTo("Thu 09:00");
+    release();
+    await s.core.emailsSettled();
+
+    expect(summariesTo(s, "reviewer")).toHaveLength(1);
+    expect(summariesTo(s, "second")).toEqual([]);
+
+    await s.advanceTo("Thu 09:01");
+    expect(s.notifier.sentTo(owner, "operator-alert").map((sent) => sent.payload.body)).toEqual([
+      "The Pact Daily Summary for Wed Jan 7 to second (second@example.test) failed for 24 hours and was given up.",
+    ]);
+  });
+
+  test("being sent when its 24 hours end: delivered, and not given up", async () => {
+    const s = scenario();
+    const { owner, reviewer } = await evidenceAt(s, "Tue 08:00");
+    await reviewer.setDailySummary(true);
+    s.mailer.fail("reviewer@example.test");
+    await s.advanceTo("Wed 09:00");
+    s.mailer.recover("reviewer@example.test");
+
+    const release = s.mailer.hold();
+    s.setClockTo("Thu 08:59");
+    await s.core.advanceTo(s.clock.now());
+    s.setClockTo("Thu 09:00");
+    await s.core.advanceTo(s.clock.now());
+    release();
+    await s.core.emailsSettled();
+
+    expect(summariesTo(s, "reviewer").map((email) => email.text.split("\n").at(6))).toEqual(["Gym · waited 1 day"]);
+    expect(s.notifier.sentTo(owner, "operator-alert")).toEqual([]);
+    expect(s.logs.filter((line) => line.startsWith("OPERATOR_ALERT"))).toEqual([]);
+  });
+});
+
+describe("apart from the pushes", () => {
+  test("a hung mail server holds up neither the tick nor a push queued while it hangs, and one pass runs at a time", async () => {
+    const s = scenario();
+    const { owner, reviewer, evidenceId } = await evidenceAt(s, "Tue 08:00");
+    await reviewer.setDailySummary(true);
+    const release = s.mailer.hold();
+
+    s.setClockTo("Wed 09:00");
+    await s.core.advanceTo(s.clock.now());
+    expect(s.notifier.sentTo(reviewer, "stale-review-items")).toHaveLength(1);
+    await reviewer.askOwner(evidenceId, "Which gym?");
+    expect(s.notifier.sentTo(owner, "reviewer-question")).toHaveLength(1);
+    s.setClockTo("Wed 09:01");
+    await s.core.advanceTo(s.clock.now());
+    expect(summariesTo(s, "reviewer")).toEqual([]);
+
+    release();
+    await s.core.emailsSettled();
+    expect(summariesTo(s, "reviewer")).toHaveLength(1);
   });
 });

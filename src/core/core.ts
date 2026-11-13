@@ -123,7 +123,14 @@ import { acceptExcuseRejection, excuseOptions, excusePage, fileExcuse, previewEx
 import { endPastEndDate } from "./ending.ts";
 import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOverdue } from "./money.ts";
 import { remindStale } from "./stale-items.ts";
-import { deliverPending, enqueue, giveUpEmails } from "./outbox.ts";
+import {
+  alertGivenUpEmails,
+  deliverEmails,
+  deliverPending,
+  enqueue,
+  giveUpEmails,
+  releaseEmailClaims,
+} from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
 import type { RaiseOperatorAlert } from "./operator-alerts.ts";
 import type { AnkiSource, Clock, Mailer, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
@@ -201,7 +208,8 @@ export interface PactCore {
   /** Commands and queries made as one account. */
   as(accountId: AccountId): AccountView;
   /**
-   * Runs everything due by `t`, records the tick, then delivers the outbox.
+   * Runs everything due by `t`, records the tick, then delivers the outbox's
+   * pushes, and starts sending its emails without waiting for them.
    * Judges every occurrence due by `t` that isn't judged yet, catching up on
    * any it missed while stopped: approved evidence makes it Satisfied; evidence
    * still waiting leaves it for the decision; none makes it Missed and adds
@@ -219,6 +227,11 @@ export interface PactCore {
   raiseRestoreAlert(): Promise<void>;
   /** Waits for the outbox deliveries started so far. Commands don't; the scheduler's tick and tests do. */
   deliveriesSettled(): Promise<void>;
+  /**
+   * Waits for the email pass in progress, if any. The tick starts one and
+   * doesn't wait for it; shutdown waits for it briefly, and tests do.
+   */
+  emailsSettled(): Promise<void>;
   /** Waits for any delivery in progress, then closes the database. */
   close(): Promise<void>;
 }
@@ -556,6 +569,8 @@ class Core implements PactCore {
   readonly #raiseOperatorAlert: RaiseOperatorAlert;
   /** Outbox deliveries run one at a time, in this chain. */
   #delivery: Promise<void> = Promise.resolve();
+  /** The email pass running, if any: at most one at a time, apart from `#delivery`. */
+  #emailPass: Promise<void> | null = null;
   /**
    * When each account last checked Oura now. In memory: a restart forgets
    * it, which costs at most one more call. Set before the call, so two
@@ -582,6 +597,7 @@ class Core implements PactCore {
     this.#ankiSource = options.ankiSource;
     this.#operatorEmailKey = emailKey(options.operatorEmail);
     this.#raiseOperatorAlert = options.raiseOperatorAlert;
+    releaseEmailClaims(this.#ctx);
   }
 
   /**
@@ -607,9 +623,19 @@ class Core implements PactCore {
 
   #deliverOutbox(): Promise<void> {
     this.#delivery = this.#delivery
-      .then(() => deliverPending(this.#ctx, this.#notifier, this.#mailer))
+      .then(() => deliverPending(this.#ctx, this.#notifier))
       .catch((error: unknown) => this.#ctx.log(`outbox delivery stopped, will retry: ${String(error)}`));
     return this.#delivery;
+  }
+
+  /** Starts an email pass unless one is running. Only the tick calls it, and doesn't wait for it. */
+  #deliverEmails(): void {
+    if (this.#emailPass) return;
+    this.#emailPass = deliverEmails(this.#ctx, this.#mailer)
+      .catch((error: unknown) => this.#ctx.log(`email delivery stopped, will retry next tick: ${String(error)}`))
+      .finally(() => {
+        this.#emailPass = null;
+      });
   }
 
   signIn(
@@ -732,8 +758,8 @@ class Core implements PactCore {
     const checked = await fetchAnki(this.#ctx, this.#ankiSource, this.#ankiPolling, t);
     const { dropped, givenUp } = await this.#command(
       () => {
-        // Before the outbox is delivered after this tick: an email 24 hours old is never tried again.
-        const givenUp = giveUpEmails(this.#ctx, t);
+        // Before this tick's email pass: an email 24 hours old is never tried again.
+        const givenUp = alertGivenUpEmails(this.#ctx, giveUpEmails(this.#ctx, t));
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
         recordAnkiChecks(this.#ctx, checked);
@@ -773,6 +799,8 @@ class Core implements PactCore {
       });
     }
     for (const text of givenUp) this.#raiseOperatorAlert({ title: "daily summary given up", text, withoutEmail: true });
+    // Apart from the pushes, and not waited for: a slow mail server never holds up the tick.
+    this.#deliverEmails();
     await this.#delivery;
   }
 
@@ -825,6 +853,10 @@ class Core implements PactCore {
 
   deliveriesSettled(): Promise<void> {
     return this.#delivery;
+  }
+
+  async emailsSettled(): Promise<void> {
+    await this.#emailPass;
   }
 
   async close(): Promise<void> {

@@ -30,21 +30,24 @@ const REMINDER_HOUR = 9;
  * if an item in its Review Queue had waited more than 24 hours by then, or a
  * reviewer's question to it had gone unanswered that long: pushes the
  * reviewer reminder, pushes the owner reminder, and with the daily summary
- * on, queues the email listing both. At most one of each since that 09:00,
- * restart or not (`stale_notice`). Links in the email start with `appUrl`.
+ * on, queues the email listing both. At most one of each a local day,
+ * restart or timezone change or not (`stale_notice`). Links in the email start with `appUrl`.
  */
 export function remindStale(ctx: CoreContext, t: Date, appUrl: string): void {
-  const accounts = ctx.all<{ id: AccountId; email: string; timezone: string; daily_summary: number }>(
-    `SELECT id, email, timezone, daily_summary FROM account ORDER BY id`,
+  const accounts = ctx.all<{ id: AccountId; email: string; timezone: string; daily_summary_on_at: string | null }>(
+    `SELECT id, email, timezone, daily_summary_on_at FROM account ORDER BY id`,
   );
-  for (const { id, email, timezone, daily_summary } of accounts) {
+  for (const { id, email, timezone, daily_summary_on_at } of accounts) {
     const nine = latestReminderTime(t, timezone);
     const notice = staleNotice(ctx, id);
-    const notYet = (at: Date | null) => at === null || at < nine;
+    // By local date, not instant: a move to a timezone further west can't bring a second one the same day.
+    const today = localDateOf(nine, timezone);
+    const notYet = (at: Date | null) => at === null || localDateOf(at, timezone) < today;
     const due = {
       reviewer: notYet(notice.reviewerRemindedAt),
       owner: notYet(notice.ownerRemindedAt),
-      summary: daily_summary === 1 && notYet(notice.summarySentAt),
+      // The first goes at the first 09:00 after it was turned on.
+      summary: daily_summary_on_at !== null && new Date(daily_summary_on_at) < nine && notYet(notice.summarySentAt),
     };
     if (!due.reviewer && !due.owner && !due.summary) continue;
     const staleBefore = new Date(nine.getTime() - STALE_AFTER_MS);
@@ -137,12 +140,12 @@ function summaryLines(
   return {
     waiting: waiting.map(({ item, since }) => ({
       title: `${item.ownerName}'s ${ITEM_NAMES[item.kind]}`,
-      about: reviewItemAbout(item),
+      about: aboutText(item),
       age: `waited ${daysText(since, t, timezone)}`,
     })),
     questions: questions.map(({ item, reviewerName, askedAt }) => ({
       title: `${reviewerName} asked about your ${ITEM_NAMES[item.kind]}`,
-      about: waitingItemAbout(item),
+      about: aboutText(item),
       age: `asked ${daysText(askedAt, t, timezone)} ago`,
     })),
   };
@@ -157,25 +160,15 @@ const ITEM_NAMES: Record<ReviewItem["kind"], string> = {
   vacation: "vacation",
 };
 
-function reviewItemAbout(item: ReviewItem): string {
+/** What an item is about, in a daily summary: its pact, a payment's recipient, or a vacation's dates. */
+function aboutText(item: ReviewItem | TodayWaitingItem): string {
   switch (item.kind) {
     case "payment":
       return `To ${item.recipientName}`;
     case "vacation":
-      return dateSpan(item.from, item.to);
+      return "from" in item ? dateSpan(item.from, item.to) : dateSpan(item.firstDate, item.lastDate);
     default:
-      return item.pactName;
-  }
-}
-
-function waitingItemAbout(item: TodayWaitingItem): string {
-  switch (item.kind) {
-    case "payment":
-      return `To ${item.recipientName}`;
-    case "vacation":
-      return dateSpan(item.firstDate, item.lastDate);
-    default:
-      return item.name;
+      return "pactName" in item ? item.pactName : item.name;
   }
 }
 

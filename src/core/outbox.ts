@@ -1,8 +1,11 @@
 // The outbox: notifications a command queues in its transaction, and their
 // delivery once it has committed. A row goes by one channel: a push to the
-// account's devices, or an email (the daily summary).
+// account's devices, delivered after every command, or an email (the daily
+// summary), delivered apart from the pushes and only from the scheduler's
+// tick, so a slow mail server never holds up a push.
 
 import { APP_PATHS } from "../shared/api.ts";
+import { formatDate } from "../shared/format.ts";
 import {
   NOTIFICATION_SETTINGS,
   type AccountId,
@@ -10,6 +13,7 @@ import {
   type NotificationSettingState,
   type PushDevice,
 } from "../shared/types.ts";
+import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import type { Email, Mailer, Notification, NotificationKind, NotificationOf, Notifier } from "./ports.ts";
 
@@ -41,7 +45,6 @@ interface OutboxRow {
   id: number;
   recipient_account_id: string;
   kind: string;
-  channel: "push" | "email";
   payload: string;
   sent_to: string;
 }
@@ -81,38 +84,114 @@ export function enqueueEmail(ctx: CoreContext, recipient: AccountId, kind: Email
     .run(recipient, kind, JSON.stringify(email), ctx.clock.now().toISOString());
 }
 
+/** An email given up after failing for 24 hours. */
+export interface GivenUpEmail {
+  to: string;
+  recipient: { name: string; timezone: string };
+  queuedAt: Date;
+  lastError: string | null;
+}
+
 /**
- * Gives up each email still failing 24 hours after it was queued, as of `t`:
- * it's never tried again, and the operator's account is pushed about it.
- * Returns the operator alert's words for each, for the log line, which goes
- * once this commits. Not by email, since email is what failed.
+ * Gives up each email not delivered 24 hours after it was queued, as of
+ * `t`, unless it's being sent right now: it's never tried again. Returns
+ * them, for the operator alert.
  */
-export function giveUpEmails(ctx: CoreContext, t: Date): string[] {
-  const rows = ctx.all<{ id: number; payload: string; last_error: string | null }>(
-    `SELECT id, payload, last_error FROM outbox
-     WHERE channel = 'email' AND delivered_at IS NULL AND given_up_at IS NULL AND created_at <= ? ORDER BY id`,
-    new Date(t.getTime() - EMAIL_GIVE_UP_MS).toISOString(),
+export function giveUpEmails(ctx: CoreContext, t: Date): GivenUpEmail[] {
+  const rows = ctx.all<{
+    id: number;
+    payload: string;
+    created_at: string;
+    last_error: string | null;
+    name: string;
+    timezone: string;
+  }>(
+    `SELECT outbox.id, outbox.payload, outbox.created_at, outbox.last_error, account.name, account.timezone
+     FROM outbox JOIN account ON account.id = outbox.recipient_account_id
+     WHERE outbox.channel = 'email' AND outbox.delivered_at IS NULL AND outbox.given_up_at IS NULL
+       AND outbox.sending = 0 AND outbox.created_at <= ?
+     ORDER BY outbox.id`,
+    emailCutoff(t),
   );
-  const operator = ctx.one<{ id: AccountId }>(`SELECT id FROM account WHERE is_operator = 1`);
   return rows.map((row) => {
     ctx.db.prepare(`UPDATE outbox SET given_up_at = ? WHERE id = ?`).run(t.toISOString(), row.id);
-    // Stored by `enqueueEmail`.
-    const { to } = JSON.parse(row.payload) as Email;
+    return {
+      // Stored by `enqueueEmail`.
+      to: (JSON.parse(row.payload) as Email).to,
+      recipient: { name: row.name, timezone: row.timezone },
+      queuedAt: new Date(row.created_at),
+      lastError: row.last_error,
+    };
+  });
+}
+
+/**
+ * The operator alert for each email given up: pushed to the operator's
+ * account in this transaction. Returns the log line's words for each, with
+ * the last error, which go once it commits. Not by email, since email is
+ * what failed.
+ */
+export function alertGivenUpEmails(ctx: CoreContext, givenUp: GivenUpEmail[]): string[] {
+  const operator = ctx.one<{ id: AccountId }>(`SELECT id FROM account WHERE is_operator = 1`);
+  return givenUp.map((email) => {
+    const date = formatDate(localDateOf(email.queuedAt, email.recipient.timezone));
+    const text = `The Pact Daily Summary for ${date} to ${email.recipient.name} (${email.to}) failed for 24 hours and was given up.`;
     if (operator) {
       ctx.enqueue({
         recipient: operator.id,
         kind: "operator-alert",
-        payload: {
-          alert: "email-given-up",
-          to,
-          title: "Operator alert",
-          body: `A daily summary to ${to} failed for 24 hours and was given up.`,
-          url: APP_PATHS.today,
-        },
+        payload: { alert: "email-given-up", to: email.to, title: "Operator alert", body: text, url: APP_PATHS.today },
       });
     }
-    return `daily summary to ${to} given up after 24 hours of failed sends; last error: ${row.last_error ?? "none"}`;
+    return `${text} Last error: ${email.lastError ?? "none"}`;
   });
+}
+
+/** An email queued at or before this, as of `t`, is too old to send: it's given up. */
+function emailCutoff(t: Date): string {
+  return new Date(t.getTime() - EMAIL_GIVE_UP_MS).toISOString();
+}
+
+/**
+ * Sends each email waiting, oldest first. Each is claimed just before its
+ * send, and only while it's still within its 24 hours and not given up, so a
+ * row is delivered or given up, never both. A failed one waits for the
+ * next tick's pass.
+ */
+export async function deliverEmails(ctx: CoreContext, mailer: Mailer): Promise<void> {
+  const waiting = ctx.all<{ id: number }>(
+    `SELECT id FROM outbox WHERE channel = 'email' AND delivered_at IS NULL AND given_up_at IS NULL ORDER BY id`,
+  );
+  for (const { id } of waiting) {
+    const claimed = ctx.one<{ kind: EmailKind; recipient_account_id: string; payload: string }>(
+      `UPDATE outbox SET sending = 1
+       WHERE id = ? AND delivered_at IS NULL AND given_up_at IS NULL AND sending = 0 AND created_at > ?
+       RETURNING kind, recipient_account_id, payload`,
+      id,
+      emailCutoff(ctx.clock.now()),
+    );
+    if (!claimed) continue;
+    try {
+      // Stored by `enqueueEmail`.
+      await mailer.send(JSON.parse(claimed.payload) as Email);
+      ctx.db
+        .prepare(`UPDATE outbox SET delivered_at = ?, sending = 0, attempts = attempts + 1 WHERE id = ?`)
+        .run(ctx.clock.now().toISOString(), id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.db
+        .prepare(`UPDATE outbox SET sending = 0, attempts = attempts + 1, last_error = ? WHERE id = ?`)
+        .run(message, id);
+      ctx.log(
+        `email ${id} (${claimed.kind} to ${claimed.recipient_account_id}) not sent, will retry next tick: ${message}`,
+      );
+    }
+  }
+}
+
+/** No email is being sent when the core starts: a claim left by a stop mid-send is let go. */
+export function releaseEmailClaims(ctx: CoreContext): void {
+  ctx.db.prepare(`UPDATE outbox SET sending = 0 WHERE sending = 1`).run();
 }
 
 /** Queues the same notification to each of `recipients`. */
@@ -137,17 +216,12 @@ export function notificationSettings(ctx: CoreContext, accountId: AccountId): No
   return NOTIFICATION_SETTINGS.map((setting) => ({ setting, enabled: !settingIsOff(ctx, accountId, setting) }));
 }
 
-export async function deliverPending(ctx: CoreContext, notifier: Notifier, mailer: Mailer): Promise<void> {
-  const rows = ctx.all<OutboxRow>(`SELECT id, recipient_account_id, kind, channel, payload, sent_to
-       FROM outbox WHERE delivered_at IS NULL AND given_up_at IS NULL ORDER BY id`);
+/** Delivers each push waiting, oldest first. Emails go apart (`deliverEmails`). */
+export async function deliverPending(ctx: CoreContext, notifier: Notifier): Promise<void> {
+  const rows = ctx.all<OutboxRow>(`SELECT id, recipient_account_id, kind, payload, sent_to
+       FROM outbox WHERE channel = 'push' AND delivered_at IS NULL ORDER BY id`);
   for (const row of rows) {
     try {
-      if (row.channel === "email") {
-        // Stored by `enqueueEmail`.
-        await mailer.send(JSON.parse(row.payload) as Email);
-        markDelivered(ctx, row.id);
-        continue;
-      }
       // Stored by `enqueue`, so the kind and its payload match.
       const notification = {
         recipient: row.recipient_account_id,
@@ -172,7 +246,9 @@ export async function deliverPending(ctx: CoreContext, notifier: Notifier, maile
           .run(JSON.stringify([...sentTo, ...reached]), row.id);
         throw new Error(failed.map((f) => f.error).join("; "));
       }
-      markDelivered(ctx, row.id);
+      ctx.db
+        .prepare(`UPDATE outbox SET delivered_at = ?, attempts = attempts + 1 WHERE id = ?`)
+        .run(ctx.clock.now().toISOString(), row.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.db.prepare(`UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?`).run(message, row.id);
@@ -181,10 +257,4 @@ export async function deliverPending(ctx: CoreContext, notifier: Notifier, maile
       );
     }
   }
-}
-
-function markDelivered(ctx: CoreContext, id: number): void {
-  ctx.db
-    .prepare(`UPDATE outbox SET delivered_at = ?, attempts = attempts + 1 WHERE id = ?`)
-    .run(ctx.clock.now().toISOString(), id);
 }

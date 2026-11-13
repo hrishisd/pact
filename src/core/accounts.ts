@@ -22,7 +22,7 @@ import type {
 import type { CoreContext } from "./context.ts";
 import { notificationSettings } from "./outbox.ts";
 import { isPushDevice } from "./push-devices.ts";
-import { accountRow, areFriends, byName, friendshipPair, selectRecipients } from "./rows.ts";
+import { areFriends, byName, friendshipPair, selectRecipients, UnknownAccountError } from "./rows.ts";
 import { nameTooLong } from "./text-limits.ts";
 
 export function signIn(
@@ -147,12 +147,23 @@ export function setNotificationSetting(
 }
 
 export function dailySummarySetting(ctx: CoreContext, accountId: AccountId): DailySummarySetting {
-  const row = ctx.one<{ daily_summary: number }>(`SELECT daily_summary FROM account WHERE id = ?`, accountId);
-  return { enabled: row?.daily_summary === 1, to: accountRow(ctx, accountId).email };
+  const row = ctx.one<{ email: string; daily_summary_on_at: string | null }>(
+    `SELECT email, daily_summary_on_at FROM account WHERE id = ?`,
+    accountId,
+  );
+  if (!row) throw new UnknownAccountError(accountId);
+  return { enabled: row.daily_summary_on_at !== null, to: row.email };
 }
 
+/** Turning it on again while on keeps when it was first turned on. */
 export function setDailySummary(ctx: CoreContext, accountId: AccountId, enabled: boolean): DailySummarySetting {
-  ctx.db.prepare(`UPDATE account SET daily_summary = ? WHERE id = ?`).run(enabled ? 1 : 0, accountId);
+  if (enabled) {
+    ctx.db
+      .prepare(`UPDATE account SET daily_summary_on_at = COALESCE(daily_summary_on_at, ?) WHERE id = ?`)
+      .run(ctx.clock.now().toISOString(), accountId);
+  } else {
+    ctx.db.prepare(`UPDATE account SET daily_summary_on_at = NULL WHERE id = ?`).run(accountId);
+  }
   return dailySummarySetting(ctx, accountId);
 }
 

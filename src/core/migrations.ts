@@ -896,11 +896,15 @@ export const migrations: readonly Migration[] = [
   `
   -- The daily summary: an email the account turns on. Every push setting
   -- starts on (a row in notification_setting_off turns one off); this one
-  -- starts off.
-  ALTER TABLE account ADD COLUMN daily_summary INTEGER NOT NULL DEFAULT 0 CHECK (daily_summary IN (0, 1));
+  -- starts off. When it was turned on, NULL while off: the first goes at the
+  -- first 09:00 after.
+  ALTER TABLE account ADD COLUMN daily_summary_on_at TEXT;
   -- When the account was last sent it: at most one a day, restart or not.
   ALTER TABLE stale_notice ADD COLUMN summary_sent_at TEXT;
   -- An email that kept failing for 24 hours is given up: never tried again.
+  -- One being sent is claimed (sending = 1), so it's delivered or given up,
+  -- never both.
   ALTER TABLE outbox ADD COLUMN given_up_at TEXT;
+  ALTER TABLE outbox ADD COLUMN sending INTEGER NOT NULL DEFAULT 0 CHECK (sending IN (0, 1));
   `,
 ];
