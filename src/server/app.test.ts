@@ -82,7 +82,6 @@ import {
   type LedgerResponse,
   type LedgersResponse,
   type PactResponse,
-  type PactsResponse,
   type RecipientsResponse,
   type RemovePushSubscriptionResponse,
   type MeResponse,
