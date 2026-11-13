@@ -12,7 +12,7 @@ Things that need a real Gmail account, Fly secrets and a phone. Steps marked **(
 
 - [ ] **(human)** An operator alert email arrives at the `OPERATOR_EMAIL` address in Gmail on the iPhone, and isn't in spam.
 
-## After the daily emails land
+## After the daily summary lands
 
-- [ ] **(human)** A friend turns on the daily Review Queue email. The next 09:00 with an item waiting over 24 hours, it reaches their inbox, not spam, and tapping an item opens it in Safari (signing in with Google the first time).
-- [ ] **(human)** A friend's reply to a daily email lands in the Pact Gmail account's inbox.
+- [ ] **(human)** A friend turns on the daily summary. The next 09:00 with an item waiting over 24 hours, it reaches their inbox, not spam, and tapping "Open your Review Queue" opens Review in Safari (signing in with Google the first time).
+- [ ] **(human)** A friend's reply to a daily summary lands in the Pact Gmail account's inbox.
