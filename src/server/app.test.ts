@@ -2292,6 +2292,8 @@ describe("canonical host", () => {
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
         OURA_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
+        GMAIL_ADDRESS: "pact.sender@gmail.example",
+        GMAIL_APP_PASSWORD: "test-app-password",
       }).canonicalOrigin,
     });
 

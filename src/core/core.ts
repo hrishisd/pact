@@ -122,7 +122,8 @@ import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOv
 import { remindStale } from "./stale-items.ts";
 import { deliverPending, enqueue } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
-import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
+import { operatorAlerts, type RaiseOperatorAlert } from "./operator-alerts.ts";
+import type { AnkiSource, Clock, Mailer, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
 import {
   askOwner,
@@ -153,10 +154,15 @@ export interface PactCoreOptions {
   dbPath: string;
   clock: Clock;
   notifier: Notifier;
+  /** Sends email: operator alerts, to `operatorEmail`. */
+  mailer: Mailer;
   ouraSource: OuraSource;
   ankiSource: AnkiSource;
   photoStore: PhotoStore;
-  /** The operator's email; their first sign-in may create an account without an invite. */
+  /**
+   * The operator's email; their first sign-in may create an account without
+   * an invite, and operator alerts are emailed to it.
+   */
   operatorEmail: string;
   /** Where the core writes log lines (including OPERATOR_ALERT). Default: console.log. */
   log?: (line: string) => void;
@@ -533,6 +539,7 @@ class Core implements PactCore {
   readonly #ouraSource: OuraSource;
   readonly #ankiSource: AnkiSource;
   readonly #operatorEmailKey: string;
+  readonly #raiseOperatorAlert: RaiseOperatorAlert;
   /** Outbox deliveries run one at a time, in this chain. */
   #delivery: Promise<void> = Promise.resolve();
   /**
@@ -558,6 +565,11 @@ class Core implements PactCore {
     this.#ouraSource = options.ouraSource;
     this.#ankiSource = options.ankiSource;
     this.#operatorEmailKey = emailKey(options.operatorEmail);
+    this.#raiseOperatorAlert = operatorAlerts({
+      mailer: options.mailer,
+      operatorEmail: options.operatorEmail,
+      log: this.#ctx.log,
+    });
   }
 
   /**
@@ -704,7 +716,7 @@ class Core implements PactCore {
     // An account whose call throws has no data this tick; the next one retries.
     const fetched = await fetchSleep(this.#ctx, this.#ouraSource, t);
     const checked = await fetchAnki(this.#ctx, this.#ankiSource, this.#ankiPolling, t);
-    await this.#command(
+    const dropped = await this.#command(
       () => {
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
@@ -727,7 +739,6 @@ class Core implements PactCore {
           .run(t.toISOString());
         return dropped;
       },
-      // Logged once committed, like any operator alert: the log line never depends on delivery.
       (dropped) => {
         for (const drop of dropped) {
           this.#ctx.log(
@@ -735,10 +746,16 @@ class Core implements PactCore {
               `${Math.floor(drop.lateMs / 60_000)} min late at ${t.toISOString()}`,
           );
         }
-        if (dropped.length > 0) this.#ctx.log(`OPERATOR_ALERT ${droppedText(dropped.length)} after downtime`);
       },
       t,
     );
+    // Raised once committed, like any operator alert: neither the log line nor the email depends on delivery.
+    if (dropped.length > 0) {
+      await this.#raiseOperatorAlert({
+        title: "reminders dropped after downtime",
+        text: `${droppedText(dropped.length)} after downtime`,
+      });
+    }
     await this.#delivery;
   }
 
@@ -758,31 +775,29 @@ class Core implements PactCore {
   }
 
   async raiseRestoreAlert(): Promise<void> {
-    await this.#command(
-      () => {
-        const lastTick = this.lastTick()?.toISOString() ?? null;
-        const operator = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE is_operator = 1`);
-        if (operator) {
-          this.#ctx.enqueue({
-            recipient: operator.id,
-            kind: "operator-alert",
-            payload: {
-              alert: "database-restored",
-              lastTick,
-              title: "Operator alert",
-              body: `Database restored from backup. Last tick: ${lastTick ?? "none"}`,
-              url: APP_PATHS.today,
-            },
-          });
-        }
-        return lastTick;
-      },
-      // The log line is the alert's channel that never depends on delivery.
-      (lastTick) =>
-        this.#ctx.log(
-          `OPERATOR_ALERT database restored from backup; last scheduler tick before the restore: ${lastTick ?? "none"}`,
-        ),
-    );
+    const lastTick = await this.#command(() => {
+      const lastTick = this.lastTick()?.toISOString() ?? null;
+      const operator = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE is_operator = 1`);
+      if (operator) {
+        this.#ctx.enqueue({
+          recipient: operator.id,
+          kind: "operator-alert",
+          payload: {
+            alert: "database-restored",
+            lastTick,
+            title: "Operator alert",
+            body: `Database restored from backup. Last tick: ${lastTick ?? "none"}`,
+            url: APP_PATHS.today,
+          },
+        });
+      }
+      return lastTick;
+    });
+    // The log line and the email never depend on the database: the push may not reach a restored one's operator.
+    await this.#raiseOperatorAlert({
+      title: "database restored from backup",
+      text: `database restored from backup; last scheduler tick before the restore: ${lastTick ?? "none"}`,
+    });
     await this.#delivery;
   }
 

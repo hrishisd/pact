@@ -57,6 +57,12 @@ export interface Config {
    * development: any login works, and decks come from a file (see devAnki).
    */
   anki: { tokenKey: string; python: string } | null;
+  /**
+   * The Gmail account made just for Pact that email is sent from, and its app
+   * password. Required in production. Null in development without them: each
+   * email is logged instead of sent (see devMailer).
+   */
+  gmail: { address: string; appPassword: string } | null;
   /** Set by the container entrypoint when Litestream restored the database on this boot. */
   restored: boolean;
   /**
@@ -127,6 +133,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     anki: env.ANKI_TOKEN_KEY?.trim()
       ? { tokenKey: env.ANKI_TOKEN_KEY.trim(), python: env.ANKI_PYTHON?.trim() || "python3" }
       : null,
+    gmail:
+      production || env.GMAIL_ADDRESS?.trim()
+        ? {
+            address: read("GMAIL_ADDRESS", ""),
+            // Google shows an app password in groups of four; Gmail takes it without the spaces.
+            appPassword: read("GMAIL_APP_PASSWORD", "").replace(/\s+/g, ""),
+          }
+        : null,
     restored: env.PACT_RESTORED === "1",
     commit: env.PACT_COMMIT?.trim() || null,
     devClock: env.PACT_DEV_CLOCK === "1",
@@ -145,6 +159,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   if (config.anki && Buffer.from(config.anki.tokenKey, "base64").length !== 32) {
     throw new Error("ANKI_TOKEN_KEY must be 32 bytes, base64");
+  }
+  if (config.gmail && !config.gmail.appPassword) {
+    throw new Error("GMAIL_APP_PASSWORD is required with GMAIL_ADDRESS");
   }
   if (production && config.auth.secret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");

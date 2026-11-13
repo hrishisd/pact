@@ -17,6 +17,7 @@ import { localDateOf } from "./calendar.ts";
 import { openWithPragmas, type Db } from "./db.ts";
 import { secretBox, type SecretBox } from "./secret-box.ts";
 import type { AccountId, AnkiCounts, AnkiDeck } from "../shared/types.ts";
+import type { RaiseOperatorAlert } from "./operator-alerts.ts";
 import type { AnkiCountsResult, AnkiDeckListResult, AnkiSource, Clock } from "./ports.ts";
 
 export interface AnkiSetup {
@@ -44,8 +45,10 @@ export interface AnkiAdapterOptions {
   python?: string;
   /** How long one run may take: a download of a large collection takes a while. Default 120s. */
   timeoutMs?: number;
-  /** Where the adapter writes log lines (an OPERATOR_ALERT for a protocol error). Default: console.log. */
+  /** Where the adapter writes log lines (a failed login). Default: console.log. */
   log?: (line: string) => void;
+  /** The operator alert path (operator-alerts.ts), for a protocol error. */
+  raiseOperatorAlert: RaiseOperatorAlert;
 }
 
 export type AnkiLoginResult = { ok: true } | { ok: false; reason: "wrong-login" | "unreachable" };
@@ -67,12 +70,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 /** The script's answer can hold a whole deck list. */
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
-export function ankiAdapter(
-  dbPath: string,
-  setup: AnkiSetup,
-  clock: Clock,
-  options: AnkiAdapterOptions = {},
-): AnkiAdapter {
+export function ankiAdapter(dbPath: string, setup: AnkiSetup, clock: Clock, options: AnkiAdapterOptions): AnkiAdapter {
   return new Anki(openWithPragmas(dbPath), setup, clock, options);
 }
 
@@ -179,6 +177,7 @@ class Anki implements AnkiAdapter {
   readonly #run: AnkiScriptRunner;
   readonly #loginEndpoint: string | undefined;
   readonly #log: (line: string) => void;
+  readonly #raiseOperatorAlert: RaiseOperatorAlert;
   /** The operation running for each account: the next waits for it. */
   readonly #running = new Map<AccountId, Promise<unknown>>();
 
@@ -188,6 +187,7 @@ class Anki implements AnkiAdapter {
     this.#box = secretBox(setup.tokenKey, "Anki token key");
     this.#collectionsDir = setup.collectionsDir;
     this.#log = options.log ?? console.log;
+    this.#raiseOperatorAlert = options.raiseOperatorAlert;
     this.#loginEndpoint = options.loginEndpoint;
     this.#run = options.run ?? pythonRunner(options.python ?? "python3", options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   }
@@ -289,10 +289,13 @@ class Anki implements AnkiAdapter {
   }
 
   #alertProtocolError(account: AccountId, message: string): void {
-    this.#log(
-      `OPERATOR_ALERT AnkiWeb protocol error for account ${account}: ${message}. ` +
+    // Not waited for: a slow mail server doesn't hold up the account's AnkiWeb operations.
+    void this.#raiseOperatorAlert({
+      title: "AnkiWeb protocol error",
+      text:
+        `AnkiWeb protocol error for account ${account}: ${message}. ` +
         `AnkiWeb may have changed its sync protocol; the pinned anki package may need updating.`,
-    );
+    });
   }
 
   /**

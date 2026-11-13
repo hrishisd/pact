@@ -1,4 +1,4 @@
-// Fakes for the five ports. Used only by tests.
+// Fakes for the six ports. Used only by tests.
 
 import type { AccountId } from "../../shared/types.ts";
 import type {
@@ -9,6 +9,8 @@ import type {
   AnkiSource,
   Clock,
   DeliveryReport,
+  Email,
+  Mailer,
   Notification,
   NotificationKind,
   NotificationOf,
@@ -102,6 +104,20 @@ export class RecordingNotifier implements Notifier {
     let release = () => {};
     this.#held = new Promise((resolve) => (release = resolve));
     return release;
+  }
+}
+
+/** Records every email it is given, in order. A send `failOnCall` makes fail is not recorded. */
+export class RecordingMailer implements Mailer {
+  readonly sent: Email[] = [];
+
+  async send(email: Email): Promise<void> {
+    this.sent.push(structuredClone(email));
+  }
+
+  /** Every email sent to `address`, in order. */
+  sentTo(address: string): Email[] {
+    return this.sent.filter((email) => email.to === address);
   }
 }
 

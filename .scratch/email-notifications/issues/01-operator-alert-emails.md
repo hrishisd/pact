@@ -23,10 +23,10 @@ Every operator alert reaches the operator's inbox as well as the log and the pus
 
 ## Acceptance criteria
 
-- [ ] Reminders dropped after downtime: one email to the operator address with the count, plus the existing push and log line.
-- [ ] Database restored on boot: one email with the last scheduler tick, even when the restored database has no push subscription for the operator.
-- [ ] The Oura refresh-token alert and the AnkiWeb protocol-error alert each send one email to the operator address.
-- [ ] A failing email port doesn't stop the log line or the push, and its failure is logged.
-- [ ] Outside production without Gmail secrets, an alert's email is logged, not sent; in production, missing Gmail secrets stop the server starting.
-- [ ] `npm run check` passes.
+- [x] Reminders dropped after downtime: one email to the operator address with the count, plus the existing push and log line.
+- [x] Database restored on boot: one email with the last scheduler tick, even when the restored database has no push subscription for the operator.
+- [x] The Oura refresh-token alert and the AnkiWeb protocol-error alert each send one email to the operator address.
+- [x] A failing email port doesn't stop the log line or the push, and its failure is logged.
+- [x] Outside production without Gmail secrets, an alert's email is logged, not sent; in production, missing Gmail secrets stop the server starting.
+- [x] `npm run check` passes.
 - [ ] Manual: an operator alert email reaches the iPhone inbox, not spam (`../manual-checks.md`).

@@ -1,7 +1,7 @@
 // The scenario harness: every core test is written with it.
 //
 // A scenario is one Pact core on its own temporary SQLite file (production
-// pragmas, WAL), with fakes for the five ports. Tests act as named accounts,
+// pragmas, WAL), with fakes for the six ports. Tests act as named accounts,
 // issue commands, move time with `advanceTo`, and assert only on query
 // results, on what `s.notifier` recorded, and on `s.logs`. Never on storage.
 //
@@ -28,8 +28,16 @@ import { onTestFinished } from "vitest";
 import { wallTime } from "../calendar.ts";
 import { addDays } from "../../shared/calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
+import { operatorAlerts, type RaiseOperatorAlert } from "../operator-alerts.ts";
 import type { AccountId, ChangePactResult, LocalDate, SignInResult } from "../../shared/types.ts";
-import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
+import {
+  FakeAnkiSource,
+  FakeClock,
+  FakeOuraSource,
+  InMemoryPhotoStore,
+  RecordingMailer,
+  RecordingNotifier,
+} from "./fakes.ts";
 import { SourceWatch, VerdictCheck } from "./verdict-check.ts";
 
 /** A named account. Every AccountView query and command, plus its id. */
@@ -56,6 +64,11 @@ export interface Scenario {
   readonly core: PactCore;
   readonly clock: FakeClock;
   readonly notifier: RecordingNotifier;
+  readonly mailer: RecordingMailer;
+  /** The operator's address, OPERATOR_EMAIL: where operator alert emails go. */
+  readonly operatorEmail: string;
+  /** The operator alert path as the server hands it to the Oura and Anki adapters: to `mailer` and `logs`. */
+  readonly raiseOperatorAlert: RaiseOperatorAlert;
   readonly ouraSource: FakeOuraSource;
   readonly ankiSource: FakeAnkiSource;
   readonly photoStore: InMemoryPhotoStore;
@@ -100,6 +113,7 @@ export function scenario(): Scenario {
   const dbPath = join(dir, "pact.db");
   const clock = new FakeClock(at("Mon 09:00"));
   const notifier = new RecordingNotifier();
+  const mailer = new RecordingMailer();
   const ouraSource = new FakeOuraSource();
   const ankiSource = new FakeAnkiSource();
   const photoStore = new InMemoryPhotoStore(clock);
@@ -117,6 +131,7 @@ export function scenario(): Scenario {
       dbPath,
       clock,
       notifier,
+      mailer,
       ouraSource: watch.oura(ouraSource),
       ankiSource: watch.anki(ankiSource),
       photoStore,
@@ -161,6 +176,9 @@ export function scenario(): Scenario {
     },
     clock,
     notifier,
+    mailer,
+    operatorEmail: emailFor(OPERATOR),
+    raiseOperatorAlert: operatorAlerts({ mailer, operatorEmail: emailFor(OPERATOR), log: (line) => logs.push(line) }),
     ouraSource,
     ankiSource,
     photoStore,

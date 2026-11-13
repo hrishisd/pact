@@ -18,6 +18,8 @@ const PRODUCTION = {
   OURA_CLIENT_ID: "oura-client-id",
   OURA_CLIENT_SECRET: "oura-client-secret",
   OURA_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
+  GMAIL_ADDRESS: "pact.sender@gmail.example",
+  GMAIL_APP_PASSWORD: "abcdefghijklmnop",
 };
 
 const PHOTOS_BUCKET = {
@@ -118,6 +120,42 @@ describe("Anki", () => {
       tokenKey: ANKI_TOKEN_KEY,
       python: "/opt/anki/bin/python3",
     });
+  });
+});
+
+describe("Gmail", () => {
+  test("production sends from the Gmail account the environment names", () => {
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET }).gmail).toEqual({
+      address: "pact.sender@gmail.example",
+      appPassword: "abcdefghijklmnop",
+    });
+  });
+
+  test("production refuses to start without the Gmail address and app password", () => {
+    const { GMAIL_ADDRESS: _address, GMAIL_APP_PASSWORD: _password, ...withoutGmail } = PRODUCTION;
+    expect(() => loadConfig({ ...withoutGmail, ...PHOTOS_BUCKET })).toThrow(
+      "missing required environment variables: GMAIL_ADDRESS, GMAIL_APP_PASSWORD",
+    );
+  });
+
+  test("the app password may be pasted as Google shows it, in groups of four", () => {
+    expect(loadConfig({ ...PRODUCTION, ...PHOTOS_BUCKET, GMAIL_APP_PASSWORD: "abcd efgh ijkl mnop" }).gmail).toEqual({
+      address: "pact.sender@gmail.example",
+      appPassword: "abcdefghijklmnop",
+    });
+  });
+
+  test("development without them logs each email instead of sending it", () => {
+    expect(loadConfig({}).gmail).toBeNull();
+  });
+
+  test("development with an address needs the app password too", () => {
+    expect(() => loadConfig({ GMAIL_ADDRESS: "pact.sender@gmail.example" })).toThrow(
+      "GMAIL_APP_PASSWORD is required with GMAIL_ADDRESS",
+    );
+    expect(
+      loadConfig({ GMAIL_ADDRESS: "pact.sender@gmail.example", GMAIL_APP_PASSWORD: "abcdefghijklmnop" }).gmail,
+    ).toMatchObject({ address: "pact.sender@gmail.example" });
   });
 });
 

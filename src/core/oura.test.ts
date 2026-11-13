@@ -97,18 +97,17 @@ class FakeOura {
 }
 
 /** The adapter on the scenario's database, with `options`; it closes when the test ends. */
-function adapterOn(s: Scenario, options?: OuraAdapterOptions) {
-  const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock, options);
+function adapterOn(s: Scenario, options: Partial<OuraAdapterOptions> = {}) {
+  const adapter = ouraAdapter(s.dbPath, CLIENT, s.clock, { raiseOperatorAlert: s.raiseOperatorAlert, ...options });
   onTestFinished(() => adapter.close());
   return adapter;
 }
 
 /** The owner, connected through an adapter that a fake Oura answers. */
-async function connected(s: Scenario, options: OuraAdapterOptions = {}) {
+async function connected(s: Scenario, options: Partial<OuraAdapterOptions> = {}) {
   const oura = new FakeOura();
   const adapter = adapterOn(s, {
     fetch: oura.fetch as typeof fetch,
-    log: (line) => s.logs.push(line),
     authorizeUrl: "https://cloud.oura.test/oauth/authorize",
     tokenUrl: "https://api.oura.test/oauth/token",
     apiBase: "https://api.oura.test",
@@ -308,6 +307,13 @@ describe("sleep periods", () => {
     expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([null, "refresh-1", "refresh-1"]);
     expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([
       expect.stringMatching(new RegExp(`OPERATOR_ALERT Oura refresh token for account ${owner.id} .*lost`)),
+    ]);
+    expect(s.mailer.sent).toEqual([
+      {
+        to: s.operatorEmail,
+        subject: "Pact operator alert: Oura refresh token refused",
+        text: expect.stringMatching(new RegExp(`^Oura refresh token for account ${owner.id} .*lost`)),
+      },
     ]);
   });
 

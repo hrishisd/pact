@@ -1,6 +1,6 @@
-// The five ports outside the Pact core. Each has a production adapter
-// (adapters.ts, oura.ts, anki.ts, photo-stores.ts, web-push.ts) and a fake for
-// tests (testing/fakes.ts).
+// The six ports outside the Pact core. Each has a production adapter
+// (adapters.ts, oura.ts, anki.ts, photo-stores.ts, web-push.ts, gmail.ts) and a
+// fake for tests (testing/fakes.ts).
 
 import type { AccountId, AnkiCounts, AnkiDeck, PushDevice, ReviewItem } from "../shared/types.ts";
 
@@ -171,6 +171,19 @@ export interface DeliveryReport {
  */
 export interface Notifier {
   deliver(notification: Notification, devices: readonly PushDevice[]): Promise<DeliveryReport>;
+}
+
+/** One email: plain text, with an HTML version when there is one. */
+export interface Email {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}
+
+/** Sends email. `send` rejects when the mail server doesn't accept the message. */
+export interface Mailer {
+  send(email: Email): Promise<void>;
 }
 
 export interface StoredPhoto {

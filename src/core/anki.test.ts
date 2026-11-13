@@ -28,6 +28,7 @@ function adapterFor(s: Scenario, run: AnkiScriptRunner) {
   const adapter = ankiAdapter(s.dbPath, { tokenKey: TOKEN_KEY, collectionsDir }, s.clock, {
     run,
     log: (line) => s.logs.push(line),
+    raiseOperatorAlert: s.raiseOperatorAlert,
   });
   onTestFinished(() => adapter.close());
   return { adapter, collectionsDir };
@@ -143,6 +144,13 @@ test("an auth error is disconnected; a network error throws; a protocol error th
   answer = { ok: false, error: "protocol", message: "DecodeError: unexpected field" };
   await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow("DecodeError");
   expect(s.logs).toEqual([expect.stringMatching(/^OPERATOR_ALERT AnkiWeb protocol error.*DecodeError/)]);
+  expect(s.mailer.sent).toEqual([
+    {
+      to: s.operatorEmail,
+      subject: "Pact operator alert: AnkiWeb protocol error",
+      text: expect.stringMatching(new RegExp(`^AnkiWeb protocol error for account ${owner.id}: DecodeError`)),
+    },
+  ]);
   answer = "not json at all";
   await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow();
 });

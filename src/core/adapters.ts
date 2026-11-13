@@ -1,6 +1,7 @@
-// Production adapters for the five ports (the photo stores are in
-// photo-stores.ts, the notifier in web-push.ts, Oura in oura.ts, Anki in anki.ts). The server wires these into createPactCore; tests use the
-// fakes in testing/fakes.ts instead.
+// Production adapters for the six ports (the photo stores are in
+// photo-stores.ts, the notifier in web-push.ts, the mailer in gmail.ts, Oura in
+// oura.ts, Anki in anki.ts). The server wires these into createPactCore; tests
+// use the fakes in testing/fakes.ts instead.
 
 import type { Clock } from "./ports.ts";
 

@@ -8,9 +8,12 @@ import {
   ankiAdapter,
   createPactCore,
   devAnki,
+  devMailer,
   devOura,
+  gmailMailer,
   localDiskPhotoStore,
   offsetClock,
+  operatorAlerts,
   ouraAdapter,
   r2PhotoStore,
   systemClock,
@@ -59,6 +62,15 @@ if (!config.production) {
   exitUnlessNativeBinaryLoads();
 }
 
+// Production refuses to start without a Gmail account (loadConfig); development without one logs each email.
+const mailer = config.gmail ? gmailMailer(config.gmail) : devMailer((line) => console.log(line));
+// The adapters' operator alerts, which have no push: the log line and the email, apart from the core and its outbox.
+const raiseOperatorAlert = operatorAlerts({
+  mailer,
+  operatorEmail: config.operatorEmail,
+  log: (line) => console.log(line),
+});
+
 // Production without Oura credentials gets no connector (connecting is refused)
 // and a source with no sleep; only development falls back to the stand-in.
 const oura: OuraAdapter | null = config.oura
@@ -66,6 +78,7 @@ const oura: OuraAdapter | null = config.oura
       config.dbPath,
       { ...config.oura, redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString() },
       clock,
+      { raiseOperatorAlert },
     )
   : config.production
     ? null
@@ -76,6 +89,7 @@ const oura: OuraAdapter | null = config.oura
 const anki: AnkiAdapter | null = config.anki
   ? ankiAdapter(config.dbPath, { tokenKey: config.anki.tokenKey, collectionsDir: join(dataDir, "anki") }, clock, {
       python: config.anki.python,
+      raiseOperatorAlert,
     })
   : config.production
     ? null
@@ -85,6 +99,7 @@ const core = createPactCore({
   dbPath: config.dbPath,
   clock,
   notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, clock),
+  mailer,
   ouraSource: oura ?? unavailableOura,
   ankiSource: anki ?? unavailableAnki,
   photoStore:
