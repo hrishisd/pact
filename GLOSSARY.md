@@ -133,7 +133,14 @@ One device's permission to get an account's notifications, as its browser report
 A push to a pact's owner at a time of day they set on the pact, before an occurrence's due time, while it's still useful: on a scheduled day with no evidence yet, or every scheduled night for a bedtime pact until Oura has judged it. On a One-time pact each reminder has its own date too, and goes off once. Changing reminders applies at once, with no review. They aren't terms.
 
 **Notification setting**:
-An account's on/off for one kind of notification, on all its devices. Every kind starts on.
+An account's on/off for one kind of notification. A push setting covers all its devices and starts on. Each daily email has its own setting, which starts off and doesn't follow the push settings.
+
+**Daily email**:
+An email a person can turn on, sent at 09:00 in their timezone only when there's something to list. A reviewer's lists the items in their Review Queue that have waited more than 24 hours; an owner's lists their reviewers' questions they've left unanswered that long. It goes as well as the day's push, not instead of it.
+_Avoid_: Newsletter, digest email
+
+**Operator alert**:
+A message to the operator, the person who runs Pact, about a problem only they can fix, such as a restore from backup or reminders dropped after downtime. It's a log line tagged `OPERATOR_ALERT`, a push to the operator's account and, once email is built, an email to the operator's address. Nobody can turn it off.
 
 ### Money
 
