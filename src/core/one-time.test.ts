@@ -424,6 +424,25 @@ describe("reminders", () => {
       "invalid-reminders",
     );
   });
+
+  test("set on their own after the edit window: dated, in order, and before the deadline, with Submit anytime or without", async () => {
+    for (const submitAnytime of [false, true]) {
+      const s = scenario();
+      const { owner, createPact } = await ownerWithReviewers(s);
+      const taxes = await createPact("Taxes", oneTime(s.date("Thu"), submitAnytime), { dates: { dueBy: "17:00" } });
+      await pastEditWindow(s);
+
+      expect(await owner.setReminders(taxes, [`${s.date("Thu")}T17:00`])).toEqual({
+        ok: false,
+        reason: "reminder-after-due-time",
+      });
+      expect(await owner.setReminders(taxes, ["09:00"])).toEqual({ ok: false, reason: "invalid-reminders" });
+      expect(await owner.setReminders(taxes, [`${s.date("Thu")}T16:59`, `${s.date("Tue")}T18:00`])).toEqual({
+        ok: true,
+      });
+      expect(pactOf(owner, taxes).reminders).toEqual([`${s.date("Tue")}T18:00`, `${s.date("Thu")}T16:59`]);
+    }
+  });
 });
 
 describe("changing a One-time pact", () => {

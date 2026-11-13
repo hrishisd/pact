@@ -163,6 +163,29 @@ describe("the pact page's at-once changes apply to the terms as they stand", () 
     expect(s.notifier.sentTo(second, "picked-as-reviewer")).toHaveLength(1);
     expect(reviewer.reviewQueue()).toEqual([]);
   });
+
+  test("made while a change request waits, they stay out of it, and approving it keeps them", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await dailyGym(s);
+    const third = await s.befriend(owner, "third");
+    const id = changeRequestIdOf(ok(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 200 }))));
+
+    expect(await owner.renamePact(gym, "Morning gym")).toEqual({ ok: true });
+    expect(await owner.addReviewers(gym, [third.id])).toEqual({ ok: true });
+    expect(await owner.setReminders(gym, ["18:00"])).toEqual({ ok: true });
+    expect(owner.changeRequest(id)).toMatchObject({
+      ok: true,
+      changeRequest: { pactName: "Morning gym", changes: [{ term: "penalty", before: 500, after: 200 }] },
+    });
+    await reviewer.decide(id, { kind: "approve" });
+
+    expect(pactOf(owner, gym)).toMatchObject({
+      name: "Morning gym",
+      penaltyCents: 200,
+      reviewers: [{ name: "reviewer" }, { name: "second" }, { name: "third" }],
+      reminders: ["18:00"],
+    });
+  });
 });
 
 describe("a relaxing change waits for a reviewer", () => {
