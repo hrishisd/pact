@@ -406,9 +406,8 @@ describe("changing reminders on an Active pact", () => {
         outcome: { kind: "at-once" },
       },
     });
-    const result = await owner.changePact(gym, changed(owner, gym, { reminders: ["17:00", "20:00"] }));
+    expect(await owner.setReminders(gym, ["20:00", "17:00", "20:00"])).toEqual({ ok: true });
 
-    expect(result).toEqual({ ok: true, outcome: { kind: "at-once" } });
     expect(pactOf(owner, gym).reminders).toEqual(["17:00", "20:00"]);
     expect(reviewer.reviewQueue()).toEqual([]);
     for (const time of ["Mon 17:00", "Mon 18:00", "Mon 20:00"]) await s.advanceTo(time);
@@ -420,14 +419,30 @@ describe("changing reminders on an Active pact", () => {
     const requested = await owner.changePact(gym, changed(owner, gym, { penaltyCents: 300 }));
     if (!requested.ok || requested.outcome.kind !== "needs-approval") throw new Error("expected a change request");
 
-    const result = await owner.changePact(gym, changed(owner, gym, { reminders: [] }));
-    expect(result).toEqual({ ok: true, outcome: { kind: "at-once" } });
+    expect(await owner.setReminders(gym, [])).toEqual({ ok: true });
     expect(pactOf(owner, gym).reminders).toEqual([]);
 
     await reviewer.decide(requested.outcome.changeRequestId, { kind: "approve" });
     expect(pactOf(owner, gym).reminders).toEqual([]);
     await s.advanceTo("Mon 18:00");
     expect(reminders(s, owner)).toEqual([]);
+  });
+
+  test("set on their own: the same checks as a new pact's, against the due-by time in force now", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { dates: { dueBy: "18:00" }, reminders: ["17:00"] });
+    await s.advanceTo("Mon 09:30");
+
+    expect(await owner.setReminders(gym, ["18:00"])).toEqual({ ok: false, reason: "reminder-after-due-time" });
+    expect(await owner.setReminders(gym, ["5pm"])).toEqual({ ok: false, reason: "invalid-reminders" });
+    expect(await owner.setReminders(gym, ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00"])).toEqual({
+      ok: false,
+      reason: "invalid-reminders",
+    });
+    expect(pactOf(owner, gym).reminders).toEqual(["17:00"]);
+    // The same reminders again change nothing, and aren't refused.
+    expect(await owner.setReminders(gym, ["17:00"])).toEqual({ ok: true });
   });
 
   test("set with a later due-by time that needs approval, one after the due-by time in force now is refused", async () => {
@@ -446,13 +461,16 @@ describe("changing reminders on an Active pact", () => {
     });
   });
 
-  test("inside a change that needs approval, they apply at once and aren't part of the request", async () => {
+  test("inside a change that needs approval, they apply at once, as the name does, and neither is part of the request", async () => {
     const { owner, gym } = await pastEditWindow();
 
-    const result = await owner.changePact(gym, changed(owner, gym, { penaltyCents: 300, reminders: ["19:00"] }));
+    const result = await owner.changePact(
+      gym,
+      changed(owner, gym, { penaltyCents: 300, reminders: ["19:00"], name: "Gym time" }),
+    );
     if (!result.ok || result.outcome.kind !== "needs-approval") throw new Error("expected a change request");
 
-    expect(pactOf(owner, gym).reminders).toEqual(["19:00"]);
+    expect(pactOf(owner, gym)).toMatchObject({ name: "Gym time", reminders: ["19:00"], penaltyCents: 500 });
     const request = owner.changeRequest(result.outcome.changeRequestId);
     if (!request.ok || request.changeRequest.endsPact) throw new Error("expected a change of terms");
     expect(request.changeRequest.changes.map((c) => c.term)).toEqual(["penalty"]);

@@ -37,6 +37,12 @@ import {
   type ApiErrorResponse,
   type ChangePactRequest,
   type ChangePactResponse,
+  type AddReviewersRequest,
+  type AddReviewersResponse,
+  type RenamePactRequest,
+  type RenamePactResponse,
+  type SetRemindersRequest,
+  type SetRemindersResponse,
   type ChangePreviewResponse,
   type ChangeRequestResponse,
   type EndPactRequest,
@@ -244,6 +250,17 @@ export const api = {
     postQuietly<ChangePreviewResponse>(API_PATHS.changePreview(encodeURIComponent(pactId)), change),
   changePact: (pactId: string, change: ChangePactRequest) =>
     post<ChangePactResponse>(API_PATHS.changePact(encodeURIComponent(pactId)), change),
+  renamePact: (pactId: string, name: string) =>
+    post<RenamePactResponse>(API_PATHS.renamePact(encodeURIComponent(pactId)), { name } satisfies RenamePactRequest),
+  /** `reviewerIds`: only the reviewers added. */
+  addReviewers: (pactId: string, reviewerIds: string[]) =>
+    post<AddReviewersResponse>(API_PATHS.addReviewers(encodeURIComponent(pactId)), {
+      reviewerIds,
+    } satisfies AddReviewersRequest),
+  setReminders: (pactId: string, reminders: string[]) =>
+    post<SetRemindersResponse>(API_PATHS.setReminders(encodeURIComponent(pactId)), {
+      reminders,
+    } satisfies SetRemindersRequest),
   endPact: (pactId: string, request: EndPactRequest) =>
     post<EndPactResponse>(API_PATHS.endPact(encodeURIComponent(pactId)), request),
   changeRequest: (changeRequestId: string) =>

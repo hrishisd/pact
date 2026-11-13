@@ -97,16 +97,17 @@ describe("a stricter change applies at once, from the first occurrence not open 
 
   test("the name, and adding a reviewer, apply at once and the new reviewer is told", async () => {
     const s = scenario();
-    const { owner, second, createPact } = await ownerWithReviewers(s);
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [second] });
     await s.advanceTo("Wed 12:00");
     const third = await s.befriend(owner, "third");
 
-    const result = ok(
-      await owner.changePact(gym, changed(owner, gym, { name: "Morning gym", reviewerIds: [second.id, third.id] })),
-    );
+    expect(await owner.renamePact(gym, " Morning gym ")).toEqual({ ok: true });
+    // One who already reviews it is left as they are, and isn't told again.
+    expect(await owner.addReviewers(gym, [second.id, third.id, third.id])).toEqual({ ok: true });
 
-    expect(result).toEqual({ ok: true, outcome: { kind: "at-once" } });
+    expect(reviewer.reviewQueue()).toEqual([]);
+    expect(s.notifier.sentTo(second, "picked-as-reviewer")).toHaveLength(1);
     expect(pactOf(owner, gym)).toMatchObject({
       name: "Morning gym",
       reviewers: [
@@ -127,6 +128,63 @@ describe("a stricter change applies at once, from the first occurrence not open 
         },
       },
     ]);
+  });
+});
+
+describe("the pact page's at-once changes apply to the terms as they stand", () => {
+  test("after an approved change, a rename, an added reviewer and new reminders leave the approved terms in place", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym } = await dailyGym(s);
+    const third = await s.befriend(owner, "third");
+    // The pact page loads these terms; a reviewer then approves a lower penalty and second's removal elsewhere.
+    expect(pactOf(owner, gym)).toMatchObject({
+      penaltyCents: 500,
+      reviewers: [{ name: "reviewer" }, { name: "second" }],
+    });
+    const sent = ok(
+      await owner.changePact(gym, changed(owner, gym, { penaltyCents: 200, reviewerIds: [reviewer.id] })),
+    );
+    await reviewer.decide(changeRequestIdOf(sent), { kind: "approve" });
+
+    expect(await owner.renamePact(gym, "Morning gym")).toEqual({ ok: true });
+    expect(await owner.addReviewers(gym, [third.id])).toEqual({ ok: true });
+    expect(await owner.setReminders(gym, ["18:00"])).toEqual({ ok: true });
+
+    expect(pactOf(owner, gym)).toMatchObject({
+      name: "Morning gym",
+      penaltyCents: 200,
+      reviewers: [
+        { id: reviewer.id, name: "reviewer" },
+        { id: third.id, name: "third" },
+      ],
+      reminders: ["18:00"],
+    });
+    // Told once, when the edit window closed: never added back.
+    expect(s.notifier.sentTo(second, "picked-as-reviewer")).toHaveLength(1);
+    expect(reviewer.reviewQueue()).toEqual([]);
+  });
+
+  test("made while a change request waits, they stay out of it, and approving it keeps them", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await dailyGym(s);
+    const third = await s.befriend(owner, "third");
+    const id = changeRequestIdOf(ok(await owner.changePact(gym, changed(owner, gym, { penaltyCents: 200 }))));
+
+    expect(await owner.renamePact(gym, "Morning gym")).toEqual({ ok: true });
+    expect(await owner.addReviewers(gym, [third.id])).toEqual({ ok: true });
+    expect(await owner.setReminders(gym, ["18:00"])).toEqual({ ok: true });
+    expect(owner.changeRequest(id)).toMatchObject({
+      ok: true,
+      changeRequest: { pactName: "Morning gym", changes: [{ term: "penalty", before: 500, after: 200 }] },
+    });
+    await reviewer.decide(id, { kind: "approve" });
+
+    expect(pactOf(owner, gym)).toMatchObject({
+      name: "Morning gym",
+      penaltyCents: 200,
+      reviewers: [{ name: "reviewer" }, { name: "second" }, { name: "third" }],
+      reminders: ["18:00"],
+    });
   });
 });
 
@@ -522,15 +580,9 @@ describe("one change request at a time", () => {
       reason: "change-request-waiting",
     });
     expect(await owner.requestEnd(gym)).toEqual({ ok: false, reason: "change-request-waiting" });
-    expect(ok(await owner.changePact(gym, changed(owner, gym, { name: "Gym, any gym" })))).toMatchObject({
-      outcome: { kind: "at-once" },
-    });
-    ok(
-      await owner.changePact(
-        gym,
-        changed(owner, gym, { reviewerIds: [...termsOf(pactOf(owner, gym)).reviewerIds, third.id] }),
-      ),
-    );
+    expect(await owner.renamePact(gym, "Gym, any gym")).toEqual({ ok: true });
+    expect(await owner.addReviewers(gym, [third.id])).toEqual({ ok: true });
+    expect(await owner.setReminders(gym, ["18:00"])).toEqual({ ok: true });
     // The new reviewer can decide the change already waiting.
     expect(third.reviewQueue()).toEqual([expect.objectContaining({ kind: "change-request", id })]);
     expect(pactOf(owner, gym).waiting).toEqual([
@@ -652,6 +704,10 @@ describe("what can't be changed", () => {
       reason: "edit-window-open",
     });
     expect(await owner.requestEnd(gym)).toEqual({ ok: false, reason: "edit-window-open" });
+    const editWindowOpen = { ok: false, reason: "edit-window-open" };
+    expect(await owner.renamePact(gym, "Morning gym")).toEqual(editWindowOpen);
+    expect(await owner.addReviewers(gym, [])).toEqual(editWindowOpen);
+    expect(await owner.setReminders(gym, ["18:00"])).toEqual(editWindowOpen);
     await s.advanceTo("Mon 10:00");
     expect(await owner.changePact(gym, termsOf(pactOf(owner, gym)))).toEqual({ ok: false, reason: "nothing-changed" });
     expect(owner.changePreview(gym, termsOf(pactOf(owner, gym)))).toEqual({
@@ -668,6 +724,24 @@ describe("what can't be changed", () => {
       reason: "pact-not-found",
     });
     expect(await reviewer.requestEnd(gym)).toEqual({ ok: false, reason: "pact-not-found" });
+    const notFound = { ok: false, reason: "pact-not-found" };
+    expect(await reviewer.renamePact(gym, "Morning gym")).toEqual(notFound);
+    expect(await reviewer.addReviewers(gym, [])).toEqual(notFound);
+    expect(await reviewer.setReminders(gym, [])).toEqual(notFound);
+  });
+
+  test("a blank name, or a reviewer who isn't the owner's friend, is refused", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await dailyGym(s);
+    // Invited by the reviewer: their friend, not the owner's.
+    const stranger = await s.befriend(reviewer, "stranger");
+
+    expect(await owner.renamePact(gym, " ")).toEqual({ ok: false, reason: "blank-name" });
+    expect(await owner.addReviewers(gym, [stranger.id])).toEqual({ ok: false, reason: "not-a-friend" });
+    expect(await owner.addReviewers(gym, [owner.id])).toEqual({ ok: false, reason: "not-a-friend" });
+    expect(pactOf(owner, gym)).toMatchObject({ name: "Gym", reviewers: [{ name: "reviewer" }, { name: "second" }] });
+    expect(s.notifier.kindsSentTo(stranger)).toEqual([]);
+    expect(reviewer.reviewQueue()).toEqual([]);
   });
 });
 
@@ -795,15 +869,11 @@ describe("ending a pact", () => {
       expect(owner.changePreview(gym, changed(owner, gym, change))).toEqual({ ok: false, reason: "end-approved" });
     }
     expect(reviewer.reviewQueue()).toEqual([]);
-    expect(ok(await owner.changePact(gym, changed(owner, gym, { name: "Gym, any gym" })))).toMatchObject({
-      outcome: { kind: "at-once" },
-    });
-    ok(
-      await owner.changePact(
-        gym,
-        changed(owner, gym, { reviewerIds: [...termsOf(pactOf(owner, gym)).reviewerIds, third.id] }),
-      ),
-    );
+    expect(await owner.renamePact(gym, "Gym, any gym")).toEqual({ ok: true });
+    expect(await owner.addReviewers(gym, [third.id])).toEqual({ ok: true });
+    expect(await owner.setReminders(gym, ["18:00"])).toEqual({ ok: true });
+    expect(pactOf(owner, gym)).toMatchObject({ name: "Gym, any gym", reminders: ["18:00"] });
+    expect(pactOf(owner, gym).reviewers.map((r) => r.name)).toEqual(["reviewer", "second", "third"]);
 
     await s.advanceTo("Sat 12:00");
     expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endedAt: s.at("Fri 00:00") });
@@ -832,6 +902,10 @@ describe("once a pact has Ended", () => {
     await s.advanceTo("Fri 12:00");
 
     expect(await owner.submitEvidence(gym, [photo()])).toEqual({ ok: false, reason: "not-open" });
+    const ended = { ok: false, reason: "pact-ended" };
+    expect(await owner.renamePact(gym, "Morning gym")).toEqual(ended);
+    expect(await owner.addReviewers(gym, [])).toEqual(ended);
+    expect(await owner.setReminders(gym, [])).toEqual(ended);
     expect(await owner.fileExcuse(gym, { from: s.date("Fri"), to: s.date("Sat"), reason: "Away" }, [])).toEqual({
       ok: false,
       reason: "nothing-to-excuse",

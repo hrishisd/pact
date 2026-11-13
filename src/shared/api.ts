@@ -2,13 +2,17 @@
 // request and response bodies. Domain shapes come from ./types.ts.
 
 import type {
+  AccountId,
   AnkiDecksResult,
   AcceptExcuseRejectionResult,
   AcceptVacationRejectionResult,
   AcceptInviteResult,
   AcceptMissResult,
   AddRecipientResult,
+  AddReviewersResult,
   AskOwnerResult,
+  ClockTime,
+  DatedReminder,
   EvidenceResult,
   PaymentResult,
   ReplyResult,
@@ -16,7 +20,9 @@ import type {
   ChangePreviewResult,
   ChangeRequestResult,
   PactChange,
+  RenamePactResult,
   RequestEndResult,
+  SetRemindersResult,
   WithdrawChangeRequestResult,
   CreatePactResult,
   DeletePactResult,
@@ -201,6 +207,12 @@ export const API_PATHS = {
   changePreview: <T extends string>(pactId: T) => `/api/pacts/${pactId}/change/preview` as const,
   /** POST: change the pact after its edit window. */
   changePact: <T extends string>(pactId: T) => `/api/pacts/${pactId}/change` as const,
+  /** POST: rename the pact after its edit window, at once. */
+  renamePact: <T extends string>(pactId: T) => `/api/pacts/${pactId}/name` as const,
+  /** POST: add reviewers to the pact after its edit window, at once. */
+  addReviewers: <T extends string>(pactId: T) => `/api/pacts/${pactId}/reviewers` as const,
+  /** POST: set the pact's reminders after its edit window, at once. */
+  setReminders: <T extends string>(pactId: T) => `/api/pacts/${pactId}/reminders` as const,
   /** POST: ask to end the pact. */
   endPact: <T extends string>(pactId: T) => `/api/pacts/${pactId}/end` as const,
   /** GET: a change request's page, for its owner. */
@@ -328,6 +340,25 @@ export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
 export type ChangePactRequest = PactChange;
 export type ChangePreviewResponse = Json<ChangePreviewResult>;
 export type ChangePactResponse = Json<ChangePactResult>;
+
+/**
+ * The pact page's changes that apply at once, each sending only its own
+ * term: POST /api/pacts/:id/name, /reviewers (only the reviewers added) and
+ * /reminders (the whole list). A body of another shape is a 400
+ * "invalid-request"; the core's refusals are 200s.
+ */
+export interface RenamePactRequest {
+  name: string;
+}
+export type RenamePactResponse = Json<RenamePactResult>;
+export interface AddReviewersRequest {
+  reviewerIds: AccountId[];
+}
+export type AddReviewersResponse = Json<AddReviewersResult>;
+export interface SetRemindersRequest {
+  reminders: (ClockTime | DatedReminder)[];
+}
+export type SetRemindersResponse = Json<SetRemindersResult>;
 
 /** POST /api/pacts/:id/end, with an optional note. */
 export interface EndPactRequest {

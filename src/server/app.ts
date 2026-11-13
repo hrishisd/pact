@@ -54,12 +54,18 @@ import {
   type AcceptMissResponse,
   type AddRecipientRequest,
   type AddRecipientResponse,
+  type AddReviewersRequest,
+  type AddReviewersResponse,
   type ChangePactRequest,
   type ChangePactResponse,
   type ChangePreviewResponse,
   type ChangeRequestResponse,
   type EndPactRequest,
   type EndPactResponse,
+  type RenamePactRequest,
+  type RenamePactResponse,
+  type SetRemindersRequest,
+  type SetRemindersResponse,
   type WithdrawChangeRequestResponse,
   type ApiErrorResponse,
   type CreateInviteResponse,
@@ -572,6 +578,24 @@ export function createApp({
     return c.json<ChangePactResponse>(await account(c).changePact(c.req.param("id"), change));
   });
 
+  app.post(API_PATHS.renamePact(":id"), async (c) => {
+    const request = await readJson(c, parseRenamePact);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<RenamePactResponse>(await account(c).renamePact(c.req.param("id"), request.name));
+  });
+
+  app.post(API_PATHS.addReviewers(":id"), async (c) => {
+    const request = await readJson(c, parseAddReviewers);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<AddReviewersResponse>(await account(c).addReviewers(c.req.param("id"), request.reviewerIds));
+  });
+
+  app.post(API_PATHS.setReminders(":id"), async (c) => {
+    const request = await readJson(c, parseSetReminders);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<SetRemindersResponse>(await account(c).setReminders(c.req.param("id"), request.reminders));
+  });
+
   app.post(API_PATHS.endPact(":id"), async (c) => {
     const request = await readJson(c, parseEndPact);
     if (!request) return apiError(c, 400, "invalid-request");
@@ -858,6 +882,9 @@ const PACT_TERMS: Fields<Omit<NewPact, "evidenceKind">> = {
 
 const parseNewPact = object<CreatePactRequest>({ evidenceKind: oneOf(EVIDENCE_KINDS), ...PACT_TERMS });
 const parsePactChange = object<ChangePactRequest>({ ...PACT_TERMS, note: optional(string) });
+const parseRenamePact = object<RenamePactRequest>({ name: string });
+const parseAddReviewers = object<AddReviewersRequest>({ reviewerIds: arrayOf(string) });
+const parseSetReminders = object<SetRemindersRequest>({ reminders: arrayOf(string) });
 const parseEndPact = object<EndPactRequest>({ note: optional(string) });
 const VACATION_REQUEST = { from: string, to: string, pactIds: arrayOf(string) };
 const parseVacationRequest = object<VacationPreviewRequest>(VACATION_REQUEST);

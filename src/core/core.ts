@@ -22,6 +22,7 @@ import type {
   AcceptMissResult,
   AccountId,
   AddRecipientResult,
+  AddReviewersResult,
   AnkiDecksResult,
   AskOwnerResult,
   ChangePactResult,
@@ -59,11 +60,13 @@ import type {
   PushDevice,
   Recipient,
   RecordPaymentResult,
+  RenamePactResult,
   ReplyResult,
   RequestEndResult,
   ReviewDecision,
   ReviewItem,
   SavePushSubscriptionResult,
+  SetRemindersResult,
   SetTimezoneResult,
   SignInResult,
   SubmitEvidenceResult,
@@ -99,7 +102,16 @@ import {
 } from "./accounts.ts";
 import { ankiDecks, checkAnki, fetchAnki, recordAnkiChecks, type AnkiPolling } from "./anki-days.ts";
 import { checkOura, fetchSleep, judgeNights, noteOuraClock, pushNoOuraData } from "./bedtime.ts";
-import { changePact, changePreview, changeRequestPage, requestEnd, withdrawChangeRequest } from "./change-requests.ts";
+import {
+  addReviewers,
+  changePact,
+  changePreview,
+  changeRequestPage,
+  renamePact,
+  requestEnd,
+  setReminders,
+  withdrawChangeRequest,
+} from "./change-requests.ts";
 import { connectAnki, connectOura, disconnectAnki, disconnectOura, markDisconnected, profile } from "./connections.ts";
 import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
@@ -242,16 +254,40 @@ export interface AccountView {
    */
   changePreview(pactId: string, change: PactChange): ChangePreviewResult;
   /**
-   * The owner changes an Active pact past its edit window. The name and added
+   * The owner changes an Active pact past its edit window: the Request change
+   * form, which sends the whole terms. The name, the reminders and added
    * reviewers apply at once (each new reviewer is told). If anything else
    * relaxes the pact, the rest waits as one change request for a reviewer,
    * stricter parts included, and the reviewers get a review item. Otherwise
    * the stricter parts apply now, to every occurrence not open yet (from
-   * tomorrow, in the owner's timezone). While a change request waits, only
-   * the name and added reviewers may change. The same checks as
-   * `createPact`, so a pact never has zero reviewers. A refusal changes nothing.
+   * tomorrow, in the owner's timezone). While a change request or an approved
+   * end waits, only the name, the reminders and added reviewers may change.
+   * The same checks as `createPact`, so a pact never has zero reviewers. A
+   * refusal changes nothing.
    */
   changePact(pactId: string, change: PactChange): Promise<ChangePactResult>;
+  /**
+   * The owner renames an Active pact past its edit window, from the pact page:
+   * at once, with no review, even while a change request or an approved end
+   * waits. Only the name changes. The same name rules as `createPact`. A
+   * refusal changes nothing.
+   */
+  renamePact(pactId: string, name: string): Promise<RenamePactResult>;
+  /**
+   * The owner adds reviewers to an Active pact past its edit window, from the
+   * pact page: each of `reviewerIds` joins at once and is told, even while a
+   * change request or an approved end waits, and can decide it. One who
+   * already reviews the pact is left as they are. Each must be the owner's
+   * friend. A refusal changes nothing.
+   */
+  addReviewers(pactId: string, reviewerIds: AccountId[]): Promise<AddReviewersResult>;
+  /**
+   * The owner sets an Active pact's reminders past its edit window, from the
+   * pact page: the whole list, at once, even while a change request or an
+   * approved end waits. Each must go off before the due time in force now. A
+   * refusal changes nothing.
+   */
+  setReminders(pactId: string, reminders: string[]): Promise<SetRemindersResult>;
   /**
    * The owner asks to end an Active pact past its edit window: a change
    * request. Approved, the pact is Ended at once and makes no more
@@ -609,6 +645,10 @@ class Core implements PactCore {
       editPact: (pactId, pact) => this.#command(() => editPact(this.#ctx, accountId, pactId, pact)),
       deletePact: (pactId) => this.#command(() => deletePact(this.#ctx, accountId, pactId)),
       changePact: (pactId, change) => this.#command(() => changePact(this.#ctx, accountId, pactId, change)),
+      renamePact: (pactId, name) => this.#command(() => renamePact(this.#ctx, accountId, pactId, name)),
+      addReviewers: (pactId, reviewerIds) =>
+        this.#command(() => addReviewers(this.#ctx, accountId, pactId, reviewerIds)),
+      setReminders: (pactId, reminders) => this.#command(() => setReminders(this.#ctx, accountId, pactId, reminders)),
       requestEnd: (pactId, note) => this.#command(() => requestEnd(this.#ctx, accountId, pactId, note)),
       withdrawChangeRequest: (changeRequestId) =>
         this.#command(() => withdrawChangeRequest(this.#ctx, accountId, changeRequestId)),

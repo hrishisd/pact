@@ -461,6 +461,7 @@ describe("changing them after the edit window", () => {
       ok: false,
       reason: "edit-window-open",
     });
+    expect(await owner.renamePact(gym, " ")).toEqual({ ok: false, reason: "edit-window-open" });
     await s.advanceTo("Wed 12:00");
     const weekly = { kind: "weekly-count", target: 3 } as const;
 

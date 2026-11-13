@@ -777,7 +777,7 @@ describe("who decides a vacation when a covered pact's reviewers change", () => 
     const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
     s.setClockTo("Wed 12:00");
     const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer]));
-    ok(await owner.changePact(gym, changed(owner, gym, { reviewerIds: [reviewer.id, second.id] })));
+    ok(await owner.addReviewers(gym, [second.id]));
 
     expect(second.reviewQueue()).toEqual([]);
     expect(vacationPushes(s, second, vacationId)).toEqual([]);
