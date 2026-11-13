@@ -24,16 +24,16 @@ A person can turn on one email, the daily summary. At 09:00 in their timezone, i
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] Off by default: a new account gets no email, whatever waits.
-- [ ] Sam turns it on. Jordan's evidence has waited 25 hours at Sam's 09:00: Sam gets one email listing it under "Items waiting for your review", and none the next day once it's decided.
-- [ ] Only the questions section: Jordan has a question from Sam unanswered for 25 hours and nothing in their queue; the email has only "Questions waiting for your reply".
-- [ ] Both sections in one email for someone who is an owner and a reviewer; never two emails on one day, across a restart too.
-- [ ] Nothing older than 24 hours: no email.
-- [ ] With the Review item and Comment push settings off, the email still goes; with the summary off, the pushes still go.
-- [ ] A payment shows its recipient and a vacation its dates in place of the pact.
-- [ ] 09:00 is in the account's timezone.
-- [ ] A send that keeps failing is retried each tick and given up after 24 hours, with an operator alert by log and push and no email.
-- [ ] Routes for reading and changing the setting (`src/server/app.test.ts`), and a `*.test.tsx` test for the Email section.
-- [ ] The Email section checked in the browser at 390×844 against the prototype, with screenshots.
-- [ ] `npm run check` passes.
+- [x] Off by default: a new account gets no email, whatever waits.
+- [x] Sam turns it on. Jordan's evidence has waited 25 hours at Sam's 09:00: Sam gets one email listing it under "Items waiting for your review", and none the next day once it's decided.
+- [x] Only the questions section: Jordan has a question from Sam unanswered for 25 hours and nothing in their queue; the email has only "Questions waiting for your reply".
+- [x] Both sections in one email for someone who is an owner and a reviewer; never two emails on one day, across a restart too.
+- [x] Nothing older than 24 hours: no email.
+- [x] With the Review item and Comment push settings off, the email still goes; with the summary off, the pushes still go.
+- [x] A payment shows its recipient and a vacation its dates in place of the pact.
+- [x] 09:00 is in the account's timezone.
+- [x] A send that keeps failing is retried each tick and given up after 24 hours, with an operator alert by log and push and no email.
+- [x] Routes for reading and changing the setting (`src/server/app.test.ts`), and a `*.test.tsx` test for the Email section.
+- [x] The Email section checked in the browser at 390×844 against the prototype, with screenshots.
+- [x] `npm run check` passes.
 - [ ] Manual: a real daily summary reaches a friend's inbox, not spam (`../manual-checks.md`).

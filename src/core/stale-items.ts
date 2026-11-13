@@ -48,11 +48,18 @@ export function remindStale(ctx: CoreContext, t: Date, appUrl: string): void {
     };
     if (!due.reviewer && !due.owner && !due.summary) continue;
     const staleBefore = new Date(nine.getTime() - STALE_AFTER_MS);
-    const queue = reviewQueueWaits(ctx, id).sort((a, b) => a.since.getTime() - b.since.getTime());
+    // Each list only when something due needs it: until one goes, this runs every tick.
+    const queue =
+      due.reviewer || due.summary
+        ? reviewQueueWaits(ctx, id).sort((a, b) => a.since.getTime() - b.since.getTime())
+        : [];
     const waiting = queue.filter((entry) => entry.since < staleBefore);
-    const questions = questionAlerts(ctx, id)
-      .flatMap(({ alert }) => (alert.kind === "reviewer-question" && alert.askedAt < staleBefore ? [alert] : []))
-      .sort((a, b) => a.askedAt.getTime() - b.askedAt.getTime());
+    const questions =
+      due.owner || due.summary
+        ? questionAlerts(ctx, id)
+            .flatMap(({ alert }) => (alert.kind === "reviewer-question" && alert.askedAt < staleBefore ? [alert] : []))
+            .sort((a, b) => a.askedAt.getTime() - b.askedAt.getTime())
+        : [];
     const sent = {
       reviewer: due.reviewer && waiting.length > 0,
       owner: due.owner && questions.length > 0,

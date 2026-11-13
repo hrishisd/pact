@@ -203,7 +203,7 @@ function Guide({ push: { state, turnOn }, onDone }: { push: Push; onDone: () => 
 
 /**
  * The profile's section: this device's state, then one switch per kind,
- * grouped in one block. Below it, the Email section's one switch.
+ * grouped in one block. Below it, the Email section.
  */
 export function NotificationsSection({ push: { state }, onSetUp }: { push: Push; onSetUp: () => void }) {
   const { state: load } = useLoad(api.notifications);
@@ -212,21 +212,6 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
   const [changed, setChanged] = useState<NotificationSettingState[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const settings = changed ?? data?.settings ?? null;
-  const [changedSummary, setChangedSummary] = useState<DailySummarySetting | null>(null);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
-  const summary = changedSummary ?? data?.dailySummary ?? null;
-
-  const toggleSummary = async (enabled: boolean) => {
-    if (!summary) return;
-    setSummaryError(null);
-    setChangedSummary({ ...summary, enabled });
-    try {
-      setChangedSummary(await api.setDailySummary({ enabled }));
-    } catch (cause) {
-      setChangedSummary(summary);
-      setSummaryError(`Couldn't save. ${failureText(cause, "Check your connection and try again.")}`);
-    }
-  };
 
   const toggle = async (setting: NotificationSetting, enabled: boolean) => {
     if (!settings) return;
@@ -236,7 +221,7 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
       setChanged(await api.setNotificationSetting({ setting, enabled }));
     } catch (cause) {
       setChanged(settings);
-      setError(`Couldn't save. ${failureText(cause, "Check your connection and try again.")}`);
+      setError(saveFailureText(cause));
     }
   };
 
@@ -250,19 +235,12 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
           <>
             <div className="list">
               {settings.map(({ setting, enabled }) => (
-                <label key={setting} className="switch-row">
-                  <span className="rt">
-                    <b>{SETTING_COPY[setting].label}</b>
-                    <small>{SETTING_COPY[setting].hint}</small>
-                  </span>
-                  <input
-                    className="switch"
-                    type="checkbox"
-                    role="switch"
-                    checked={enabled}
-                    onChange={(e) => void toggle(setting, e.target.checked)}
-                  />
-                </label>
+                <SwitchRow
+                  key={setting}
+                  {...SETTING_COPY[setting]}
+                  checked={enabled}
+                  onChange={(on) => void toggle(setting, on)}
+                />
               ))}
             </div>
             {error && <p className="error">{error}</p>}
@@ -270,33 +248,65 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
           </>
         )}
       </section>
-      {summary && (
-        <section className="stack">
-          <div className="label">Email</div>
-          <div className="list">
-            <label className="switch-row">
-              <span className="rt">
-                <b>Daily summary</b>
-                <small>
-                  An email at 09:00 when items in your Review Queue, or reviewers' questions to you, have waited more
-                  than a day
-                </small>
-              </span>
-              <input
-                className="switch"
-                type="checkbox"
-                role="switch"
-                checked={summary.enabled}
-                onChange={(e) => void toggleSummary(e.target.checked)}
-              />
-            </label>
-          </div>
-          {summaryError && <p className="error">{summaryError}</p>}
-          <p className="muted small">Sent to {summary.to}, your Google address.</p>
-        </section>
-      )}
+      {data && <EmailSection loaded={data.dailySummary} />}
     </>
   );
+}
+
+/** The daily summary's one switch, and the address it goes to. */
+function EmailSection({ loaded }: { loaded: DailySummarySetting }) {
+  const [changed, setChanged] = useState<DailySummarySetting | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const summary = changed ?? loaded;
+
+  const toggle = async (enabled: boolean) => {
+    setError(null);
+    setChanged({ ...summary, enabled });
+    try {
+      setChanged(await api.setDailySummary({ enabled }));
+    } catch (cause) {
+      setChanged(summary);
+      setError(saveFailureText(cause));
+    }
+  };
+
+  return (
+    <section className="stack">
+      <div className="label">Email</div>
+      <div className="list">
+        <SwitchRow
+          label="Daily summary"
+          hint="An email at 09:00 when items in your Review Queue, or reviewers' questions to you, have waited more than a day"
+          checked={summary.enabled}
+          onChange={(on) => void toggle(on)}
+        />
+      </div>
+      {error && <p className="error">{error}</p>}
+      <p className="muted small">Sent to {summary.to}, your Google address.</p>
+    </section>
+  );
+}
+
+function SwitchRow(props: { label: string; hint: string; checked: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className="switch-row">
+      <span className="rt">
+        <b>{props.label}</b>
+        <small>{props.hint}</small>
+      </span>
+      <input
+        className="switch"
+        type="checkbox"
+        role="switch"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.target.checked)}
+      />
+    </label>
+  );
+}
+
+function saveFailureText(cause: unknown): string {
+  return `Couldn't save. ${failureText(cause, "Check your connection and try again.")}`;
 }
 
 function DeviceLine({ state, onSetUp }: { state: Push["state"]; onSetUp: () => void }) {
