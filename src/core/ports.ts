@@ -1,6 +1,6 @@
-// The five ports outside the Pact core. Each has a production adapter
-// (adapters.ts, oura.ts, anki.ts, photo-stores.ts, web-push.ts) and a fake for
-// tests (testing/fakes.ts).
+// The six ports outside the Pact core. Each has a production adapter
+// (adapters.ts, oura.ts, anki.ts, photo-stores.ts, web-push.ts, gmail.ts) and a
+// fake for tests (testing/fakes.ts).
 
 import type { AccountId, AnkiCounts, AnkiDeck, PushDevice, ReviewItem } from "../shared/types.ts";
 
@@ -122,7 +122,10 @@ type DecisionDetails = { decision: "approved" } | { decision: "rejected"; reason
  */
 interface NotificationDetails {
   "operator-alert":
-    { alert: "reminders-dropped"; dropped: number } | { alert: "database-restored"; lastTick: string | null };
+    | { alert: "reminders-dropped"; dropped: number }
+    | { alert: "database-restored"; lastTick: string | null }
+    /** `to`: the address of an email that failed for 24 hours and was given up. */
+    | { alert: "email-given-up"; to: string };
   "picked-as-reviewer": { pactId: string };
   "review-item":
     | { itemKind: "evidence" | "excuse" | "change-request"; itemId: string; pactId: string }
@@ -171,6 +174,19 @@ export interface DeliveryReport {
  */
 export interface Notifier {
   deliver(notification: Notification, devices: readonly PushDevice[]): Promise<DeliveryReport>;
+}
+
+/** One email: plain text, with an HTML version when there is one. */
+export interface Email {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}
+
+/** Sends email. `send` rejects when the mail server doesn't accept the message. */
+export interface Mailer {
+  send(email: Email): Promise<void>;
 }
 
 export interface StoredPhoto {

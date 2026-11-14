@@ -29,6 +29,7 @@ import type {
   ChangePreviewResult,
   ChangeRequestResult,
   CreatePactResult,
+  DailySummarySetting,
   DecideResult,
   DeletePactResult,
   EditPactResult,
@@ -87,6 +88,7 @@ import {
   accountIdForEmail,
   addRecipient,
   createInvite,
+  dailySummarySetting,
   emailKey,
   friendList,
   inviteLookup,
@@ -96,6 +98,7 @@ import {
   recipientList,
   removePushSubscription,
   savePushSubscription,
+  setDailySummary,
   setNotificationSetting,
   setTimezone,
   signIn,
@@ -120,9 +123,17 @@ import { acceptExcuseRejection, excuseOptions, excusePage, fileExcuse, previewEx
 import { endPastEndDate } from "./ending.ts";
 import { ledgerList, ledgerPage, makeBills, paymentPage, recordPayment, remindOverdue } from "./money.ts";
 import { remindStale } from "./stale-items.ts";
-import { deliverPending, enqueue } from "./outbox.ts";
+import {
+  alertGivenUpEmails,
+  deliverEmails,
+  deliverPending,
+  enqueue,
+  giveUpEmails,
+  releaseEmailClaims,
+} from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
-import type { AnkiSource, Clock, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
+import type { RaiseOperatorAlert } from "./operator-alerts.ts";
+import type { AnkiSource, Clock, Mailer, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
 import {
   askOwner,
@@ -153,12 +164,22 @@ export interface PactCoreOptions {
   dbPath: string;
   clock: Clock;
   notifier: Notifier;
+  /** Sends the daily summary, through the outbox. Operator alert emails go through `raiseOperatorAlert` instead. */
+  mailer: Mailer;
+  /** The app's address, such as "https://pact.example.com": the links in an email start with it. */
+  appUrl: string;
+  /**
+   * The operator alert path (operator-alerts.ts): the log line and the email,
+   * which must go to the same operator as `operatorEmail`. The server shares
+   * it with the adapters.
+   */
+  raiseOperatorAlert: RaiseOperatorAlert;
   ouraSource: OuraSource;
   ankiSource: AnkiSource;
   photoStore: PhotoStore;
   /** The operator's email; their first sign-in may create an account without an invite. */
   operatorEmail: string;
-  /** Where the core writes log lines (including OPERATOR_ALERT). Default: console.log. */
+  /** Where the core writes log lines. Default: console.log. */
   log?: (line: string) => void;
   /**
    * Makes the id of each new row: unique, URL-safe. Default: randomUUID. Ties on
@@ -187,7 +208,8 @@ export interface PactCore {
   /** Commands and queries made as one account. */
   as(accountId: AccountId): AccountView;
   /**
-   * Runs everything due by `t`, records the tick, then delivers the outbox.
+   * Runs everything due by `t`, records the tick, then delivers the outbox's
+   * pushes, and starts sending its emails without waiting for them.
    * Judges every occurrence due by `t` that isn't judged yet, catching up on
    * any it missed while stopped: approved evidence makes it Satisfied; evidence
    * still waiting leaves it for the decision; none makes it Missed and adds
@@ -205,6 +227,11 @@ export interface PactCore {
   raiseRestoreAlert(): Promise<void>;
   /** Waits for the outbox deliveries started so far. Commands don't; the scheduler's tick and tests do. */
   deliveriesSettled(): Promise<void>;
+  /**
+   * Waits for the email pass in progress, if any. The tick starts one and
+   * doesn't wait for it; shutdown waits for it briefly, and tests do.
+   */
+  emailsSettled(): Promise<void>;
   /** Waits for any delivery in progress, then closes the database. */
   close(): Promise<void>;
 }
@@ -494,6 +521,10 @@ export interface AccountView {
   notificationSettings(): NotificationSettingState[];
   /** Off, that kind records nothing for this account until it's turned back on. */
   setNotificationSetting(setting: NotificationSetting, enabled: boolean): Promise<NotificationSettingState[]>;
+  /** The daily summary email's setting, off until turned on, and the address it goes to. */
+  dailySummary(): DailySummarySetting;
+  /** Turns the daily summary on or off. It doesn't follow the push settings, nor they it. */
+  setDailySummary(enabled: boolean): Promise<DailySummarySetting>;
   /**
    * Notifications for this account go to this device too, from now on. Only
    * the known push services are accepted, since the server sends to whatever
@@ -529,12 +560,17 @@ const HEALTHY_TICK_AGE_MS = 5 * 60 * 1000;
 class Core implements PactCore {
   readonly #ctx: CoreContext;
   readonly #notifier: Notifier;
+  readonly #mailer: Mailer;
+  readonly #appUrl: string;
   readonly #photoStore: PhotoStore;
   readonly #ouraSource: OuraSource;
   readonly #ankiSource: AnkiSource;
   readonly #operatorEmailKey: string;
+  readonly #raiseOperatorAlert: RaiseOperatorAlert;
   /** Outbox deliveries run one at a time, in this chain. */
   #delivery: Promise<void> = Promise.resolve();
+  /** The email pass running, if any: at most one at a time, apart from `#delivery`. */
+  #emailPass: Promise<void> | null = null;
   /**
    * When each account last checked Oura now. In memory: a restart forgets
    * it, which costs at most one more call. Set before the call, so two
@@ -554,10 +590,14 @@ class Core implements PactCore {
       ankiChecksRunning: this.#ankiPolling.checksRunning,
     });
     this.#notifier = options.notifier;
+    this.#mailer = options.mailer;
+    this.#appUrl = options.appUrl;
     this.#photoStore = options.photoStore;
     this.#ouraSource = options.ouraSource;
     this.#ankiSource = options.ankiSource;
     this.#operatorEmailKey = emailKey(options.operatorEmail);
+    this.#raiseOperatorAlert = options.raiseOperatorAlert;
+    releaseEmailClaims(this.#ctx);
   }
 
   /**
@@ -586,6 +626,16 @@ class Core implements PactCore {
       .then(() => deliverPending(this.#ctx, this.#notifier))
       .catch((error: unknown) => this.#ctx.log(`outbox delivery stopped, will retry: ${String(error)}`));
     return this.#delivery;
+  }
+
+  /** Starts an email pass unless one is running. Only the tick calls it, and doesn't wait for it. */
+  #deliverEmails(): void {
+    if (this.#emailPass) return;
+    this.#emailPass = deliverEmails(this.#ctx, this.#mailer)
+      .catch((error: unknown) => this.#ctx.log(`email delivery stopped, will retry next tick: ${String(error)}`))
+      .finally(() => {
+        this.#emailPass = null;
+      });
   }
 
   signIn(
@@ -622,6 +672,7 @@ class Core implements PactCore {
       profile: () => profile(this.#ctx, accountId),
       today: () => todayPage(this.#ctx, accountId),
       notificationSettings: () => notificationSettingList(this.#ctx, accountId),
+      dailySummary: () => dailySummarySetting(this.#ctx, accountId),
       excusePreview: (pactId, dates) => previewExcuse(this.#ctx, accountId, pactId, dates),
       excuseOptions: (pactId) => excuseOptions(this.#ctx, accountId, pactId),
       excuse: (excuseId) => excusePage(this.#ctx, accountId, excuseId),
@@ -663,6 +714,7 @@ class Core implements PactCore {
       connectOura: () => this.#command(() => connectOura(this.#ctx, accountId)),
       setNotificationSetting: (setting, enabled) =>
         this.#command(() => setNotificationSetting(this.#ctx, accountId, setting, enabled)),
+      setDailySummary: (enabled) => this.#command(() => setDailySummary(this.#ctx, accountId, enabled)),
       savePushSubscription: (device) => this.#command(() => savePushSubscription(this.#ctx, accountId, device)),
       removePushSubscription: (endpoint) => this.#command(() => removePushSubscription(this.#ctx, accountId, endpoint)),
       submitEvidence: (pactId, photos) =>
@@ -704,8 +756,10 @@ class Core implements PactCore {
     // An account whose call throws has no data this tick; the next one retries.
     const fetched = await fetchSleep(this.#ctx, this.#ouraSource, t);
     const checked = await fetchAnki(this.#ctx, this.#ankiSource, this.#ankiPolling, t);
-    await this.#command(
+    const { dropped, givenUp } = await this.#command(
       () => {
+        // Before this tick's email pass: an email 24 hours old is never tried again.
+        const givenUp = alertGivenUpEmails(this.#ctx, giveUpEmails(this.#ctx, t));
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
         recordAnkiChecks(this.#ctx, checked);
@@ -718,27 +772,35 @@ class Core implements PactCore {
         endPastEndDate(this.#ctx, t);
         makeBills(this.#ctx, t);
         remindOverdue(this.#ctx, t);
-        remindStale(this.#ctx, t);
+        remindStale(this.#ctx, t, this.#appUrl);
         this.#ctx.db
           .prepare(
             `INSERT INTO scheduler_state (id, last_tick_at) VALUES (1, ?)
              ON CONFLICT (id) DO UPDATE SET last_tick_at = excluded.last_tick_at`,
           )
           .run(t.toISOString());
-        return dropped;
+        return { dropped, givenUp };
       },
-      // Logged once committed, like any operator alert: the log line never depends on delivery.
-      (dropped) => {
+      ({ dropped }) => {
         for (const drop of dropped) {
           this.#ctx.log(
             `reminder dropped: pact ${drop.pactId}, ${drop.time} for ${drop.date}, ` +
               `${Math.floor(drop.lateMs / 60_000)} min late at ${t.toISOString()}`,
           );
         }
-        if (dropped.length > 0) this.#ctx.log(`OPERATOR_ALERT ${droppedText(dropped.length)} after downtime`);
       },
       t,
     );
+    // Raised once committed. Neither the log line nor the email depends on delivery, and the tick doesn't wait for the email.
+    if (dropped.length > 0) {
+      this.#raiseOperatorAlert({
+        title: "reminders dropped after downtime",
+        text: `${droppedText(dropped.length)} after downtime`,
+      });
+    }
+    for (const text of givenUp) this.#raiseOperatorAlert({ title: "daily summary given up", text, withoutEmail: true });
+    // Apart from the pushes, and not waited for: a slow mail server never holds up the tick.
+    this.#deliverEmails();
     await this.#delivery;
   }
 
@@ -758,36 +820,43 @@ class Core implements PactCore {
   }
 
   async raiseRestoreAlert(): Promise<void> {
-    await this.#command(
-      () => {
-        const lastTick = this.lastTick()?.toISOString() ?? null;
-        const operator = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE is_operator = 1`);
-        if (operator) {
-          this.#ctx.enqueue({
-            recipient: operator.id,
-            kind: "operator-alert",
-            payload: {
-              alert: "database-restored",
-              lastTick,
-              title: "Operator alert",
-              body: `Database restored from backup. Last tick: ${lastTick ?? "none"}`,
-              url: APP_PATHS.today,
-            },
-          });
-        }
-        return lastTick;
-      },
-      // The log line is the alert's channel that never depends on delivery.
-      (lastTick) =>
-        this.#ctx.log(
-          `OPERATOR_ALERT database restored from backup; last scheduler tick before the restore: ${lastTick ?? "none"}`,
-        ),
-    );
+    // The log line and the email go first, and even when the database can't say its last tick:
+    // they are the channels that never depend on it. The push may not reach a restored database's operator.
+    const title = "database restored from backup";
+    const said = "database restored from backup; last scheduler tick before the restore";
+    let lastTick: string | null;
+    try {
+      lastTick = this.lastTick()?.toISOString() ?? null;
+    } catch (error) {
+      this.#raiseOperatorAlert({ title, text: `${said}: unknown, reading it failed: ${String(error)}` });
+      throw error;
+    }
+    this.#raiseOperatorAlert({ title, text: `${said}: ${lastTick ?? "none"}` });
+    await this.#command(() => {
+      const operator = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE is_operator = 1`);
+      if (operator) {
+        this.#ctx.enqueue({
+          recipient: operator.id,
+          kind: "operator-alert",
+          payload: {
+            alert: "database-restored",
+            lastTick,
+            title: "Operator alert",
+            body: `Database restored from backup. Last tick: ${lastTick ?? "none"}`,
+            url: APP_PATHS.today,
+          },
+        });
+      }
+    });
     await this.#delivery;
   }
 
   deliveriesSettled(): Promise<void> {
     return this.#delivery;
+  }
+
+  async emailsSettled(): Promise<void> {
+    await this.#emailPass;
   }
 
   async close(): Promise<void> {

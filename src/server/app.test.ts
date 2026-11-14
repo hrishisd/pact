@@ -89,6 +89,7 @@ import {
   type RecordPaymentResponse,
   type ReviewQueueResponse,
   type SavePushSubscriptionResponse,
+  type SetDailySummaryResponse,
   type SetNotificationSettingResponse,
   type SetTimezoneResponse,
   type SubmitEvidenceResponse,
@@ -2292,6 +2293,8 @@ describe("canonical host", () => {
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
         OURA_TOKEN_KEY: Buffer.alloc(32, 1).toString("base64"),
+        GMAIL_ADDRESS: "pact.sender@gmail.example",
+        GMAIL_APP_PASSWORD: "test-app-password",
       }).canonicalOrigin,
     });
 
@@ -2382,7 +2385,31 @@ describe("notifications", () => {
         { setting: "overdue-bill", enabled: true },
         { setting: "connection-problem", enabled: true },
       ],
+      dailySummary: { enabled: false, to: "owner@example.test" },
     });
+  });
+
+  test("the daily summary is turned on, and reads back on", async () => {
+    const s = await server();
+    const operator = await s.signIn(OPERATOR);
+
+    const changed = await operator.post<SetDailySummaryResponse>(API_PATHS.dailySummary, { enabled: true });
+
+    expect(changed).toEqual({ status: 200, body: { enabled: true, to: "owner@example.test" } });
+    expect((await operator.get<NotificationsResponse>(API_PATHS.notifications)).body).toMatchObject({
+      dailySummary: { enabled: true, to: "owner@example.test" },
+    });
+  });
+
+  test("a daily summary change needs a session, and enabled as a boolean", async () => {
+    const s = await server();
+    expect((await s.api(API_PATHS.dailySummary, { method: "POST", body: { enabled: true } })).status).toBe(401);
+    const operator = await s.signIn(OPERATOR);
+
+    for (const sent of [{}, { enabled: "yes" }, { enabled: 1 }, true]) {
+      const response = await operator.post(API_PATHS.dailySummary, sent);
+      expect({ sent, ...response }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
+    }
   });
 
   test.each([

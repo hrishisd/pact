@@ -8,9 +8,12 @@ import {
   ankiAdapter,
   createPactCore,
   devAnki,
+  devMailer,
   devOura,
+  gmailMailer,
   localDiskPhotoStore,
   offsetClock,
+  operatorAlerts,
   ouraAdapter,
   r2PhotoStore,
   systemClock,
@@ -59,6 +62,15 @@ if (!config.production) {
   exitUnlessNativeBinaryLoads();
 }
 
+// Production refuses to start without a Gmail account (loadConfig); development without one logs each email.
+const mailer = config.gmail ? gmailMailer(config.gmail) : devMailer((line) => console.log(line));
+// The one operator alert path, for the core and the adapters: the log line and the email, apart from the outbox.
+const alerts = operatorAlerts({
+  mailer,
+  operatorEmail: config.operatorEmail,
+  log: (line) => console.log(line),
+});
+
 // Production without Oura credentials gets no connector (connecting is refused)
 // and a source with no sleep; only development falls back to the stand-in.
 const oura: OuraAdapter | null = config.oura
@@ -66,6 +78,7 @@ const oura: OuraAdapter | null = config.oura
       config.dbPath,
       { ...config.oura, redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString() },
       clock,
+      { raiseOperatorAlert: alerts.raise },
     )
   : config.production
     ? null
@@ -76,6 +89,7 @@ const oura: OuraAdapter | null = config.oura
 const anki: AnkiAdapter | null = config.anki
   ? ankiAdapter(config.dbPath, { tokenKey: config.anki.tokenKey, collectionsDir: join(dataDir, "anki") }, clock, {
       python: config.anki.python,
+      raiseOperatorAlert: alerts.raise,
     })
   : config.production
     ? null
@@ -85,6 +99,9 @@ const core = createPactCore({
   dbPath: config.dbPath,
   clock,
   notifier: webPushNotifier({ ...config.vapid, subject: `mailto:${config.operatorEmail}` }, clock),
+  mailer,
+  appUrl: config.auth.url,
+  raiseOperatorAlert: alerts.raise,
   ouraSource: oura ?? unavailableOura,
   ankiSource: anki ?? unavailableAnki,
   photoStore:
@@ -106,6 +123,7 @@ const {
 await migrate();
 
 // Before the first tick, so the alert reports the restored database's last tick, not this boot's.
+// It waits for the push's delivery but not the email, which shutdown waits for.
 if (config.restored) await core.raiseRestoreAlert();
 
 const scheduler = startScheduler(core, clock);
@@ -141,6 +159,12 @@ async function shutdown(signal: string): Promise<void> {
     new Promise<void>((resolve) => setTimeout(resolve, 5000).unref()),
   ]);
   await scheduler.stop();
+  // An email still sending (an operator alert, a daily summary) gets a few seconds, so it isn't lost mid-send,
+  // but can't hold up the stop. A daily summary cut off is tried again by the next run's tick.
+  await Promise.race([
+    Promise.all([alerts.settled(), core.emailsSettled()]),
+    new Promise<void>((resolve) => setTimeout(resolve, 3000).unref()),
+  ]);
   await core.close();
   oura?.close();
   anki?.close();

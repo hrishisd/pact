@@ -432,7 +432,7 @@ The prototype settled these screens first. Where the app on `main` differs from 
 - **Photo upload evidence kind:** a separate kind, alongside Camera, where the owner picks a photo from the library (e.g. a screenshot from another app). Camera stays live-capture only, opening the camera directly.
 - **Vacation:** being designed in `../vacation/spec.md`.
 - **Getting overdue bills paid:** v0 only notifies reviewers (when a bill first goes overdue, then weekly). Something with more social weight could follow, such as a text to the reviewer or a friend. The mechanism isn't designed yet.
-- **Email notifications:** a second Notifier channel, for reviewers who won't remember to open the app and for operator alerts, which survive a database restore better by email than by push.
+- **Email notifications:** built as the opt-in daily summary and operator alert emails (`../email-notifications/spec.md`; rules in `docs/behaviour.md`, "Notifications and reminders").
 - **Text messages** (a rough idea that needs refining before it's built). Prompted by a reviewer who's happy to review but won't remember to open the app. Two possible stages:
   1. SMS reminders for owners, and SMS nudges for reviewers that link straight to the review item.
   2. Answering a review item by text, with Y/N or a comment.

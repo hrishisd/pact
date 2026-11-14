@@ -1,9 +1,10 @@
 // The scenario harness: every core test is written with it.
 //
 // A scenario is one Pact core on its own temporary SQLite file (production
-// pragmas, WAL), with fakes for the five ports. Tests act as named accounts,
+// pragmas, WAL), with fakes for the six ports. Tests act as named accounts,
 // issue commands, move time with `advanceTo`, and assert only on query
-// results, on what `s.notifier` recorded, and on `s.logs`. Never on storage.
+// results, on what `s.notifier` and `s.mailer` recorded, and on `s.logs`.
+// Never on storage.
 //
 // TIME STRINGS. Wherever the harness takes a time, "Mon 18:00" means that
 // wall-clock time in America/New_York during the reference week
@@ -28,8 +29,16 @@ import { onTestFinished } from "vitest";
 import { wallTime } from "../calendar.ts";
 import { addDays } from "../../shared/calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
+import { operatorAlerts, type OperatorAlerts } from "../operator-alerts.ts";
 import type { AccountId, ChangePactResult, LocalDate, SignInResult } from "../../shared/types.ts";
-import { FakeAnkiSource, FakeClock, FakeOuraSource, InMemoryPhotoStore, RecordingNotifier } from "./fakes.ts";
+import {
+  FakeAnkiSource,
+  FakeClock,
+  FakeOuraSource,
+  InMemoryPhotoStore,
+  RecordingMailer,
+  RecordingNotifier,
+} from "./fakes.ts";
 import { SourceWatch, VerdictCheck } from "./verdict-check.ts";
 
 /** A named account. Every AccountView query and command, plus its id. */
@@ -56,6 +65,15 @@ export interface Scenario {
   readonly core: PactCore;
   readonly clock: FakeClock;
   readonly notifier: RecordingNotifier;
+  readonly mailer: RecordingMailer;
+  /** The operator's address, OPERATOR_EMAIL: where operator alert emails go. */
+  readonly operatorEmail: string;
+  /**
+   * The operator alert path the core has, to `mailer` and `logs`, for the Oura
+   * and Anki adapters too. `advanceTo` waits for its emails, and the tick's
+   * own; after anything else, `settled()` does.
+   */
+  readonly operatorAlerts: OperatorAlerts;
   readonly ouraSource: FakeOuraSource;
   readonly ankiSource: FakeAnkiSource;
   readonly photoStore: InMemoryPhotoStore;
@@ -94,16 +112,24 @@ const TIMEZONE = "America/New_York";
 const REFERENCE_WEEK_MONDAY = "2026-01-05";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 const OPERATOR = "owner";
+/** Where the app is: links in emails start with it. */
+const APP_URL = "https://pact.example.test";
 
 export function scenario(): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "pact-test-"));
   const dbPath = join(dir, "pact.db");
   const clock = new FakeClock(at("Mon 09:00"));
   const notifier = new RecordingNotifier();
+  const mailer = new RecordingMailer();
+  const logs: string[] = [];
+  const alerts = operatorAlerts({
+    mailer,
+    operatorEmail: emailFor(OPERATOR),
+    log: (line) => logs.push(line),
+  });
   const ouraSource = new FakeOuraSource();
   const ankiSource = new FakeAnkiSource();
   const photoStore = new InMemoryPhotoStore(clock);
-  const logs: string[] = [];
   // After every command and tick, judging's stored outcomes must be what verdictOf says (verdict-check.ts).
   const watch = new SourceWatch(clock);
   const verdicts = new VerdictCheck(dbPath, clock, watch);
@@ -117,6 +143,9 @@ export function scenario(): Scenario {
       dbPath,
       clock,
       notifier,
+      mailer,
+      appUrl: APP_URL,
+      raiseOperatorAlert: alerts.raise,
       ouraSource: watch.oura(ouraSource),
       ankiSource: watch.anki(ankiSource),
       photoStore,
@@ -161,6 +190,9 @@ export function scenario(): Scenario {
     },
     clock,
     notifier,
+    mailer,
+    operatorEmail: emailFor(OPERATOR),
+    operatorAlerts: alerts,
     ouraSource,
     ankiSource,
     photoStore,
@@ -186,6 +218,8 @@ export function scenario(): Scenario {
       clock.set(at(when));
       watch.tick(clock.now());
       await core.advanceTo(clock.now());
+      await core.emailsSettled();
+      await alerts.settled();
       verdicts.check();
     },
     setClockTo(when) {

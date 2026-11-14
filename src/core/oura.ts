@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { openWithPragmas, type Db } from "./db.ts";
 import { secretBox, type SecretBox } from "./secret-box.ts";
 import type { AccountId } from "../shared/types.ts";
+import type { RaiseOperatorAlert } from "./operator-alerts.ts";
 import type { Clock, OuraDateRange, OuraSleepPeriod, OuraSleepResult, OuraSource } from "./ports.ts";
 
 export interface OuraClient {
@@ -36,8 +37,8 @@ export interface OuraAdapterOptions {
   timeoutMs?: number;
   /** For token requests: longer, since a refresh abandoned after Oura granted it can't be recovered. */
   tokenTimeoutMs?: number;
-  /** Where the adapter writes log lines (an OPERATOR_ALERT for a refresh token a lost answer spent). Default: console.log. */
-  log?: (line: string) => void;
+  /** The operator alert path (operator-alerts.ts), for a refresh token a lost answer spent. */
+  raiseOperatorAlert: RaiseOperatorAlert;
 }
 
 export interface OuraConnector {
@@ -80,7 +81,7 @@ export function ouraAdapter(
   dbPath: string,
   client: OuraClient,
   clock: Clock,
-  options: OuraAdapterOptions = {},
+  options: OuraAdapterOptions,
 ): OuraAdapter {
   return new Oura(openWithPragmas(dbPath), client, clock, options);
 }
@@ -121,7 +122,7 @@ class Oura implements OuraAdapter {
   readonly #urls: { authorizeUrl: string; tokenUrl: string; apiBase: string };
   readonly #timeoutMs: number;
   readonly #tokenTimeoutMs: number;
-  readonly #log: (line: string) => void;
+  readonly #raiseOperatorAlert: RaiseOperatorAlert;
   readonly #box: SecretBox;
   /** Refreshes in progress, by account: a second caller waits for the first's result. */
   readonly #refreshing = new Map<AccountId, Promise<Tokens | null>>();
@@ -138,7 +139,7 @@ class Oura implements OuraAdapter {
     };
     this.#timeoutMs = options.timeoutMs ?? DEFAULTS.timeoutMs;
     this.#tokenTimeoutMs = options.tokenTimeoutMs ?? DEFAULTS.tokenTimeoutMs;
-    this.#log = options.log ?? console.log;
+    this.#raiseOperatorAlert = options.raiseOperatorAlert;
     this.#box = secretBox(client.tokenKey, "Oura token key");
   }
 
@@ -254,11 +255,13 @@ class Oura implements OuraAdapter {
       const latest = this.#load(account);
       if (latest && latest.generation !== current.generation) return latest;
       if (!tokens && latest?.refreshOutcomeUnknownAt) {
-        this.#log(
-          `OPERATOR_ALERT Oura refresh token for account ${account} was refused after a refresh at ` +
+        this.#raiseOperatorAlert({
+          title: "Oura refresh token refused",
+          text:
+            `Oura refresh token for account ${account} was refused after a refresh at ` +
             `${latest.refreshOutcomeUnknownAt} got no answer; that lost answer most likely spent it, ` +
             `so the owner has to reconnect Oura`,
-        );
+        });
         this.#db
           .prepare(`UPDATE oura_token SET refresh_outcome_unknown_at = NULL WHERE account_id = ? AND generation = ?`)
           .run(account, current.generation);

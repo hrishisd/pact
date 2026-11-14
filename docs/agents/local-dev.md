@@ -44,6 +44,10 @@ Development only: `GET /api/dev/sign-in` signs in and redirects. It doesn't exis
 - To switch person in one browser, visit the URL for the other person; the new session cookie replaces the old one.
 - With curl, keep a cookie jar in your scratchpad: `curl -c JAR "http://localhost:5173/api/dev/sign-in?as=operator"`, then `curl -b JAR http://localhost:5173/api/me`.
 
+## Email without Gmail
+
+Without `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` set, development sends no email: the server logs each one instead (`devMailer` in `src/core/gmail.ts`), as `email not sent (development, no Gmail account): to <address>, "<subject>"` followed by the body, in the server log below. So local development needs no Gmail account. Production refuses to start without them. To try real sending, set both to the Pact Gmail account's address and an app password.
+
 ## Anki without AnkiWeb
 
 Without `ANKI_TOKEN_KEY` set, development uses a stand-in for AnkiWeb (`devAnki` in `src/core/anki.ts`), as Oura has one:

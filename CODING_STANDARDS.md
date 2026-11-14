@@ -7,7 +7,7 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 - Domain decisions live in `src/core/`, behind the command/query interface the server calls as an account (`core.as(id)`). The server translates HTTP to core calls and back; the client renders what the core returns. A rule decided in a route or a component is a finding.
 - Commands are async and all-or-nothing: one SQLite transaction (`#command`). Anything a command sends goes into the outbox inside that transaction and is delivered after commit, never sent directly.
 - Queries are synchronous reads and never write. `photo` is the one async query, because the photo store is.
-- Outside effects go through the five ports (Clock, OuraSource, AnkiSource, Notifier, PhotoStore). New outside effects get a port with a fake in `src/core/testing/`.
+- Outside effects go through the six ports (Clock, OuraSource, AnkiSource, Notifier, Mailer, PhotoStore). New outside effects get a port with a fake in `src/core/testing/`.
 
 ## Results and errors
 
@@ -44,4 +44,5 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 - `src/server/pages.ts` has its own hex colours: those pages are plain HTML with no shared stylesheet.
 - Light theme only.
 - `Notification.recipient` is the account being notified, and predates the glossary's Recipient (a penalty's payee, never notified). The type makes clear which one it is.
+- Operator alert emails skip the outbox on purpose (`operator-alerts.ts`): the outbox lives in the database, and the restore alert must reach the operator after a restore from an old backup, when the database may have lost the operator's push subscription and the queued rows. They're sent at once, not waited for, and a failed one is logged, not retried.
 - The photo bytes route (`GET /api/photos/:id`) answers 404 for a photo the account may not see, not a 200 refusal: an `<img>` can't read a refusal body. The core still returns `photo-not-found`.

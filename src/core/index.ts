@@ -5,6 +5,8 @@ export { offsetClock, systemClock, type DevClock } from "./adapters.ts";
 export { devOura, ouraAdapter, unavailableOura, type OuraAdapter, type OuraConnector } from "./oura.ts";
 export { ankiAdapter, devAnki, unavailableAnki, type AnkiAdapter, type AnkiConnector } from "./anki.ts";
 export { webPushNotifier } from "./web-push.ts";
+export { devMailer, gmailMailer } from "./gmail.ts";
+export { operatorAlerts } from "./operator-alerts.ts";
 export { localDiskPhotoStore, r2PhotoStore, type R2Bucket } from "./photo-stores.ts";
 export type * from "./ports.ts";
 export type * from "../shared/types.ts";

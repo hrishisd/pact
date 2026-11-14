@@ -10,6 +10,7 @@ import { describe, expect, test } from "vitest";
 import { WEEKDAYS, type NewPact } from "../shared/types.ts";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { failOnCall } from "./testing/fakes.ts";
 import { scenario, type AccountHandle, type Scenario } from "./testing/scenario.ts";
 import { cards, changed, ok, pactOf } from "./testing/queries.ts";
 
@@ -317,6 +318,28 @@ describe("after downtime", () => {
         url: "/",
       },
     ]);
+    expect(s.mailer.sent).toEqual([
+      {
+        to: "owner@example.test",
+        subject: "Pact operator alert: reminders dropped after downtime",
+        text: "dropped 2 reminders more than 15 minutes late after downtime\n",
+      },
+    ]);
+  });
+
+  test("a failed email is logged, and the log line and the push still go", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    await createPact("Gym", MON_WED_FRI, { reminders: ["18:00"] });
+    await s.advanceTo("Mon 17:50");
+    failOnCall(s.mailer, "send", 1, new Error("connection refused"));
+
+    await s.advanceTo("Mon 18:20");
+
+    expect(s.mailer.sent).toEqual([]);
+    expect(s.logs).toContainEqual(expect.stringMatching(/^OPERATOR_ALERT dropped 1 reminder /));
+    expect(s.logs).toContainEqual(expect.stringMatching(/^operator alert email .* failed.*connection refused/));
+    expect(s.notifier.sentTo(owner, "operator-alert")).toHaveLength(1);
   });
 
   test("advancing from 17:50 to 18:10 sends it", async () => {
@@ -341,6 +364,7 @@ describe("after downtime", () => {
 
     expect(s.notifier.sentTo(owner, "operator-alert")).toEqual([]);
     expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([]);
+    expect(s.mailer.sent).toEqual([]);
   });
 });
 

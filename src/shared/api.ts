@@ -12,6 +12,7 @@ import type {
   AddReviewersResult,
   AskOwnerResult,
   ClockTime,
+  DailySummarySetting,
   DatedReminder,
   EvidenceResult,
   PaymentResult,
@@ -257,6 +258,8 @@ export const API_PATHS = {
   ledger: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}` as const,
   payments: <T extends string>(recipientId: T) => `/api/ledgers/${recipientId}/payments` as const,
   notifications: "/api/notifications",
+  /** POST `{ enabled }`: turns the daily summary email on or off. */
+  dailySummary: "/api/notifications/daily-summary",
   pushSubscriptions: "/api/push-subscriptions",
 } as const;
 
@@ -492,9 +495,10 @@ export type LedgerResponse = Json<LedgerResult>;
 export type RecordPaymentRequest = Omit<NewPayment, "recipientId">;
 export type RecordPaymentResponse = Json<RecordPaymentResult>;
 
-/** GET /api/notifications: the account's settings, and the key a browser subscribes with. */
+/** GET /api/notifications: the account's settings, the daily summary's, and the key a browser subscribes with. */
 export interface NotificationsResponse {
   settings: NotificationSettingState[];
+  dailySummary: DailySummarySetting;
   vapidPublicKey: string;
 }
 
@@ -504,6 +508,12 @@ export interface SetNotificationSettingRequest {
   enabled: boolean;
 }
 export type SetNotificationSettingResponse = Json<NotificationSettingState[]>;
+
+/** POST /api/notifications/daily-summary: turns the daily summary on or off. Answers with its setting. */
+export interface SetDailySummaryRequest {
+  enabled: boolean;
+}
+export type SetDailySummaryResponse = Json<DailySummarySetting>;
 
 /**
  * POST /api/push-subscriptions: this device gets this account's notifications.

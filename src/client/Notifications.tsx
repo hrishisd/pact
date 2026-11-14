@@ -1,8 +1,9 @@
 // Turning notifications on (story 3) and choosing which ones you get (story 88):
-// an alert above Today, the page it opens, and the profile's Notifications section.
+// an alert above Today, the page it opens, and the profile's Notifications
+// section, with the daily summary email in an Email section below it.
 
 import { useState } from "react";
-import type { NotificationSetting, NotificationSettingState } from "../shared/types.ts";
+import type { DailySummarySetting, NotificationSetting, NotificationSettingState } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
 import { AddIcon, ShareIcon } from "./icons.tsx";
 import { deviceName, isIos, type Push } from "./push.ts";
@@ -200,7 +201,10 @@ function Guide({ push: { state, turnOn }, onDone }: { push: Push; onDone: () => 
   }
 }
 
-/** The profile's section: this device's state, then one switch per kind, grouped in one block. */
+/**
+ * The profile's section: this device's state, then one switch per kind,
+ * grouped in one block. Below it, the Email section.
+ */
 export function NotificationsSection({ push: { state }, onSetUp }: { push: Push; onSetUp: () => void }) {
   const { state: load } = useLoad(api.notifications);
   const data = loadedData(load);
@@ -217,40 +221,92 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
       setChanged(await api.setNotificationSetting({ setting, enabled }));
     } catch (cause) {
       setChanged(settings);
-      setError(`Couldn't save. ${failureText(cause, "Check your connection and try again.")}`);
+      setError(saveFailureText(cause));
+    }
+  };
+
+  return (
+    <>
+      <section className="stack">
+        <div className="label">Notifications</div>
+        <DeviceLine state={state} onSetUp={onSetUp} />
+        {failed && <p className="muted small">Notification settings couldn't load.</p>}
+        {settings && (
+          <>
+            <div className="list">
+              {settings.map(({ setting, enabled }) => (
+                <SwitchRow
+                  key={setting}
+                  {...SETTING_COPY[setting]}
+                  checked={enabled}
+                  onChange={(on) => void toggle(setting, on)}
+                />
+              ))}
+            </div>
+            {error && <p className="error">{error}</p>}
+            <p className="muted small">These apply to all your devices. Reminders are set on each pact.</p>
+          </>
+        )}
+      </section>
+      {data && <EmailSection loaded={data.dailySummary} />}
+    </>
+  );
+}
+
+/** The daily summary's one switch, and the address it goes to. */
+function EmailSection({ loaded }: { loaded: DailySummarySetting }) {
+  const [changed, setChanged] = useState<DailySummarySetting | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const summary = changed ?? loaded;
+
+  const toggle = async (enabled: boolean) => {
+    setError(null);
+    setChanged({ ...summary, enabled });
+    try {
+      setChanged(await api.setDailySummary({ enabled }));
+    } catch (cause) {
+      setChanged(summary);
+      setError(saveFailureText(cause));
     }
   };
 
   return (
     <section className="stack">
-      <div className="label">Notifications</div>
-      <DeviceLine state={state} onSetUp={onSetUp} />
-      {failed && <p className="muted small">Notification settings couldn't load.</p>}
-      {settings && (
-        <>
-          <div className="list">
-            {settings.map(({ setting, enabled }) => (
-              <label key={setting} className="switch-row">
-                <span className="rt">
-                  <b>{SETTING_COPY[setting].label}</b>
-                  <small>{SETTING_COPY[setting].hint}</small>
-                </span>
-                <input
-                  className="switch"
-                  type="checkbox"
-                  role="switch"
-                  checked={enabled}
-                  onChange={(e) => void toggle(setting, e.target.checked)}
-                />
-              </label>
-            ))}
-          </div>
-          {error && <p className="error">{error}</p>}
-          <p className="muted small">These apply to all your devices. Reminders are set on each pact.</p>
-        </>
-      )}
+      <div className="label">Email</div>
+      <div className="list">
+        <SwitchRow
+          label="Daily summary"
+          hint="An email at 09:00 when items in your Review Queue, or reviewers' questions to you, have waited more than a day"
+          checked={summary.enabled}
+          onChange={(on) => void toggle(on)}
+        />
+      </div>
+      {error && <p className="error">{error}</p>}
+      <p className="muted small">Sent to {summary.to}, your Google address.</p>
     </section>
   );
+}
+
+function SwitchRow(props: { label: string; hint: string; checked: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className="switch-row">
+      <span className="rt">
+        <b>{props.label}</b>
+        <small>{props.hint}</small>
+      </span>
+      <input
+        className="switch"
+        type="checkbox"
+        role="switch"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.target.checked)}
+      />
+    </label>
+  );
+}
+
+function saveFailureText(cause: unknown): string {
+  return `Couldn't save. ${failureText(cause, "Check your connection and try again.")}`;
 }
 
 function DeviceLine({ state, onSetUp }: { state: Push["state"]; onSetUp: () => void }) {

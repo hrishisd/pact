@@ -1,4 +1,4 @@
-// Fakes for the five ports. Used only by tests.
+// Fakes for the six ports. Used only by tests.
 
 import type { AccountId } from "../../shared/types.ts";
 import type {
@@ -9,6 +9,8 @@ import type {
   AnkiSource,
   Clock,
   DeliveryReport,
+  Email,
+  Mailer,
   Notification,
   NotificationKind,
   NotificationOf,
@@ -102,6 +104,38 @@ export class RecordingNotifier implements Notifier {
     let release = () => {};
     this.#held = new Promise((resolve) => (release = resolve));
     return release;
+  }
+}
+
+/**
+ * Records every email it sends, in order. A send to an address `fail` named,
+ * or one `failOnCall` makes fail, rejects and is not recorded.
+ */
+export class RecordingMailer implements Mailer {
+  readonly sent: Email[] = [];
+  readonly #failing = new Set<string>();
+  #held: Promise<void> = Promise.resolve();
+
+  async send(email: Email): Promise<void> {
+    await this.#held;
+    if (this.#failing.has(email.to)) throw new Error(`injected failure: mail to ${email.to}`);
+    this.sent.push(structuredClone(email));
+  }
+
+  /** Sends stall, as a hung mail server's would, until the returned function is called. */
+  hold(): () => void {
+    let release = () => {};
+    this.#held = new Promise((resolve) => (release = resolve));
+    return release;
+  }
+
+  /** From now on (or until `recover`) sending to `address` fails. */
+  fail(address: string): void {
+    this.#failing.add(address);
+  }
+
+  recover(address: string): void {
+    this.#failing.delete(address);
   }
 }
 

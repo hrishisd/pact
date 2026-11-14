@@ -90,8 +90,9 @@ function checkWithCommand(command: string[], flyToml = FLY_TOML, path = TOOLS_PA
 }
 
 describe("check-fly-secrets", () => {
-  test("reads the required names from config.ts, photos included", () => {
+  test("reads the required names from config.ts, photos and Gmail included", () => {
     expect(requiredNames()).toContain("PHOTOS_BUCKET");
+    expect(requiredNames()).toEqual(expect.arrayContaining(["GMAIL_ADDRESS", "GMAIL_APP_PASSWORD"]));
     expect(requiredNames()).toContain("PACT_DB_PATH");
   });
 
