@@ -6,7 +6,9 @@
     "allow": [
       "Bash(scripts/prod-log.sh *)",
       "Bash(scripts/prod-db.sh *)",
-      "Bash(curl -sS https://pact.hrishisd.com/health)"
+      "Bash(curl -sS https://pact.hrishisd.com/health)",
+      "Bash(flyctl *)",
+      "Bash(fly *)"
     ],
     "deny": ["Read(./.env)", "Read(./.env.operator)"]
   },
