@@ -2,7 +2,7 @@
 
 Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
 
-Status: ready-for-agent
+Status: done
 
 Designed in a grilling session on 2026-11-13. Vocabulary follows `GLOSSARY.md`. Every decision below is settled. A prototype round on the same day trimmed two daily emails to one and settled the settings layout. The tickets under `issues/` will build it.
 

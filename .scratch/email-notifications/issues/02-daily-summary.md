@@ -1,6 +1,6 @@
 # 02 Daily summary: the setting, the email, and its retries
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: `../spec.md` stories 1 to 11 and 14, and the Implementation decisions sections "What is emailed", "Settings", "What an email says" and "Sending". The screens and email follow the prototype's round 2.

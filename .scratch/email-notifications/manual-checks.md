@@ -6,11 +6,11 @@ Things that need a real Gmail account, Fly secrets and a phone. Steps marked **(
 
 - [x] **(human)** Create an app password on the Gmail account Pact sends from. A new account made just for Pact was refused one ("The setting you are looking for is not available for your account"), so it's the operator's own account.
 - [x] **(human)** Store the address and the app password as Fly secrets `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` (`fly secrets set ... --stage`). Production refuses to start without them, so the deploy's secrets check stops a deploy of ticket 01 until both are set.
-- [ ] Check that the Fly machine can reach `smtp.gmail.com` on port 587.
+- [x] Check that the Fly machine can reach `smtp.gmail.com` on port 587. Done 2026-11-14: a test email sent from the production machine with nodemailer through smtp.gmail.com:587 reached the operator's inbox.
 
 ## After the Gmail adapter lands
 
-- [ ] **(human)** An operator alert email arrives at the `OPERATOR_EMAIL` address in Gmail on the iPhone, and isn't in spam.
+- [x] **(human)** An operator alert email arrives at the `OPERATOR_EMAIL` address in Gmail on the iPhone, and isn't in spam. Done 2026-11-14 with a test email through the same Gmail account and path, to `OPERATOR_EMAIL`; no real alert has fired yet.
 
 ## After the daily summary lands
 

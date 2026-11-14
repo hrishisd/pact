@@ -1,6 +1,6 @@
 # 01 Operator alert emails: the email port, the Gmail adapter, and all four alerts by email
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: `../spec.md` stories 12 and 13, and the Implementation decisions sections "What is emailed" (operator alerts), "What an email says" (operator alert emails) and "Sending".
