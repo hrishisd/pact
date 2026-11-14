@@ -19,7 +19,7 @@ An opt-in **daily summary** email, and **operator alert emails**.
 
 - A person can turn on one email, the daily summary. It lists the items in their Review Queue that have waited more than 24 hours, and the reviewers' questions they have left unanswered that long. It goes at 09:00 in the account's timezone, the same moment as the existing daily pushes, and only when it has something to list. It is off to start with, and goes in addition to push, not instead of it.
 - Every operator alert also goes by email to the operator address in Fly secrets, sent straight from the server so that it doesn't depend on the database.
-- Pact sends from a Gmail account made just for Pact, through Gmail's mail server. The sending code sits behind its own port, so a provider such as Resend can replace it later.
+- Pact sends from the operator's own Gmail account, through Gmail's mail server. The sending code sits behind its own port, so a provider such as Resend can replace it later.
 
 Nothing else is emailed. This is not a full second channel.
 
@@ -67,7 +67,7 @@ Nothing else is emailed. This is not a full second channel.
 
 ### Sending
 
-- **A dedicated Gmail account**, made just for Pact, sends through Gmail's mail server (`smtp.gmail.com`, port 587) with an app password. The address and the app password live in Fly secrets. A dedicated account limits a leaked secret to that account: an app password opens the whole mailbox, not only sending. Replies from friends land in that account's inbox.
+- **The operator's own Gmail account** sends through Gmail's mail server (`smtp.gmail.com`, port 587) with an app password. The address and the app password live in Fly secrets. A dedicated account was the plan, since an app password opens the whole mailbox, not only sending, but Google refused app passwords on the new account (2026-11-14). The operator accepted the risk for about five users who all know them; the app password can be revoked on its own. Replies from friends land in the operator's inbox. Moving to a dedicated account changes only the secrets.
 - **Resend was the alternative** (a verified sending domain on `hrishisd.com`, whose DNS is on Cloudflare and has no mail records yet). It is deferred, not rejected: the port makes it a one-adapter change if Gmail delivery proves unreliable or lands in spam.
 - **A new port, not a wider `Notifier`.** `Notifier.deliver` takes push devices and reports expired endpoints, which email has no use for. Email gets its own port (a sketch: `send({ to, subject, text, html })`), with a Gmail adapter in `src/server` or `src/core/adapters.ts` and a fake in `src/core/testing/`, as `CODING_STANDARDS.md` asks for any outside effect.
 - **The daily summary goes through the outbox**, as one row per channel: the push row and the email row are separate, each checked against its own setting when it's queued. The outbox already has a `channel` column, always `'push'` so far.

@@ -58,7 +58,7 @@ export interface Config {
    */
   anki: { tokenKey: string; python: string } | null;
   /**
-   * The Gmail account made just for Pact that email is sent from, and its app
+   * The Gmail account email is sent from (today the operator's own), and its app
    * password. Required in production. Null in development without them: each
    * email is logged instead of sent (see devMailer).
    */

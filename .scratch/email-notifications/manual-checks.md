@@ -4,8 +4,8 @@ Things that need a real Gmail account, Fly secrets and a phone. Steps marked **(
 
 ## Before the first ticket
 
-- [ ] **(human)** Create a Gmail account just for Pact. Turn on 2-Step Verification, then create an app password for it.
-- [ ] **(human)** Store the address and the app password as Fly secrets `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` (`fly secrets set ... --stage`). Production refuses to start without them, so the deploy's secrets check stops a deploy of ticket 01 until both are set.
+- [x] **(human)** Create an app password on the Gmail account Pact sends from. A new account made just for Pact was refused one ("The setting you are looking for is not available for your account"), so it's the operator's own account.
+- [x] **(human)** Store the address and the app password as Fly secrets `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` (`fly secrets set ... --stage`). Production refuses to start without them, so the deploy's secrets check stops a deploy of ticket 01 until both are set.
 - [ ] Check that the Fly machine can reach `smtp.gmail.com` on port 587.
 
 ## After the Gmail adapter lands
