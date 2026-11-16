@@ -49,8 +49,9 @@ export function endTiming(ctx: CoreContext, pactId: string, now: Date): EndTimin
     pactId,
   )!;
   const today = localDateOf(now, timezone);
+  // A day either side as well: a move since may leave one open there, where it opened.
   const open = occurrencesOf(ctx, pactId, timezone)
-    .overlapping(addDays(today, -1), today)
+    .overlapping(addDays(today, -2), addDays(today, 1))
     .filter(
       (occurrence) =>
         occurrence.opensAt.getTime() <= now.getTime() &&

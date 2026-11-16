@@ -168,19 +168,10 @@ export class VerdictCheck {
    */
   #last: { readAt: string; now: Date; instants: number[]; tickedThrough: string | null } | null = null;
 
-  /**
-   * Whether a stored judging time may differ from the verdict's. Only the
-   * randomised test's runs with timezone changes set it: `verdictOf` works a
-   * due time out in the owner's timezone now, so after a move every day
-   * judged before it has another due time than the one it was judged at.
-   */
-  readonly #timesMayMove: boolean;
-
-  constructor(dbPath: string, clock: Clock, watch: SourceWatch, { timesMayMove = false } = {}) {
+  constructor(dbPath: string, clock: Clock, watch: SourceWatch) {
     this.#dbPath = dbPath;
     this.#clock = clock;
     this.#watch = watch;
-    this.#timesMayMove = timesMayMove;
   }
 
   /** Throws listing every mismatch not known. */
@@ -277,7 +268,7 @@ export class VerdictCheck {
           facts.automatic = { ...facts.automatic, recordedAt: answered ?? facts.automatic.finishedAt };
         }
         const verdict = verdictOf(facts, now);
-        const agreement = agrees(stored, verdict, facts, tickedThrough, now, this.#timesMayMove);
+        const agreement = agrees(stored, verdict, facts, tickedThrough, now);
         if (agreement === "waits-for-tick") waitsForTick();
         if (agreement === false) found.push({ pactId: pact.id, date, stored, verdict, facts });
       }
@@ -338,7 +329,6 @@ function agrees(
   facts: OccurrenceFacts,
   tickedThrough: Date | null,
   now: Date,
-  timesMayMove: boolean,
 ): boolean | "waits-for-tick" {
   if (!("at" in verdict)) return stored.outcome === null && stored.penalties.length === 0;
   if (stored.outcome === null && stored.penalties.length === 0) {
@@ -359,7 +349,7 @@ function agrees(
     return held ? "waits-for-tick" : false;
   }
   if (stored.outcome !== verdict.kind) return false;
-  if (!timesMayMove && stored.judgedAt?.getTime() !== verdict.at.getTime()) return false;
+  if (stored.judgedAt?.getTime() !== verdict.at.getTime()) return false;
   if (verdict.kind !== "missed") return stored.penalties.length === 0;
   return (
     stored.penalties.length === 1 &&

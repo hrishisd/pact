@@ -6,10 +6,8 @@
 //
 //   FUZZ_SEEDS=1000-1499 npx vitest run src/core/fuzz.test.ts
 //   FUZZ_SEEDS=1234 FUZZ_STEPS=400 npx vitest run src/core/fuzz.test.ts
-//   FUZZ_TIMEZONE_CHANGES=1 FUZZ_SEEDS=2000-2079 npx vitest run src/core/fuzz.test.ts
 //
-// The last adds timezone changes, which break invariants today (design
-// review ticket 39), so the fixed seeds leave them out.
+// A quarter of the seeds have people change their timezone during the run.
 //
 // A failure prints the seed, the invariant broken, and the shortest run found
 // that still breaks it, as what each action did. FUZZ_SHRINK=0 skips the

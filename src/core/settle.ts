@@ -4,6 +4,7 @@
 // nights and Anki checks all judge through here. A One-time pact Ends here,
 // through `endPact` (ending.ts).
 
+import { addDays } from "../shared/calendar.ts";
 import type { AccountId, EvidenceKind, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { endPact } from "./ending.ts";
@@ -147,10 +148,16 @@ export function settleAll(ctx: CoreContext, t: Date): void {
  */
 export function settlePactDueBy(ctx: CoreContext, pact: PactToJudge, t: Date): void {
   if (pact.evidence_kind === "oura") return;
-  settleBehindCursor(ctx, pact, t);
-  const due = occurrencesOf(ctx, pact.id, pact.timezone).dueAfter(pact.judged_through, t);
+  const occurrences = occurrencesOf(ctx, pact.id, pact.timezone);
+  const due = occurrences.dueAfter(pact.judged_through, t);
   let through: LocalDate | null = null;
+  // After a move east a day can be due before an older one is: judging gets to it, and the cursor
+  // waits before the older one.
+  let behind = pact.judged_through ?? addDays(occurrences.first.date, -1);
+  let waiting = false;
   for (const occurrence of due) {
+    waiting ||= occurrences.between(addDays(behind, 1), addDays(occurrence.date, -1)).length > 0;
+    behind = occurrence.date;
     const isAnki = pact.evidence_kind === "anki";
     if (isAnki && !isJudged(ctx, pact.id, occurrence.date)) {
       if (ankiCheckHolds(ctx, pact.id, occurrence.date, t)) break;
@@ -158,26 +165,7 @@ export function settlePactDueBy(ctx: CoreContext, pact: PactToJudge, t: Date): v
     } else {
       settle(ctx, pact.id, occurrence.date, t);
     }
-    through = occurrence.date;
+    if (!waiting) through = occurrence.date;
   }
   if (through !== null) ctx.db.prepare(`UPDATE pact SET judged_through = ? WHERE id = ?`).run(through, pact.id);
-}
-
-/**
- * Settles the pact's days behind its cursor that evidence still holds. A
- * decision settles such a day once it's past its due time, but an owner's
- * move west can put a due time the cursor went past back in the future; a
- * decision before then leaves the day for the tick at its new due time.
- */
-function settleBehindCursor(ctx: CoreContext, pact: PactToJudge, t: Date): void {
-  if (pact.judged_through === null) return;
-  const days = ctx.all<{ date: LocalDate }>(
-    `SELECT DISTINCT evidence.occurrence_date AS date FROM evidence
-       LEFT JOIN occurrence ON occurrence.pact_id = evidence.pact_id AND occurrence.date = evidence.occurrence_date
-       WHERE evidence.pact_id = ? AND evidence.occurrence_date <= ? AND occurrence.outcome IS NULL
-       ORDER BY date`,
-    pact.id,
-    pact.judged_through,
-  );
-  for (const { date } of days) settle(ctx, pact.id, date, t);
 }

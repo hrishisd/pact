@@ -220,7 +220,8 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
   const today = localDateOf(now, timezone);
   // Nights the owner needn't hear about: judged, or with an excuse filed (a waiting vacation keeps them).
   const open = (night: Occurrence) => occurrenceView(ctx, pact.id, night).toDo;
-  const nights = between(addDays(today, -2), today);
+  // After a move west, a night open in the timezone moved from may be dated tomorrow here.
+  const nights = between(addDays(today, -2), addDays(today, 1));
   // Tonight: the night open now whose deadline hasn't passed. Past midnight that may be last night's.
   const tonight = nights.find(
     (night) => night.opensAt.getTime() <= now.getTime() && now.getTime() < night.dueAt.getTime() && open(night),
@@ -290,7 +291,7 @@ function ankiToday(
  * still needs evidence; Coming up before its first occurrence opens.
  */
 function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: Date): TodayPlacement | null {
-  const { first, openAt, dayDueAt } = occurrencesOf(ctx, pact.id, timezone);
+  const { first, openAt, dayDueAt, timezoneOn } = occurrencesOf(ctx, pact.id, timezone);
   const open = openAt(now);
   if (!open) {
     return now.getTime() < first.opensAt.getTime()
@@ -302,7 +303,8 @@ function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: 
   if (!occurrenceView(ctx, pact.id, open).toDo) return null;
   const { editWindowClosesAt } = pact;
   if (pact.terms.schedule.kind === "weekly-count") {
-    const today = localDateOf(now, timezone);
+    // The day it is where the week opened, which a move since leaves as it was.
+    const today = localDateOf(now, timezoneOn(open.date));
     const week = weekToDo(ctx, pact.id, open, today, dayDueAt(today)!, now);
     if (!week) return null;
     return {

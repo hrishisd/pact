@@ -72,10 +72,14 @@ function nightsWaiting(ctx: CoreContext, t: Date, owner?: AccountId): { pact: Pa
     const endedAt = pact.ended_at === null ? null : new Date(pact.ended_at);
     const until = endedAt !== null && endedAt.getTime() < t.getTime() ? endedAt : t;
     const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
-    // The window is on the clock the night closes on.
-    const offset = ouraOffset(ctx, pact.owner_account_id, timezone);
-    for (const night of occurrencesOf(ctx, pact.id, timezone).between(from, localDateOf(until, timezone))) {
-      if (nightStartsAt(night.date, timezone, offset).getTime() > t.getTime()) break;
+    const nights = occurrencesOf(ctx, pact.id, timezone);
+    // After a move west, a night open in the timezone moved from may be dated tomorrow here.
+    for (const night of nights.between(from, addDays(localDateOf(until, timezone), 1))) {
+      // The window is on the clock the night closes on, where it opened.
+      const zone = nights.timezoneOn(night.date);
+      if (nightStartsAt(night.date, zone, ouraOffset(ctx, pact.owner_account_id, zone)).getTime() > t.getTime()) {
+        continue;
+      }
       if (endedAt !== null && night.dueAt.getTime() > endedAt.getTime()) break;
       if (!isJudged(ctx, pact.id, night.date)) waiting.push({ pact, night });
     }
@@ -135,8 +139,9 @@ export async function fetchSleep(
  */
 export function pushNoOuraData(ctx: CoreContext, t: Date): void {
   for (const { pact, night } of nightsWaiting(ctx, t)) {
-    const offset = ouraOffset(ctx, pact.owner_account_id, pact.timezone);
-    if (t.getTime() < noOuraDataPushAt(night.date, pact.timezone, offset).getTime()) continue;
+    const zone = occurrencesOf(ctx, pact.id, pact.timezone).timezoneOn(night.date);
+    const offset = ouraOffset(ctx, pact.owner_account_id, zone);
+    if (t.getTime() < noOuraDataPushAt(night.date, zone, offset).getTime()) continue;
     if (t.getTime() >= night.closesAt.getTime() || isJudged(ctx, pact.id, night.date)) continue;
     if (!keepsToDo(coverOn(ctx, pact.id, night.date))) continue;
     const sent = ctx.db

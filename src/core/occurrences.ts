@@ -11,7 +11,7 @@ import {
   type Schedule,
 } from "../shared/types.ts";
 import { addDays, parseClockTime, parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
-import { localDateOf, mondayOf, startOfDay, wallTime, weekdayOf } from "./calendar.ts";
+import { laterDate, localDateOf, mondayOf, startOfDay, wallTime, weekdayOf } from "./calendar.ts";
 
 /** One occurrence's timing. */
 export interface Occurrence {
@@ -189,10 +189,13 @@ export interface Occurrences {
   dayDueAt(day: LocalDate): Date | null;
   /** Whether the pact has an occurrence dated `date`. */
   includes(date: LocalDate): boolean;
+  /** The timezone the occurrence whose period has the day `day` is worked out in (see `EarlierTimezone`). */
+  timezoneOn(day: LocalDate): string;
   /**
    * The occurrences dated after `date` (from the first occurrence, if null)
    * whose due time has come by `t`, oldest first: what judging at `t` still
-   * has to look at when it has been through `date`.
+   * has to look at when it has been through `date`. After a move east one
+   * can be due before an older one that isn't.
    */
   dueAfter(date: LocalDate | null, t: Date): Occurrence[];
   /** The pact's occurrences dated `from` to `to`, both included, oldest first. */
@@ -217,6 +220,33 @@ export function occurrences(terms: OccurrenceTerms, timezone: string, ouraOffset
 }
 
 /**
+ * A timezone the pact's owner had before a change: it applies to the pact's
+ * occurrences dated before `until`, the day after the day of the change
+ * there (or in the new timezone, if that's later), so an occurrence open or
+ * past keeps the timezone it opened in. A
+ * bedtime night there closes on `ouraOffset`'s clock, if there is one.
+ */
+export interface EarlierTimezone {
+  timezone: string;
+  until: LocalDate;
+  ouraOffset: OuraOffset;
+}
+
+/** The timezone an occurrence is worked out in, and the Oura clock a bedtime night there closes on. */
+type Zone = Omit<EarlierTimezone, "until">;
+
+/** A pact's zones over time: `earlier` ones, oldest first, then `current`. */
+interface Zones {
+  earlier: readonly EarlierTimezone[];
+  current: Zone;
+}
+
+/** The zone of the date `date`: the first earlier one it's dated before, else the current one. */
+function zoneOn({ earlier, current }: Zones, date: LocalDate): Zone {
+  return earlier.find((zone) => date < zone.until) ?? current;
+}
+
+/**
  * Terms a pact had before a change: they apply to its occurrences dated
  * before `until` ("YYYY-MM-DD"). A change starts new terms from the first
  * date not open yet. A One-time change applies to its one occurrence, so
@@ -225,36 +255,52 @@ export function occurrences(terms: OccurrenceTerms, timezone: string, ouraOffset
 export type EarlierTerms = RecurringTerms & { until: LocalDate };
 
 /**
- * The occurrences of a pact whose terms changed over time: each date follows
- * the first of `earlier` (oldest first) it's dated before, else `current`.
- * The first occurrence and end date are always `current`'s.
+ * The occurrences of a pact whose terms, or its owner's timezone, changed
+ * over time: each date follows the first of `earlier` (oldest first) it's
+ * dated before, else `current`, and is worked out in the first of
+ * `earlierTimezones` (oldest first) it's dated before, else `timezone`. A
+ * Weekly count week goes by its Monday. The first occurrence and end date
+ * are always `current`'s.
  */
 export function occurrencesOverTime(
   current: OccurrenceTerms,
   earlier: readonly EarlierTerms[],
   timezone: string,
   ouraOffset: OuraOffset = null,
+  earlierTimezones: readonly EarlierTimezone[] = [],
 ): Occurrences {
-  // One occurrence, which a change applies to even once it's open: only the current terms count.
-  if (hasSchedule(current, "one-time")) return oneTimeOccurrences(current, timezone);
+  const zones: Zones = { earlier: earlierTimezones, current: { timezone, ouraOffset } };
+  const timezoneOn = (date: LocalDate) => zoneOn(zones, date).timezone;
+  if (hasSchedule(current, "one-time")) {
+    // One occurrence, which a change applies to even once it's open: only the current terms count. With
+    // Submit anytime it opened when the pact was made, before every change of timezone since.
+    const { submitAnytime, deadline } = current.schedule;
+    return oneTimeOccurrences(
+      current,
+      submitAnytime ? (earlierTimezones[0]?.timezone ?? timezone) : timezoneOn(deadline),
+    );
+  }
   if (hasSchedule(current, "weekly-count")) {
     const weeks = sameKind(earlier, "weekly-count");
     const dueByOn = (date: LocalDate) => (weeks.find((terms) => date < terms.until) ?? current).dueBy;
-    return recurringOccurrences(current, timezone, {
+    return recurringOccurrences(current, zones, {
       periodOf: mondayOf,
       // For a day that isn't a Monday, its week's.
-      occurrence: (date) => weekOccurrence(mondayOf(date), timezone),
+      occurrence: (date) => weekOccurrence(mondayOf(date), timezoneOn(mondayOf(date))),
       scheduled: (date) => date === mondayOf(date),
-      dayDueAt: (day, week) => dueOnDay(day, dueByOn(week.date), timezone),
+      dayDueAt: (day, week) => dueOnDay(day, dueByOn(week.date), timezoneOn(week.date)),
       rollover: null,
     });
   }
   const days = sameKind(earlier, "fixed-days");
   const termsOn = (date: LocalDate) => days.find((terms) => date < terms.until) ?? current;
-  return recurringOccurrences(current, timezone, {
+  return recurringOccurrences(current, zones, {
     periodOf: (day) => day,
     // For a day that isn't an occurrence's, as one would be.
-    occurrence: (date) => fixedDaysOccurrence(date, timezone, termsOn(date).day, ouraOffset),
+    occurrence: (date) => {
+      const zone = zoneOn(zones, date);
+      return fixedDaysOccurrence(date, zone.timezone, termsOn(date).day, zone.ouraOffset);
+    },
     scheduled: (date) => termsOn(date).schedule.days.includes(weekdayOf(date)),
     dayDueAt: (_day, occurrence) => occurrence.dueAt,
     // An Anki pact keeps the rollover hour it was made with.
@@ -283,7 +329,7 @@ interface Periods {
   periodOf(day: LocalDate): LocalDate;
   /**
    * The occurrence dated `date`, or for a date that isn't one's, as one
-   * would be: due times then only grow with the date.
+   * would be: due times then only grow with the date, in one timezone.
    */
   occurrence(date: LocalDate): Occurrence;
   /** Whether the schedule has an occurrence dated `date`, before the end date is applied. */
@@ -294,10 +340,14 @@ interface Periods {
   rollover: number | null;
 }
 
-/** The occurrences of recurring `terms` whose periods fall as `periods` says, from their first occurrence to their end date. */
+/**
+ * The occurrences of recurring `terms` whose periods fall as `periods` says,
+ * from their first occurrence to their end date, each in the zone of its
+ * period's first day.
+ */
 function recurringOccurrences(
   terms: OccurrenceTerms,
-  timezone: string,
+  zones: Zones,
   { periodOf, occurrence, scheduled, dayDueAt, rollover }: Periods,
 ): Occurrences {
   const { schedule, firstOccurrence, endDate } = terms;
@@ -314,11 +364,19 @@ function recurringOccurrences(
   return {
     first: occurrence(firstOccurrence),
     openAt(t) {
-      const day = localDateOf(t, timezone);
-      if (rollover !== null && t.getTime() < wallTime(day, rollover, 0, timezone).getTime()) {
-        return covering(addDays(day, -1));
+      // The day it is at `t` in each zone, if that zone has it. After a move east the last day in
+      // the old timezone and the first in the new one are both open for some hours: the older
+      // one is the open one until it's due.
+      const open: Occurrence[] = [];
+      for (const zone of [...zones.earlier, zones.current]) {
+        let day = localDateOf(t, zone.timezone);
+        if (rollover !== null && t.getTime() < wallTime(day, rollover, 0, zone.timezone).getTime()) {
+          day = addDays(day, -1);
+        }
+        const found = zoneOn(zones, periodOf(day)) === zone ? covering(day) : null;
+        if (found !== null) open.push(found);
       }
-      return covering(day);
+      return open.find((o) => t.getTime() < o.dueAt.getTime()) ?? open.at(-1) ?? null;
     },
     covering,
     dayDueAt(day) {
@@ -326,13 +384,21 @@ function recurringOccurrences(
       return found && dayDueAt(day, found);
     },
     includes,
+    timezoneOn: (day) => zoneOn(zones, periodOf(day)).timezone,
     dueAfter(after, t) {
       const due: Occurrence[] = [];
       const start = after === null || after < firstOccurrence ? firstOccurrence : addDays(after, 1);
-      // Due times only grow with the date, so the first not due yet ends the list.
       for (let date = start; !ended(date); date = addDays(date, 1)) {
         const next = occurrence(date);
-        if (next.dueAt.getTime() > t.getTime()) return due;
+        if (next.dueAt.getTime() > t.getTime()) {
+          // Due times only grow with the date in one zone, so the first not due yet ends that zone's
+          // dates. A later zone, further east, may have some due before it.
+          const zone = zones.earlier.find((earlier) => periodOf(date) < earlier.until);
+          if (zone === undefined) return due;
+          // The loop goes on from `until`, or from the next day if a week from before it holds `until`.
+          date = laterDate(date, addDays(zone.until, -1));
+          continue;
+        }
         if (scheduled(date)) due.push(next);
       }
       return due;
@@ -360,6 +426,7 @@ function oneTimeOccurrences(terms: OneTimeTerms, timezone: string): Occurrences 
     covering,
     dayDueAt: (day) => covering(day)?.dueAt ?? null,
     includes: (date) => date === only.date,
+    timezoneOn: () => timezone,
     dueAfter: (after, t) =>
       (after === null || after < only.date) && only.dueAt.getTime() <= t.getTime() ? [only] : [],
     between,

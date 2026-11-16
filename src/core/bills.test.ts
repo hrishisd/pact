@@ -6,7 +6,14 @@
 import { describe, expect, onTestFinished, test } from "vitest";
 import { openWithPragmas } from "./db.ts";
 import { ownerWithOura } from "./testing/bedtime-pact.ts";
-import { fifteenOwed, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
+import {
+  EVERY_DAY,
+  fifteenOwed,
+  MON_WED_FRI,
+  ownerWithReviewers,
+  photo,
+  recordPayment,
+} from "./testing/camera-pact.ts";
 import { scenario, type AccountHandle } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
 
@@ -38,6 +45,38 @@ describe("Wednesday bills", () => {
       { kind: "on-bill", billedOn: s.date("Wed+1"), dueAt: s.at("Wed+2 18:00") },
       { kind: "on-bill", billedOn: s.date("Wed+1"), dueAt: s.at("Wed+2 18:00") },
     ]);
+  });
+
+  test("a move west across midnight after a Wednesday's bill makes no second bill for that Wednesday", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s, { timezone: "Asia/Tokyo" });
+    await createPact("Gym", EVERY_DAY);
+    // Wednesday+1 18:00 in Tokyo.
+    await s.advanceTo("Wed+1 04:00");
+    expect(s.notifier.sentTo(owner, "new-bill")).toHaveLength(1);
+
+    // 00:30 on Thursday in Tokyo, 10:30 on Wednesday in New York.
+    s.setClockTo("Wed+1 10:30");
+    await owner.setTimezone("America/New_York");
+    // Monday+1's penalty can't be excused after this, yet waits for the next Wednesday.
+    await s.advanceTo("Wed+1 18:00");
+    expect(s.notifier.sentTo(owner, "new-bill")).toHaveLength(1);
+
+    await s.advanceTo("Wed+2 18:00");
+    expect(s.notifier.sentTo(owner, "new-bill")).toHaveLength(2);
+  });
+
+  test("a move east across midnight before a Wednesday's bill time still makes that Wednesday's bill", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Wed+1 08:00");
+    expect(s.notifier.sentTo(owner, "new-bill")).toHaveLength(0);
+
+    // 22:00 on Wednesday in Tokyo: its 18:00 has passed.
+    await owner.setTimezone("Asia/Tokyo");
+    await s.advanceTo("Wed+1 08:01");
+    expect(s.notifier.sentTo(owner, "new-bill")).toHaveLength(1);
   });
 
   test("before its bill, a penalty says which Wednesday's bill it goes on", async () => {

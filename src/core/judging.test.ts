@@ -99,13 +99,13 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.today().alerts).toEqual([expect.objectContaining({ pactId: gym })]);
   });
 
-  test("evidence waiting when Monday ends in the owner's new timezone, rejected before Monday would have ended in the old one: Missed as of the rejection", async () => {
+  test("evidence waiting after a move east, rejected while Monday is still open where it opened: Missed as of the rejection", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 18:00");
     const evidenceId = await submit(owner, gym);
-    // In Kiritimati (UTC+14) Monday ended at Mon 05:00 New York time.
+    // In Kiritimati (UTC+14) it's Tuesday already; Monday stays New York's.
     await owner.setTimezone("Pacific/Kiritimati");
     await s.advanceTo("Mon 19:00");
 
@@ -118,19 +118,17 @@ describe("judging at the end of a scheduled day", () => {
     expect(owner.today().alerts).toEqual([expect.objectContaining({ pactId: gym, occurrenceDate: s.date("Mon") })]);
   });
 
-  test("evidence waiting when the tick passed Monday, approved after a move west put Monday's end back ahead: Satisfied when Monday ends in the new timezone", async () => {
+  test("evidence waiting when the tick passed Monday, approved after a move west: Satisfied at the approval, as Monday ended where it opened", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
     s.setClockTo("Mon 18:00");
     const evidenceId = await submit(owner, gym);
     await s.advanceTo("Tue 00:30");
-    // In Los Angeles Monday ends at Tue 03:00 New York time.
+    // Still Monday in Los Angeles.
     await owner.setTimezone("America/Los_Angeles");
     s.setClockTo("Tue 01:00");
     await reviewer.decide(evidenceId, { kind: "approve" });
-
-    await s.advanceTo("Tue 03:00");
 
     expect(statusOn(owner, gym, s.date("Mon"))).toBe("satisfied");
     expect(owner.ledgers()).toEqual([expect.objectContaining({ owedCents: 0 })]);

@@ -24,6 +24,8 @@ type Question = Extract<TodayAlert, { kind: "reviewer-question" }>;
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 /** The local hour the daily reminders go at. */
 const REMINDER_HOUR = 9;
+/** A day's 09:00 sends nothing that went less than this long before it: a move west brings 09:00 round sooner. */
+const MIN_GAP_MS = 12 * 60 * 60 * 1000;
 
 /**
  * For each account at `t`, once the day's 09:00 in its timezone has passed,
@@ -31,7 +33,8 @@ const REMINDER_HOUR = 9;
  * reviewer's question to it had gone unanswered that long: pushes the
  * reviewer reminder, pushes the owner reminder, and with the daily summary
  * on, queues the email listing both. At most one of each a local day,
- * restart or timezone change or not (`stale_notice`). Links in the email start with `appUrl`.
+ * restart or not (`stale_notice`), and none within 12 hours of the last,
+ * so a move west doesn't repeat it. Links in the email start with `appUrl`.
  */
 export function remindStale(ctx: CoreContext, t: Date, appUrl: string): void {
   const accounts = ctx.all<{ id: AccountId; email: string; timezone: string; daily_summary_on_at: string | null }>(
@@ -40,9 +43,11 @@ export function remindStale(ctx: CoreContext, t: Date, appUrl: string): void {
   for (const { id, email, timezone, daily_summary_on_at } of accounts) {
     const nine = latestReminderTime(t, timezone);
     const notice = staleNotice(ctx, id);
-    // By local date, not instant: a move to a timezone further west can't bring a second one the same day.
+    // By local date, not instant, and not within 12 hours: a move west can't bring a second one the same day,
+    // nor one a few hours after the last on the next day there.
     const today = localDateOf(nine, timezone);
-    const notYet = (at: Date | null) => at === null || localDateOf(at, timezone) < today;
+    const notYet = (at: Date | null) =>
+      at === null || (localDateOf(at, timezone) < today && nine.getTime() - at.getTime() >= MIN_GAP_MS);
     const due = {
       reviewer: notYet(notice.reviewerRemindedAt),
       owner: notYet(notice.ownerRemindedAt),

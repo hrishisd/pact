@@ -92,6 +92,22 @@ describe("the reviewer's daily reminder", () => {
     expect(s.notifier.sentTo(reviewer, "stale-review-items")).toEqual([]);
   });
 
+  test("no second one after a move west brings 09:00 round again on another date", async () => {
+    const s = scenario();
+    const { reviewer } = await gymEvidenceWaiting(s, "Mon 10:00");
+    await reviewer.setTimezone("Asia/Kolkata");
+    // 09:00 on Wednesday in Kolkata.
+    await s.advanceTo("Tue 22:30");
+    expect(s.notifier.sentTo(reviewer, "stale-review-items")).toHaveLength(1);
+
+    await reviewer.setTimezone("America/New_York");
+    await s.advanceTo("Wed 20:00");
+    expect(s.notifier.sentTo(reviewer, "stale-review-items")).toHaveLength(1);
+
+    await s.advanceTo("Thu 09:00");
+    expect(s.notifier.sentTo(reviewer, "stale-review-items")).toHaveLength(2);
+  });
+
   test("no second reminder the same day across a restart", async () => {
     const s = scenario();
     const { reviewer } = await gymEvidenceWaiting(s, "Mon 10:00");

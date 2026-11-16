@@ -907,4 +907,19 @@ export const migrations: readonly Migration[] = [
   ALTER TABLE outbox ADD COLUMN given_up_at TEXT;
   ALTER TABLE outbox ADD COLUMN sending INTEGER NOT NULL DEFAULT 0 CHECK (sending IN (0, 1));
   `,
+  // 37: the timezone an occurrence opened in
+  `
+  -- The timezones a pact's owner had before a change. Each still applies to
+  -- the pact's occurrences dated before \`until\`, the day after the day of
+  -- the change there (or in the new timezone, if that's later); the owner's
+  -- timezone now applies from the latest \`until\` on. So an occurrence open or past when the owner moves
+  -- keeps its due time and how it was judged. Changes made before this
+  -- moved every occurrence; they left no row.
+  CREATE TABLE pact_earlier_timezone (
+    pact_id TEXT NOT NULL REFERENCES pact (id),
+    until TEXT NOT NULL, -- "YYYY-MM-DD"
+    timezone TEXT NOT NULL, -- IANA zone
+    PRIMARY KEY (pact_id, until)
+  );
+  `,
 ];
