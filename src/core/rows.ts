@@ -18,13 +18,15 @@ import type {
   Recipient,
   Schedule,
 } from "../shared/types.ts";
-import { zoneOffsetAt } from "./calendar.ts";
+import { addDays } from "../shared/calendar.ts";
+import { laterDate, localDateOf, zoneOffsetAt } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import {
   hasSchedule,
   occurrencesOverTime,
   utcOffsetMs,
   type EarlierTerms,
+  type EarlierTimezone,
   type Occurrences,
   type OccurrenceTerms,
   type OneTimeTerms,
@@ -177,9 +179,44 @@ export function earlierTermsOf(ctx: CoreContext, pact: PactClock & Pick<PactRow,
 }
 
 /**
- * The occurrences of pact `pactId` in `timezone`, each dated one on the
- * terms it opened with. A bedtime night closes on Oura's clock where the
- * owner is (`ouraOffset`).
+ * The timezones `pact`'s owner had before each change since it was made,
+ * oldest first (`setTimezone`, accounts.ts), each with the Oura clock a
+ * bedtime night there closes on (`ouraOffset`).
+ */
+export function earlierTimezonesOf(
+  ctx: CoreContext,
+  pact: Pick<PactRow, "id" | "evidence_kind" | "owner_account_id">,
+): EarlierTimezone[] {
+  const rows = ctx.all<{ until: LocalDate; timezone: string }>(
+    `SELECT until, timezone FROM pact_earlier_timezone WHERE pact_id = ? ORDER BY until`,
+    pact.id,
+  );
+  return rows.map(({ until, timezone }) => ({
+    until,
+    timezone,
+    ouraOffset: pact.evidence_kind === "oura" ? ouraOffset(ctx, pact.owner_account_id, timezone) : null,
+  }));
+}
+
+/**
+ * The last day an occurrence of `pactId` may have opened by `at`: today in
+ * the owner's `timezone`, or after a move west, the day it still is in the
+ * timezone they moved from, whose occurrence is open and keeps that
+ * timezone. A change applies from the day after (`firstDayNotOpen`).
+ */
+export function lastDayOpened(ctx: CoreContext, pactId: string, timezone: string, at: Date): LocalDate {
+  const today = localDateOf(at, timezone);
+  const latest = ctx.one<{ until: LocalDate }>(
+    `SELECT until FROM pact_earlier_timezone WHERE pact_id = ? ORDER BY until DESC LIMIT 1`,
+    pactId,
+  );
+  return latest === undefined ? today : laterDate(today, addDays(latest.until, -1));
+}
+
+/**
+ * The occurrences of pact `pactId` with its owner now in `timezone`, each
+ * dated one on the terms it opened with, in the timezone it opened in. A
+ * bedtime night closes on Oura's clock where the owner is (`ouraOffset`).
  */
 export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string): Occurrences {
   const pact = ctx.one<
@@ -204,7 +241,8 @@ export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string
   );
   if (!pact) throw new Error(`no pact ${pactId}`);
   const offset = pact.evidence_kind === "oura" ? ouraOffset(ctx, pact.owner_account_id, timezone) : null;
-  return occurrencesOverTime(occurrenceTermsOf(pact), earlierTermsOf(ctx, pact), timezone, offset);
+  const terms = occurrenceTermsOf(pact);
+  return occurrencesOverTime(terms, earlierTermsOf(ctx, pact), timezone, offset, earlierTimezonesOf(ctx, pact));
 }
 
 /**

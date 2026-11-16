@@ -138,7 +138,7 @@ export function setupOf(seed: number): Setup {
     start: STARTS[next() % STARTS.length]!,
     timezones: [zone(), zone(), zone()],
     outages: next() % 4 === 0,
-    timezoneChanges: next() % 4 === 0 && process.env.FUZZ_TIMEZONE_CHANGES === "1",
+    timezoneChanges: next() % 4 === 0,
     automatic: next() % 3 !== 0,
   };
 }
@@ -193,7 +193,7 @@ export class World {
   #names = 0;
 
   constructor(setup: Setup, { manyTicks = false } = {}) {
-    this.s = scenario({ judgingTimesMayMove: setup.timezoneChanges });
+    this.s = scenario();
     this.setup = setup;
     this.#manyTicks = manyTicks;
     this.checks = new Checks(this);

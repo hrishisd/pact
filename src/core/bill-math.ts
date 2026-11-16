@@ -86,6 +86,13 @@ export function billDays(from: Date, to: Date, timezone: string): LocalDate[] {
   return days;
 }
 
+/** The latest Wednesday whose bill time in `timezone` is by `at`: the last one billing at `at` has been through. */
+export function lastBillDay(at: Date, timezone: string): LocalDate {
+  let date = localDateOf(at, timezone);
+  while (weekdayOf(date) !== "wed" || billInstant(date, timezone).getTime() > at.getTime()) date = addDays(date, -1);
+  return date;
+}
+
 /**
  * The Wednesday whose bill a penalty whose excuse window opens at
  * `windowOpens` goes on, if nothing excuses it: the first bill time after

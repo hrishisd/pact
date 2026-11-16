@@ -19,6 +19,9 @@ import type {
   SetTimezoneResult,
   SignInResult,
 } from "../shared/types.ts";
+import { addDays } from "../shared/calendar.ts";
+import { billInstant, lastBillDay } from "./bill-math.ts";
+import { laterDate, localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { notificationSettings } from "./outbox.ts";
 import { isPushDevice } from "./push-devices.ts";
@@ -60,10 +63,47 @@ export function accountIdForEmail(ctx: CoreContext, email: string): AccountId | 
   return row?.id ?? null;
 }
 
+/**
+ * Moves the account to `timezone`. It applies only to the occurrences of
+ * the account's pacts that haven't opened: each pact keeps the old timezone
+ * for those dated before the day after today there, or today in the new one
+ * if that's later (`pact_earlier_timezone`; a second change that day keeps
+ * the first one's). Everything else, from reminders to what today is,
+ * follows the new one at once; billing goes on from the last Wednesday
+ * billed, so no Wednesday is billed twice or skipped.
+ */
 export function setTimezone(ctx: CoreContext, accountId: AccountId, timezone: string): SetTimezoneResult {
   const zone = canonicalTimezone(timezone);
   if (zone === null) return { ok: false, reason: "invalid-timezone" };
-  ctx.db.prepare(`UPDATE account SET timezone = ? WHERE id = ?`).run(zone, accountId);
+  const account = ctx.one<{ timezone: string; created_at: string; billed_through: string | null }>(
+    `SELECT timezone, created_at, billed_through FROM account WHERE id = ?`,
+    accountId,
+  );
+  if (!account) throw new UnknownAccountError(accountId);
+  const before = account.timezone;
+  if (zone === before) return { ok: true, timezone: zone };
+  const now = ctx.clock.now();
+  // Every date before `until` keeps the old timezone, every date from it takes the new one, so no
+  // date is in both or neither. Today in the old timezone has opened, so it's before. So is today
+  // in the new one, after a move east: it hasn't opened in the old timezone, but taking the new
+  // one would open it before the move and could make it due already. Every date from `until`
+  // opens after the move. After a move east the old today and the next day, in the new timezone,
+  // can be open together: the older is the open one until it's due (`openAt`). After a move west
+  // the old today may be tomorrow in the new timezone, and stays open in the old one
+  // (`lastDayOpened`, rows.ts).
+  const until = addDays(laterDate(localDateOf(now, before), localDateOf(now, zone)), 1);
+  ctx.db
+    .prepare(
+      `INSERT INTO pact_earlier_timezone (pact_id, until, timezone)
+       SELECT id, ?, ? FROM pact WHERE owner_account_id = ?
+         AND NOT EXISTS (SELECT 1 FROM pact_earlier_timezone AS earlier WHERE earlier.pact_id = pact.id AND earlier.until >= ?)`,
+    )
+    .run(until, before, accountId, until);
+  const billedThrough = new Date(account.billed_through ?? account.created_at);
+  const lastBilled = billInstant(lastBillDay(billedThrough, before), zone);
+  ctx.db
+    .prepare(`UPDATE account SET timezone = ?, billed_through = ? WHERE id = ?`)
+    .run(zone, lastBilled.toISOString(), accountId);
   return { ok: true, timezone: zone };
 }
 

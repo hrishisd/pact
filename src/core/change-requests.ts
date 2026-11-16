@@ -33,14 +33,7 @@ import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } 
 import type { CoreContext } from "./context.ts";
 import { uncoverRemovedDays } from "./covers.ts";
 import { endAfter, endPact, endTiming } from "./ending.ts";
-import {
-  dueSoonEnough,
-  hasSchedule,
-  lastDayOf,
-  occurrences,
-  occurrencesOverTime,
-  type Occurrences,
-} from "./occurrences.ts";
+import { dueSoonEnough, hasSchedule, lastDayOf, occurrencesOverTime, type Occurrences } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import {
   checkedName,
@@ -68,7 +61,9 @@ import {
   accountRow,
   ankiDeckName,
   earlierTermsOf,
+  earlierTimezonesOf,
   friendsSortedByName,
+  lastDayOpened,
   occurrencesOf,
   occurrenceTermsOf,
   ownPact,
@@ -464,7 +459,7 @@ export function checkedChange(
   if (checked.terms.schedule.kind === "one-time" && !deadlineFarEnough(ctx, pact, zone, after, now)) {
     return { ok: false, reason: "deadline-too-soon" };
   }
-  const reason = openOccurrencesRefusal(pact.first_occurrence, before, after, localDateOf(now, zone));
+  const reason = openOccurrencesRefusal(pact.first_occurrence, before, after, lastDayOpened(ctx, pact.id, zone, now));
   if (reason !== null) return { ok: false, reason };
   return {
     ok: true,
@@ -521,10 +516,11 @@ export function startOfNewTerms(
 ): ChangeStart {
   // One-time: the change applies to its one occurrence, open or not.
   if (after.schedule.kind === "one-time") return { appliesFrom: after.schedule.deadline, todayKeepsCents: null };
-  const today = localDateOf(at, timezone);
+  const today = lastDayOpened(ctx, pact.id, timezone, at);
   const from = firstDayNotOpen(after.schedule, today);
   const current = occurrenceTermsOf(pact);
   const earlier = earlierTermsOf(ctx, pact);
+  const zones = earlierTimezonesOf(ctx, pact);
   const firstOccurrence = firstOccurrenceAfterChange(pact.first_occurrence, after.schedule, from, after.startDate);
   // A schedule keeps its kind once its edit window has closed, so the terms in force now are on a recurring schedule too.
   if (hasSchedule(current, "one-time")) throw new Error(`pact ${pact.id} is One-time, but its change isn't`);
@@ -537,10 +533,13 @@ export function startOfNewTerms(
     { ...changed, firstOccurrence, endDate: after.endDate },
     planned,
     timezone,
+    null,
+    zones,
   ).between(from, addDays(start, 7));
+  const scheduled = occurrencesOverTime(current, earlier, timezone, null, zones);
   return {
     appliesFrom: first?.date ?? from,
-    todayKeepsCents: todayKeeps(ctx, pact.id, occurrencesOverTime(current, earlier, timezone), today, after),
+    todayKeepsCents: todayKeeps(ctx, pact.id, scheduled, today, after),
   };
 }
 
@@ -553,8 +552,7 @@ export function startOfNewTerms(
  */
 export function applyTerms(ctx: CoreContext, pact: PactRow, after: ChangeableTerms, at: Date, timezone: string): void {
   if (after.schedule.kind === "one-time") return applyOneTimeTerms(ctx, pact, after);
-  const today = localDateOf(at, timezone);
-  const from = firstDayNotOpen(after.schedule, today);
+  const from = firstDayNotOpen(after.schedule, lastDayOpened(ctx, pact.id, timezone, at));
   // A change already made today put the terms today keeps there first.
   ctx.db
     .prepare(
@@ -633,9 +631,12 @@ export function deadlineFarEnough(
 ): boolean {
   const current = occurrencesOf(ctx, pact.id, timezone).first;
   const terms = scheduleTermsOf(pact, after.schedule, pact.in_bed_by, after.dueBy);
-  const changed = occurrences(
+  const changed = occurrencesOverTime(
     { ...terms, firstOccurrence: pact.first_occurrence, endDate: pact.end_date },
+    [],
     timezone,
+    null,
+    earlierTimezonesOf(ctx, pact),
   ).first;
   return changed.dueAt.getTime() === current.dueAt.getTime() || dueSoonEnough(changed, at);
 }

@@ -359,12 +359,13 @@ export function evidenceAcceptance(
   const { kind } = scheduleOf(row.schedule);
   const occurrences = occurrencesOf(ctx, pactId, timezone);
   const occurrence = occurrences.openAt(at);
+  if (!occurrence) return { ok: false, reason: "not-open" };
+  // The day it is where the occurrence opened, which a move since leaves as it was.
+  const today = localDateOf(at, occurrences.timezoneOn(occurrence.date));
   // One-time evidence is for its one occurrence, whichever day it comes.
-  const day = occurrence && kind === "one-time" ? occurrence.date : localDateOf(at, timezone);
+  const day = kind === "one-time" ? occurrence.date : today;
   // Past its due-by time, the day takes no more evidence.
-  if (!occurrence || at.getTime() >= occurrences.dayDueAt(localDateOf(at, timezone))!.getTime()) {
-    return { ok: false, reason: "not-open" };
-  }
+  if (at.getTime() >= occurrences.dayDueAt(today)!.getTime()) return { ok: false, reason: "not-open" };
   const decision = evidenceDecision(ctx, pactId, day, "day");
   if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
   if (decision === "approved") return { ok: false, reason: "already-approved" };

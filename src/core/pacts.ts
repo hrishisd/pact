@@ -165,6 +165,7 @@ export function deletePact(ctx: CoreContext, accountId: AccountId, pactId: strin
   // In its window a pact has nothing judged, so no penalties: evidence is all it can have.
   removeEvidence(ctx, pactId, () => true);
   ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
+  ctx.db.prepare(`DELETE FROM pact_earlier_timezone WHERE pact_id = ?`).run(pactId);
   ctx.db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);
   return { ok: true };
 }
