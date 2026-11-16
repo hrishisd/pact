@@ -34,7 +34,7 @@ const MIN_GAP_MS = 12 * 60 * 60 * 1000;
  * reviewer reminder, pushes the owner reminder, and with the daily summary
  * on, queues the email listing both. At most one of each a local day,
  * restart or not (`stale_notice`), and none within 12 hours of the last,
- * so a move west doesn't repeat it. Links in the email start with `appUrl`.
+ * so a short move west doesn't repeat it. Links in the email start with `appUrl`.
  */
 export function remindStale(ctx: CoreContext, t: Date, appUrl: string): void {
   const accounts = ctx.all<{ id: AccountId; email: string; timezone: string; daily_summary_on_at: string | null }>(
@@ -43,8 +43,8 @@ export function remindStale(ctx: CoreContext, t: Date, appUrl: string): void {
   for (const { id, email, timezone, daily_summary_on_at } of accounts) {
     const nine = latestReminderTime(t, timezone);
     const notice = staleNotice(ctx, id);
-    // By local date, not instant, and not within 12 hours: a move west can't bring a second one the same day,
-    // nor one a few hours after the last on the next day there.
+    // By local date, and not within 12 hours: a move west brings 09:00 round sooner, on the same
+    // date or the next. After a move west of more than 12 hours the same date can get a second.
     const today = localDateOf(nine, timezone);
     const notYet = (at: Date | null) =>
       at === null || (localDateOf(at, timezone) < today && nine.getTime() - at.getTime() >= MIN_GAP_MS);

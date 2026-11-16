@@ -156,8 +156,8 @@ export class Checks {
   /** How many pushes and emails the last check had seen. */
   #pushesSeen = 0;
   #emailsSeen = 0;
-  /** By person, kind and local day: the once-a-day messages sent. */
-  readonly #onceADay = new Set<string>();
+  /** By person and kind: the local day and time of the last once-a-day message sent. */
+  readonly #onceADay = new Map<string, { date: string; at: number }>();
   /** By person: the notification settings turned on when the messages were last checked. */
   readonly #settingsOn = new Map<string, NotificationSetting[]>();
   /** Every item seen waiting, by id: whose it is and its kind. */
@@ -891,11 +891,18 @@ export class Checks {
     this.#emailsSeen = mailer.sent.length;
   }
 
+  /**
+   * At most one a local day. After a long move west the next 09:00 can carry
+   * the same date again; it is then at least 12 hours after the last.
+   */
   #onceToday({ who, timezone }: { who: AccountHandle; timezone: string }, what: string, now: Date): void {
-    const key = `${who.id} ${what} ${localDateOf(now, timezone)}`;
-    if (this.#onceADay.has(key))
-      fail("messages-follow-settings", `${who.name} got a second ${what} on ${localDateOf(now, timezone)}`);
-    this.#onceADay.add(key);
+    const key = `${who.id} ${what}`;
+    const date = localDateOf(now, timezone);
+    const last = this.#onceADay.get(key);
+    if (last && last.date === date && now.getTime() - last.at < 12 * 60 * 60 * 1000) {
+      fail("messages-follow-settings", `${who.name} got a second ${what} on ${date}`);
+    }
+    this.#onceADay.set(key, { date, at: now.getTime() });
   }
 
   /**

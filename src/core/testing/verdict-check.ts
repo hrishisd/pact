@@ -49,7 +49,17 @@ export interface Mismatch {
  * Mismatches the check skips: each a bug a ticket fixes. Remove an entry
  * with the fix.
  */
-const KNOWN_MISMATCHES: { ticket: string; matches: (m: Mismatch) => boolean }[] = [];
+const KNOWN_MISMATCHES: { ticket: string; matches: (m: Mismatch) => boolean }[] = [
+  {
+    // A bedtime night judged at its close, whose close moves when Oura later reports another clock.
+    ticket: "design review 45",
+    matches: (m) =>
+      m.facts?.automatic?.kind === "oura" &&
+      m.stored.outcome === m.verdict.kind &&
+      "at" in m.verdict &&
+      m.stored.judgedAt?.getTime() !== m.verdict.at.getTime(),
+  },
+];
 
 /** The ticket that fixes a known mismatch, or null if it isn't one. */
 function knownMismatchTicket(mismatch: Mismatch): string | null {
