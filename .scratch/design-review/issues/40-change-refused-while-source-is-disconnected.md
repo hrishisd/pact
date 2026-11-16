@@ -1,13 +1,11 @@
 # Every change to an Oura or Anki pact is refused while the source is disconnected
 
-Status: needs-info
+Status: done
 Blocked by: none
 
-## Decision needed
+## Decision
 
-May an owner change an Oura Ring or Anki pact while its connection is gone, when the change does not need the connection?
-
-Recommended: yes. The spec below builds that.
+An owner may change an Oura Ring or Anki pact while its connection is gone, when the change does not need the connection (the recommended answer). The connection is needed to create a pact and to give an Anki pact another deck.
 
 ## Problem
 
@@ -56,7 +54,15 @@ Not needed. A refusal goes away; no screen or words are new.
 
 ## Acceptance criteria
 
-- [ ] `docs/behaviour.md` says what an owner can change while the source is disconnected.
-- [ ] The scenarios above pass, and the allowance for the two refusals is gone from the `current-terms-are-valid` invariant.
-- [ ] The Request change form works for an Anki pact with AnkiWeb disconnected.
-- [ ] `npm run check` passes.
+- [x] `docs/behaviour.md` says what an owner can change while the source is disconnected.
+- [x] The scenarios above pass, and the allowance for the two refusals is gone from the `current-terms-are-valid` invariant.
+- [x] The Request change form works for an Anki pact with AnkiWeb disconnected.
+- [x] `npm run check` passes.
+
+## Outcome
+
+Built as planned. `evidenceSource` (`pacts.ts`) checks the connection only when there is no `existing` pact (creating), or when an Anki pact is given a deck other than its own; an Anki pact's own deck with its stored rollover hour is taken first, with no connection or deck list. `editPact` and `changePact`/`changePreview` go through it, so both follow the rule. The `current-terms-are-valid` invariant no longer allows `oura-not-connected` and `anki-not-connected`.
+
+- The Request change form already worked for an Anki pact with AnkiWeb disconnected: it loads no deck list until the Goal sheet is opened, and sends the pact's own deck. A client test now holds it (`ChangePact.test.tsx`, "an Anki pact with AnkiWeb disconnected loads and sends its own deck").
+- Tests: `change-requests.test.ts`, "a change with the Oura or AnkiWeb connection gone"; `edit-window.test.ts`, "an Oura Ring pact is edited with Oura disconnected".
+- `npm run check` was run in its parts (shellcheck isn't installed where this was built, so its lint step wasn't run): `tsc`, Prettier, knip, `check-conventions.ts`, the tests and the build.

@@ -917,9 +917,6 @@ export class Checks {
       "end-approved",
       "edit-window-open",
       "pact-ended",
-      // Not about the terms: with Oura or AnkiWeb disconnected, the Request change form refuses any change.
-      "oura-not-connected",
-      "anki-not-connected",
     ]);
     for (const pact of pacts) {
       if (pact.stage !== "active" || pact.editWindowClosesAt !== null) continue;

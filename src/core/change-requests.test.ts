@@ -7,6 +7,7 @@
 import { describe, expect, test } from "vitest";
 import { termsOf } from "../shared/terms.ts";
 import type { PactChange } from "../shared/types.ts";
+import { ownerWithAnki } from "./testing/anki-pact.ts";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import type { Scenario } from "./testing/scenario.ts";
@@ -458,6 +459,46 @@ describe("a relaxing change waits for a reviewer", () => {
     expect(view).toMatchObject({ ok: true, changeRequest: { current: { evidenceKind: "oura", inBedBy: "23:00" } } });
     expect(view).not.toHaveProperty("changeRequest.current.dueBy");
     expect(view).not.toHaveProperty("changeRequest.current.anki");
+  });
+});
+
+describe("a change with the Oura or AnkiWeb connection gone", () => {
+  test("an Oura Ring pact: a higher penalty applies, and a later in-bed-by time waits for approval", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    const bed = await createPact("23:00");
+    await s.advanceTo("Wed 12:00");
+    await owner.disconnectOura();
+
+    expect(ok(await owner.changePact(bed, changed(owner, bed, { penaltyCents: 1000 }))).outcome).toMatchObject({
+      kind: "stricter",
+      appliesFrom: s.date("Thu"),
+    });
+    expect(ok(await owner.changePact(bed, changed(owner, bed, { inBedBy: "00:30" }))).outcome).toMatchObject({
+      kind: "needs-approval",
+    });
+    expect(pactOf(owner, bed)).toMatchObject({ penaltyCents: 1000, inBedBy: "23:00" });
+  });
+
+  test("an Anki pact: fewer days waits for approval on its own deck; another deck is refused", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    const spanish = await createPact();
+    await s.advanceTo("Wed 12:00");
+    await owner.disconnectAnki();
+
+    expect(
+      ok(await owner.changePact(spanish, changed(owner, spanish, { schedule: { kind: "fixed-days", days: ["mon"] } })))
+        .outcome,
+    ).toMatchObject({ kind: "needs-approval" });
+    expect(owner.changePreview(spanish, changed(owner, spanish, { ankiDeckId: "1700000000002" }))).toEqual({
+      ok: false,
+      reason: "anki-not-connected",
+    });
+    expect(await owner.changePact(spanish, changed(owner, spanish, { ankiDeckId: "1700000000002" }))).toEqual({
+      ok: false,
+      reason: "anki-not-connected",
+    });
   });
 });
 
