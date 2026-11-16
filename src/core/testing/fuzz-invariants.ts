@@ -129,6 +129,7 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "connection-problem": "connection-problem",
   "timezone-changed": "reviewed-pact",
   "reviewer-added": "reviewed-pact",
+  "vacation-approved": "reviewed-pact",
   reminder: null,
 };
 

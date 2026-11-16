@@ -177,6 +177,26 @@ describe("notification settings", () => {
     expect(s.notifier.sentTo(second, "reviewer-added")).toHaveLength(1);
   });
 
+  test("Pacts you review turned off: a reviewer isn't told of an approved vacation", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Wed 12:00");
+    await second.setNotificationSetting("reviewed-pact", false);
+    const vacation = ok(
+      await owner.fileVacation({
+        from: s.date("Mon+1"),
+        to: s.date("Sun+1"),
+        pactIds: [gym],
+        reviewerIds: [reviewer.id],
+      }),
+    );
+
+    await reviewer.decide(vacation.vacationId, { kind: "approve" });
+
+    expect(s.notifier.sentTo(second, "vacation-approved")).toEqual([]);
+  });
+
   test("an operator alert can't be turned off", async () => {
     const s = scenario();
     const owner = await s.signIn("owner");

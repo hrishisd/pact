@@ -1,13 +1,11 @@
 # The owner picks which reviewers decide a vacation, and the others are never told
 
-Status: needs-info
+Status: done
 Blocked by: none
 
-## Decision needed
+## Decision
 
-Should a vacation cover a pact only once one of that pact's own reviewers approved it, or should the owner keep picking who decides, with every other reviewer of a covered pact told when it is approved?
-
-Recommended: keep the picked deciders and tell the others at approval. The spec below builds that. Also needed: a yes to the push's words and to the new notification setting, or a request to prototype them first.
+The owner keeps picking who decides a vacation, and every other reviewer of a covered pact is told when it is approved (the recommended answer). The push's words and the "Pacts you review" setting were accepted as written below, with no prototype.
 
 ## Problem
 
@@ -53,8 +51,19 @@ User-visible, but small: one push and one row in notification settings, with no 
 
 ## Acceptance criteria
 
-- [ ] Every reviewer of a pact a vacation covers, but the approver, is pushed when it is approved, with the dates, their pacts and who approved.
-- [ ] The push follows the "Pacts you review" setting.
-- [ ] `docs/behaviour.md` (Vacations; Notifications and reminders) says so.
-- [ ] The scenarios above pass.
-- [ ] `npm run check` passes.
+- [x] Every reviewer of a pact a vacation covers, but the approver, is pushed when it is approved, with the dates, their pacts and who approved.
+- [x] The push follows the "Pacts you review" setting.
+- [x] `docs/behaviour.md` (Vacations; Notifications and reminders) says so.
+- [x] The scenarios above pass.
+- [x] `npm run check` passes.
+
+## Outcome
+
+Built as planned. On an approval `decideVacation` (`vacations.ts`) calls `tellOtherReviewers`, after the days are settled: for each pact with a `vacation_day` of the vacation, oldest first, its current reviewers but the approver each get one `vacation-approved` push naming only the pacts they review (`pactNamesText`, `src/shared/format.ts`). It reuses the `reviewed-pact` setting from ticket 42; the setting's hint now has the full words, "A friend added a reviewer, changed timezone, or had a vacation approved on a pact you review".
+
+Differs from the plan, or beyond it:
+
+- The dates are worded by `dateSpan`, as the spec says and as the vacation-decided push words them: "Jan 5 – 19 covers Gym. Sam approved it.", not the spec example's "Jan 5 to Jan 19".
+- The `docs/behaviour.md` sentence is added to the end of the Vacations line that starts "Only its deciders are told".
+- Tests: `vacations.test.ts`, "the other reviewers of covered pacts hear of an approval"; `notifications.test.ts`, "Pacts you review turned off: a reviewer isn't told of an approved vacation".
+- `npm run check` was run in its parts (shellcheck isn't installed where this was built, so its lint step wasn't run).

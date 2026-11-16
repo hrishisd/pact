@@ -28,7 +28,7 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
   },
   "reviewed-pact": {
     label: "Pacts you review",
-    hint: "A friend added a reviewer or changed timezone on a pact you review",
+    hint: "A friend added a reviewer, changed timezone, or had a vacation approved on a pact you review",
   },
 };
 

@@ -919,6 +919,96 @@ describe("the owner hears the decision", () => {
   });
 });
 
+// Rule R5 keeps who decides a vacation; on approval every other reviewer of a
+// covered pact is told, so no reviewer misses that their pact was excused.
+describe("the other reviewers of covered pacts hear of an approval", () => {
+  /** Gym (the reviewer) and Read (the second friend), both Mon/Wed/Fri, and "third", a friend who reviews neither yet. */
+  async function twoPacts(s: Scenario) {
+    const setup = await ownerWithReviewers(s);
+    const { owner, reviewer, second, createPact } = setup;
+    const third = await s.befriend(owner, "third");
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer, third] });
+    const read = await createPact("Read", MON_WED_FRI, { reviewers: [second, third] });
+    s.setClockTo("Wed 12:00");
+    return { ...setup, owner, reviewer, second, third, gym, read };
+  }
+
+  test("decided by the picked reviewer of the first pact: the second's reviewer is told of only theirs, and who approved", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym, read } = await twoPacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, read], [reviewer]));
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(s.notifier.sentTo(second, "vacation-approved")).toEqual([
+      {
+        recipient: second.id,
+        kind: "vacation-approved",
+        payload: {
+          vacationId,
+          pactIds: [read],
+          title: "owner's vacation was approved",
+          body: "Jan 12 – 18 covers Read. reviewer approved it.",
+          url: "/review",
+        },
+      },
+    ]);
+  });
+
+  test("a reviewer of both pacts who wasn't picked gets one push naming both", async () => {
+    const s = scenario();
+    const { owner, reviewer, third, gym, read } = await twoPacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, read], [reviewer]));
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(s.notifier.sentTo(third, "vacation-approved")).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          pactIds: [gym, read],
+          body: "Jan 12 – 18 covers Gym and Read. reviewer approved it.",
+        }),
+      }),
+    ]);
+  });
+
+  test("a picked decider who didn't decide is told; the approver isn't", async () => {
+    const s = scenario();
+    const { owner, reviewer, third, gym } = await twoPacts(s);
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym], [reviewer, third]));
+
+    ok(await third.decide(vacationId, { kind: "approve" }));
+
+    expect(s.notifier.sentTo(reviewer, "vacation-approved").map((n) => n.payload.body)).toEqual([
+      "Jan 12 – 18 covers Gym. third approved it.",
+    ]);
+    expect(s.notifier.sentTo(third, "vacation-approved")).toEqual([]);
+  });
+
+  test("a rejection and a withdrawal tell no other reviewer", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, third, gym, read } = await twoPacts(s);
+    const rejected = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, read], [reviewer]));
+    ok(await reviewer.decide(rejected, { kind: "reject", reason: "Not that week" }));
+    const withdrawn = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [gym, read], [reviewer]));
+    ok(await owner.withdrawVacation(withdrawn));
+
+    for (const who of [reviewer, second, third]) expect(s.notifier.sentTo(who, "vacation-approved")).toEqual([]);
+  });
+
+  test("a ticked pact with no covered day isn't named, and a reviewer of only that pact isn't told", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact, gym } = await twoPacts(s);
+    const weekends = await createPact("Weekends", ["sat", "sun"], { reviewers: [second] });
+    s.setClockTo("Wed 12:20");
+    const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Fri+1"), [gym, weekends], [reviewer]));
+
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(s.notifier.sentTo(second, "vacation-approved")).toEqual([]);
+  });
+});
+
 describe("once approved, covered occurrences are Excused", () => {
   test("a covered Weekly count week is Excused at the end of its Sunday; an uncovered partial week keeps its full target", async () => {
     const s = scenario();

@@ -108,7 +108,9 @@ export type NotificationKind =
   /** To each reviewer of an owner's affected pacts: the owner's timezone change made due times later. */
   | "timezone-changed"
   /** To each earlier reviewer of a pact: the owner added another reviewer to it. */
-  | "reviewer-added";
+  | "reviewer-added"
+  /** To each reviewer of a pact a vacation covers, but the approver: the vacation was approved. */
+  | "vacation-approved";
 
 /** What a notification says, and the app path it opens: all a push carries. */
 interface NotificationText {
@@ -158,6 +160,8 @@ interface NotificationDetails {
   "timezone-changed": { ownerId: AccountId; from: string; to: string };
   /** `added`: the reviewers added, by name. */
   "reviewer-added": { pactId: string; added: AccountId[] };
+  /** `pactIds`: the covered pacts named to this recipient, the ones they review. */
+  "vacation-approved": { vacationId: string; pactIds: string[] };
 }
 
 /** A notification of kind `K`. */
