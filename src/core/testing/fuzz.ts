@@ -17,6 +17,7 @@
 import { addDays } from "../../shared/calendar.ts";
 import { termsOf } from "../../shared/terms.ts";
 import {
+  MAX_TEXT_CHARS,
   WEEKDAYS,
   type NewPact,
   type PactChange,
@@ -59,11 +60,12 @@ const WEIGHTS = {
   rename: 1,
   "add-reviewers": 1,
   "set-reminders": 2,
-  "request-end": 1,
+  "request-end": 2,
   "withdraw-change-request": 1,
   // Evidence and its review.
   submit: 10,
   decide: 12,
+  "decide-again": 1,
   ask: 3,
   reply: 5,
   "accept-miss": 2,
@@ -184,6 +186,8 @@ export class World {
   /** What each action did, for the report of a failure. */
   readonly log: string[] = [];
   readonly checks: Checks;
+  /** The last few items decided, with who decided them, for deciding one again. */
+  readonly decided: { reviewer: AccountHandle; id: string; what: string }[] = [];
   /** Whether each tick is made as many: one a minute for half an hour, or thirty evenly spaced. */
   readonly #manyTicks: boolean;
   #names = 0;
@@ -279,6 +283,7 @@ export class World {
     }
     await this.checks.guard("tick", () => this.s.advanceTo(to.toISOString()));
     this.tickedAt = to.getTime();
+    this.checks.nothingMootWaits();
     // Now, while the clock still says when they were sent.
     this.checks.messagesFollowSettings();
   }
@@ -385,15 +390,17 @@ export class World {
         return;
       }
       case "edit-pact": {
-        const summary = pick(
-          who.pacts().filter((p) => p.editWindowClosesAt !== null),
-          a,
-        );
+        // Mostly a pact in its edit window; sometimes any, which is refused once the window has closed.
+        const pacts = who.pacts();
+        const summary = pick((b >>> 24) % 4 === 0 ? pacts : pacts.filter((p) => p.editWindowClosesAt !== null), a);
         if (!summary) return;
         const pact = this.checks.pactOf(who, summary.id);
         const edited = this.newPact(who, b, c, d, a >>> 8, pact.evidenceKind);
         if (!edited) return;
-        await this.command(who, `editPact(${pact.name}, ${describe(edited)})`, () => who.editPact(pact.id, edited));
+        const result = await this.command(who, `editPact(${pact.name}, ${describe(edited)})`, () =>
+          who.editPact(pact.id, edited),
+        );
+        this.checks.editedInWindow(pact, result);
         return;
       }
       case "delete-pact": {
@@ -414,6 +421,7 @@ export class World {
           who.changePact(pact.id, change),
         );
         this.checks.changedAsPreviewed(preview, result);
+        this.checks.easierNeedsApproval(pact, change, result);
         return;
       }
       case "rename": {
@@ -466,14 +474,23 @@ export class World {
           .today()
           .sections.flatMap((section) => (section.kind === "to-do" ? section.cards : []))
           .flatMap((card) => ("pactId" in card ? [card.pactId] : []));
-        // Mostly a pact Today says to do; sometimes any pact, which is mostly refused.
+        // Mostly a pact Today says to do; sometimes any pact, or an Ended recurring one, which are mostly refused.
         const all = who.pacts().map((p) => p.id);
-        const pactId = pick(b % 5 === 0 || toDo.length === 0 ? all : toDo, a);
+        const ended = who
+          .pacts()
+          .filter((p) => p.stage === "ended" && p.schedule.kind !== "one-time")
+          .map((p) => p.id);
+        const pactId = pick(
+          (c >>> 8) % 3 === 0 && ended.length > 0 ? ended : b % 5 === 0 || toDo.length === 0 ? all : toDo,
+          a,
+        );
         if (pactId === undefined) return;
+        const pact = this.checks.pactOf(who, pactId);
         const photos = Array.from({ length: 1 + (c % 2) }, (_, i) => photo(d + i));
-        await this.command(who, `submitEvidence(${this.checks.pactOf(who, pactId).name})`, () =>
+        const result = await this.command(who, `submitEvidence(${pact.name})`, () =>
           who.submitEvidence(pactId, photos),
         );
+        this.checks.submittedWhileActive(pact, result);
         return;
       }
       case "decide": {
@@ -486,13 +503,29 @@ export class World {
           who.decide(item.id, decision),
         );
         this.checks.decidedFromQueue(who, item, decision.kind, result);
+        if (result.ok) this.decided.push({ reviewer: who, id: item.id, what: describeItem(item) });
+        if (this.decided.length > 5) this.decided.shift();
+        return;
+      }
+      case "decide-again": {
+        const done = pick(this.decided, a);
+        if (!done) return;
+        const decision = c % 2 === 0 ? ({ kind: "approve" } as const) : ({ kind: "reject", reason: "no" } as const);
+        const result = await this.command(done.reviewer, `decide(${done.what}, ${decision.kind}) again`, () =>
+          done.reviewer.decide(done.id, decision),
+        );
+        this.checks.decidedOnce(done.reviewer, done.what, result);
         return;
       }
       case "ask": {
         const item = pick(who.reviewQueue(), a);
         if (!item) return;
-        const result = await this.command(who, `askOwner(${describeItem(item)})`, () => who.askOwner(item.id, "why?"));
-        this.checks.askedFromQueue(who, item, result);
+        // Sometimes blank or too long, which is refused.
+        const question = b % 5 !== 0 ? "why?" : c % 2 === 0 ? "  " : "?".repeat(MAX_TEXT_CHARS + 1);
+        const result = await this.command(who, `askOwner(${describeItem(item)}, ${question.length} chars)`, () =>
+          who.askOwner(item.id, question),
+        );
+        this.checks.askedFromQueue(who, item, b % 5 !== 0, result);
         return;
       }
       case "reply": {
@@ -521,15 +554,20 @@ export class World {
       case "file-excuse": {
         const summary = pick(who.pacts(), a);
         if (!summary) return;
-        const from = addDays(this.today(who), (b % 12) - 4);
+        // Sometimes around a day that was Satisfied, which can't be excused.
+        const satisfied = this.checks.satisfiedDates(this.checks.pactOf(who, summary.id));
+        const around = (c >>> 8) % 4 === 0 ? pick(satisfied, d >>> 8) : undefined;
+        const from = around ?? addDays(this.today(who), (b % 12) - 4);
         const to = addDays(from, c % 8 === 7 ? 70 : c % 5);
         const excuse = { from, to, reason: d % 11 === 0 ? " " : "ill" };
         const preview = this.checks.excusePreviewOf(who, summary.id, excuse);
+        const before = this.checks.pactOf(who, summary.id);
         const photos = d % 3 === 0 ? [photo(d)] : [];
         const result = await this.command(who, `fileExcuse(${summary.name}, ${from}..${to})`, () =>
           who.fileExcuse(summary.id, excuse, photos),
         );
         this.checks.excusedAsPreviewed(who, excuse, preview, result);
+        this.checks.excusedNoSatisfiedDay(who, before, result);
         return;
       }
       case "accept-excuse-rejection": {
@@ -549,18 +587,26 @@ export class World {
         const some = offered.filter((_, i) => (a >> i) & 1 || a % 3 === 0);
         // Mostly at least one pact; sometimes none, which is refused.
         const ticked = some.length > 0 || a % 11 === 0 || offered.length === 0 ? some : [offered[a % offered.length]!];
-        const from = addDays(options.today, b % 9 === 8 ? 0 : 1 + (b % 8));
+        // Often from tomorrow, when a Weekly count week may already be open.
+        const from = addDays(options.today, b % 9 === 8 ? 0 : (b >>> 8) % 3 === 0 ? 1 : 1 + (b % 8));
         const to = addDays(from, c % 12);
-        const reviewers = this.friendsOf(who).filter((_, i) => (d >> i) & 1 || d % 3 === 0);
+        // Mostly from the ticked pacts' reviewers; sometimes any friend, who may review none of them.
+        const friends = this.friendsOf(who);
+        const offeredReviewers = friends.filter((f) => ticked.some((p) => p.reviewers.some((r) => r.id === f.id)));
+        const reviewers = ((d >>> 8) % 4 === 0 ? friends : offeredReviewers).filter(
+          (_, i) => (d >> i) & 1 || d % 3 === 0,
+        );
         const request = { from, to, pactIds: ticked.map((p) => p.id) };
         const vacation = { ...request, reviewerIds: reviewers.map((r) => r.id), ...(d % 2 === 0 && { note: "away" }) };
         const preview = this.checks.vacationPreviewOf(who, request);
+        const before = ticked.map((p) => this.checks.pactOf(who, p.id));
         const result = await this.command(
           who,
           `fileVacation(${from}..${to}, [${ticked.map((p) => p.name).join(", ")}], to ${names(reviewers)})`,
           () => who.fileVacation(vacation),
         );
         this.checks.vacationAsPreviewed(who, vacation, preview, result);
+        this.checks.vacationCoversNothingOpen(who, before, result);
         return;
       }
       case "withdraw-vacation": {
@@ -588,21 +634,25 @@ export class World {
       case "record-payment": {
         const ledger = pick(who.ledgers(), a);
         if (!ledger) return;
+        // Sometimes more than payable: up to what payments awaiting approval leave owed, or beyond.
         const sized = b % 10;
         const amountCents =
-          sized < 4
+          sized < 3
             ? ledger.payableCents
-            : sized < 6
+            : sized < 5
               ? ledger.suggestedPaymentCents
-              : sized < 9
+              : sized < 7
                 ? 1 + (c % Math.max(1, ledger.payableCents))
-                : ledger.payableCents + 1 + (c % 500);
+                : sized < 9
+                  ? ledger.payableCents + 1 + (c % Math.max(1, ledger.awaitingCents))
+                  : ledger.payableCents + 1 + (c % 500);
         const screenshot = d % 13 === 0 ? null : photo(d);
-        await this.command(
+        const result = await this.command(
           who,
           `recordPayment(${ledger.name}, ${amountCents}c of ${ledger.payableCents}c payable)`,
           () => who.recordPayment({ recipientId: ledger.recipientId, amountCents }, screenshot),
         );
+        this.checks.paidWhatIsPayable(ledger, amountCents, result);
         return;
       }
       case "sleep": {

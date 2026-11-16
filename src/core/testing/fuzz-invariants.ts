@@ -8,6 +8,7 @@
 // A violation that is a bug with a ticket goes in KNOWN below, so the run
 // carries on past it. Remove the entry with the fix.
 
+import { addDays } from "../../shared/calendar.ts";
 import { termsOf } from "../../shared/terms.ts";
 import type {
   ChangePactResult,
@@ -79,6 +80,14 @@ function occurrencesOf(pact: PactTerms): { date: string; occurrence: OccurrenceR
         ? pact.history.weeks
         : [pact.history.day];
   return days.flatMap((day) => (day.occurrence ? [{ date: day.date, occurrence: day.occurrence }] : []));
+}
+
+/** The occurrence a pact's heat map shows for `date`: on Weekly count, the week it falls in. */
+function occurrenceOn(pact: PactTerms, date: string): OccurrenceRecord | undefined {
+  const weekly = pact.history.kind === "weekly-count";
+  return occurrencesOf(pact).find((entry) =>
+    weekly ? entry.date <= date && date < addDays(entry.date, 7) : entry.date === date,
+  )?.occurrence;
 }
 
 /** What one person's queries showed at one moment. */
@@ -439,7 +448,8 @@ export class Checks {
 
   // What a reviewer's queue offers can be done.
 
-  decidedFromQueue(who: AccountHandle, item: ReviewItem, decision: "approve" | "reject", result: DecideResult): void {
+  /** What a reviewer's queue offers can be decided. */
+  #decidable(who: AccountHandle, item: ReviewItem, decision: "approve" | "reject", result: DecideResult): void {
     if (result.ok) return;
     // Withdrawn as the decision arrived: the clock had passed the moment it stopped mattering, with no tick yet.
     if (result.reason === "withdrawn") return;
@@ -450,7 +460,33 @@ export class Checks {
     );
   }
 
-  askedFromQueue(who: AccountHandle, item: ReviewItem, result: { ok: boolean; reason?: string }): void {
+  /** An item from the queue can be decided, and approving an end request Ends the pact or sets the last day it keeps. */
+  decidedFromQueue(who: AccountHandle, item: ReviewItem, decision: "approve" | "reject", result: DecideResult): void {
+    if (result.ok && decision === "approve" && item.kind === "change-request" && item.endsPact) {
+      const owner = this.#world.people.find((person) => person.name === item.ownerName)!;
+      const pact = this.pactOf(owner, item.pactId);
+      if (pact.stage === "active" && pact.ending === null) {
+        fail("approved-end-ends", `${who.name} approved ending ${pact.name}, which is still Active with no last day`);
+      }
+    }
+    this.#decidable(who, item, decision, result);
+  }
+
+  /** A decided item stays decided: deciding it again is refused. */
+  decidedOnce(who: AccountHandle, what: string, result: DecideResult): void {
+    if (result.ok) fail("decided-once", `${who.name} decided ${what} a second time`);
+  }
+
+  askedFromQueue(
+    who: AccountHandle,
+    item: ReviewItem,
+    validQuestion: boolean,
+    result: { ok: boolean; reason?: string },
+  ): void {
+    if (!validQuestion) {
+      if (result.ok) fail("questions-are-valid", `${who.name} asked a blank or too long question and it was accepted`);
+      return;
+    }
     if (!result.ok) {
       fail(
         "queue-items-can-be-decided",
@@ -465,6 +501,122 @@ export class Checks {
         "queue-items-can-be-decided",
         `${who.name} could not reply to the question Today shows on ${describeItem(item)}: ${result.reason}`,
       );
+    }
+  }
+
+  // What a command accepted, against what the queries showed just before it.
+
+  /** A payment is never more than the ledger showed payable; checked only when no housekeeping waits (see `command`). */
+  paidWhatIsPayable(ledger: Ledger["summary"], amountCents: number, result: { ok: boolean }): void {
+    if (!result.ok || this.#world.tickedAt !== this.#world.now().getTime()) return;
+    if (amountCents > ledger.payableCents) {
+      fail(
+        "payments-fit-what-is-payable",
+        `a payment of ${amountCents}c to ${ledger.name} was accepted with ${ledger.payableCents}c payable: ${show(ledger)}`,
+      );
+    }
+  }
+
+  /** An excuse never covers a day that was Satisfied. */
+  excusedNoSatisfiedDay(who: AccountHandle, before: PactTerms, result: FileExcuseResult): void {
+    if (!result.ok) return;
+    const page = who.excuse(result.excuseId);
+    if (!page.ok) return;
+    for (const { date } of page.excuse.days) {
+      if (occurrenceOn(before, date)?.status.kind === "satisfied") {
+        fail(
+          "excuses-skip-satisfied-days",
+          `${who.name}'s excuse on ${before.name} covers ${date}, which was Satisfied`,
+        );
+      }
+    }
+  }
+
+  /** The days `pact`'s heat map shows Satisfied. */
+  satisfiedDates(pact: PactTerms): string[] {
+    return occurrencesOf(pact).flatMap(({ date, occurrence }) =>
+      occurrence.status.kind === "satisfied" ? [date] : [],
+    );
+  }
+
+  /** A vacation never covers an occurrence that had already opened. */
+  vacationCoversNothingOpen(who: AccountHandle, before: PactTerms[], result: FileVacationResult): void {
+    if (!result.ok) return;
+    const item = this.#world.people
+      .flatMap((reviewer) => reviewer.reviewQueue())
+      .find((queued) => queued.id === result.vacationId);
+    if (item?.kind !== "vacation") return;
+    for (const cover of item.covers) {
+      const pact = before.find((p) => p.id === cover.pactId);
+      for (const { date } of cover.covered) {
+        const status = pact && occurrenceOn(pact, date)?.status;
+        if (status && (status.kind !== "not-judged" || status.phase !== "ahead")) {
+          fail(
+            "vacations-cover-what-has-not-opened",
+            `${who.name}'s vacation covers ${pact.name} ${date}, which was ${status.kind} (${status.phase})`,
+          );
+        }
+      }
+    }
+  }
+
+  /** Lowering the penalty of a reviewed pact waits for a reviewer. */
+  easierNeedsApproval(pact: PactTerms, change: PactChange, result: ChangePactResult): void {
+    if (!result.ok || pact.reviewers.length === 0 || change.penaltyCents >= pact.penaltyCents) return;
+    if (result.outcome.kind !== "needs-approval") {
+      fail(
+        "easier-needs-approval",
+        `${pact.name}'s penalty went from ${pact.penaltyCents}c to ${change.penaltyCents}c as ${result.outcome.kind}`,
+      );
+    }
+  }
+
+  /** A pact is edited only while its edit window is open. */
+  editedInWindow(pact: PactTerms, result: { ok: boolean }): void {
+    if (result.ok && pact.editWindowClosesAt === null) {
+      fail("edits-only-in-edit-window", `${pact.name} was edited after its edit window closed`);
+    }
+  }
+
+  /** Evidence is accepted only for an Active pact. */
+  submittedWhileActive(pact: PactTerms, result: { ok: boolean }): void {
+    if (result.ok && pact.stage !== "active") {
+      fail("evidence-only-while-active", `evidence for ${pact.name} was accepted after it Ended`);
+    }
+  }
+
+  /**
+   * Right after a tick, nothing waits that deciding could no longer change
+   * (R8, moot.ts): no evidence on an occurrence already Satisfied, no excuse
+   * whose every day is Satisfied, and nothing on a pact that's gone.
+   */
+  nothingMootWaits(): void {
+    for (const who of this.#world.people) {
+      for (const item of who.today().waiting) {
+        if (!("pactId" in item)) continue;
+        const found = who.pact(item.pactId);
+        if (!found.ok) {
+          fail("no-moot-items-wait", `${who.name}'s ${describeItem(item)} waits on a pact that's gone`);
+          continue;
+        }
+        if (item.kind === "excuse") {
+          const page = who.excuse(item.id);
+          const days = page.ok ? page.excuse.days : [];
+          if (days.length > 0 && days.every((day) => day.status.kind === "satisfied")) {
+            fail(
+              "no-moot-items-wait",
+              `${who.name}'s ${describeItem(item)} waits, but every day it covers is Satisfied`,
+            );
+          }
+        }
+        if (item.kind !== "evidence") continue;
+        if (occurrenceOn(found.pact, item.occurrenceDate)?.status.kind === "satisfied") {
+          fail(
+            "no-moot-items-wait",
+            `${who.name}'s ${describeItem(item)} waits on ${found.pact.name} ${item.occurrenceDate}, already Satisfied`,
+          );
+        }
+      }
     }
   }
 
@@ -501,7 +653,30 @@ export class Checks {
     this.messagesFollowSettings();
     this.#waitingItemsAgree(seen);
     this.#othersSeeNothing(seen, outsider);
+    this.#endingWithdrawsChangeRequests(seen);
     this.#changesSinceLastCheck(seen);
+  }
+
+  /**
+   * Ending a pact withdraws its waiting change request as it Ends, so one
+   * withdrawn because its pact Ended was withdrawn when the pact Ended. (A
+   * change request waiting on an Ended pact is checked in `#waitingItemsAgree`.)
+   */
+  #endingWithdrawsChangeRequests(seen: Seen[]): void {
+    for (const [id, { owner, kind }] of this.#items) {
+      if (kind !== "change-request") continue;
+      const page = owner.changeRequest(id);
+      if (!page.ok) continue;
+      const { state, pactId } = page.changeRequest;
+      if (state.kind !== "withdrawn" || state.reason !== "pact-ended") continue;
+      const pact = seen.find((person) => person.who.id === owner.id)?.pacts.find((p) => p.id === pactId);
+      if (pact?.stage === "ended" && pact.endedAt.getTime() !== state.withdrawnAt.getTime()) {
+        fail(
+          "ending-withdraws-change-request",
+          `${owner.name}'s ${pact.name} Ended at ${pact.endedAt.toISOString()} but its change request was withdrawn at ${state.withdrawnAt.toISOString()}`,
+        );
+      }
+    }
   }
 
   /** A ledger's summary is its history added up. */
