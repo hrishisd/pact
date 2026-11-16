@@ -106,6 +106,11 @@ export interface Scenario {
   setClockTo(when: string): void;
   /** Discards the core and builds a new one on the same database file. */
   restart(): Promise<void>;
+  /**
+   * Closes the core and removes the database, as the end of the test does.
+   * Only for a test that makes many scenarios; safe to call twice.
+   */
+  dispose(): Promise<void>;
 }
 
 const TIMEZONE = "America/New_York";
@@ -155,11 +160,15 @@ export function scenario(): Scenario {
     });
   let core = build();
 
-  onTestFinished(async () => {
+  let disposed = false;
+  const dispose = async () => {
+    if (disposed) return;
+    disposed = true;
     verdicts.close();
     await core.close();
     rmSync(dir, { recursive: true, force: true });
-  });
+  };
+  onTestFinished(dispose);
 
   const handle = (id: AccountId, name: string): AccountHandle =>
     new Proxy({} as AccountHandle, {
@@ -229,6 +238,7 @@ export function scenario(): Scenario {
       await core.close();
       core = build();
     },
+    dispose,
   };
   return s;
 }
