@@ -28,7 +28,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 ### Change requests
 
 - After the edit window, the owner changes a pact through `changePact` (`change-requests.ts`), which takes the whole terms from the Request change form. What needs approval is decided per term by `termDiffs` (`changes.ts`):
-  - Name, reminders and added reviewers apply at once. They apply at once even when sent alongside terms that wait, and added reviewers are told they were picked.
+  - Name, reminders and added reviewers apply at once. They apply at once even when sent alongside terms that wait, and added reviewers are told they were picked, and the pact's other reviewers are told who was added (`addReviewersNow`, `change-requests.ts`; design review ticket 43). That includes a reviewer a waiting change request would remove; nobody is told while the pact's reviewers haven't yet been told of the pact. Test: `change-requests.test.ts`, "a pact's other reviewers are told who was added".
   - Description, deck, recipient and removing a reviewer always need approval.
   - Changes that relax the pact need approval: a lower penalty, a later due-by or bedtime, a later start, an earlier or added end date, fewer days, or a lower target. Changes that tighten it need no approval and apply from the first day not yet open, like an approved change (`STRICTER`, `changes.ts`).
 - A change needs the Oura or AnkiWeb connection only to give an Anki pact another deck; with the connection gone, every other change is taken as usual (`evidenceSource`, `pacts.ts`). An edit in the edit window follows the same rule; creating an Oura Ring or Anki pact needs the connection. Test: `change-requests.test.ts`, "a change with the Oura or AnkiWeb connection gone".

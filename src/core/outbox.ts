@@ -39,6 +39,7 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "overdue-bill": "overdue-bill",
   "connection-problem": "connection-problem",
   "timezone-changed": "reviewed-pact",
+  "reviewer-added": "reviewed-pact",
   reminder: null,
 };
 

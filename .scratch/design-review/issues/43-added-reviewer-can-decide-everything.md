@@ -1,13 +1,11 @@
 # An owner can add a reviewer at once, and that reviewer alone can approve anything
 
-Status: needs-info
+Status: done
 Blocked by: none
 
-## Decision needed
+## Decision
 
-Should adding a reviewer need the approval of a current reviewer, or only be told to the current reviewers?
-
-Recommended: tell the current reviewers, with no approval. The spec below builds that. Also needed: a yes to the push's words and to the new notification setting, or a request to prototype them first.
+Adding a reviewer is told to the pact's current reviewers, with no approval (the recommended answer). The push's words and the "Pacts you review" setting were accepted as written below, with no prototype.
 
 ## Problem
 
@@ -61,8 +59,20 @@ User-visible, but small: one push and one row in notification settings, with no 
 
 ## Acceptance criteria
 
-- [ ] A pact's reviewers are pushed when another reviewer is added, by either command.
-- [ ] The push follows the "Pacts you review" setting.
-- [ ] `docs/behaviour.md` (Change requests; Notifications and reminders) says so.
-- [ ] The scenarios above pass, and the randomised test checks it.
-- [ ] `npm run check` passes.
+- [x] A pact's reviewers are pushed when another reviewer is added, by either command.
+- [x] The push follows the "Pacts you review" setting.
+- [x] `docs/behaviour.md` (Change requests; Notifications and reminders) says so.
+- [x] The scenarios above pass, and the randomised test checks it.
+- [x] `npm run check` passes.
+
+## Outcome
+
+Built as planned. `addReviewersNow` (`change-requests.ts`), which `addReviewers` and `changePact` share, reads the pact's reviewers before adding, and after telling the added ones queues a `reviewer-added` push to each earlier reviewer, unless the pact's reviewers haven't been told of it yet (`reviewers_notified_at`). It reuses the `reviewed-pact` setting from ticket 42; the setting's hint is now "A friend added a reviewer or changed timezone on a pact you review".
+
+Differs from the plan, or beyond it:
+
+- Three or more added at once are named "A, B and C" in the title; the spec gave only one and two.
+- `added` in the details lists the added reviewers sorted by name, as the title names them.
+- The randomised test's new invariant, `added-reviewers-are-announced`, reads what a command queued from the outbox table (through `dump`), since whether a pact's reviewers were told of it shows in no query. Checked by breaking the push: seeds 4 and 6 (300 steps) then fail it.
+- Tests: `change-requests.test.ts`, "a pact's other reviewers are told who was added"; `notifications.test.ts`, "Pacts you review turned off: a reviewer isn't told another was added".
+- `npm run check` was run in its parts (shellcheck isn't installed where this was built, so its lint step wasn't run).

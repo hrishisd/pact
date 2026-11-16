@@ -106,7 +106,9 @@ export type NotificationKind =
   /** To the owner: Oura refused its tokens, or at 15:00 a bedtime night still has no sleep data. */
   | "connection-problem"
   /** To each reviewer of an owner's affected pacts: the owner's timezone change made due times later. */
-  | "timezone-changed";
+  | "timezone-changed"
+  /** To each earlier reviewer of a pact: the owner added another reviewer to it. */
+  | "reviewer-added";
 
 /** What a notification says, and the app path it opens: all a push carries. */
 interface NotificationText {
@@ -154,6 +156,8 @@ interface NotificationDetails {
   "connection-problem": { occurrenceDate?: string };
   /** `from` and `to`: the owner's timezones before and after, IANA names. */
   "timezone-changed": { ownerId: AccountId; from: string; to: string };
+  /** `added`: the reviewers added, by name. */
+  "reviewer-added": { pactId: string; added: AccountId[] };
 }
 
 /** A notification of kind `K`. */

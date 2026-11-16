@@ -163,6 +163,20 @@ describe("notification settings", () => {
     expect(s.notifier.sentTo(second, "timezone-changed")).toHaveLength(1);
   });
 
+  test("Pacts you review turned off: a reviewer isn't told another was added", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Mon 12:00");
+    const third = await s.befriend(owner, "third");
+    await reviewer.setNotificationSetting("reviewed-pact", false);
+
+    ok(await owner.addReviewers(gym, [third.id]));
+
+    expect(s.notifier.sentTo(reviewer, "reviewer-added")).toEqual([]);
+    expect(s.notifier.sentTo(second, "reviewer-added")).toHaveLength(1);
+  });
+
   test("an operator alert can't be turned off", async () => {
     const s = scenario();
     const owner = await s.signIn("owner");

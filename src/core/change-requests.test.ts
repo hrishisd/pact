@@ -132,6 +132,84 @@ describe("a stricter change applies at once, from the first occurrence not open 
   });
 });
 
+describe("a pact's other reviewers are told who was added", () => {
+  test("addReviewers tells the pact's other reviewer, and the added one still gets their own push", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    await s.advanceTo("Wed 12:00");
+    const third = await s.befriend(owner, "third");
+
+    ok(await owner.addReviewers(gym, [third.id]));
+
+    expect(s.notifier.sentTo(reviewer, "reviewer-added")).toEqual([
+      {
+        recipient: reviewer.id,
+        kind: "reviewer-added",
+        payload: {
+          pactId: gym,
+          added: [third.id],
+          title: "owner added third as a reviewer",
+          body: "Gym · third can now decide its review items too.",
+          url: "/review",
+        },
+      },
+    ]);
+    expect(s.notifier.kindsSentTo(third)).toEqual(["picked-as-reviewer"]);
+  });
+
+  test("changePact that adds a reviewer beside a term that waits tells the other reviewers at once", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym } = await dailyGym(s);
+    const third = await s.befriend(owner, "third");
+
+    const result = ok(
+      await owner.changePact(
+        gym,
+        changed(owner, gym, { penaltyCents: 200, reviewerIds: [reviewer.id, second.id, third.id] }),
+      ),
+    );
+
+    expect(result.outcome.kind).toBe("needs-approval");
+    for (const who of [reviewer, second]) {
+      expect(s.notifier.sentTo(who, "reviewer-added").map((n) => n.payload.title)).toEqual([
+        "owner added third as a reviewer",
+      ]);
+    }
+  });
+
+  test("two added at once: each earlier reviewer gets one push naming both, and neither added one gets it", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym } = await dailyGym(s);
+    const zed = await s.befriend(owner, "zed");
+    const alex = await s.befriend(owner, "alex");
+
+    ok(await owner.addReviewers(gym, [zed.id, alex.id]));
+
+    for (const who of [reviewer, second]) {
+      expect(s.notifier.sentTo(who, "reviewer-added")).toEqual([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            added: expect.arrayContaining([zed.id, alex.id]),
+            title: "owner added alex and zed as reviewers",
+            body: "Gym · They can now decide its review items too.",
+          }),
+        }),
+      ]);
+    }
+    for (const who of [zed, alex]) expect(s.notifier.sentTo(who, "reviewer-added")).toEqual([]);
+  });
+
+  test("adding someone who already reviews the pact tells nobody", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym } = await dailyGym(s);
+
+    ok(await owner.addReviewers(gym, [second.id]));
+
+    for (const who of [reviewer, second]) expect(s.notifier.sentTo(who, "reviewer-added")).toEqual([]);
+  });
+});
+
 describe("the pact page's at-once changes apply to the terms as they stand", () => {
   test("after an approved change, a rename, an added reviewer and new reminders leave the approved terms in place", async () => {
     const s = scenario();
