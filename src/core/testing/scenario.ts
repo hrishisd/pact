@@ -106,6 +106,11 @@ export interface Scenario {
   setClockTo(when: string): void;
   /** Discards the core and builds a new one on the same database file. */
   restart(): Promise<void>;
+  /**
+   * Closes the core and removes the database, as the end of the test does.
+   * Only for a test that makes many scenarios; safe to call twice.
+   */
+  dispose(): Promise<void>;
 }
 
 const TIMEZONE = "America/New_York";
@@ -115,7 +120,11 @@ const OPERATOR = "owner";
 /** Where the app is: links in emails start with it. */
 const APP_URL = "https://pact.example.test";
 
-export function scenario(): Scenario {
+/**
+ * `judgingTimesMayMove` is for the randomised test's runs with timezone
+ * changes (see `VerdictCheck`); no scenario sets it.
+ */
+export function scenario({ judgingTimesMayMove = false } = {}): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "pact-test-"));
   const dbPath = join(dir, "pact.db");
   const clock = new FakeClock(at("Mon 09:00"));
@@ -132,7 +141,7 @@ export function scenario(): Scenario {
   const photoStore = new InMemoryPhotoStore(clock);
   // After every command and tick, judging's stored outcomes must be what verdictOf says (verdict-check.ts).
   const watch = new SourceWatch(clock);
-  const verdicts = new VerdictCheck(dbPath, clock, watch);
+  const verdicts = new VerdictCheck(dbPath, clock, watch, { timesMayMove: judgingTimesMayMove });
   // UUID-shaped ids in creation order, so a tie broken by id breaks the same way
   // every run. Shared across restart(), as the database is.
   let idCount = 0;
@@ -155,11 +164,15 @@ export function scenario(): Scenario {
     });
   let core = build();
 
-  onTestFinished(async () => {
+  let disposed = false;
+  const dispose = async () => {
+    if (disposed) return;
+    disposed = true;
     verdicts.close();
     await core.close();
     rmSync(dir, { recursive: true, force: true });
-  });
+  };
+  onTestFinished(dispose);
 
   const handle = (id: AccountId, name: string): AccountHandle =>
     new Proxy({} as AccountHandle, {
@@ -229,6 +242,7 @@ export function scenario(): Scenario {
       await core.close();
       core = build();
     },
+    dispose,
   };
   return s;
 }

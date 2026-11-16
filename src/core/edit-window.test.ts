@@ -300,6 +300,38 @@ describe("evidence submitted in the edit window", () => {
     expect(s.notifier.kindsSentTo(reviewer)).toEqual(["picked-as-reviewer"]);
   });
 
+  test("an edit to a schedule whose day for it has not opened removes it", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Mon 10:00");
+    const essay = await createPact(
+      "Essay",
+      { kind: "one-time", deadline: s.date("Thu"), submitAnytime: true },
+      { reviewers: [reviewer] },
+    );
+    await owner.submitEvidence(essay, [photo()]);
+
+    // Thursday is one of the new days, but Monday's photo is not evidence for it.
+    expect(
+      await owner.editPact(essay, cameraPact("Essay", ["tue", "thu"], { recipientId: sam.id, reviewers: [reviewer] })),
+    ).toEqual({ ok: true });
+
+    expect(owner.today().waiting).toEqual([]);
+    await s.advanceTo("Mon 10:10");
+    expect(reviewer.reviewQueue()).toEqual([]);
+  });
+
+  test("an edit to a schedule whose day for it is open keeps it", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym, edited } = await newGym(s);
+    await owner.submitEvidence(gym, [photo()]);
+
+    await owner.editPact(gym, edited({ schedule: { kind: "fixed-days", days: ["mon", "tue"] } }));
+
+    await s.advanceTo("Mon 10:10");
+    expect(reviewer.reviewQueue()).toHaveLength(1);
+  });
+
   test("an edit that swaps the reviewer sends it to the final one", async () => {
     const s = scenario();
     const { owner, reviewer, second, gym, edited } = await newGym(s);

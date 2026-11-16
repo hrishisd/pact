@@ -150,8 +150,11 @@ export function editPact(ctx: CoreContext, accountId: AccountId, pactId: string,
     moveOneTimeOccurrence(ctx, pactId, row.first_occurrence, checked.terms.firstOccurrence);
     return { ok: true };
   }
-  const { includes } = occurrences(checked.terms, checked.timezone);
-  removeEvidence(ctx, pactId, (date) => !includes(date));
+  // Evidence stays only on a day the new schedule has, and that has opened:
+  // a photo sent for a One-time occurrence is not evidence for a later Fixed day.
+  const { between } = occurrences(checked.terms, checked.timezone);
+  const now = ctx.clock.now().getTime();
+  removeEvidence(ctx, pactId, (date) => !between(date, date).some((o) => o.opensAt.getTime() <= now));
   return { ok: true };
 }
 

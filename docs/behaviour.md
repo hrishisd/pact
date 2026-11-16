@@ -21,7 +21,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 ### Edit window
 
 - For the first 10 minutes after creation the owner can edit or delete the pact freely (`EDIT_WINDOW_MS`, `pact-rules.ts`; `editPact`, `pacts.ts`; `deletePact`, `pacts.ts`). An edit does not restart the window. Test: `edit-window.test.ts`.
-- An edit that drops days from the schedule removes evidence for those days. An edit to a One-time deadline moves its occurrence with its evidence (`editPact`, `moveOneTimeOccurrence`, `pacts.ts`).
+- An edit removes evidence for a day the new schedule does not have, or has but that has not opened yet: evidence sent for a One-time occurrence is not kept for a later Fixed day that falls on the old deadline (design review ticket 41). Test: `edit-window.test.ts`. An edit to a One-time deadline moves its occurrence with its evidence (`editPact`, `moveOneTimeOccurrence`, `pacts.ts`).
 - Reviewers are told they were picked only when the window closes, and evidence submitted inside the window goes to them then (`closeEditWindows`, `pacts.ts`). Until then a reviewer cannot see or decide the pact's evidence (`evidenceToReview`; `reviewable` in `evidenceKind`, `evidence.ts`).
 - No excuse can be filed while the window is open (`edit-window-open`, `excuseOptions`, `excuses.ts`), and vacations offer only pacts past it (`offeredPacts`, `vacations.ts`).
 
