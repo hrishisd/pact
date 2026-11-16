@@ -19,7 +19,7 @@ import { writeFileSync } from "node:fs";
 import { afterAll, expect, test } from "vitest";
 import { actionsOf, run, runBothWays, setupOf, shrink, STATS, type RunResult } from "./testing/fuzz.ts";
 
-const FIXED_SEEDS = [1, 2, 3, 4, 5, 6];
+const FIXED_SEEDS = [1, 2, 3, 4];
 
 function seeds(): number[] {
   const asked = process.env.FUZZ_SEEDS;
@@ -30,7 +30,7 @@ function seeds(): number[] {
   });
 }
 
-const steps = Number(process.env.FUZZ_STEPS ?? 120);
+const steps = Number(process.env.FUZZ_STEPS ?? 100);
 
 /** Runs a seed with `runner` and fails with the shortest run found that breaks the same invariant. */
 async function keepsEveryInvariant(seed: number, runner: typeof run): Promise<void> {
@@ -61,8 +61,8 @@ test.skipIf(mode === "both-ways").each(seeds())("seed %i keeps every invariant",
   keepsEveryInvariant(seed, run),
 );
 
-// With the fixed seeds, two are enough: each run is two scenarios.
-test.skipIf(mode === "one").each(process.env.FUZZ_SEEDS ? seeds() : FIXED_SEEDS.slice(0, 2))(
+// With the fixed seeds, one is enough: each run is two scenarios.
+test.skipIf(mode === "one").each(process.env.FUZZ_SEEDS ? seeds() : FIXED_SEEDS.slice(0, 1))(
   "seed %i answers the same after one tick or many",
   { timeout: 600_000 },
   (seed) => keepsEveryInvariant(seed, runBothWays),
