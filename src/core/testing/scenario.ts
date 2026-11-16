@@ -120,7 +120,11 @@ const OPERATOR = "owner";
 /** Where the app is: links in emails start with it. */
 const APP_URL = "https://pact.example.test";
 
-export function scenario(): Scenario {
+/**
+ * `judgingTimesMayMove` is for the randomised test's runs with timezone
+ * changes (see `VerdictCheck`); no scenario sets it.
+ */
+export function scenario({ judgingTimesMayMove = false } = {}): Scenario {
   const dir = mkdtempSync(join(tmpdir(), "pact-test-"));
   const dbPath = join(dir, "pact.db");
   const clock = new FakeClock(at("Mon 09:00"));
@@ -137,7 +141,7 @@ export function scenario(): Scenario {
   const photoStore = new InMemoryPhotoStore(clock);
   // After every command and tick, judging's stored outcomes must be what verdictOf says (verdict-check.ts).
   const watch = new SourceWatch(clock);
-  const verdicts = new VerdictCheck(dbPath, clock, watch);
+  const verdicts = new VerdictCheck(dbPath, clock, watch, { timesMayMove: judgingTimesMayMove });
   // UUID-shaped ids in creation order, so a tie broken by id breaks the same way
   // every run. Shared across restart(), as the database is.
   let idCount = 0;

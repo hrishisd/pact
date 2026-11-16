@@ -90,8 +90,6 @@ interface Seen {
   ledgers: Ledger[];
   queue: ReviewItem[];
   waitingOnReply: ReviewItem[];
-  /** The notification settings turned on. */
-  settingsOn: NotificationSetting[];
 }
 
 /** The setting that turns each kind of notification off; null for a kind nothing turns off. */
@@ -133,8 +131,6 @@ interface Before {
   paidLedgers: Map<string, string>;
   /** By pact: an Ended pact's terms, and each pact's evidence kind and (past its edit window) schedule kind. */
   frozen: Map<string, string>;
-  /** By person: the notification settings turned on. */
-  settingsOn: Map<string, NotificationSetting[]>;
 }
 
 export class Checks {
@@ -147,6 +143,8 @@ export class Checks {
   #emailsSeen = 0;
   /** By person, kind and local day: the once-a-day messages sent. */
   readonly #onceADay = new Set<string>();
+  /** By person: the notification settings turned on when the messages were last checked. */
+  readonly #settingsOn = new Map<string, NotificationSetting[]>();
   /** Every item seen waiting, by id: whose it is and its kind. */
   readonly #items = new Map<string, { owner: AccountHandle; kind: TodayWaitingItem["kind"] }>();
 
@@ -190,12 +188,26 @@ export class Checks {
     this.#db = null;
   }
 
-  /** The tables that differ between two dumps. */
+  /** The tables that differ between two dumps, each with the rows that went and the rows that came. */
   #changed(before: Map<string, string>, after: Map<string, string>): string[] {
-    return [...after].filter(([table, rows]) => before.get(table) !== rows).map(([table]) => table);
+    return [...after]
+      .filter(([table, rows]) => before.get(table) !== rows)
+      .map(([table, rows]) => {
+        const was = new Set((JSON.parse(before.get(table) ?? "[]") as unknown[]).map((row) => JSON.stringify(row)));
+        const is = new Set((JSON.parse(rows) as unknown[]).map((row) => JSON.stringify(row)));
+        const gone = [...was].filter((row) => !is.has(row)).slice(0, 3);
+        const come = [...is].filter((row) => !was.has(row)).slice(0, 3);
+        return `${table} (was ${gone.join(" ") || "nothing"}, now ${come.join(" ") || "nothing"})`;
+      });
   }
 
-  /** A command: it never throws, and a refusal changes nothing and tells nobody. */
+  /**
+   * A command: it never throws, and a refusal changes nothing and tells
+   * nobody. Every command also does the tick's housekeeping for requests
+   * that no longer matter (`withdrawMoot`), which can judge a day whose due
+   * time passed since the last tick. So a refusal's writes are checked only
+   * when a tick ran at this very time and left no such work.
+   */
   async command<T>(label: string, run: () => Promise<T>): Promise<T> {
     const before = this.dump();
     const sent = this.#world.s.notifier.sent.length;
@@ -205,7 +217,7 @@ export class Checks {
     } catch (error) {
       throw this.#asViolation(label, error);
     }
-    if (isRefusal(result)) {
+    if (isRefusal(result) && this.#world.tickedAt === this.#world.now().getTime()) {
       const changed = this.#changed(before, this.dump());
       if (changed.length > 0) {
         fail("refusal-changes-nothing", `${label} was refused (${result.reason}) but wrote to ${changed.join(", ")}`);
@@ -236,14 +248,15 @@ export class Checks {
 
   /** A restart: every query answers as before it. */
   async restart(): Promise<void> {
-    const before = show(this.#everything());
+    const before = JSON.stringify(this.everything());
     await this.#world.s.restart();
-    const after = show(this.#everything());
+    const after = JSON.stringify(this.everything());
     if (before !== after) fail("restart-changes-nothing", `queries answer differently after a restart`);
   }
 
-  #everything(): unknown {
-    return this.#world.people.map((who) => this.#see(who));
+  /** What every person's queries answer now. */
+  everything(): unknown {
+    return this.#world.people.map((who) => ({ ...this.#see(who), who: who.name, vacations: who.vacations() }));
   }
 
   pactOf(who: AccountHandle, pactId: string): PactTerms {
@@ -271,10 +284,6 @@ export class Checks {
       }),
       queue: who.reviewQueue(),
       waitingOnReply: who.waitingOnReply(),
-      settingsOn: who
-        .notificationSettings()
-        .filter((state) => state.enabled)
-        .map((state) => state.setting),
     };
   }
 
@@ -489,7 +498,7 @@ export class Checks {
       this.#pactsAreWellFormed(person);
       this.#currentTermsAreValid(person);
     }
-    this.#messagesFollowSettings(seen);
+    this.messagesFollowSettings();
     this.#waitingItemsAgree(seen);
     this.#othersSeeNothing(seen, outsider);
     this.#changesSinceLastCheck(seen);
@@ -668,16 +677,24 @@ export class Checks {
    * Nobody gets a push of a kind they turned off, and the once-a-day
    * messages (the stale-item pushes and the daily summary) come once a day.
    */
-  #messagesFollowSettings(seen: Seen[]): void {
+  messagesFollowSettings(): void {
     const { notifier, mailer } = this.#world.s;
     const now = this.#world.now();
+    const people = this.#world.people.map((who) => ({
+      who,
+      timezone: who.profile().timezone,
+      settingsOn: who
+        .notificationSettings()
+        .filter((state) => state.enabled)
+        .map((state) => state.setting),
+    }));
     for (const push of notifier.sent.slice(this.#pushesSeen)) {
-      const person = seen.find(({ who }) => who.id === push.recipient);
+      const person = people.find(({ who }) => who.id === push.recipient);
       if (!person) continue;
       const setting = SETTING_OF_KIND[push.kind];
-      // Off before the action and after it: an action that turns a setting on or off is in neither.
-      const offBefore = !(this.#before?.settingsOn.get(push.recipient) ?? [setting]).includes(setting!);
-      if (setting !== null && offBefore && !person.settingsOn.includes(setting)) {
+      // Off when last looked and off now: a command that turns a setting on or off is in neither.
+      const wasOff = setting !== null && this.#settingsOn.get(push.recipient)?.includes(setting) === false;
+      if (setting !== null && wasOff && !person.settingsOn.includes(setting)) {
         fail("messages-follow-settings", `${person.who.name} got a ${push.kind} push with ${setting} turned off`);
       }
       if (push.kind === "stale-review-items" || push.kind === "unanswered-question") {
@@ -685,14 +702,15 @@ export class Checks {
       }
     }
     for (const email of mailer.sent.slice(this.#emailsSeen)) {
-      const person = seen.find(({ who }) => `${who.name}@example.test` === email.to);
+      const person = people.find(({ who }) => `${who.name}@example.test` === email.to);
       if (person && email.subject === "Pact Daily Summary") this.#onceToday(person, "daily summary", now);
     }
+    for (const { who, settingsOn } of people) this.#settingsOn.set(who.id, settingsOn);
     this.#pushesSeen = notifier.sent.length;
     this.#emailsSeen = mailer.sent.length;
   }
 
-  #onceToday({ who, timezone }: Seen, what: string, now: Date): void {
+  #onceToday({ who, timezone }: { who: AccountHandle; timezone: string }, what: string, now: Date): void {
     const key = `${who.id} ${what} ${localDateOf(now, timezone)}`;
     if (this.#onceADay.has(key))
       fail("messages-follow-settings", `${who.name} got a second ${what} on ${localDateOf(now, timezone)}`);
@@ -865,7 +883,6 @@ export class Checks {
       billed: new Map(),
       paidLedgers: new Map(),
       frozen: new Map(),
-      settingsOn: new Map(seen.map(({ who, settingsOn }) => [who.id, settingsOn])),
     };
     const before = this.#before;
     for (const { who, timezone, pacts, ledgers } of seen) {

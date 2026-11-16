@@ -48,6 +48,7 @@ const WEIGHTS = {
   advance: 14,
   "advance-to-edge": 10,
   drift: 4,
+  "cross-edge": 6,
   "tick-again": 1,
   restart: 1,
   // Pacts.
@@ -183,11 +184,14 @@ export class World {
   /** What each action did, for the report of a failure. */
   readonly log: string[] = [];
   readonly checks: Checks;
+  /** Whether each tick is made as many: one a minute for half an hour, or thirty evenly spaced. */
+  readonly #manyTicks: boolean;
   #names = 0;
 
-  constructor(setup: Setup) {
-    this.s = scenario();
+  constructor(setup: Setup, { manyTicks = false } = {}) {
+    this.s = scenario({ judgingTimesMayMove: setup.timezoneChanges });
     this.setup = setup;
+    this.#manyTicks = manyTicks;
     this.checks = new Checks(this);
   }
 
@@ -256,9 +260,27 @@ export class World {
     this.s.ankiSource.setAnkiDay(person.id, ankiDate, this.now());
   }
 
+  /** When the last tick ran, or null before the first. */
+  tickedAt: number | null = null;
+
   /** A scheduler tick at `to`, then every check. */
   async tick(to: Date): Promise<void> {
+    const from = this.now().getTime();
+    const span = to.getTime() - from;
+    if (this.#manyTicks && span > MINUTE) {
+      const pieces = Math.min(30, Math.floor(span / MINUTE));
+      for (let i = 1; i < pieces; i++) {
+        // On the minute, as the scheduler ticks.
+        const at = Math.floor((from + (span * i) / pieces) / MINUTE) * MINUTE;
+        if (at <= this.now().getTime()) continue;
+        await this.checks.guard("tick", () => this.s.advanceTo(new Date(at).toISOString()));
+        this.checks.messagesFollowSettings();
+      }
+    }
     await this.checks.guard("tick", () => this.s.advanceTo(to.toISOString()));
+    this.tickedAt = to.getTime();
+    // Now, while the clock still says when they were sent.
+    this.checks.messagesFollowSettings();
   }
 
   /**
@@ -310,6 +332,17 @@ export class World {
         const to = new Date(Math.max(edge.at.getTime() + offset, this.now().getTime() + 1000));
         await this.tick(to);
         this.note(`tick at ${edge.what} ${offset >= 0 ? "+" : ""}${offset / 1000} s`);
+        return;
+      }
+      case "cross-edge": {
+        // The clock passes an edge with no tick yet, as in the minute between two ticks: what comes next arrives in that gap.
+        const edge = pick(this.checks.edgesAhead().slice(0, 4), a);
+        if (!edge) return;
+        const before = edge.at.getTime() - [1000, 20_000, 59_000][b % 3]!;
+        if (before > this.now().getTime()) await this.tick(new Date(before));
+        const to = Math.max(edge.at.getTime() + [0, 1000, 30_000][c % 3]!, this.now().getTime() + 1000);
+        s.setClockTo(new Date(to).toISOString());
+        this.note(`clock passes ${edge.what} with no tick yet`);
         return;
       }
       case "drift": {
@@ -883,25 +916,95 @@ export async function shrink(
   setup: Setup,
   actions: readonly Action[],
   invariant: string,
-  budget = 150,
+  runner: (setup: Setup, actions: readonly Action[]) => Promise<RunResult> = run,
+  budget = Number(process.env.FUZZ_SHRINK_RUNS ?? 250),
 ): Promise<{ actions: Action[]; result: RunResult }> {
   let best = [...actions];
-  let result = await run(setup, best);
+  let result = await runner(setup, best);
   if (result.violation?.invariant !== invariant) throw new Error("the run to shrink doesn't break that invariant");
   best = best.slice(0, result.steps);
   let spent = 1;
-  for (let size = Math.ceil(best.length / 2); size >= 1 && spent < budget; size = Math.floor(size / 2)) {
-    for (let from = 0; from < best.length && spent < budget;) {
-      const shorter = [...best.slice(0, from), ...best.slice(from + size)];
-      const tried = await run(setup, shorter);
-      spent++;
-      if (tried.violation?.invariant === invariant) {
+  // Until a whole pass drops nothing: taking one action out often frees others.
+  for (let dropped = true; dropped && spent < budget;) {
+    dropped = false;
+    for (let size = Math.ceil(best.length / 2); size >= 1 && spent < budget; size = Math.floor(size / 2)) {
+      // From the end: the actions just before the failure matter most, so the early ones go in big pieces.
+      for (let from = Math.max(0, best.length - size); from >= 0 && spent < budget; from -= size) {
+        const shorter = [...best.slice(0, from), ...best.slice(from + size)];
+        const tried = await runner(setup, shorter);
+        spent++;
+        if (tried.violation?.invariant !== invariant) continue;
         best = shorter.slice(0, tried.steps);
         result = tried;
-      } else {
-        from += size;
+        dropped = true;
       }
     }
   }
   return { actions: best, result };
+}
+
+/** `value` as JSON with each id replaced by when it first appears, so two runs that made their rows in another order compare equal. */
+function withoutIds(value: unknown): unknown {
+  const seen = new Map<string, string>();
+  const text = (JSON.stringify(value) ?? "null").replace(
+    /[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}/g,
+    (id) => {
+      if (!seen.has(id)) seen.set(id, `#${seen.size + 1}`);
+      return seen.get(id)!;
+    },
+  );
+  return JSON.parse(text) as unknown;
+}
+
+/** Where two JSON values first differ, and the two values there; null if they don't. */
+function firstDifference(a: unknown, b: unknown, path = ""): string | null {
+  if (JSON.stringify(a) === JSON.stringify(b)) return null;
+  if (typeof a === "object" && typeof b === "object" && a !== null && b !== null) {
+    const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])];
+    for (const key of keys) {
+      const found = firstDifference(
+        (a as Record<string, unknown>)[key],
+        (b as Record<string, unknown>)[key],
+        `${path}/${key}`,
+      );
+      if (found !== null) return found;
+    }
+  }
+  const brief = (value: unknown) => (JSON.stringify(value) ?? "undefined").slice(0, 300);
+  return `${path}: with one tick ${brief(a)}, with many ${brief(b)}`;
+}
+
+/**
+ * Applies `actions` to two scenarios side by side. In the first every tick
+ * is one tick, however far it moves the clock, as after an outage. In the
+ * second it's many ticks on the way. The core catches up on what it missed
+ * (`advanceTo`), so after every action every query must answer the same in
+ * both. Camera pacts only: what Oura and AnkiWeb said depends on when they
+ * were asked.
+ */
+export async function runBothWays(setup: Setup, actions: readonly Action[]): Promise<RunResult> {
+  const cameraOnly = { ...setup, automatic: false };
+  const once = new World(cameraOnly);
+  const many = new World(cameraOnly, { manyTicks: true });
+  let steps = 0;
+  try {
+    await once.start();
+    await many.start();
+    for (const action of actions) {
+      steps++;
+      await once.checks.guard(action.do, () => once.apply(action));
+      await many.checks.guard(action.do, () => many.apply(action));
+      const difference = firstDifference(withoutIds(once.checks.everything()), withoutIds(many.checks.everything()));
+      if (difference !== null) throw new Violation("one-tick-or-many", difference);
+    }
+    return { violation: null, steps, log: once.log };
+  } catch (error) {
+    if (!(error instanceof Violation)) throw error;
+    return { violation: error, steps, log: once.log };
+  } finally {
+    once.checks.close();
+    many.checks.close();
+    await once.s.dispose();
+    await many.s.dispose();
+  }
 }
