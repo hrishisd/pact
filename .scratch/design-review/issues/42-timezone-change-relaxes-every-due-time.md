@@ -1,13 +1,11 @@
 # A timezone change relaxes every due time with no approval, and no reviewer is told
 
-Status: needs-info
+Status: done
 Blocked by: 39
 
-## Decision needed
+## Decision
 
-Should a timezone change that makes due times later need a reviewer's approval, or only be told to the reviewers?
-
-Recommended: tell the reviewers, with no approval. The spec below builds that. Also needed: a yes to the push's words and to the new notification setting, or a request to prototype them first.
+A timezone change that makes due times later is told to the reviewers, with no approval (the recommended answer). The push's words, the Profile line and the "Pacts you review" setting were accepted as written below, with no prototype.
 
 ## Problem
 
@@ -61,9 +59,21 @@ User-visible, but small: one push, one line in Profile and one row in notificati
 
 ## Acceptance criteria
 
-- [ ] A reviewer is pushed when an owner's timezone change makes a pact they review due later, with both timezones, their pacts and the first day.
-- [ ] A change that makes due times earlier, or leaves them, tells nobody.
-- [ ] The push follows the "Pacts you review" setting.
-- [ ] `docs/behaviour.md` (Time and timezones; Notifications and reminders) says so.
-- [ ] The scenarios above pass, and the randomised test's kind-to-setting map has the new kind.
-- [ ] `npm run check` passes.
+- [x] A reviewer is pushed when an owner's timezone change makes a pact they review due later, with both timezones, their pacts and the first day.
+- [x] A change that makes due times earlier, or leaves them, tells nobody.
+- [x] The push follows the "Pacts you review" setting.
+- [x] `docs/behaviour.md` (Time and timezones; Notifications and reminders) says so.
+- [x] The scenarios above pass, and the randomised test's kind-to-setting map has the new kind.
+- [x] `npm run check` passes.
+
+## Outcome
+
+Built as planned. `setTimezone` (`accounts.ts`) calls `tellReviewersOfLaterDueTimes` after the change is stored: it reads the shift at the start of `until` in both timezones, tells nobody when it is zero or less, and otherwise sends one `timezone-changed` push per reviewer, naming only the pacts that reviewer reviews, oldest first (`pactNamesText`, `src/shared/format.ts`). The new setting `reviewed-pact`, "Pacts you review", is in `NOTIFICATION_SETTINGS`, `SETTING_OF_KIND` (`outbox.ts` and the randomised test's copy) and `SETTING_COPY`. Profile shows the line under the timezone picker.
+
+Differs from the plan, or beyond it:
+
+- A One-time pact is named only when its occurrence moves: not with Submit anytime, and not with a deadline before `until`. Both keep their timezone (`occurrencesOverTime`), so "due later" would not be true of them.
+- The setting's hint lists only what is built: "A friend changed timezone on a pact you review" here; tickets 43 and 44 grow it to the full words.
+- `Asia/Kolkata` is stored as `Asia/Calcutta` (its canonical name in this ICU), so a push names the city as the stored name has it.
+- Tests: `timezone.test.ts`, "a timezone change and the owner's reviewers" (also the half-hour rounding and a zone with no city); `notifications.test.ts`, "Pacts you review turned off"; `src/shared/format.test.ts` for the pact names.
+- `npm run check` was run in its parts (shellcheck isn't installed where this was built, so its lint step wasn't run).

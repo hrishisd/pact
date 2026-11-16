@@ -104,7 +104,9 @@ export type NotificationKind =
   /** To the owner, daily while Overdue; to the reviewers of pacts with that recipient, at first and weekly. */
   | "overdue-bill"
   /** To the owner: Oura refused its tokens, or at 15:00 a bedtime night still has no sleep data. */
-  | "connection-problem";
+  | "connection-problem"
+  /** To each reviewer of an owner's affected pacts: the owner's timezone change made due times later. */
+  | "timezone-changed";
 
 /** What a notification says, and the app path it opens: all a push carries. */
 interface NotificationText {
@@ -150,6 +152,8 @@ interface NotificationDetails {
   "overdue-bill": { recipientId: string };
   /** `occurrenceDate`: "YYYY-MM-DD", the night with no sleep data; none when the service needs reconnecting. */
   "connection-problem": { occurrenceDate?: string };
+  /** `from` and `to`: the owner's timezones before and after, IANA names. */
+  "timezone-changed": { ownerId: AccountId; from: string; to: string };
 }
 
 /** A notification of kind `K`. */

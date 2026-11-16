@@ -2384,6 +2384,7 @@ describe("notifications", () => {
         { setting: "new-bill", enabled: true },
         { setting: "overdue-bill", enabled: true },
         { setting: "connection-problem", enabled: true },
+        { setting: "reviewed-pact", enabled: true },
       ],
       dailySummary: { enabled: false, to: "owner@example.test" },
     });

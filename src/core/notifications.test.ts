@@ -93,6 +93,7 @@ describe("notification settings", () => {
       { setting: "new-bill", enabled: true },
       { setting: "overdue-bill", enabled: true },
       { setting: "connection-problem", enabled: true },
+      { setting: "reviewed-pact", enabled: true },
     ]);
   });
 
@@ -147,6 +148,19 @@ describe("notification settings", () => {
     await owner.submitEvidence(gym, [photo()]);
 
     expect(s.notifier.sentTo(reviewer)).toHaveLength(1);
+  });
+
+  test("Pacts you review turned off: a reviewer isn't told of the owner's timezone change", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s, { timezone: "Europe/London" });
+    await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Mon 12:00");
+    await reviewer.setNotificationSetting("reviewed-pact", false);
+
+    await owner.setTimezone("Pacific/Honolulu");
+
+    expect(s.notifier.sentTo(reviewer, "timezone-changed")).toEqual([]);
+    expect(s.notifier.sentTo(second, "timezone-changed")).toHaveLength(1);
   });
 
   test("an operator alert can't be turned off", async () => {

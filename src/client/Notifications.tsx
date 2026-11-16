@@ -26,6 +26,7 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
     label: "Connection problem",
     hint: "Oura or AnkiWeb needs reconnecting, or last night still has no Oura data at 3pm",
   },
+  "reviewed-pact": { label: "Pacts you review", hint: "A friend changed timezone on a pact you review" },
 };
 
 function alertWasCleared(): boolean {

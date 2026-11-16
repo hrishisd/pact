@@ -10,6 +10,7 @@ import type {
   Friend,
   Invite,
   InviteLookup,
+  LocalDate,
   NewRecipient,
   NotificationSetting,
   NotificationSettingState,
@@ -19,13 +20,24 @@ import type {
   SetTimezoneResult,
   SignInResult,
 } from "../shared/types.ts";
+import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
+import { formatDate, pactNamesText } from "../shared/format.ts";
 import { billInstant, lastBillDay } from "./bill-math.ts";
-import { laterDate, localDateOf } from "./calendar.ts";
+import { laterDate, localDateOf, startOfDay } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { notificationSettings } from "./outbox.ts";
 import { isPushDevice } from "./push-devices.ts";
-import { areFriends, byName, friendshipPair, selectRecipients, UnknownAccountError } from "./rows.ts";
+import {
+  accountName,
+  areFriends,
+  byName,
+  friendshipPair,
+  reviewersOf,
+  scheduleOf,
+  selectRecipients,
+  UnknownAccountError,
+} from "./rows.ts";
 import { nameTooLong } from "./text-limits.ts";
 
 export function signIn(
@@ -104,7 +116,69 @@ export function setTimezone(ctx: CoreContext, accountId: AccountId, timezone: st
   ctx.db
     .prepare(`UPDATE account SET timezone = ?, billed_through = ? WHERE id = ?`)
     .run(zone, lastBilled.toISOString(), accountId);
+  tellReviewersOfLaterDueTimes(ctx, accountId, before, zone, until);
   return { ok: true, timezone: zone };
+}
+
+/**
+ * When an owner's move from `from` to `to` makes due times later from
+ * `until` on, tells each reviewer of their affected pacts once, naming only
+ * the pacts that reviewer reviews. The shift is read at the start of
+ * `until`, the first day in `to`. Affected: Active Camera and Anki pacts
+ * whose reviewers have been told of them, with a day from `until` that
+ * takes `to`. Oura Ring nights follow the offset Oura reports. A move that
+ * makes due times earlier is stricter and tells nobody.
+ */
+function tellReviewersOfLaterDueTimes(
+  ctx: CoreContext,
+  ownerId: AccountId,
+  from: string,
+  to: string,
+  until: LocalDate,
+): void {
+  const shiftMs = startOfDay(until, to).getTime() - startOfDay(until, from).getTime();
+  if (shiftMs <= 0) return;
+  const pacts = ctx
+    .all<{ id: string; name: string; schedule: string }>(
+      `SELECT id, name, schedule FROM pact
+       WHERE owner_account_id = ? AND stage = 'active' AND reviewers_notified_at IS NOT NULL
+         AND evidence_kind IN ('camera', 'anki') AND (end_date IS NULL OR end_date >= ?)
+       ORDER BY created_at, id`,
+      ownerId,
+      until,
+    )
+    .filter((pact) => {
+      const schedule = scheduleOf(pact.schedule);
+      // A One-time occurrence that has opened keeps its timezone (`occurrencesOverTime`).
+      return schedule.kind !== "one-time" || (!schedule.submitAnytime && schedule.deadline >= until);
+    });
+  const named = new Map<AccountId, string[]>();
+  for (const pact of pacts) {
+    for (const reviewerId of reviewersOf(ctx, pact.id))
+      named.set(reviewerId, [...(named.get(reviewerId) ?? []), pact.name]);
+  }
+  const hours = Math.round(shiftMs / (30 * 60 * 1000)) / 2;
+  const later = `${hours} ${hours === 1 ? "hour" : "hours"} later from ${formatDate(until)}`;
+  const title = `${accountName(ctx, ownerId)} changed timezone`;
+  for (const [recipient, names] of named) {
+    ctx.enqueue({
+      recipient,
+      kind: "timezone-changed",
+      payload: {
+        ownerId,
+        from,
+        to,
+        title,
+        body: `${cityOf(from)} to ${cityOf(to)}. ${pactNamesText(names)} ${names.length === 1 ? "is" : "are"} due ${later}.`,
+        url: APP_PATHS.review,
+      },
+    });
+  }
+}
+
+/** A timezone by its city: "Buenos Aires" for "America/Argentina/Buenos_Aires"; "UTC" stays "UTC". */
+function cityOf(timezone: string): string {
+  return (timezone.split("/").at(-1) ?? timezone).replaceAll("_", " ");
 }
 
 export function createInvite(ctx: CoreContext, accountId: AccountId): Invite {
