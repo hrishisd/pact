@@ -1,6 +1,6 @@
 # Evidence kept through an edit can judge a day Missed before it opens
 
-Status: needs-triage
+Status: done
 Blocked by: none
 
 ## Problem
@@ -27,8 +27,12 @@ Evidence survives an edit only if it still answers the occurrence it was sent fo
 
 ## Acceptance criteria
 
-- [ ] After an edit, no evidence is attached to an occurrence that had not opened when the evidence was sent.
-- [ ] A scenario test covers the run above, for a rejection and for an approval.
-- [ ] `docs/behaviour.md` (Edit window) says what an edit does to evidence already sent.
-- [ ] The entry for this ticket is removed from `KNOWN` in `src/core/testing/fuzz-invariants.ts`, and seed 3107 passes.
-- [ ] `npm run check` passes.
+- [x] After an edit, no evidence is attached to an occurrence that had not opened when the evidence was sent.
+- [x] A scenario test covers the run above, for a rejection and for an approval.
+- [x] `docs/behaviour.md` (Edit window) says what an edit does to evidence already sent.
+- [x] The entry for this ticket is removed from `KNOWN` in `src/core/testing/fuzz-invariants.ts`, and seed 3107 passes.
+- [x] `npm run check` passes.
+
+## Outcome
+
+`editPact` keeps evidence only on a day the new schedule has and that has opened. The scenario test covers the removal; with the evidence gone there is nothing to reject or approve, so one test serves both.
