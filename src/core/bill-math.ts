@@ -23,13 +23,17 @@ export interface BillState {
   unpaidCents: number;
   /** `unpaidCents` less what payments awaiting approval cover. */
   uncoveredCents: number;
+  /** Whether an older bill was still unpaid when this one fell due: it joined an Overdue spell, and started none. */
+  joinedSpell: boolean;
 }
 
 /**
  * What's Overdue at `now`: the uncovered part of bills past due, and the
  * oldest such bill. `spellStartedAt` is when the current spell of being
  * Overdue began: the due time of the oldest bill past due that approved
- * payments haven't paid, covered or not. Null when nothing is Overdue.
+ * payments haven't paid, covered or not, or of the bill whose spell that
+ * one joined (`joinedSpell`), since paying off a spell's first bill while a
+ * later one is past due doesn't end it. Null when nothing is Overdue.
  * Bills are oldest first.
  */
 export function overdueOf(
@@ -41,7 +45,9 @@ export function overdueOf(
   const [oldest] = overdue;
   if (!oldest) return null;
   // An uncovered bill is unpaid too, so there's always one.
-  const spellStart = pastDue.find((bill) => bill.unpaidCents > 0)!;
+  let first = pastDue.findIndex((bill) => bill.unpaidCents > 0);
+  while (first > 0 && pastDue[first]!.joinedSpell) first--;
+  const spellStart = pastDue[first]!;
   return {
     cents: sum(overdue.map((bill) => bill.uncoveredCents)),
     billedOn: oldest.billedOn,
