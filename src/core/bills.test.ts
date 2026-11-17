@@ -444,6 +444,38 @@ describe("Overdue", () => {
     expect(told(reviewer)).toHaveLength(2);
   });
 
+  test("paying off the oldest of two overdue bills doesn't end the spell: the alert keeps its reviewers and nobody is told again", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await fifteenOwed(s);
+    const reminders = () => s.notifier.sentTo(owner, "overdue-bill");
+    const told = () => s.notifier.sentTo(reviewer, "overdue-bill");
+    // Wednesday+1's $15 goes Overdue Thursday+2 20:00, as above, and Wednesday+2's joins the spell.
+    s.setClockTo("Wed+2 17:00");
+    const rejected = await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
+    await s.advanceTo("Wed+2 18:00");
+    s.setClockTo("Thu+2 20:00");
+    await reviewer.decide(rejected, { kind: "reject", reason: "That's a different account" });
+    for (const day of ["Thu+2", "Fri+2", "Sat+2", "Sun+2", "Mon+3", "Tue+3", "Wed+3"]) {
+      await s.advanceTo(`${day} 20:00`);
+    }
+    expect([reminders().length, told().length]).toEqual([7, 1]);
+
+    // $15 approved pays Wednesday+1's bill. Wednesday+2's was past due already, so the owner never stopped being Overdue.
+    s.setClockTo("Wed+3 21:00");
+    const paid = await recordPayment(owner, { recipientId: sam.id, amountCents: 1500 });
+    await reviewer.decide(paid, { kind: "approve" });
+    expect(owner.today().alerts).toMatchObject([
+      { kind: "bill-overdue", overdueCents: 1500, billedOn: s.date("Wed+2"), reviewerNames: ["reviewer", "second"] },
+    ]);
+    await s.advanceTo("Wed+3 21:01");
+    expect([reminders().length, told().length]).toEqual([7, 1]);
+    // The weekly word to the reviewers keeps its time.
+    await s.advanceTo("Thu+3 19:59");
+    expect(told()).toHaveLength(1);
+    await s.advanceTo("Thu+3 20:00");
+    expect([reminders().length, told().length]).toEqual([8, 2]);
+  });
+
   test("a second bill falling due in the same spell adds to it: the alert keeps the oldest bill, and the reminders their times", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await fifteenOwed(s);

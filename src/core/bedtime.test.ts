@@ -415,6 +415,44 @@ describe("a traveller's night closes at 18:00 on Oura's clock", () => {
     expect(night(owner, pactId, "2026-11-01")).toBe("missed");
   });
 
+  test("a night judged at its close keeps that close when Oura later reports a sleep on another clock", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("02:00");
+    // No sleep Mon night: Missed at 18:00 Tue in New York.
+    await s.advanceTo("Tue 18:00");
+    const mondayMissed = expect.objectContaining({ occurrenceDate: s.date("Mon"), missedAt: s.at("Tue 18:00") });
+    expect(cards(owner, "missed")).toEqual([mondayMissed]);
+
+    // The owner flies to Paris: Tue night, asleep at 01:00 Wed there (19:00 Tue in New York).
+    s.ouraSource.addSleep(owner.id, sleep("2026-01-07T01:00:00+01:00"));
+    await s.advanceTo("Wed 08:00");
+    expect(night(owner, pactId, s.date("Tue"))).toBe("satisfied");
+    // Mon night still closed at 18:00 Tue in New York; the scenario holds every stored outcome to `verdictOf` too.
+    expect(cards(owner, "missed")).toEqual([mondayMissed]);
+
+    // Wed night opens on Paris's clock: with no sleep, it closes at 18:00 Thu there, 12:00 in New York.
+    await s.advanceTo("Thu 11:59");
+    expect(night(owner, pactId, s.date("Wed"))).toBe("not-judged");
+    await s.advanceTo("Thu 12:00");
+    expect(night(owner, pactId, s.date("Wed"))).toBe("missed");
+  });
+
+  test("a night open when Oura reports another clock keeps the clock it opened on", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    const pactId = await createPact("00:00");
+    // Mon night opens at 18:00 Mon in New York. At 20:00 Oura reports a nap in Paris, at 01:00 Tue there.
+    await s.advanceTo("Mon 20:00");
+    s.ouraSource.addSleep(owner.id, sleep("2026-01-06T01:00:00+01:00", "sleep"));
+
+    // Mon night still closes at 18:00 Tue in New York, not 18:00 Tue in Paris (12:00 in New York).
+    await s.advanceTo("Tue 17:59");
+    expect(night(owner, pactId, s.date("Mon"))).toBe("not-judged");
+    await s.advanceTo("Tue 18:00");
+    expect(night(owner, pactId, s.date("Mon"))).toBe("missed");
+  });
+
   test("Oura timestamps with no UTC offset close the night on the account's clock", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithOura(s);

@@ -53,13 +53,7 @@ export class Violation extends Error {
 }
 
 /** Violations the checks skip: each a bug a ticket fixes. */
-const KNOWN: { invariant: string; ticket: string; matches: (detail: string) => boolean }[] = [
-  {
-    invariant: "current-terms-are-valid",
-    ticket: "design review 38: a reminder at or after the due time once a waiting change is approved",
-    matches: (detail) => detail.includes('"reason":"reminder-after-due-time"'),
-  },
-];
+const KNOWN: { invariant: string; ticket: string; matches: (detail: string) => boolean }[] = [];
 
 function fail(invariant: string, detail: string): void {
   if (KNOWN.some((known) => known.invariant === invariant && known.matches(detail))) return;

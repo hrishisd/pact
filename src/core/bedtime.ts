@@ -10,10 +10,10 @@ import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { coverOn, keepsToDo } from "./covers.ts";
 import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
-import { nightStartsAt, noOuraDataPushAt, type Occurrence } from "./occurrences.ts";
+import { nightStartsAt, noOuraDataPushAt, utcOffsetMs, type Occurrence, type OuraOffset } from "./occurrences.ts";
 import { nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
 import type { OuraSleepPeriod, OuraSource } from "./ports.ts";
-import { connectionProblem, occurrencesOf, ouraOffset } from "./rows.ts";
+import { connectionProblem, occurrencesOf, ouraClockOf, ouraOffsetOf } from "./rows.ts";
 import { settle } from "./settle.ts";
 
 /** The core ignores a check of Oura now this soon after the account's last one. */
@@ -32,7 +32,7 @@ export async function checkOura(
   const fetched = await fetchSleep(ctx, ouraSource, now, accountId);
   await command(() => {
     for (const account of fetched.disconnected) markDisconnected(ctx, "oura", account, fetched.askedAt);
-    noteOuraClock(ctx, fetched.sleep);
+    noteOuraClock(ctx, fetched.sleep, now);
     judgeNights(ctx, now, fetched.sleep, accountId);
   });
 }
@@ -40,22 +40,75 @@ export async function checkOura(
 /**
  * Keeps, for each account in `sleep`, the latest bedtime_start Oura has
  * reported with a UTC offset, by when it happened: Oura's clock where the
- * owner is now, for `ouraOffset`. Deleted periods don't count.
+ * owner is now, for `ouraClockOf`. Deleted periods don't count. When that
+ * moves the clock nights close on, a night that has opened by `at` keeps
+ * the clock it opened on (`keepEarlierClock`).
  */
-export function noteOuraClock(ctx: CoreContext, sleep: Map<AccountId, OuraSleepPeriod[]>): void {
+export function noteOuraClock(ctx: CoreContext, sleep: Map<AccountId, OuraSleepPeriod[]>, at: Date): void {
   for (const [account, periods] of sleep) {
-    const row = ctx.one<{ oura_latest_bedtime_start: string | null }>(
-      `SELECT oura_latest_bedtime_start FROM account WHERE id = ?`,
+    const row = ctx.one<{ oura_latest_bedtime_start: string | null; timezone: string | null }>(
+      `SELECT oura_latest_bedtime_start, timezone FROM account WHERE id = ?`,
       account,
     );
-    let latest = row?.oura_latest_bedtime_start ?? null;
+    const before = row?.oura_latest_bedtime_start ?? null;
+    let latest = before;
     for (const { type, bedtime_start: start } of periods) {
       if (type === "deleted" || utcOffsetOf(start) === null) continue;
       if (latest === null || Date.parse(start) > Date.parse(latest)) latest = start;
     }
-    if (latest === null || latest === row?.oura_latest_bedtime_start) continue;
+    if (latest === null || latest === before) continue;
+    if (row?.timezone) keepEarlierClock(ctx, account, row.timezone, before, latest, at);
     ctx.db.prepare(`UPDATE account SET oura_latest_bedtime_start = ? WHERE id = ?`).run(latest, account);
   }
+}
+
+/**
+ * Keeps the clock of the sleep that started at `before` for the account's
+ * nights that have opened by `at`, when the one that started at `latest`
+ * gives nights another clock in `timezone` or in a timezone the owner moved
+ * from: as a timezone change does (design review tickets 39 and 45), so a
+ * night open or judged keeps its close. The nights kept are those dated up to the latest whose window
+ * (from 18:00) has started on either clock, or up to the last day open in
+ * a timezone the owner moved from. A second change before the next night
+ * opens keeps the first clock; a change to the same clock keeps nothing.
+ */
+function keepEarlierClock(
+  ctx: CoreContext,
+  account: AccountId,
+  timezone: string,
+  before: string | null,
+  latest: string,
+  at: Date,
+): void {
+  const movedFrom = ctx.all<{ until: LocalDate; timezone: string }>(
+    `SELECT until, timezone FROM pact_earlier_timezone
+       WHERE pact_id IN (SELECT id FROM pact WHERE owner_account_id = ?)`,
+    account,
+  );
+  // A night is worked out in the timezone it opened in, so the clock may change in any of them.
+  const zones = [timezone, ...movedFrom.map((zone) => zone.timezone)];
+  if (zones.every((zone) => ouraOffsetOf(before, zone) === ouraOffsetOf(latest, zone))) return;
+  const [old, changed] = [ouraOffsetOf(before, timezone), ouraOffsetOf(latest, timezone)];
+  let opened = laterDate(lastNightStarted(at, timezone, old), lastNightStarted(at, timezone, changed));
+  for (const zone of movedFrom) opened = laterDate(opened, addDays(zone.until, -1));
+  const until = addDays(opened, 1);
+  const kept = ctx.one<{ until: LocalDate | null }>(
+    `SELECT MAX(until) AS until FROM oura_earlier_clock WHERE account_id = ?`,
+    account,
+  )?.until;
+  if (kept && until <= kept) return;
+  ctx.db
+    .prepare(`INSERT INTO oura_earlier_clock (account_id, until, bedtime_start) VALUES (?, ?, ?)`)
+    .run(account, until, before);
+}
+
+/** The latest night whose window (from 18:00) has started by `at`, on the clock `offset` (in `timezone` with none). */
+function lastNightStarted(at: Date, timezone: string, offset: OuraOffset): LocalDate {
+  const today =
+    offset === null
+      ? localDateOf(at, timezone)
+      : new Date(at.getTime() + utcOffsetMs(offset)).toISOString().slice(0, 10);
+  return nightStartsAt(today, timezone, offset).getTime() <= at.getTime() ? today : addDays(today, -1);
 }
 
 /**
@@ -73,11 +126,12 @@ function nightsWaiting(ctx: CoreContext, t: Date, owner?: AccountId): { pact: Pa
     const until = endedAt !== null && endedAt.getTime() < t.getTime() ? endedAt : t;
     const from = pact.judged_through === null ? pact.first_occurrence : addDays(pact.judged_through, 1);
     const nights = occurrencesOf(ctx, pact.id, timezone);
+    const clock = ouraClockOf(ctx, pact.owner_account_id);
     // After a move west, a night open in the timezone moved from may be dated tomorrow here.
     for (const night of nights.between(from, addDays(localDateOf(until, timezone), 1))) {
       // The window is on the clock the night closes on, where it opened.
       const zone = nights.timezoneOn(night.date);
-      if (nightStartsAt(night.date, zone, ouraOffset(ctx, pact.owner_account_id, zone)).getTime() > t.getTime()) {
+      if (nightStartsAt(night.date, zone, clock(night.date, zone)).getTime() > t.getTime()) {
         continue;
       }
       if (endedAt !== null && night.dueAt.getTime() > endedAt.getTime()) break;
@@ -140,7 +194,7 @@ export async function fetchSleep(
 export function pushNoOuraData(ctx: CoreContext, t: Date): void {
   for (const { pact, night } of nightsWaiting(ctx, t)) {
     const zone = occurrencesOf(ctx, pact.id, pact.timezone).timezoneOn(night.date);
-    const offset = ouraOffset(ctx, pact.owner_account_id, zone);
+    const offset = ouraClockOf(ctx, pact.owner_account_id)(night.date, zone);
     if (t.getTime() < noOuraDataPushAt(night.date, zone, offset).getTime()) continue;
     if (t.getTime() >= night.closesAt.getTime() || isJudged(ctx, pact.id, night.date)) continue;
     if (!keepsToDo(coverOn(ctx, pact.id, night.date))) continue;

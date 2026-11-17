@@ -30,6 +30,7 @@ import {
   type Occurrences,
   type OccurrenceTerms,
   type OneTimeTerms,
+  type OuraClock,
   type OuraOffset,
   type RecurringTerms,
 } from "./occurrences.ts";
@@ -178,24 +179,12 @@ export function earlierTermsOf(ctx: CoreContext, pact: PactClock & Pick<PactRow,
   });
 }
 
-/**
- * The timezones `pact`'s owner had before each change since it was made,
- * oldest first (`setTimezone`, accounts.ts), each with the Oura clock a
- * bedtime night there closes on (`ouraOffset`).
- */
-export function earlierTimezonesOf(
-  ctx: CoreContext,
-  pact: Pick<PactRow, "id" | "evidence_kind" | "owner_account_id">,
-): EarlierTimezone[] {
-  const rows = ctx.all<{ until: LocalDate; timezone: string }>(
+/** The timezones `pact`'s owner had before each change since it was made, oldest first (`setTimezone`, accounts.ts). */
+export function earlierTimezonesOf(ctx: CoreContext, pact: Pick<PactRow, "id">): EarlierTimezone[] {
+  return ctx.all<{ until: LocalDate; timezone: string }>(
     `SELECT until, timezone FROM pact_earlier_timezone WHERE pact_id = ? ORDER BY until`,
     pact.id,
   );
-  return rows.map(({ until, timezone }) => ({
-    until,
-    timezone,
-    ouraOffset: pact.evidence_kind === "oura" ? ouraOffset(ctx, pact.owner_account_id, timezone) : null,
-  }));
 }
 
 /**
@@ -216,7 +205,7 @@ export function lastDayOpened(ctx: CoreContext, pactId: string, timezone: string
 /**
  * The occurrences of pact `pactId` with its owner now in `timezone`, each
  * dated one on the terms it opened with, in the timezone it opened in. A
- * bedtime night closes on Oura's clock where the owner is (`ouraOffset`).
+ * bedtime night closes on the Oura clock it opened on (`ouraClockOf`).
  */
 export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string): Occurrences {
   const pact = ctx.one<
@@ -240,27 +229,44 @@ export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string
     pactId,
   );
   if (!pact) throw new Error(`no pact ${pactId}`);
-  const offset = pact.evidence_kind === "oura" ? ouraOffset(ctx, pact.owner_account_id, timezone) : null;
+  const clock = pact.evidence_kind === "oura" ? ouraClockOf(ctx, pact.owner_account_id) : null;
   const terms = occurrenceTermsOf(pact);
-  return occurrencesOverTime(terms, earlierTermsOf(ctx, pact), timezone, offset, earlierTimezonesOf(ctx, pact));
+  return occurrencesOverTime(terms, earlierTermsOf(ctx, pact), timezone, clock, earlierTimezonesOf(ctx, pact));
 }
 
 /**
- * The UTC offset a bedtime night with no period yet closes on: the one on
- * the latest sleep Oura reported for `account`. Null, the account's
- * `timezone`, when Oura hasn't reported one with an offset, or when that
- * offset is the timezone's own at that moment: the owner was at home, and
- * the timezone also knows when its clocks change.
+ * The Oura clock each bedtime night of `account`'s closes on: the one it
+ * opened on. A night dated before an earlier clock's `until` keeps that
+ * clock (`oura_earlier_clock`, kept by `noteOuraClock`, bedtime.ts); any
+ * later night is on the latest sleep Oura reported (`ouraOffsetOf`).
  */
-export function ouraOffset(ctx: CoreContext, account: AccountId, timezone: string): OuraOffset {
+export function ouraClockOf(ctx: CoreContext, account: AccountId): OuraClock {
   const row = ctx.one<{ oura_latest_bedtime_start: string | null }>(
     `SELECT oura_latest_bedtime_start FROM account WHERE id = ?`,
     account,
   );
+  const earlier = ctx.all<{ until: LocalDate; bedtime_start: string | null }>(
+    `SELECT until, bedtime_start FROM oura_earlier_clock WHERE account_id = ? ORDER BY until`,
+    account,
+  );
   const latest = row?.oura_latest_bedtime_start ?? null;
-  const offset = latest === null ? null : utcOffsetOf(latest);
-  if (latest === null || offset === null) return null;
-  return utcOffsetMs(offset) === zoneOffsetAt(new Date(latest), timezone) ? null : offset;
+  return (night, timezone) => {
+    const clock = earlier.find((before) => night < before.until);
+    return ouraOffsetOf(clock === undefined ? latest : clock.bedtime_start, timezone);
+  };
+}
+
+/**
+ * The UTC offset a bedtime night with no period yet closes on, when Oura's
+ * clock was the one on the sleep that started at `bedtimeStart`. Null, the
+ * night's `timezone`, when there was no such sleep or it carries no offset,
+ * or when that offset is the timezone's own at that moment: the owner was
+ * at home, and the timezone also knows when its clocks change.
+ */
+export function ouraOffsetOf(bedtimeStart: string | null, timezone: string): OuraOffset {
+  const offset = bedtimeStart === null ? null : utcOffsetOf(bedtimeStart);
+  if (bedtimeStart === null || offset === null) return null;
+  return utcOffsetMs(offset) === zoneOffsetAt(new Date(bedtimeStart), timezone) ? null : offset;
 }
 
 /** The deck an Anki pact's day `date` is judged on: the one in force when it opened. */

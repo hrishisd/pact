@@ -922,4 +922,20 @@ export const migrations: readonly Migration[] = [
     PRIMARY KEY (pact_id, until)
   );
   `,
+  // 38: the Oura clock a bedtime night opened on
+  `
+  -- The Oura clocks an account's bedtime nights closed on before Oura
+  -- reported a sleep on another clock: the latest bedtime_start Oura had
+  -- reported then (NULL for none). Each still applies to the nights dated
+  -- before \`until\`, the day after the last night open when the clock
+  -- changed; the latest sleep's clock applies from the latest \`until\` on.
+  -- So a night open or judged keeps its close. Clocks that changed before
+  -- this moved every night; they left no row.
+  CREATE TABLE oura_earlier_clock (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    until TEXT NOT NULL, -- "YYYY-MM-DD"
+    bedtime_start TEXT, -- as Oura wrote it, with its UTC offset
+    PRIMARY KEY (account_id, until)
+  );
+  `,
 ];

@@ -765,7 +765,7 @@ class Core implements PactCore {
         recordAnkiChecks(this.#ctx, checked);
         settleAll(this.#ctx, t);
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
-        noteOuraClock(this.#ctx, fetched.sleep);
+        noteOuraClock(this.#ctx, fetched.sleep, t);
         judgeNights(this.#ctx, t, fetched.sleep);
         pushNoOuraData(this.#ctx, t);
         const dropped = remind(this.#ctx, t);

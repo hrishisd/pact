@@ -356,7 +356,12 @@ function allocate(
   return allocation;
 }
 
-/** The owner's bills to `recipientId`, oldest first, with what's unpaid and what payments awaiting approval don't cover. */
+/**
+ * The owner's bills to `recipientId`, oldest first, with what's unpaid and
+ * what payments awaiting approval don't cover. A bill joined an Overdue
+ * spell when the payments approved by its due time hadn't paid every bill
+ * before it.
+ */
 function billsOf(ctx: CoreContext, ownerId: AccountId, recipientId: string): BillState[] {
   const allocation = allocate(ctx, ownerId, recipientId);
   const bills = ctx.all<{ id: string; billed_on: LocalDate; due_at: string }>(
@@ -365,19 +370,34 @@ function billsOf(ctx: CoreContext, ownerId: AccountId, recipientId: string): Bil
     ownerId,
     recipientId,
   );
+  const approved = ctx.all<{ amount_cents: number; decided_at: string }>(
+    `SELECT amount_cents, decided_at FROM payment
+       WHERE owner_account_id = ? AND recipient_id = ? AND decision = 'approved'`,
+    ownerId,
+    recipientId,
+  );
+  let owedBeforeCents = 0;
   return bills.map((bill) => {
     const penalties = ctx.all<{
       id: string;
       amount_cents: number;
     }>(`SELECT id, amount_cents FROM penalty WHERE bill_id = ?`, bill.id);
+    const dueAt = new Date(bill.due_at);
+    const approvedByDueCents = approved
+      .filter((payment) => new Date(payment.decided_at).getTime() <= dueAt.getTime())
+      .reduce((total, payment) => total + payment.amount_cents, 0);
+    const joinedSpell = approvedByDueCents < owedBeforeCents;
     let unpaidCents = 0;
     let uncoveredCents = 0;
     for (const penalty of penalties) {
-      const { paidCents, coveredCents } = allocation.get(penalty.id) ?? { paidCents: 0, coveredCents: 0 };
+      const allocated = allocation.get(penalty.id);
+      const { paidCents, coveredCents } = allocated ?? { paidCents: 0, coveredCents: 0 };
       unpaidCents += penalty.amount_cents - paidCents;
       uncoveredCents += penalty.amount_cents - paidCents - coveredCents;
+      // A held penalty isn't owed: payments skip it (`allocate`).
+      if (allocated) owedBeforeCents += penalty.amount_cents;
     }
-    return { id: bill.id, billedOn: bill.billed_on, dueAt: new Date(bill.due_at), unpaidCents, uncoveredCents };
+    return { id: bill.id, billedOn: bill.billed_on, dueAt, unpaidCents, uncoveredCents, joinedSpell };
   });
 }
 

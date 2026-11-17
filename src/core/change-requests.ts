@@ -33,7 +33,15 @@ import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } 
 import type { CoreContext } from "./context.ts";
 import { uncoverRemovedDays } from "./covers.ts";
 import { endAfter, endPact, endTiming } from "./ending.ts";
-import { dueSoonEnough, hasSchedule, lastDayOf, occurrencesOverTime, type Occurrences } from "./occurrences.ts";
+import {
+  dueSoonEnough,
+  hasSchedule,
+  lastDayOf,
+  occurrencesOverTime,
+  type Occurrence,
+  type Occurrences,
+  type OccurrenceTerms,
+} from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
 import {
   checkedName,
@@ -41,6 +49,7 @@ import {
   editWindowClosesAt,
   firstDayNotOpen,
   firstOccurrenceAfterChange,
+  remindersGoOffInTime,
   remindersInTime,
   storedTerms,
   TERM_LABELS,
@@ -204,11 +213,19 @@ function changeablePact(
 
 /**
  * Well-formed `reminders` in the order they go off, or null when one goes off
- * at or after the due time in force now: reminders apply at once.
+ * at or after the due time in force now, or the one a waiting change request
+ * asks for: reminders apply at once, and approving the request changes the
+ * due time but not them.
  */
 function remindersInTimeNow(ctx: CoreContext, pact: PactRow, timezone: string, reminders: string[]): string[] | null {
   const currentDueAt = occurrencesOf(ctx, pact.id, timezone).first.dueAt;
-  return remindersInTime(reminders, occurrenceTermsOf(pact), currentDueAt, timezone);
+  const sorted = remindersInTime(reminders, occurrenceTermsOf(pact), currentDueAt, timezone);
+  if (sorted === null) return null;
+  const waiting = waitingChangeRequestId(ctx, pact.id);
+  const request = waiting === null ? undefined : changeRequestRow(ctx, waiting)?.request;
+  if (request?.kind !== "change") return sorted;
+  const requested = firstOccurrenceUnder(ctx, pact, timezone, request.after);
+  return remindersGoOffInTime(sorted, requested.terms, requested.first.dueAt, timezone) ? sorted : null;
 }
 
 function rename(ctx: CoreContext, pactId: string, name: string): void {
@@ -648,15 +665,27 @@ export function deadlineFarEnough(
   at: Date,
 ): boolean {
   const current = occurrencesOf(ctx, pact.id, timezone).first;
-  const terms = scheduleTermsOf(pact, after.schedule, pact.in_bed_by, after.dueBy);
-  const changed = occurrencesOverTime(
-    { ...terms, firstOccurrence: pact.first_occurrence, endDate: pact.end_date },
-    [],
-    timezone,
-    null,
-    earlierTimezonesOf(ctx, pact),
-  ).first;
+  const changed = firstOccurrenceUnder(ctx, pact, timezone, { ...after, inBedBy: pact.in_bed_by }).first;
   return changed.dueAt.getTime() === current.dueAt.getTime() || dueSoonEnough(changed, at);
+}
+
+/**
+ * The terms `pact` would have under `after`'s schedule and times, and their
+ * first occurrence: on a One-time pact, its one, due at the deadline `after` asks for.
+ */
+function firstOccurrenceUnder(
+  ctx: CoreContext,
+  pact: PactRow,
+  timezone: string,
+  after: Pick<ChangeableTerms, "schedule" | "inBedBy" | "dueBy">,
+): { terms: OccurrenceTerms; first: Occurrence } {
+  const terms = {
+    ...scheduleTermsOf(pact, after.schedule, after.inBedBy, after.dueBy),
+    firstOccurrence: pact.first_occurrence,
+    endDate: pact.end_date,
+  };
+  const { first } = occurrencesOverTime(terms, [], timezone, null, earlierTimezonesOf(ctx, pact));
+  return { terms, first };
 }
 
 /** The changed terms, old and new, with names for the recipient and reviewers. */

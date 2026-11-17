@@ -267,6 +267,82 @@ describe("the pact page's at-once changes apply to the terms as they stand", () 
   });
 });
 
+describe("reminders go off before the due time a waiting change request asks for, too", () => {
+  const afterDueTime = { ok: false, reason: "reminder-after-due-time" };
+
+  test("due by 21:00, a request for 18:00 waiting: a 19:00 reminder is refused, a 17:00 one survives approval", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { dueBy: "21:00" } });
+    await s.advanceTo("Thu 15:00");
+    // An earlier due time is stricter; the lower penalty with it makes the change wait.
+    const id = changeRequestIdOf(
+      ok(await owner.changePact(gym, changed(owner, gym, { dueBy: "18:00", penaltyCents: 200 }))),
+    );
+
+    expect(await owner.setReminders(gym, ["19:00"])).toEqual(afterDueTime);
+    expect(await owner.changePact(gym, changed(owner, gym, { reminders: ["19:00"] }))).toEqual(afterDueTime);
+    expect(owner.changePreview(gym, changed(owner, gym, { reminders: ["19:00"] }))).toEqual(afterDueTime);
+    expect(await owner.setReminders(gym, ["17:00"])).toEqual({ ok: true });
+    await reviewer.decide(id, { kind: "approve" });
+
+    expect(pactOf(owner, gym)).toMatchObject({ dueBy: "18:00", reminders: ["17:00"] });
+    // Withdrawn, a request no longer holds the reminders back.
+    expect(await owner.setReminders(gym, [])).toEqual({ ok: true });
+    const later = changeRequestIdOf(
+      ok(await owner.changePact(gym, changed(owner, gym, { dueBy: "16:00", penaltyCents: 100 }))),
+    );
+    expect(await owner.setReminders(gym, ["17:00"])).toEqual(afterDueTime);
+    expect(await owner.withdrawChangeRequest(later)).toEqual({ ok: true });
+    expect(await owner.setReminders(gym, ["17:00"])).toEqual({ ok: true });
+  });
+
+  test("reminders set first: a change to a due time at or before one of them is refused, waiting or not", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { dueBy: "21:00" }, reminders: ["19:00"] });
+    await s.advanceTo("Thu 15:00");
+
+    expect(await owner.changePact(gym, changed(owner, gym, { dueBy: "18:00" }))).toEqual(afterDueTime);
+    expect(await owner.changePact(gym, changed(owner, gym, { dueBy: "18:00", penaltyCents: 200 }))).toEqual(
+      afterDueTime,
+    );
+  });
+
+  test("a bedtime pact's in-bed-by time", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    const night = await createPact("23:00");
+    await s.advanceTo("Thu 15:00");
+    const id = changeRequestIdOf(
+      ok(await owner.changePact(night, changed(owner, night, { inBedBy: "22:00", penaltyCents: 200 }))),
+    );
+
+    expect(await owner.setReminders(night, ["22:30"])).toEqual(afterDueTime);
+    expect(await owner.setReminders(night, ["21:30"])).toEqual({ ok: true });
+    await reviewer.decide(id, { kind: "approve" });
+
+    expect(pactOf(owner, night)).toMatchObject({ inBedBy: "22:00", reminders: ["21:30"] });
+  });
+
+  test("a One-time pact's deadline", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const essay = await createPact("Essay", { kind: "one-time", deadline: s.date("Fri+1"), submitAnytime: true });
+    await s.advanceTo("Thu 15:00");
+    const earlier = { kind: "one-time", deadline: s.date("Tue+1"), submitAnytime: true } as const;
+    const id = changeRequestIdOf(
+      ok(await owner.changePact(essay, changed(owner, essay, { schedule: earlier, penaltyCents: 200 }))),
+    );
+
+    expect(await owner.setReminders(essay, [`${s.date("Wed+1")}T09:00`])).toEqual(afterDueTime);
+    expect(await owner.setReminders(essay, [`${s.date("Mon+1")}T09:00`])).toEqual({ ok: true });
+    await reviewer.decide(id, { kind: "approve" });
+
+    expect(pactOf(owner, essay)).toMatchObject({ schedule: earlier, reminders: [`${s.date("Mon+1")}T09:00`] });
+  });
+});
+
 describe("a relaxing change waits for a reviewer", () => {
   test("lowering the penalty → a change request; $5 applies until approved, then from the next occurrence not open yet", async () => {
     const s = scenario();
