@@ -221,14 +221,32 @@ function saveReminders(ctx: CoreContext, pact: PactRow, reminders: string[]): vo
   if (json !== pact.reminders) ctx.db.prepare(`UPDATE pact SET reminders = ? WHERE id = ?`).run(json, pact.id);
 }
 
-/** Adds `added` to the pact's reviewers, and tells each about the pact (named `pact.name`) as it stands. */
+/**
+ * Adds `added` to the pact's reviewers, and tells each about the pact (named
+ * `pact.name`) as it stands. Each reviewer the pact had already is told who
+ * was added, unless the reviewers haven't been told of the pact yet: they
+ * then learn of it with every reviewer in place.
+ */
 function addReviewersNow(ctx: CoreContext, pact: PactRow, ownerName: string, added: AccountId[]): void {
+  if (added.length === 0) return;
+  const earlier = reviewersOf(ctx, pact.id);
   setReviewers(ctx, pact.id, added);
   tellPickedAsReviewer(ctx, added, `${ownerName} added you as a reviewer`, {
     id: pact.id,
     name: pact.name,
     schedule: scheduleOf(pact.schedule),
     penaltyCents: pact.penalty_cents,
+  });
+  if (pact.reviewers_notified_at === null) return;
+  const newcomers = friendsSortedByName(ctx, added);
+  const names = newcomers.map((friend) => friend.name);
+  const namesText = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  tellAll(ctx, earlier, "reviewer-added", {
+    pactId: pact.id,
+    added: newcomers.map((friend) => friend.id),
+    title: `${ownerName} added ${namesText} as ${names.length === 1 ? "a reviewer" : "reviewers"}`,
+    body: `${pact.name} · ${names.length === 1 ? names[0] : "They"} can now decide its review items too.`,
+    url: APP_PATHS.review,
   });
 }
 

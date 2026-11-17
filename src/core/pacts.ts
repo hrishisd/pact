@@ -358,10 +358,12 @@ export function checkedPact(
 }
 
 /**
- * Where `pact`'s evidence comes from, or why it can't: Oura Ring and Anki
- * need their connection, and an Anki pact a deck from the owner's deck list
- * (or `existing`'s own deck). An Anki pact's day turns at the collection's
- * rollover hour; `existing` keeps the one it has.
+ * Where `pact`'s evidence comes from, or why it can't. Creating an Oura Ring
+ * or Anki pact needs its connection, and an Anki pact a deck from the owner's
+ * deck list. An edit or a change (`existing` given) needs neither, unless it
+ * gives an Anki pact another deck: its own deck counts as known even with
+ * the connection gone. An Anki pact's day turns at the collection's rollover
+ * hour; `existing` keeps the one it has.
  */
 export function evidenceSource(
   ctx: CoreContext,
@@ -373,15 +375,19 @@ export function evidenceSource(
     case "camera":
       return { ok: true, ankiDeckId: null, ankiRollover: null };
     case "oura":
-      if (!hasConnection(ctx, ownerId, "oura")) return { ok: false, reason: "oura-not-connected" };
+      if (existing === undefined && !hasConnection(ctx, ownerId, "oura")) {
+        return { ok: false, reason: "oura-not-connected" };
+      }
       return { ok: true, ankiDeckId: null, ankiRollover: null };
     case "anki": {
+      const deckId = pact.ankiDeckId ?? "";
+      if (existing?.anki_deck_id === deckId && existing.anki_rollover_hour !== null) {
+        return { ok: true, ankiDeckId: deckId, ankiRollover: existing.anki_rollover_hour };
+      }
       if (!hasConnection(ctx, ownerId, "anki")) return { ok: false, reason: "anki-not-connected" };
       const list = ankiDeckList(ctx, ownerId);
-      const deckId = pact.ankiDeckId ?? "";
-      const ownDeck = existing?.anki_deck_id === deckId && existing.anki_rollover_hour !== null;
-      if (!ownDeck && !list?.decks.some((deck) => deck.id === deckId)) return { ok: false, reason: "unknown-deck" };
-      return { ok: true, ankiDeckId: deckId, ankiRollover: existing?.anki_rollover_hour ?? list!.rolloverHour };
+      if (!list?.decks.some((deck) => deck.id === deckId)) return { ok: false, reason: "unknown-deck" };
+      return { ok: true, ankiDeckId: deckId, ankiRollover: existing?.anki_rollover_hour ?? list.rolloverHour };
     }
   }
 }

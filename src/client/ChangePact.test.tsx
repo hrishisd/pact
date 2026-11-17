@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
-import type { ChangePreviewResponse, FriendsResponse, RecipientsResponse } from "../shared/api.ts";
-import type { AppliesNow } from "../shared/types.ts";
+import type { ChangePreviewResponse, FriendsResponse, Json, RecipientsResponse } from "../shared/api.ts";
+import type { AppliesNow, PactTerms } from "../shared/types.ts";
 import { ChangePact, nowLine } from "./ChangePact.tsx";
 import { answers, cameraPact, onOurSide, renderWithUser, stubApi } from "./testing/render.tsx";
 
@@ -76,4 +76,30 @@ test.each<[AppliesNow[], string]>([
   [["name", "reminders", "new-reviewers"], " The name, the reminders and the new reviewers change now."],
 ])("what applies now inside %j reads %j", (appliesNow, text) => {
   expect(nowLine(appliesNow)).toBe(text);
+});
+
+test("an Anki pact with AnkiWeb disconnected loads and sends its own deck, without the deck list", async () => {
+  const pact: Json<PactTerms> = {
+    ...cameraPact(),
+    evidenceKind: "anki",
+    dueBy: null,
+    schedule: { kind: "fixed-days", days: ["mon", "tue", "wed", "thu", "fri"] },
+    anki: { deckId: "spanish", deckName: "Spanish", deckMissing: false, rolloverHour: 4 },
+    connectionProblem: "not-connected",
+  };
+  const spies = stubApi({
+    pact: answers({ ok: true, pact }),
+    friends: answers([]),
+    recipients: answers([]),
+    changePreview: answers(APPLIES_NOW),
+    changePact: answers({ ok: true, outcome: { kind: "at-once" } }),
+  });
+  const onDone = vi.fn();
+  const { user } = renderChangePact(onDone);
+  const apply = await screen.findByRole("button", { name: "Apply change" });
+  await vi.waitFor(() => expect((apply as HTMLButtonElement).disabled).toBe(false));
+  await user.click(apply);
+
+  expect(spies.changePact).toHaveBeenCalledWith("gym", expect.objectContaining({ ankiDeckId: "spanish" }));
+  expect(onDone).toHaveBeenCalledTimes(1);
 });

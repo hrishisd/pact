@@ -3,7 +3,7 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
-import { dateSpan, excusableText } from "../shared/format.ts";
+import { dateSpan, excusableText, pactNamesText } from "../shared/format.ts";
 import {
   MAX_EXCUSE_SPAN_DAYS,
   type AcceptVacationRejectionResult,
@@ -655,8 +655,9 @@ function vacationOccurrences(ctx: CoreContext, vacationId: string): TouchedOccur
  * Records a decider's decision on a vacation waiting for approval
  * and tells the owner, and settles every covered day of every pact
  * (`settleCoverDays`). Approved: they're excused at once, as an approved
- * excuse's are. Rejected: its held penalties are owed by no longer waiting,
- * its days are judged as usual, and Today raises an alert
+ * excuse's are, and every other reviewer of a pact with a covered day is
+ * told (`tellOtherReviewers`). Rejected: its held penalties are owed by no
+ * longer waiting, its days are judged as usual, and Today raises an alert
  * (`rejectedVacationAlerts`).
  */
 export function decideVacation(
@@ -689,6 +690,43 @@ export function decideVacation(
       url: decided.outcome === "approved" ? APP_PATHS.profile : APP_PATHS.today,
     },
   });
+  if (decided.outcome === "approved") tellOtherReviewers(ctx, vacation, reviewerId);
+}
+
+/**
+ * Tells each current reviewer of a pact with a day of `vacation` that it was
+ * approved, but the approver: once, naming only the pacts they review, so
+ * no reviewer learns of a pact they don't review.
+ */
+function tellOtherReviewers(ctx: CoreContext, vacation: VacationToDecide, approverId: AccountId): void {
+  const pacts = ctx.all<{ id: string; name: string }>(
+    `SELECT pact.id, pact.name FROM pact
+     WHERE EXISTS (SELECT 1 FROM vacation_day WHERE vacation_day.vacation_id = ? AND vacation_day.pact_id = pact.id)
+     ORDER BY pact.created_at, pact.id`,
+    vacation.id,
+  );
+  const named = new Map<AccountId, { id: string; name: string }[]>();
+  for (const pact of pacts) {
+    for (const reviewerId of reviewersOf(ctx, pact.id)) {
+      if (reviewerId !== approverId) named.set(reviewerId, [...(named.get(reviewerId) ?? []), pact]);
+    }
+  }
+  const title = `${accountName(ctx, vacation.owner_account_id)}'s vacation was approved`;
+  const span = dateSpan(vacation.first_day, vacation.last_day);
+  const approver = accountName(ctx, approverId);
+  for (const [recipient, theirs] of named) {
+    ctx.enqueue({
+      recipient,
+      kind: "vacation-approved",
+      payload: {
+        vacationId: vacation.id,
+        pactIds: theirs.map((pact) => pact.id),
+        title,
+        body: `${span} covers ${pactNamesText(theirs.map((pact) => pact.name))}. ${approver} approved it.`,
+        url: APP_PATHS.review,
+      },
+    });
+  }
 }
 
 /** The owner withdraws their vacation `vacationId` while it waits for approval. */

@@ -765,6 +765,7 @@ export const NOTIFICATION_SETTINGS = [
   "new-bill",
   "overdue-bill",
   "connection-problem",
+  "reviewed-pact",
 ] as const;
 export type NotificationSetting = (typeof NOTIFICATION_SETTINGS)[number];
 

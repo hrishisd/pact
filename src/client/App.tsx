@@ -539,6 +539,7 @@ function ProfileSheet({
         {changing ? (
           <div className="card">
             <TimezoneSelect value={zone} onChange={setZone} />
+            <p className="muted small">Reviewers of your pacts are told when a change makes due times later.</p>
             {error && <p className="error">{error}</p>}
             <div className="row2">
               <button className="btn primary" disabled={saving} onClick={() => save(zone)}>

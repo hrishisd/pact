@@ -7,6 +7,7 @@
 import { describe, expect, test } from "vitest";
 import { termsOf } from "../shared/terms.ts";
 import type { PactChange } from "../shared/types.ts";
+import { ownerWithAnki } from "./testing/anki-pact.ts";
 import { bedtimePact, ownerWithOura, sleep } from "./testing/bedtime-pact.ts";
 import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import type { Scenario } from "./testing/scenario.ts";
@@ -128,6 +129,84 @@ describe("a stricter change applies at once, from the first occurrence not open 
         },
       },
     ]);
+  });
+});
+
+describe("a pact's other reviewers are told who was added", () => {
+  test("addReviewers tells the pact's other reviewer, and the added one still gets their own push", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    await s.advanceTo("Wed 12:00");
+    const third = await s.befriend(owner, "third");
+
+    ok(await owner.addReviewers(gym, [third.id]));
+
+    expect(s.notifier.sentTo(reviewer, "reviewer-added")).toEqual([
+      {
+        recipient: reviewer.id,
+        kind: "reviewer-added",
+        payload: {
+          pactId: gym,
+          added: [third.id],
+          title: "owner added third as a reviewer",
+          body: "Gym · third can now decide its review items too.",
+          url: "/review",
+        },
+      },
+    ]);
+    expect(s.notifier.kindsSentTo(third)).toEqual(["picked-as-reviewer"]);
+  });
+
+  test("changePact that adds a reviewer beside a term that waits tells the other reviewers at once", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym } = await dailyGym(s);
+    const third = await s.befriend(owner, "third");
+
+    const result = ok(
+      await owner.changePact(
+        gym,
+        changed(owner, gym, { penaltyCents: 200, reviewerIds: [reviewer.id, second.id, third.id] }),
+      ),
+    );
+
+    expect(result.outcome.kind).toBe("needs-approval");
+    for (const who of [reviewer, second]) {
+      expect(s.notifier.sentTo(who, "reviewer-added").map((n) => n.payload.title)).toEqual([
+        "owner added third as a reviewer",
+      ]);
+    }
+  });
+
+  test("two added at once: each earlier reviewer gets one push naming both, and neither added one gets it", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym } = await dailyGym(s);
+    const zed = await s.befriend(owner, "zed");
+    const alex = await s.befriend(owner, "alex");
+
+    ok(await owner.addReviewers(gym, [zed.id, alex.id]));
+
+    for (const who of [reviewer, second]) {
+      expect(s.notifier.sentTo(who, "reviewer-added")).toEqual([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            added: expect.arrayContaining([zed.id, alex.id]),
+            title: "owner added alex and zed as reviewers",
+            body: "Gym · They can now decide its review items too.",
+          }),
+        }),
+      ]);
+    }
+    for (const who of [zed, alex]) expect(s.notifier.sentTo(who, "reviewer-added")).toEqual([]);
+  });
+
+  test("adding someone who already reviews the pact tells nobody", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, gym } = await dailyGym(s);
+
+    ok(await owner.addReviewers(gym, [second.id]));
+
+    for (const who of [reviewer, second]) expect(s.notifier.sentTo(who, "reviewer-added")).toEqual([]);
   });
 });
 
@@ -458,6 +537,46 @@ describe("a relaxing change waits for a reviewer", () => {
     expect(view).toMatchObject({ ok: true, changeRequest: { current: { evidenceKind: "oura", inBedBy: "23:00" } } });
     expect(view).not.toHaveProperty("changeRequest.current.dueBy");
     expect(view).not.toHaveProperty("changeRequest.current.anki");
+  });
+});
+
+describe("a change with the Oura or AnkiWeb connection gone", () => {
+  test("an Oura Ring pact: a higher penalty applies, and a later in-bed-by time waits for approval", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithOura(s);
+    const bed = await createPact("23:00");
+    await s.advanceTo("Wed 12:00");
+    await owner.disconnectOura();
+
+    expect(ok(await owner.changePact(bed, changed(owner, bed, { penaltyCents: 1000 }))).outcome).toMatchObject({
+      kind: "stricter",
+      appliesFrom: s.date("Thu"),
+    });
+    expect(ok(await owner.changePact(bed, changed(owner, bed, { inBedBy: "00:30" }))).outcome).toMatchObject({
+      kind: "needs-approval",
+    });
+    expect(pactOf(owner, bed)).toMatchObject({ penaltyCents: 1000, inBedBy: "23:00" });
+  });
+
+  test("an Anki pact: fewer days waits for approval on its own deck; another deck is refused", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithAnki(s);
+    const spanish = await createPact();
+    await s.advanceTo("Wed 12:00");
+    await owner.disconnectAnki();
+
+    expect(
+      ok(await owner.changePact(spanish, changed(owner, spanish, { schedule: { kind: "fixed-days", days: ["mon"] } })))
+        .outcome,
+    ).toMatchObject({ kind: "needs-approval" });
+    expect(owner.changePreview(spanish, changed(owner, spanish, { ankiDeckId: "1700000000002" }))).toEqual({
+      ok: false,
+      reason: "anki-not-connected",
+    });
+    expect(await owner.changePact(spanish, changed(owner, spanish, { ankiDeckId: "1700000000002" }))).toEqual({
+      ok: false,
+      reason: "anki-not-connected",
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
+import { bedtimePact } from "./testing/bedtime-pact.ts";
 import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
-import { cards, owed, statusOn } from "./testing/queries.ts";
+import { cards, ok, owed, pactOf, statusOn } from "./testing/queries.ts";
 import { scenario } from "./testing/scenario.ts";
 
 describe("account timezone", () => {
@@ -175,5 +176,105 @@ describe("a timezone change and the owner's days", () => {
 
     await s.advanceTo("Mon+2 00:00");
     expect(owed(owner)).toBe(500);
+  });
+});
+
+// A timezone change that makes due times later needs no approval, but each
+// reviewer of the owner's affected pacts is told once. Scenario times are New York's.
+describe("a timezone change and the owner's reviewers", () => {
+  test("a move west tells each reviewer of an Active Camera pact once, with both timezones and the first day", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s, { timezone: "Europe/London" });
+    await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Mon 12:00");
+
+    // 17:00 on Monday in London, 07:00 in Honolulu: Tuesday is the first day in Honolulu.
+    await owner.setTimezone("Pacific/Honolulu");
+
+    for (const who of [reviewer, second]) {
+      expect(s.notifier.sentTo(who, "timezone-changed")).toEqual([
+        {
+          recipient: who.id,
+          kind: "timezone-changed",
+          payload: {
+            ownerId: owner.id,
+            from: "Europe/London",
+            to: "Pacific/Honolulu",
+            title: "owner changed timezone",
+            body: "London to Honolulu. Gym is due 10 hours later from Tue Jan 6.",
+            url: "/review",
+          },
+        },
+      ]);
+    }
+    expect(s.notifier.sentTo(owner, "timezone-changed")).toEqual([]);
+  });
+
+  test("a reviewer of two of the owner's pacts gets one push naming both; a reviewer of one, one naming only theirs", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s, { timezone: "Europe/London" });
+    await createPact("Gym", EVERY_DAY, { reviewers: [reviewer] });
+    await createPact("Reading", EVERY_DAY);
+    await s.advanceTo("Mon 12:00");
+
+    await owner.setTimezone("America/Argentina/Buenos_Aires");
+
+    expect(s.notifier.sentTo(reviewer, "timezone-changed").map((n) => n.payload.body)).toEqual([
+      "London to Buenos Aires. Gym and Reading are due 3 hours later from Tue Jan 6.",
+    ]);
+    expect(s.notifier.sentTo(second, "timezone-changed").map((n) => n.payload.body)).toEqual([
+      "London to Buenos Aires. Reading is due 3 hours later from Tue Jan 6.",
+    ]);
+  });
+
+  test("hours are rounded to the half hour, and a zone with no city reads as itself", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s, { timezone: "Asia/Tehran" });
+    await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Mon 12:00");
+
+    await owner.setTimezone("UTC");
+
+    expect(s.notifier.sentTo(reviewer, "timezone-changed").map((n) => n.payload.body)).toEqual([
+      "Tehran to UTC. Gym is due 3.5 hours later from Tue Jan 6.",
+    ]);
+  });
+
+  test("a move east, and a change between two timezones with the same offset, tell nobody", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    await createPact("Gym", EVERY_DAY);
+    await s.advanceTo("Mon 12:00");
+
+    await owner.setTimezone("Europe/London");
+    await owner.setTimezone("Europe/Lisbon");
+
+    expect(s.notifier.sentTo(reviewer, "timezone-changed")).toEqual([]);
+    expect(s.notifier.sentTo(second, "timezone-changed")).toEqual([]);
+  });
+
+  test("an Oura Ring pact, an Ended pact and a pact in its edit window aren't named, and their reviewers aren't told", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s, { timezone: "Europe/London" });
+    const [oura, ended, fresh] = [
+      await s.befriend(owner, "oura"),
+      await s.befriend(owner, "ended"),
+      await s.befriend(owner, "fresh"),
+    ];
+    await owner.connectOura();
+    await createPact("Gym", EVERY_DAY, { reviewers: [reviewer] });
+    ok(await owner.createPact(bedtimePact(sam.id, oura)));
+    const saturdays = await createPact("Saturdays", ["sat"], { reviewers: [ended] });
+    await s.advanceTo("Mon 12:00");
+    await ended.decide(ok(await owner.requestEnd(saturdays)).changeRequestId, { kind: "approve" });
+    expect(pactOf(owner, saturdays).stage).toBe("ended");
+    await createPact("Fresh", EVERY_DAY, { reviewers: [fresh] });
+
+    await owner.setTimezone("Pacific/Honolulu");
+
+    expect(s.notifier.sentTo(reviewer, "timezone-changed").map((n) => n.payload.body)).toEqual([
+      "London to Honolulu. Gym is due 10 hours later from Tue Jan 6.",
+    ]);
+    for (const who of [oura, ended, fresh]) expect(s.notifier.sentTo(who, "timezone-changed")).toEqual([]);
   });
 });

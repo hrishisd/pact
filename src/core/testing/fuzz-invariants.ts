@@ -1,9 +1,11 @@
 // The invariants the randomised test checks (fuzz.ts runs it).
 //
 // Each has a name, which a `Violation` carries. They read the core only
-// through its queries, as every scenario does, with one exception: to tell
-// whether anything was written, `dump` reads every table on its own
-// connection, as the verdict check does.
+// through its queries, as every scenario does, with one exception: `dump`
+// reads every table on its own connection, as the verdict check does, to
+// tell whether anything was written, and to see what a command queued for a
+// pact's reviewers when it added one (their being told of a pact shows in no
+// query).
 //
 // A violation that is a bug with a ticket goes in KNOWN below, so the run
 // carries on past it. Remove the entry with the fix.
@@ -125,6 +127,9 @@ const SETTING_OF_KIND: Record<NotificationKind, NotificationSetting | null> = {
   "new-bill": "new-bill",
   "overdue-bill": "overdue-bill",
   "connection-problem": "connection-problem",
+  "timezone-changed": "reviewed-pact",
+  "reviewer-added": "reviewed-pact",
+  "vacation-approved": "reviewed-pact",
   reminder: null,
 };
 
@@ -232,6 +237,7 @@ export class Checks {
     } catch (error) {
       throw this.#asViolation(label, error);
     }
+    if (!isRefusal(result)) this.#addedReviewersAreAnnounced(label, before, this.dump());
     if (isRefusal(result) && this.#world.tickedAt === this.#world.now().getTime()) {
       const changed = this.#changed(before, this.dump());
       if (changed.length > 0) {
@@ -242,6 +248,51 @@ export class Checks {
       }
     }
     return result;
+  }
+
+  /**
+   * A command that adds a reviewer to a pact whose reviewers were told of it
+   * queues a `reviewer-added` push for that pact to each earlier reviewer
+   * with Pacts you review on.
+   */
+  #addedReviewersAreAnnounced(label: string, before: Map<string, string>, after: Map<string, string>): void {
+    if (before.get("pact_reviewer") === after.get("pact_reviewer")) return;
+    const rows = <T>(dump: Map<string, string>, table: string) => JSON.parse(dump.get(table) ?? "[]") as T[];
+    type ReviewerRow = { pact_id: string; reviewer_account_id: string };
+    const reviewersIn = (dump: Map<string, string>) => {
+      const map = new Map<string, string[]>();
+      for (const row of rows<ReviewerRow>(dump, "pact_reviewer")) {
+        map.set(row.pact_id, [...(map.get(row.pact_id) ?? []), row.reviewer_account_id]);
+      }
+      return map;
+    };
+    const was = reviewersIn(before);
+    const told = new Set(
+      rows<{ id: string; reviewers_notified_at: string | null }>(before, "pact")
+        .filter((pact) => pact.reviewers_notified_at !== null)
+        .map((pact) => pact.id),
+    );
+    const off = new Set(
+      rows<{ account_id: string; setting: string }>(before, "notification_setting_off")
+        .filter((row) => row.setting === "reviewed-pact")
+        .map((row) => row.account_id),
+    );
+    const earlierIds = new Set(rows<{ id: number }>(before, "outbox").map((row) => row.id));
+    const queued = rows<{ id: number; recipient_account_id: string; kind: string; payload: string }>(after, "outbox")
+      .filter((row) => !earlierIds.has(row.id) && row.kind === "reviewer-added")
+      .map((row) => `${row.recipient_account_id} ${(JSON.parse(row.payload) as { pactId: string }).pactId}`);
+    for (const [pactId, reviewers] of reviewersIn(after)) {
+      const earlier = was.get(pactId) ?? [];
+      if (!told.has(pactId) || reviewers.every((id) => earlier.includes(id))) continue;
+      for (const reviewerId of earlier) {
+        if (!off.has(reviewerId) && !queued.includes(`${reviewerId} ${pactId}`)) {
+          fail(
+            "added-reviewers-are-announced",
+            `${label} added a reviewer to ${pactId}, but ${reviewerId} wasn't told`,
+          );
+        }
+      }
+    }
   }
 
   /** Two ticks at the same time: the second changes nothing and sends nothing. */
@@ -917,9 +968,6 @@ export class Checks {
       "end-approved",
       "edit-window-open",
       "pact-ended",
-      // Not about the terms: with Oura or AnkiWeb disconnected, the Request change form refuses any change.
-      "oura-not-connected",
-      "anki-not-connected",
     ]);
     for (const pact of pacts) {
       if (pact.stage !== "active" || pact.editWindowClosesAt !== null) continue;

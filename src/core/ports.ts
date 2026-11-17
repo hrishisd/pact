@@ -104,7 +104,13 @@ export type NotificationKind =
   /** To the owner, daily while Overdue; to the reviewers of pacts with that recipient, at first and weekly. */
   | "overdue-bill"
   /** To the owner: Oura refused its tokens, or at 15:00 a bedtime night still has no sleep data. */
-  | "connection-problem";
+  | "connection-problem"
+  /** To each reviewer of an owner's affected pacts: the owner's timezone change made due times later. */
+  | "timezone-changed"
+  /** To each earlier reviewer of a pact: the owner added another reviewer to it. */
+  | "reviewer-added"
+  /** To each reviewer of a pact a vacation covers, but the approver: the vacation was approved. */
+  | "vacation-approved";
 
 /** What a notification says, and the app path it opens: all a push carries. */
 interface NotificationText {
@@ -150,6 +156,12 @@ interface NotificationDetails {
   "overdue-bill": { recipientId: string };
   /** `occurrenceDate`: "YYYY-MM-DD", the night with no sleep data; none when the service needs reconnecting. */
   "connection-problem": { occurrenceDate?: string };
+  /** `from` and `to`: the owner's timezones before and after, IANA names. */
+  "timezone-changed": { ownerId: AccountId; from: string; to: string };
+  /** `added`: the reviewers added, by name. */
+  "reviewer-added": { pactId: string; added: AccountId[] };
+  /** `pactIds`: the covered pacts named to this recipient, the ones they review. */
+  "vacation-approved": { vacationId: string; pactIds: string[] };
 }
 
 /** A notification of kind `K`. */

@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "vitest";
 import type { NewPact } from "../shared/types.ts";
+import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
 import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 import { ok } from "./testing/queries.ts";
@@ -80,6 +81,18 @@ describe("editing a pact in its edit window", () => {
       expect(await owner.editPact(gym, edited(changes))).toEqual({ ok: false, reason });
     }
     expect(owner.pact(gym)).toMatchObject({ pact: { name: "Gym", penaltyCents: 500 } });
+  });
+
+  test("an Oura Ring pact is edited with Oura disconnected: only creating needs the connection", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithOura(s);
+    const bed = await createPact("23:00");
+    await owner.disconnectOura();
+
+    expect(await owner.editPact(bed, { ...bedtimePact(sam.id, reviewer, "23:00"), penaltyCents: 1000 })).toEqual({
+      ok: true,
+    });
+    expect(owner.pact(bed)).toMatchObject({ pact: { penaltyCents: 1000 } });
   });
 
   test("only the owner can edit it", async () => {

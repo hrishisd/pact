@@ -93,6 +93,7 @@ describe("notification settings", () => {
       { setting: "new-bill", enabled: true },
       { setting: "overdue-bill", enabled: true },
       { setting: "connection-problem", enabled: true },
+      { setting: "reviewed-pact", enabled: true },
     ]);
   });
 
@@ -147,6 +148,53 @@ describe("notification settings", () => {
     await owner.submitEvidence(gym, [photo()]);
 
     expect(s.notifier.sentTo(reviewer)).toHaveLength(1);
+  });
+
+  test("Pacts you review turned off: a reviewer isn't told of the owner's timezone change", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s, { timezone: "Europe/London" });
+    await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Mon 12:00");
+    await reviewer.setNotificationSetting("reviewed-pact", false);
+
+    await owner.setTimezone("Pacific/Honolulu");
+
+    expect(s.notifier.sentTo(reviewer, "timezone-changed")).toEqual([]);
+    expect(s.notifier.sentTo(second, "timezone-changed")).toHaveLength(1);
+  });
+
+  test("Pacts you review turned off: a reviewer isn't told another was added", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Mon 12:00");
+    const third = await s.befriend(owner, "third");
+    await reviewer.setNotificationSetting("reviewed-pact", false);
+
+    ok(await owner.addReviewers(gym, [third.id]));
+
+    expect(s.notifier.sentTo(reviewer, "reviewer-added")).toEqual([]);
+    expect(s.notifier.sentTo(second, "reviewer-added")).toHaveLength(1);
+  });
+
+  test("Pacts you review turned off: a reviewer isn't told of an approved vacation", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    s.setClockTo("Wed 12:00");
+    await second.setNotificationSetting("reviewed-pact", false);
+    const vacation = ok(
+      await owner.fileVacation({
+        from: s.date("Mon+1"),
+        to: s.date("Sun+1"),
+        pactIds: [gym],
+        reviewerIds: [reviewer.id],
+      }),
+    );
+
+    await reviewer.decide(vacation.vacationId, { kind: "approve" });
+
+    expect(s.notifier.sentTo(second, "vacation-approved")).toEqual([]);
   });
 
   test("an operator alert can't be turned off", async () => {
