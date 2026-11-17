@@ -1,6 +1,6 @@
 # A reminder can end up at or after the due time once a waiting change request is approved
 
-Status: needs-triage
+Status: done
 Blocked by: none
 
 ## Problem
@@ -20,8 +20,19 @@ No reminder is left at or after the due time in force. Directions to weigh:
 
 ## Acceptance criteria
 
-- [ ] With a change request waiting that makes the due time earlier, a reminder set between the requested and the current due time does not survive approval as a reminder that never goes off.
-- [ ] The same holds for the in-bed-by time and for a One-time pact's deadline.
-- [ ] A scenario test covers it.
-- [ ] `docs/behaviour.md` says what happens.
-- [ ] `npm run check` passes.
+- [x] With a change request waiting that makes the due time earlier, a reminder set between the requested and the current due time does not survive approval as a reminder that never goes off.
+- [x] The same holds for the in-bed-by time and for a One-time pact's deadline.
+- [x] A scenario test covers it.
+- [x] `docs/behaviour.md` says what happens.
+- [x] `npm run check` passes (its parts; `shellcheck` is not installed where this was built).
+
+## Outcome
+
+Decided: the first direction. A reminder must go off before the due time in force now and before the one a waiting change request asks for, so approval never has to touch the reminders. This is the rule `checkedChange` already had for a change sent with new reminders ("they go off before the due time in force now as well as the new one"); only a change request already waiting was missed. Dropping reminders at approval was the other choice, but nothing else in the app changes reminders the owner set, and the owner would not be told.
+
+The other order of events was already safe: `changePact` checks the reminders it is sent against the new terms (`checkedPact`), for a stricter change that applies at once and for one that waits, so a change to a due time at or before an existing reminder is refused with `reminder-after-due-time`.
+
+The fix: `remindersInTimeNow` (`change-requests.ts`), which both `setReminders` and `checkedChange` use, also checks the reminders against the waiting change request's terms (`firstOccurrenceUnder`, which `deadlineFarEnough` now shares). It covers the due-by time, the in-bed-by time and a One-time deadline. A reminder valid today can be refused for a change that is later rejected; once the request is decided or withdrawn, it can be set. The refusal is the same `reminder-after-due-time`, with the same words on the Reminders sheet ("A reminder is at or after the due time, so it would never go off"); they don't say that the due time is the waiting change's.
+
+- Tests, written first: `change-requests.test.ts`, "reminders go off before the due time a waiting change request asks for, too" (due-by, in-bed-by, One-time deadline, and reminders set first).
+- The entry for this ticket is removed from `KNOWN` (`fuzz-invariants.ts`), which is now empty; seeds 3000 to 3059 at 300 steps pass.
