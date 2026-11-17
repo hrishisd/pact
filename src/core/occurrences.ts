@@ -212,27 +212,31 @@ export interface Occurrences {
 export type OuraOffset = string | null;
 
 /**
+ * The Oura clock the bedtime night dated `night`, worked out in `timezone`,
+ * closes on: each night keeps the one it opened on (`ouraClockOf`, rows.ts).
+ */
+export type OuraClock = (night: LocalDate, timezone: string) => OuraOffset;
+
+/**
  * The occurrences of a pact with `terms`, in its owner's `timezone`. A bedtime
  * night closes at 18:00 the next day on `ouraOffset`'s clock, if there is one.
  */
 export function occurrences(terms: OccurrenceTerms, timezone: string, ouraOffset: OuraOffset = null): Occurrences {
-  return occurrencesOverTime(terms, [], timezone, ouraOffset);
+  return occurrencesOverTime(terms, [], timezone, () => ouraOffset);
 }
 
 /**
  * A timezone the pact's owner had before a change: it applies to the pact's
  * occurrences dated before `until`, the day after the day of the change
  * there (or in the new timezone, if that's later), so an occurrence open or
- * past keeps the timezone it opened in. A
- * bedtime night there closes on `ouraOffset`'s clock, if there is one.
+ * past keeps the timezone it opened in.
  */
 export interface EarlierTimezone {
   timezone: string;
   until: LocalDate;
-  ouraOffset: OuraOffset;
 }
 
-/** The timezone an occurrence is worked out in, and the Oura clock a bedtime night there closes on. */
+/** The timezone an occurrence is worked out in. */
 type Zone = Omit<EarlierTimezone, "until">;
 
 /** A pact's zones over time: `earlier` ones, oldest first, then `current`. */
@@ -260,16 +264,17 @@ export type EarlierTerms = RecurringTerms & { until: LocalDate };
  * dated before, else `current`, and is worked out in the first of
  * `earlierTimezones` (oldest first) it's dated before, else `timezone`. A
  * Weekly count week goes by its Monday. The first occurrence and end date
- * are always `current`'s.
+ * are always `current`'s. A bedtime night closes on `ouraClock`'s clock for
+ * it; with none, in the timezone it's worked out in.
  */
 export function occurrencesOverTime(
   current: OccurrenceTerms,
   earlier: readonly EarlierTerms[],
   timezone: string,
-  ouraOffset: OuraOffset = null,
+  ouraClock: OuraClock | null = null,
   earlierTimezones: readonly EarlierTimezone[] = [],
 ): Occurrences {
-  const zones: Zones = { earlier: earlierTimezones, current: { timezone, ouraOffset } };
+  const zones: Zones = { earlier: earlierTimezones, current: { timezone } };
   const timezoneOn = (date: LocalDate) => zoneOn(zones, date).timezone;
   if (hasSchedule(current, "one-time")) {
     // One occurrence, which a change applies to even once it's open: only the current terms count. With
@@ -299,7 +304,7 @@ export function occurrencesOverTime(
     // For a day that isn't an occurrence's, as one would be.
     occurrence: (date) => {
       const zone = zoneOn(zones, date);
-      return fixedDaysOccurrence(date, zone.timezone, termsOn(date).day, zone.ouraOffset);
+      return fixedDaysOccurrence(date, zone.timezone, termsOn(date).day, ouraClock?.(date, zone.timezone) ?? null);
     },
     scheduled: (date) => termsOn(date).schedule.days.includes(weekdayOf(date)),
     dayDueAt: (_day, occurrence) => occurrence.dueAt,
