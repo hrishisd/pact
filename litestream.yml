@@ -11,6 +11,22 @@ snapshot:
   interval: 24h
   retention: 720h
 
+# Keep R2 requests inside its free tier. R2 bills every list request, and
+# Litestream (v0.5.17) lists all level-1 files on each L0 retention check
+# (every 15s by default). With 30 days of history that list grows by about
+# 1,500 files a day at the default 30s level-1 interval, so the request count
+# climbs daily (https://github.com/benbjohnson/litestream/issues/1633). These
+# settings check every 5 minutes and compact less often, which makes far fewer
+# level-1 files. The 30 days of history stays.
+# Trade-off: restoring to a point in older history is accurate to about
+# 5 minutes instead of 30 seconds. Live replication still uploads each change
+# within about a second.
+l0-retention-check-interval: 5m # default 15s
+levels:
+  - interval: 5m # level 1, default 30s
+  - interval: 1h # level 2, default 5m
+  - interval: 24h # level 3, default 1h
+
 dbs:
   - path: ${PACT_DB_PATH}
     replica:

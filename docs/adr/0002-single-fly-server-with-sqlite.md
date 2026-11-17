@@ -39,6 +39,10 @@ When a restore happens, the server raises an operator alert that gives the time 
 - **After downtime:** judgments, due dates and overdue changes always catch up. Reminders more than 15 minutes late are dropped. Each drop is logged, and a summary goes out as an operator alert.
 - **Backups:** one practice restore is done during setup, before real data depends on it. Fly's automatic daily volume snapshots stay on (default 5-day retention) as a backstop behind Litestream.
 
+## Litestream's R2 request cost
+
+Litestream 0.5.17 checks its level-0 files every 15 seconds, and each check lists all level-1 files in R2. R2 bills every list request (Class A), and with 30 days of history and level-1 files made every 30 seconds, the list grows by about 1,500 files a day. The bill reached about 3 million Class A requests in 19 days and was still rising (upstream issue benbjohnson/litestream#1633). In `litestream.yml` we now run the check every 5 minutes and compact level 1 every 5 minutes, level 2 every hour and level 3 every 24 hours. That should cost roughly 9,000 Class A requests a day, inside R2's free tier of 1 million a month. The trade-off is that restoring to a point in older history is accurate to about 5 minutes instead of 30 seconds; live replication still uploads each change within about a second. We rejected cutting the 30 days of history, because that is the decision above.
+
 ## Known risk: backups can fail silently
 
 If Litestream can't reach R2 (expired credentials, a deleted bucket, a network fault), it logs the error and keeps retrying while the app runs normally. Nothing alerts the operator. `/health` watches the scheduler and disk space, so it catches this only once Litestream's unsent changes fill the volume. We accept this for v0. The volume snapshots cover the last few days, and the boot-restore alert shows staleness at the moment it matters.
