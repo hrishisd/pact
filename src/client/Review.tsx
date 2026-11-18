@@ -445,9 +445,9 @@ function PaymentItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: P
         <dl className="kv">
           <dt>Note</dt>
           <dd>{item.note ?? "—"}</dd>
-          <dt>Owes</dt>
+          <dt>Owes now</dt>
           <dd>{money(item.owedCents)}</dd>
-          <dt>Sent</dt>
+          <dt>Recorded</dt>
           <dd>{formatDayTime(item.recordedAt, timezone)}</dd>
         </dl>
         <p className="muted small">
