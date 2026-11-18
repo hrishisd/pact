@@ -347,7 +347,6 @@ function KindStep({
           {!ankiAvailable && <span className="chip c-soon">Anki isn't set up yet</span>}
         </button>
       </div>
-      <small className="muted">You can't change this later.</small>
     </>
   );
 }

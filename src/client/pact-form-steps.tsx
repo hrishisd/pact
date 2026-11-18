@@ -18,7 +18,7 @@ import {
   type Weekday,
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
-import { clockText, EDIT_WINDOW_TEXT, inBedByName, initial, NIGHT_CLOSES_TEXT } from "./format.ts";
+import { clockText, dateIn, EDIT_WINDOW_TEXT, inBedByName, initial, NIGHT_CLOSES_TEXT } from "./format.ts";
 import { remindersAs, scheduleKindOf, termsOfFormKind, type Form } from "./pact-form.ts";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { loadFailure, loadedData, useLoad, useSend } from "./ui.tsx";
@@ -516,8 +516,7 @@ function OneTimeWindow({ form, update }: { form: Form; update: (change: Partial<
         </label>
       </div>
       <small className="muted">
-        The deadline must be at least an hour after you create the pact. Pact checks it once at the deadline, and then
-        the pact ends.
+        The deadline must be at least an hour after you create the pact. Pact checks it once at the deadline.
       </small>
     </>
   );
@@ -525,7 +524,8 @@ function OneTimeWindow({ form, update }: { form: Form; update: (change: Partial<
 
 /** A recurring pact's optional start and end dates. */
 function DateRange({ form, update, weekly }: { form: Form; update: (change: Partial<Form>) => void; weekly: boolean }) {
-  const oura = form.kind === "oura";
+  // A start date before today would change nothing. On this device's clock: the form has no profile timezone.
+  const today = dateIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone);
   return (
     <>
       <div className="dates">
@@ -535,6 +535,7 @@ function DateRange({ form, update, weekly }: { form: Form; update: (change: Part
             className="inp"
             type="date"
             value={form.startDate}
+            min={today}
             onChange={(e) => update({ startDate: e.target.value })}
           />
         </label>
@@ -544,16 +545,17 @@ function DateRange({ form, update, weekly }: { form: Form; update: (change: Part
             className="inp"
             type="date"
             value={form.endDate}
-            min={form.startDate || undefined}
+            min={form.startDate || today}
             onChange={(e) => update({ endDate: e.target.value })}
           />
         </label>
       </div>
-      <small className="muted">
-        {weekly
-          ? "The pact starts the Monday after you create it, or on the first Monday on or after the start date. Only full Monday–Sunday weeks up to the end date count. Then the pact ends."
-          : `The first ${oura ? "night" : "day"} is the first one due at least an hour after you create the pact, or the start date if that's later. After the end date, no new ${oura ? "nights" : "days"} are scheduled and the pact ends.`}
-      </small>
+      {weekly && (
+        <small className="muted">
+          The pact starts the Monday after you create it, or on the first Monday on or after the start date. Only full
+          Monday–Sunday weeks up to the end date count.
+        </small>
+      )}
     </>
   );
 }
