@@ -86,7 +86,7 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
     await (await chooser).setFiles({ name: "gym.png", mimeType: "image/png", buffer: PNG });
     await toDo.getByRole("button", { name: "Submit" }).click();
     await expect(owner.getByText("Waiting for approval", { exact: true })).toBeVisible();
-    await expect(owner.getByRole("button", { name: /^Gym Evidence/ })).toBeVisible();
+    await expect(owner.getByRole("button", { name: /^Gym Photo/ })).toBeVisible();
   });
 
   await test.step("after the edit window, the reviewer approves it", async () => {
