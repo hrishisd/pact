@@ -1,0 +1,29 @@
+# 21 Tell a refused grant from a broken Oura app
+
+Status: ready-for-agent
+Blocked by: 20
+
+## Problem
+
+`#tokenRequest` in `src/core/oura.ts` treats every 400 and 401 from Oura's token endpoint as "Oura refused this account's grant". For a refresh, the account then reads as Needs reconnecting.
+
+Oura also answers 400 or 401 when Pact's own app credentials are wrong: `invalid_client` comes back as 400 on the old endpoint and as 401 on the new one (probes in `.scratch/pact-v0/oura-api-research.md`, section 4). So a mistyped or rotated `OURA_CLIENT_SECRET` would quietly mark every account Needs reconnecting at its next refresh. Each owner would be told to reconnect, reconnecting would fail too, and nothing would tell the operator the real cause.
+
+OAuth error bodies carry an `error` field (RFC 6749 section 5.2). Only `invalid_grant` means this account's code or refresh token is no good. The others (`invalid_client`, `unauthorized_client`, `invalid_request`, `unsupported_grant_type`, `invalid_scope`) mean Pact or its app setup is wrong, and the account's refresh token was not spent.
+
+## What to build
+
+- In `#tokenRequest`, read the error body. Only `invalid_grant` is a refused grant (the current `null`). Any other 400 or 401, including one with no readable `error`, is a problem with Pact's app: raise an operator alert that names the `error` value and says to check the Oura app's credentials, and treat it like a failed request (throw), so the account keeps its tokens and is tried again next tick.
+- A refresh that fails this way did not spend the refresh token, so it must not mark `refresh_outcome_unknown_at`. That mark stays for timeouts, network errors and 5xx answers.
+- Don't send the same alert every tick. Alert once until a token request succeeds again, in the way `anki.ts` handles AnkiWeb protocol errors (`#protocolErrorEmailed`).
+- On connect, a problem with Pact's app still shows the owner the existing "failed" result, and also raises the alert.
+- Update the Oura Ring section of `docs/behaviour.md` and the operator alerts list there.
+
+## Acceptance criteria
+
+- [ ] A refresh refused with `invalid_grant` marks the account Needs reconnecting, as today.
+- [ ] A refresh refused with `invalid_client` (as 400, and as 401) leaves the account connected, keeps its tokens, raises one operator alert, and doesn't mark the refresh outcome unknown. A later successful refresh works normally.
+- [ ] A connect refused with `invalid_client` shows the owner "failed" and raises the operator alert.
+- [ ] Tests in `src/core/oura.test.ts`, written first and seen failing.
+- [ ] `docs/behaviour.md` updated.
+- [ ] `npm run check` passes.
