@@ -2,7 +2,7 @@
 
 Things that need a signed-in `flyctl`, a real Oura Ring, a real phone or real push notifications. Tick items off here; when one turns up a bug, file it under `issues/` and link it.
 
-Who does what: the human doesn't run commands. Every command here (`scripts/prod-db.sh`, `scripts/prod-log.sh`, `flyctl`, `openssl`) is for an agent running on the human's own computer, where `flyctl` is signed in; a cloud session has no `flyctl`. Steps marked **(human)** need the human's hands: a browser signed in to Oura, the ring, or the phone. An agent walks the human through those one at a time.
+Who does what: the human doesn't run commands. Every command here (`scripts/prod-db.sh`, `scripts/prod-log.sh`, `flyctl`, `openssl`) is for an agent, which can run them on the human's own computer or in a cloud session: both have a signed-in `flyctl` (see `docs/agents/production.md`). Steps marked **(human)** need the human's hands: a browser signed in to Oura, the ring, or the phone. An agent walks the human through those one at a time.
 
 Last updated 2026-11-04, after ticket 18's backend fixes (migrations 23 and 24).
 

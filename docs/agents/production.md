@@ -1,6 +1,6 @@
 # Production
 
-Pact runs on one Fly machine: app `pact-hrishisd`, with the volume at `/data`. See ADR 0002 for the setup and ADR 0003 for logs and disk. The local `flyctl` is signed in as the operator. Use `flyctl` commands directly; never fetch or print a Fly token.
+Pact runs on one Fly machine: app `pact-hrishisd`, with the volume at `/data`. See ADR 0002 for the setup and ADR 0003 for logs and disk. `flyctl` is signed in as the operator, both on the owner's computer and in cloud sessions (there through the environment's `FLY_API_TOKEN`). Check with `flyctl auth whoami` rather than assuming either way. Use `flyctl` commands directly; never fetch or print a Fly token.
 
 ## Reading logs
 
