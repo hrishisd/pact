@@ -113,7 +113,10 @@ export function InvitePage({
           </div>
           <div className="card">
             <b>Accepting makes you friends.</b>
-            <p>You can pick each other as reviewers on pacts. A reviewer checks evidence and decides on excuses.</p>
+            <p>
+              You can pick each other as reviewers on pacts. A reviewer checks your evidence and decides on your
+              excuses, change requests, and payments.
+            </p>
           </div>
           {profile ? (
             <div className="stack">

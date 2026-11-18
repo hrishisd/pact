@@ -4,7 +4,7 @@ export function inviteRequiredPage(): string {
   return page(
     "You need an invite",
     `<h1>You need an invite</h1>
-     <p>Pact is invite-only, and this Google account doesn't have one.</p>
+     <p>Pact is invite-only, and this Google account hasn't been invited.</p>
      <p>Ask a friend who uses Pact to send you an invite link, then open it to sign in.</p>
      <p><a href="/">Back to sign in</a></p>`,
   );

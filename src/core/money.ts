@@ -521,8 +521,8 @@ export function remindOverdue(ctx: CoreContext, t: Date): void {
           kind: "overdue-bill",
           payload: {
             recipientId,
-            title: `${ownerName} is overdue`,
-            body: `${money(overdue.cents)} to ${name}, due ${formatDate(localDateOf(overdue.dueAt, timezone))}`,
+            title: `${ownerName}'s bill is overdue`,
+            body: `${money(overdue.cents)} to ${name} was due ${formatDate(localDateOf(overdue.dueAt, timezone))}`,
             url: APP_PATHS.today,
           },
         });

@@ -202,14 +202,17 @@ export function pushNoOuraData(ctx: CoreContext, t: Date): void {
       .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
       .run(pact.owner_account_id, night.date);
     if (sent.changes === 0) continue;
-    const fix = connectionProblem(ctx, pact.owner_account_id, "oura") === null ? "Sync your ring" : "Reconnect Oura";
+    const fix =
+      connectionProblem(ctx, pact.owner_account_id, "oura") === null
+        ? "Open the Oura app to sync it"
+        : "Reconnect Oura";
     ctx.enqueue({
       recipient: pact.owner_account_id,
       kind: "connection-problem",
       payload: {
         occurrenceDate: night.date,
-        title: "No Oura data",
-        body: `No Oura data for ${formatDate(night.date).split(" ")[0]} night yet. ${fix} before 6pm or it counts as missed.`,
+        title: `${formatDate(night.date).split(" ")[0]} night hasn't synced`,
+        body: `${fix} before 6pm, or the night is missed.`,
         url: APP_PATHS.today,
       },
     });

@@ -7,8 +7,8 @@ describe("listNames", () => {
     [[], "and", ""],
     [["alice"], "and", "alice"],
     [["alice", "Bob"], "and", "alice and Bob"],
-    [["alice", "Bob", "Cy"], "and", "alice, Bob and Cy"],
-    [["alice", "Bob", "Cy"], "or", "alice, Bob or Cy"],
+    [["alice", "Bob", "Cy"], "and", "alice, Bob, and Cy"],
+    [["alice", "Bob", "Cy"], "or", "alice, Bob, or Cy"],
   ])("%j with %s reads %j", (names, last, text) => {
     expect(listNames(names, last)).toBe(text);
   });
@@ -51,12 +51,10 @@ describe("effectText", () => {
 
   test("reviewers: who's removed needs approval, and who's added joins or hears about it", () => {
     const removing = { effect: "needs-approval", reason: "reviewers-removed" } as const;
-    expect(effectText({ ...reviewers(["Cy"], []), effect: "at-once" })).toBe("Applies now. Cy hears about it");
-    expect(effectText({ ...reviewers(["Cy", "Di"], []), effect: "at-once" })).toBe(
-      "Applies now. Cy and Di hear about it",
-    );
+    expect(effectText({ ...reviewers(["Cy"], []), effect: "at-once" })).toBe("Applies now");
+    expect(effectText({ ...reviewers(["Cy", "Di"], []), effect: "at-once" })).toBe("Applies now");
     expect(effectText({ ...reviewers([], ["Ann", "Bob", "Eve"]), ...removing })).toBe(
-      "Needs approval: removing Ann, Bob and Eve",
+      "Needs approval: removing Ann, Bob, and Eve",
     );
     expect(effectText({ ...reviewers(["Cy"], ["Ann"]), ...removing })).toBe(
       "Needs approval: removing Ann. Cy joins now",

@@ -257,12 +257,17 @@ function addReviewersNow(ctx: CoreContext, pact: PactRow, ownerName: string, add
   if (pact.reviewers_notified_at === null) return;
   const newcomers = friendsSortedByName(ctx, added);
   const names = newcomers.map((friend) => friend.name);
-  const namesText = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  const namesText =
+    names.length === 1
+      ? names[0]
+      : names.length === 2
+        ? `${names[0]} and ${names[1]}`
+        : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
   tellAll(ctx, earlier, "reviewer-added", {
     pactId: pact.id,
     added: newcomers.map((friend) => friend.id),
     title: `${ownerName} added ${namesText} as ${names.length === 1 ? "a reviewer" : "reviewers"}`,
-    body: `${pact.name} · ${names.length === 1 ? names[0] : "They"} can now decide its review items too.`,
+    body: `${pact.name} · ${names.length === 1 ? names[0] : "They"} can now review it too.`,
     url: APP_PATHS.review,
   });
 }
@@ -925,9 +930,9 @@ export const changeRequestKind: RequestKindHandler<StoredChangeRequest> = {
   moot: {
     waitingIds: (ctx) =>
       ctx
-        .all<{ id: string }>(
-          `SELECT id FROM change_request WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY requested_at, id`,
-        )
+        .all<{
+          id: string;
+        }>(`SELECT id FROM change_request WHERE decision IS NULL AND withdrawn_at IS NULL ORDER BY requested_at, id`)
         .map((row) => row.id),
     reason: (ctx, row) =>
       ctx.one(`SELECT 1 FROM pact WHERE id = ? AND stage = 'ended'`, row.pact_id) ? "pact-ended" : null,
@@ -970,7 +975,7 @@ export function decideChangeRequest(
       body = `${pact.name} ends after ${formatDate(timing.lastDay)}`;
     } else {
       endPact(ctx, pact.id, "end-request", now);
-      body = `${pact.name} is Ended`;
+      body = `${pact.name} has ended`;
     }
   } else {
     const { before, after } = request;

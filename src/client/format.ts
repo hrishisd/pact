@@ -137,7 +137,7 @@ export function initial(name: string): string {
  * profile's), or that no check reached AnkiWeb that day.
  */
 export function ankiMissText(check: Json<AnkiCheck> | null, timeZone: string): string {
-  if (check === null) return "AnkiWeb not reached";
+  if (check === null) return "Pact couldn't reach AnkiWeb";
   const { cardsLeft, checkedAt } = check;
   return `${cardsLeft} ${cardsLeft === 1 ? "card" : "cards"} left at ${clockTime(checkedAt, timeZone)}`;
 }

@@ -48,7 +48,7 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
   const bed =
     detail?.kind === "night"
       ? detail.inBedAt === null
-        ? `No sleep data by ${NIGHT_CLOSES_TEXT}.`
+        ? `No sleep data had synced by ${NIGHT_CLOSES_TEXT}.`
         : `In bed at ${clockText(detail.inBedAt)}.`
       : undefined;
   switch (status.kind) {
@@ -67,7 +67,7 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
     case "excused":
     case "not-judged":
       if (status.vacation)
-        return `Vacation, ${dateSpan(status.vacation.from, status.vacation.to)}. Excused, no penalty.`;
+        return `Excused for your vacation, ${dateSpan(status.vacation.from, status.vacation.to)}. No penalty.`;
       if (status.excuseApproval)
         return `Excuse approved by ${status.excuseApproval.reviewerName}: “${sentence(status.excuseApproval.reason)}”`;
       if (status.kind === "not-judged" && status.evidenceWaiting && reviewerNames.length > 0)

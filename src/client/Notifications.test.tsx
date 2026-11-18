@@ -31,7 +31,7 @@ describe("the Email section", () => {
     expect(daily).toHaveProperty("checked", false);
     expect(
       screen.getByText(
-        "An email at 09:00 when items in your Review Queue, or reviewers' questions to you, have waited more than a day",
+        "An email at 9am when items have waited more than a day for your review, or reviewers' questions have waited more than a day for your reply",
       ),
     ).toBeTruthy();
     expect(screen.getByText("Sent to priya@gmail.com, your Google address.")).toBeTruthy();

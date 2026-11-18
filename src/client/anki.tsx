@@ -137,8 +137,8 @@ export function AnkiDeckMissing({ deckName }: { deckName: string | null }) {
   return (
     <div className="alert bad" role="status">
       <span>
-        <b>{deckName === null ? "The deck is gone from Anki." : `The ${deckName} deck is gone from Anki.`}</b> Its days
-        count as Missed until it's back. File an excuse for a day you couldn't help.
+        <b>{deckName === null ? "The deck isn't in Anki any more." : `The ${deckName} deck isn't in Anki any more.`}</b>{" "}
+        Until it's back, each day is missed. You can file an excuse for those days.
       </span>
     </div>
   );

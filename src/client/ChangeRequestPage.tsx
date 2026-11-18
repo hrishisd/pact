@@ -27,7 +27,7 @@ export function ChangeRequestPage({
   const withdrawal = useSend(
     async (id: string) => {
       const withdrawn = await api.withdrawChangeRequest(id);
-      if (!withdrawn.ok) withdrawal.setError("It isn't waiting any more. Reopen it to see where it stands.");
+      if (!withdrawn.ok) withdrawal.setError("It isn't waiting any more. Reopen it to see the latest.");
       // Either way it isn't waiting now: reload to show where it stands.
       reload();
     },
@@ -87,9 +87,8 @@ function ChangeRequestView({
         <StateLine state={request.state} timezone={timezone} />
         {request.endsPact ? (
           <p className="small muted">
-            {request.ending &&
-              `If approved, ${request.pactName} ends ${endsWhenText(request.current, request.ending)}. `}
-            Days already judged stay on your ledger.
+            {request.ending && `If approved, the pact ends ${endsWhenText(request.current, request.ending)}. `}
+            You still owe penalties for days already missed.
           </p>
         ) : (
           <>

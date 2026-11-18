@@ -86,7 +86,7 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
     await (await chooser).setFiles({ name: "gym.png", mimeType: "image/png", buffer: PNG });
     await toDo.getByRole("button", { name: "Submit" }).click();
     await expect(owner.getByText("Waiting for approval", { exact: true })).toBeVisible();
-    await expect(owner.getByRole("button", { name: /^Gym Evidence/ })).toBeVisible();
+    await expect(owner.getByRole("button", { name: /^Gym Photo/ })).toBeVisible();
   });
 
   await test.step("after the edit window, the reviewer approves it", async () => {
@@ -141,7 +141,7 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
     await sheet.getByRole("button", { name: "Choose screenshot" }).click();
     await (await chooser).setFiles({ name: "venmo.png", mimeType: "image/png", buffer: PNG });
     await sheet.getByRole("button", { name: "Send for approval" }).click();
-    await expect(owner.getByRole("button", { name: /^Sam \$5 owed \$5 payment awaiting approval/ })).toBeVisible();
+    await expect(owner.getByRole("button", { name: /^Sam \$5 owed \$5 payment waiting for approval/ })).toBeVisible();
   });
 });
 

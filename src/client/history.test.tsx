@@ -71,7 +71,7 @@ test("tapping a vacation day shows the Vacation chip and its dates", async () =>
 
   const detail = screen.getByRole("status");
   expect(within(detail).getByText("Vacation").className).toBe("chip c-vac");
-  expect(within(detail).getByText("Vacation, Jan 7 – 10. Excused, no penalty.")).toBeTruthy();
+  expect(within(detail).getByText("Excused for your vacation, Jan 7 – 10. No penalty.")).toBeTruthy();
 });
 
 test("tapping an ordinary excused day still shows the excuse", async () => {
@@ -114,7 +114,7 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
 
   const detail = screen.getByRole("status");
   expect(within(detail).getByText("Vacation").className).toBe("chip c-vac");
-  expect(within(detail).getByText("Vacation, Jan 7 – 10. Excused, no penalty.")).toBeTruthy();
+  expect(within(detail).getByText("Excused for your vacation, Jan 7 – 10. No penalty.")).toBeTruthy();
 });
 
 test("a day with an excuse waiting for approval has a square and a chip that say the same", async () => {

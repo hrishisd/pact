@@ -14,17 +14,20 @@ const ALERT_CLEARED_KEY = "pact.notifications-alert-cleared";
 const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }> = {
   "picked-as-reviewer": { label: "Picked as a reviewer", hint: "A friend picked you as a reviewer on a pact" },
   "review-item": {
-    label: "New review item",
-    hint: "Evidence, an excuse, a payment, a change request or a vacation is waiting for you",
+    label: "Something to review",
+    hint: "Evidence, an excuse, a payment, a change request, or a vacation is waiting for your decision",
   },
   decision: { label: "Decision", hint: "A reviewer approved or rejected something of yours" },
-  comment: { label: "Comment", hint: "A reviewer asked you about something, or a friend replied to your question" },
-  "missed-occurrence": { label: "Missed occurrence", hint: "One of your pacts was judged Missed" },
+  comment: {
+    label: "Questions and replies",
+    hint: "A reviewer asked you about something, or a friend replied to your question",
+  },
+  "missed-occurrence": { label: "Missed", hint: "A day or week of one of your pacts was judged missed" },
   "new-bill": { label: "New bill", hint: "Your Wednesday bill to a recipient is ready" },
   "overdue-bill": { label: "Overdue bill", hint: "A bill of yours is overdue, or one of a friend's you review" },
   "connection-problem": {
     label: "Connection problem",
-    hint: "Oura or AnkiWeb needs reconnecting, or last night still has no Oura data at 3pm",
+    hint: "Oura or AnkiWeb needs reconnecting, or last night's Oura data hasn't synced by 3pm",
   },
   "reviewed-pact": {
     label: "Pacts you review",
@@ -280,7 +283,7 @@ function EmailSection({ loaded }: { loaded: DailySummarySetting }) {
       <div className="list">
         <SwitchRow
           label="Daily summary"
-          hint="An email at 09:00 when items in your Review Queue, or reviewers' questions to you, have waited more than a day"
+          hint="An email at 9am when items have waited more than a day for your review, or reviewers' questions have waited more than a day for your reply"
           checked={summary.enabled}
           onChange={(on) => void toggle(on)}
         />

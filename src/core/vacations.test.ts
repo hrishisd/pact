@@ -948,7 +948,7 @@ describe("the other reviewers of covered pacts hear of an approval", () => {
           vacationId,
           pactIds: [read],
           title: "owner's vacation was approved",
-          body: "Jan 12 – 18 covers Read. reviewer approved it.",
+          body: "reviewer approved it. It covers Read, Jan 12 – 18.",
           url: "/review",
         },
       },
@@ -966,7 +966,7 @@ describe("the other reviewers of covered pacts hear of an approval", () => {
       expect.objectContaining({
         payload: expect.objectContaining({
           pactIds: [gym, read],
-          body: "Jan 12 – 18 covers Gym and Read. reviewer approved it.",
+          body: "reviewer approved it. It covers Gym and Read, Jan 12 – 18.",
         }),
       }),
     ]);
@@ -980,7 +980,7 @@ describe("the other reviewers of covered pacts hear of an approval", () => {
     ok(await third.decide(vacationId, { kind: "approve" }));
 
     expect(s.notifier.sentTo(reviewer, "vacation-approved").map((n) => n.payload.body)).toEqual([
-      "Jan 12 – 18 covers Gym. third approved it.",
+      "third approved it. It covers Gym, Jan 12 – 18.",
     ]);
     expect(s.notifier.sentTo(third, "vacation-approved")).toEqual([]);
   });
@@ -1464,7 +1464,7 @@ describe("the excuse window a rejected or withdrawn vacation reopens (R3)", () =
     expect(s.notifier.sentTo(owner, "vacation-decided")).toEqual([
       expect.objectContaining({
         payload: expect.objectContaining({
-          body: `“Not that week” · ${formatDate(s.date("Mon+1"))} to ${formatDate(s.date("Wed+1"))} can be excused until Sat Jan 17, 8:00am.`,
+          body: `“Not that week” You can file an excuse for ${formatDate(s.date("Mon+1"))} to ${formatDate(s.date("Wed+1"))} until Sat Jan 17, 8:00am.`,
         }),
       }),
     ]);

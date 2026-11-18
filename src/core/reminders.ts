@@ -134,12 +134,15 @@ function enqueueReminder(
   if (pact.evidence_kind === "oura") body = `In bed by ${clockText(terms.in_bed_by!)} tonight.`;
   if (pact.evidence_kind === "anki") {
     const check = lastAnkiCheck(ctx, pact.id, date);
-    body = check === null ? `Due at ${due}. Not checked yet.` : `${cardsText(check.cardsLeft)} left, due at ${due}`;
+    body =
+      check === null
+        ? `Due at ${due}. Pact hasn't checked your deck yet.`
+        : `${cardsText(check.cardsLeft)} left, due at ${due}`;
   }
   if (kind === "one-time") body = `No photo yet. Due ${formatDate(date)} at ${due}.`;
   if (weekly) {
     const { sessions, target } = weekProgress(ctx, pact.id, mondayOf(date));
-    body = `${sessions} of ${target} this week. Today's photo is due at ${due}.`;
+    body = `${sessions} of ${target} days done this week. Today's photo is due at ${due}.`;
   }
   ctx.enqueue({
     recipient: pact.owner_account_id,

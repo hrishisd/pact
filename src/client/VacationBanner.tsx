@@ -47,5 +47,5 @@ export function VacationBanner({ vacation }: { vacation: Json<TodayVacation> }) 
 function excusedText({ pacts, covers }: Json<TodayVacation>): string {
   const names = covers.map((pact) => pact.name);
   const which = pacts.kind === "all" ? "Your pacts are" : `${listNames(names)} ${names.length === 1 ? "is" : "are"}`;
-  return `${which} Excused on these days, with no reminders and no penalties.`;
+  return `${which} excused on these days. You won't get reminders or penalties.`;
 }

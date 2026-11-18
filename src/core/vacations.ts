@@ -3,7 +3,7 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
-import { dateSpan, excusableText, pactNamesText } from "../shared/format.ts";
+import { dateSpan, daysText, formatDayTime, pactNamesText } from "../shared/format.ts";
 import {
   MAX_EXCUSE_SPAN_DAYS,
   type AcceptVacationRejectionResult,
@@ -685,7 +685,7 @@ export function decideVacation(
           ? dateSpan(from, to)
           : released === null
             ? `“${decided.reason}”`
-            : `“${decided.reason}” · ${excusableText(released.firstDate, released.lastDate, released.until.toISOString(), timezone)}`,
+            : `“${decided.reason}” You can file an excuse for ${daysText(released.firstDate, released.lastDate)} until ${formatDayTime(released.until.toISOString(), timezone)}.`,
       // A rejection shows as an alert on Today; an approval on the vacation's Profile card.
       url: decided.outcome === "approved" ? APP_PATHS.profile : APP_PATHS.today,
     },
@@ -722,7 +722,7 @@ function tellOtherReviewers(ctx: CoreContext, vacation: VacationToDecide, approv
         vacationId: vacation.id,
         pactIds: theirs.map((pact) => pact.id),
         title,
-        body: `${span} covers ${pactNamesText(theirs.map((pact) => pact.name))}. ${approver} approved it.`,
+        body: `${approver} approved it. It covers ${pactNamesText(theirs.map((pact) => pact.name))}, ${span}.`,
         url: APP_PATHS.review,
       },
     });

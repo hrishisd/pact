@@ -13,7 +13,7 @@ import { ReplyBox } from "./questions.tsx";
 import { loadedData, loadFailure, useLoad, useSend } from "./ui.tsx";
 import { firstName, pactsText, plural } from "./vacation-text.ts";
 
-const WITHDRAWN = "Vacation withdrawn. Your pacts keep all their days.";
+const WITHDRAWN = "Vacation withdrawn. These days count as usual.";
 
 export function VacationSection({
   message,
@@ -47,7 +47,7 @@ export function VacationSection({
           key={vacation.id}
           vacation={vacation}
           onWithdrawn={saying(WITHDRAWN)}
-          onReplied={saying(`Reply sent. It's back with ${listNames(vacation.reviewerNames.map(firstName))}.`)}
+          onReplied={saying(`Reply sent. ${listNames(vacation.reviewerNames.map(firstName), "or")} can decide it now.`)}
         />
       ))}
       <div className="spread">
@@ -64,11 +64,11 @@ export function VacationSection({
   );
 }
 
-/** "Sent to Sam Rivera and Alex Chen. …", or with one reviewer "Sam Rivera reviews it. …". */
+/** "Sent to Sam Rivera and Alex Chen. Until one of them approves it, …", or with one reviewer "Sam Rivera reviews it. Until then, …". */
 function sentTo(names: string[]): string {
   return names.length === 1
-    ? `${names[0]} reviews it. Nothing changes until it's approved.`
-    : `Sent to ${listNames(names)}. Nothing changes until one of them approves it.`;
+    ? `${names[0]} reviews it. Until then, your pacts run as usual.`
+    : `Sent to ${listNames(names)}. Until one of them approves it, your pacts run as usual.`;
 }
 
 const CHIPS: Record<VacationCard["state"]["kind"], { className: string; text: string }> = {
@@ -132,7 +132,7 @@ function WaitingActions({
   const withdraw = useSend(
     async () => {
       const result = await api.withdrawVacation(vacation.id);
-      if (!result.ok) return "It's no longer waiting for approval. Reopen Profile to see where it stands.";
+      if (!result.ok) return "It's no longer waiting for approval. Reopen Profile to see the latest.";
       onWithdrawn();
     },
     (failure) => `Couldn't withdraw. ${failureText(failure, "Check your connection and try again.")}`,
@@ -190,8 +190,8 @@ function WaitingActions({
  */
 function withdrawText(vacation: Json<VacationCard>): string {
   const { heldCents, heldDates } = vacation;
-  if (heldCents === undefined) return "Your pacts keep all their days.";
-  if (heldDates === undefined) return `${money(heldCents)} held becomes owed.`;
+  if (heldCents === undefined) return "These days will count as usual.";
+  if (heldDates === undefined) return `You'll owe the ${money(heldCents)} that's held.`;
   const days = daysText(heldDates.firstDate, heldDates.lastDate);
-  return `${money(heldCents)} held becomes owed, and ${days} can be excused for ${EXCUSE_WINDOW_TEXT}.`;
+  return `You'll owe the ${money(heldCents)} that's held. You can file an excuse for ${days} for the next ${EXCUSE_WINDOW_TEXT}.`;
 }

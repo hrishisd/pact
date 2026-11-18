@@ -113,14 +113,13 @@ export function PactPage({
             {changeable && !waiting && pact.ending === null && <EndPact pact={pact} onSent={reload} />}
             {pact.ending && (
               <p className="small muted">
-                Ending approved: {pact.name} ends {endsWhenText(pact, { kind: "after", ...pact.ending })}. Penalties
-                already judged stay on the ledger.
+                Ending approved. The pact ends {endsWhenText(pact, { kind: "after", ...pact.ending })}. You still owe
+                penalties for days already missed.
               </p>
             )}
             {pact.stage === "ended" && (
               <p className="small muted">
-                Ended {formatDay(pact.endedAt, timezone)}. It makes no more days. Penalties already judged stay on the
-                ledger.
+                This pact ended on {formatDay(pact.endedAt, timezone)}. You still owe penalties for days already missed.
               </p>
             )}
           </>
@@ -154,7 +153,9 @@ function EditWindowBar({
     async () => {
       const result = await api.deletePact(pact.id);
       if (!result.ok)
-        return result.reason === "edit-window-closed" ? `The ${EDIT_WINDOW_TEXT} are up.` : "This pact wasn't found.";
+        return result.reason === "edit-window-closed"
+          ? `The ${EDIT_WINDOW_TEXT} for editing are over. To stop the pact, use End pact.`
+          : "This pact wasn't found.";
       onDeleted();
     },
     (failure) => `Couldn't delete it. ${failureText(failure, "Check your connection and try again.")}`,
@@ -166,7 +167,7 @@ function EditWindowBar({
   return (
     <div className="alert fresh" role="status">
       <b>
-        Feel free to edit or delete for {minutes} more {minutes === 1 ? "minute" : "minutes"}.
+        You can edit or delete this pact for {minutes} more {minutes === 1 ? "minute" : "minutes"}.
       </b>
       <div className="row2">
         <button className="btn sm" onClick={onEdit}>
@@ -208,15 +209,15 @@ function StageLine({ pact }: { pact: Pact }) {
   );
 }
 
-/** "New terms start Fri Jan 9. Today keeps $5 per miss.", while a change in force hasn't started. */
+/** "The new terms start Fri Jan 9. Today's penalty stays $5.", while a change in force hasn't started. */
 function NewTerms({ pact }: { pact: Pact }) {
   if (pact.newTerms === null) return null;
   const { appliesFrom, todayKeepsCents } = pact.newTerms;
   return (
     <div className="alert ok" role="status">
       <p>
-        <b>New terms start {formatDate(appliesFrom)}.</b>
-        {todayKeepsCents !== null && ` ${openOccurrenceText(pact.schedule)} keeps ${money(todayKeepsCents)} per miss.`}
+        <b>The new terms start {formatDate(appliesFrom)}.</b>
+        {todayKeepsCents !== null && ` ${openOccurrenceText(pact.schedule)} penalty stays ${money(todayKeepsCents)}.`}
       </p>
     </div>
   );
@@ -252,12 +253,12 @@ function Actions({
     <div className="stack-sm">
       {waiting && (
         <p className="small muted">
-          Request change is back once{" "}
+          You can request another change after{" "}
           {listNames(
             pact.reviewers.map((r) => r.name),
             "or",
           )}{" "}
-          decides the change below, or you withdraw it. Until then you can still change the name and reminders, or add a
+          decides this one or you withdraw it. Until then, you can still change the name and reminders, or add a
           reviewer, under Terms.
         </p>
       )}
@@ -307,8 +308,8 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
         if (result.reason === "change-request-waiting")
           return "A change request is already waiting. Withdraw it first.";
         return result.reason === "end-approved"
-          ? "Its end is already approved. Reopen it to see when it ends."
-          : "This pact can't be ended now. Reopen it to see where it stands.";
+          ? "Ending this pact is already approved. Reopen the pact to see when it ends."
+          : "This pact can't be ended now. Reopen the pact to see the latest.";
       }
       setAsking(false);
       onSent();
@@ -316,7 +317,7 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
     (failure) => `Couldn't send it. ${failureText(failure, "Check your connection and try again.")}`,
   );
   const names = pact.reviewers.map((r) => r.name);
-  const approval = names.length === 1 ? `${names[0]}'s approval` : `approval from ${listNames(names, "or")}`;
+  const approver = names.length === 1 ? "Your reviewer" : "One of your reviewers";
 
   return (
     <>
@@ -326,7 +327,8 @@ function EndPact({ pact, onSent }: { pact: Pact; onSent: () => void }) {
       {asking && (
         <Sheet title={`End ${pact.name}?`} onClose={() => setAsking(false)}>
           <p>
-            Ending needs {approval}. Until then {pact.name} keeps running. Days already judged stay on your ledger.
+            {approver} must approve ending the pact. Until then, the pact continues as usual. You still owe penalties
+            for days already missed.
           </p>
           <label className="field">
             <span>Why? (optional)</span>
@@ -485,7 +487,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
           placeholder={pact.evidenceKind === "oura" ? "e.g. In bed by midnight" : "e.g. Gym"}
           onChange={(e) => setName(e.target.value)}
         />
-        <small>Shown on Today. A new name applies at once, with no approval.</small>
+        <small>A new name applies right away, with no approval.</small>
       </label>
       {error && <p className="error">{error}</p>}
       <button className="btn primary block" disabled={saving} onClick={() => save(name)}>
@@ -550,8 +552,8 @@ function AddReviewerSheet({
     body = (
       <>
         <p className="muted">
-          {listNames(reviewerNames)} already {reviewerNames.length === 1 ? "reviews" : "review"} {pact.name}. Only
-          friends can review your pacts. Invite another, and they show up here once they accept.
+          {listNames(reviewerNames)} already {reviewerNames.length === 1 ? "reviews" : "review"} this pact. Only friends
+          can review your pacts. Invite another friend, and they'll appear here after they accept.
         </p>
         <div className="row2">
           <button className="btn primary" onClick={onInvite}>
@@ -565,8 +567,8 @@ function AddReviewerSheet({
     );
   } else if (others !== null) {
     const hint = changeWaiting
-      ? "Applies at once, with no approval, and they're told. They can decide the change waiting too."
-      : "Applies at once, with no approval, and they're told.";
+      ? "Applies right away, with no approval. Pact tells the new reviewer, who can also decide the change request that's waiting."
+      : "Applies right away, with no approval. Pact tells the new reviewer.";
     body = (
       <>
         <div className="stack step-in-sheet">
@@ -619,7 +621,7 @@ function RemindersSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () =>
         <RemindersStep
           form={{ ...formOf(pact), reminders }}
           onReminders={setReminders}
-          hint="Changes apply at once, with no approval."
+          hint="Changes apply right away without approval."
         />
       </div>
       {error && <p className="error">{error}</p>}

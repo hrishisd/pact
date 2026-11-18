@@ -230,7 +230,7 @@ describe("notifications", () => {
           itemKind: "evidence",
           itemId: evidenceId,
           title: "owner replied about their evidence for Gym",
-          body: "“The one on 5th” It's back in your queue.",
+          body: "“The one on 5th” You can decide it now.",
           url: "/review",
         },
       });

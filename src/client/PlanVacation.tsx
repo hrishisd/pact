@@ -119,8 +119,8 @@ function VacationSteps({
           )}
           {preview.kind === "failed" && <p className="error">{preview.text}</p>}
           <p className="small muted">
-            On these days the pacts you pick are Excused, with no reminders and no penalties. At most{" "}
-            {MAX_EXCUSE_SPAN_DAYS} days.
+            On these days, the pacts you pick are excused. You won't get reminders or penalties for them. A vacation can
+            be at most {MAX_EXCUSE_SPAN_DAYS} days.
           </p>
           <label className="field">
             <span>What are you doing? (optional)</span>
@@ -174,7 +174,7 @@ function VacationSteps({
             </section>
           )}
           {options.inEditWindow && (
-            <p className="small muted">New pacts can go on a vacation once their edit window closes.</p>
+            <p className="small muted">A new pact can go on a vacation once its 10 minutes for editing are over.</p>
           )}
           {!ready && <p className="error">Pick at least one pact.</p>}
         </>
@@ -263,14 +263,17 @@ function VacationSteps({
                   return pact && <CoverRow key={pact.id} pact={pact} preview={pactPreview} from={from} to={to} />;
                 })}
               </div>
-              <p className="small muted">Reminders stop on these days for the pacts on vacation.</p>
+              <p className="small muted">Once approved, reminders stop on these days for the pacts on vacation.</p>
             </section>
           )}
           {shown?.ok && shown.preview.coversNothing ? (
             <p className="error">There's nothing left for this vacation to cover.</p>
           ) : (
             <div className="alert info">
-              <p className="small">Nothing changes until it's approved, and once it is, it can't be changed.</p>
+              <p className="small">
+                Until it's approved, your pacts run as usual. If you miss a day it covers, the penalty is held until a
+                reviewer decides. Once approved, the vacation can't be changed.
+              </p>
             </div>
           )}
           {sendError && <p className="error">{sendError}</p>}
@@ -373,12 +376,12 @@ function termsLine(pact: PactOption): string {
 
 /** A One-time pact's line on the Pacts step: whether its deadline is inside the dates. */
 function oneTimeLine(pact: PactOption, from: string, to: string): string {
-  if (pact.alreadyOpen) return "It's already open, so it needs an excuse instead.";
+  if (pact.alreadyOpen) return "You can already submit for it, so file an excuse instead.";
   const { schedule } = pact;
   const inside = schedule.kind === "one-time" && from <= schedule.deadline && schedule.deadline <= to;
   return inside
-    ? "Its deadline is inside your vacation. Tick it to excuse the deadline; the pact then ends."
-    : "Its deadline isn't inside your vacation.";
+    ? "Its deadline is during your vacation. Tick it to excuse the deadline. The pact then ends."
+    : "Its deadline isn't during your vacation.";
 }
 
 const KIND_ICONS: Record<PactOption["evidenceKind"], { className: string; icon: ReactNode }> = {
@@ -388,8 +391,8 @@ const KIND_ICONS: Record<PactOption["evidenceKind"], { className: string; icon: 
 };
 
 const SKIP_TEXT: Record<PactPreview["skipped"][number]["reason"], string> = {
-  "already-open": "already open",
-  excused: "already Excused",
+  "already-open": "already started",
+  excused: "already excused",
   "on-waiting-excuse": "on an excuse waiting for approval",
   "on-vacation": "on another vacation",
 };
@@ -421,7 +424,7 @@ function CoverRow({ pact, preview, from, to }: { pact: PactOption; preview: Pact
     if (schedule.kind === "weekly-count") {
       for (const week of preview.notCovered) {
         lines.push(
-          `${weekOf(week.date)}: not covered, still ${schedule.target}× by ${formatDate(week.through ?? week.date)}`,
+          `${weekOf(week.date)}: not covered, still ${schedule.target} days needed by ${formatDate(week.through ?? week.date)}`,
         );
       }
     }

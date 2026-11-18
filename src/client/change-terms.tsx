@@ -22,8 +22,8 @@ export type Term = TermChange["term"];
 /** Why any change to a pact past its edit window is refused, whatever it changes: Request change and the pact page's own. */
 export const AT_ONCE_REFUSAL_TEXT: Record<AtOnceChangeRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": `It's still in its first ${EDIT_WINDOW_TEXT}. Edit it instead.`,
-  "pact-ended": "This pact has Ended.",
+  "edit-window-open": `You can still edit this pact freely for ${EDIT_WINDOW_TEXT}. Use Edit instead.`,
+  "pact-ended": "This pact has ended.",
 };
 type Change = Json<TermChange>;
 type Current = Json<CurrentTerms>;
@@ -62,12 +62,12 @@ export function endsWhenText(
   if (ending.kind === "at-once") return "now";
   const open =
     terms.schedule.kind === "weekly-count" ? "this week" : terms.evidenceKind === "oura" ? "that night" : "that day";
-  return `after ${formatDate(ending.lastDay)}, once ${open} is judged`;
+  return `after ${formatDate(ending.lastDay)}, once ${open} has been judged`;
 }
 
-/** What a pact's open occurrence is called in "Today keeps $5 per miss": This week, for Weekly count. */
+/** Whose penalty stays, in "Today's penalty stays $5": This week's, for Weekly count. */
 export function openOccurrenceText(schedule: Pick<Schedule, "kind">): string {
-  return schedule.kind === "weekly-count" ? "This week" : "Today";
+  return schedule.kind === "weekly-count" ? "This week's" : "Today's";
 }
 
 /**
@@ -187,7 +187,7 @@ export function effectText(change: Change): string {
       return "Stricter";
     case "at-once":
       if (change.term !== "reviewers") return "Applies now";
-      return `Applies now. ${addedNames(change)} ${change.added.length === 1 ? "hears" : "hear"} about it`;
+      return "Applies now";
     case "needs-approval": {
       const needs = `Needs approval: ${APPROVAL_REASONS[change.reason]}`;
       if (change.term !== "reviewers") return needs;
@@ -263,7 +263,7 @@ export function EverythingElse({ request }: { request: Json<TermsChangeRequestVi
 
 /**
  * When an approved change would start, as a change request says it: "Approving
- * applies from Wed Nov 4, the first Gym day not open yet. Today keeps $5 per miss." A Weekly count
+ * applies from Wed Nov 4, the first day of this pact that hasn't started yet. Today's penalty stays $5." A Weekly count
  * pact's applies from a week, and this week keeps its penalty.
  */
 export function startsText(request: Json<TermsChangeRequestView>, lead: string): string {
@@ -271,19 +271,20 @@ export function startsText(request: Json<TermsChangeRequestView>, lead: string):
   if (start === null) return "";
   const { schedule } = request.current;
   // A One-time pact's one occurrence takes a change even once it's open.
-  if (schedule.kind === "one-time") return `${lead} at once, to its one deadline, even if it's open.`;
+  if (schedule.kind === "one-time") return `${lead} right away, even if the deadline day has started.`;
   const unit = request.current.evidenceKind === "oura" ? "night" : schedule.kind === "weekly-count" ? "week" : "day";
   const today =
     start.todayKeepsCents === null
       ? ""
-      : ` ${openOccurrenceText(schedule)} keeps ${money(start.todayKeepsCents)} per miss.`;
-  return `${lead} from ${formatDate(start.appliesFrom)}, the first ${request.pactName} ${unit} not open yet.${today}`;
+      : ` ${openOccurrenceText(schedule)} penalty stays ${money(start.todayKeepsCents)}.`;
+  return `${lead} from ${formatDate(start.appliesFrom)}, the first ${unit} of this pact that hasn't started yet.${today}`;
 }
 
 /** "Sam", "Sam and Alex", "Sam, Alex and Jo". */
 export function listNames(list: string[], last = "and"): string {
   if (list.length <= 1) return list[0] ?? "";
-  return `${list.slice(0, -1).join(", ")} ${last} ${list.at(-1)}`;
+  if (list.length === 2) return `${list[0]} ${last} ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")}, ${last} ${list.at(-1)}`;
 }
 
 function names(reviewers: { name: string }[]): string {

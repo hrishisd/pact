@@ -200,8 +200,8 @@ describe("a timezone change and the owner's reviewers", () => {
             ownerId: owner.id,
             from: "Europe/London",
             to: "Pacific/Honolulu",
-            title: "owner changed timezone",
-            body: "London to Honolulu. Gym is due 10 hours later from Tue Jan 6.",
+            title: "owner changed their timezone",
+            body: "From London to Honolulu. From Tue Jan 6, Gym is due 10 hours later.",
             url: "/review",
           },
         },
@@ -220,10 +220,10 @@ describe("a timezone change and the owner's reviewers", () => {
     await owner.setTimezone("America/Argentina/Buenos_Aires");
 
     expect(s.notifier.sentTo(reviewer, "timezone-changed").map((n) => n.payload.body)).toEqual([
-      "London to Buenos Aires. Gym and Reading are due 3 hours later from Tue Jan 6.",
+      "From London to Buenos Aires. From Tue Jan 6, Gym and Reading are due 3 hours later.",
     ]);
     expect(s.notifier.sentTo(second, "timezone-changed").map((n) => n.payload.body)).toEqual([
-      "London to Buenos Aires. Reading is due 3 hours later from Tue Jan 6.",
+      "From London to Buenos Aires. From Tue Jan 6, Reading is due 3 hours later.",
     ]);
   });
 
@@ -236,7 +236,7 @@ describe("a timezone change and the owner's reviewers", () => {
     await owner.setTimezone("UTC");
 
     expect(s.notifier.sentTo(reviewer, "timezone-changed").map((n) => n.payload.body)).toEqual([
-      "Tehran to UTC. Gym is due 3.5 hours later from Tue Jan 6.",
+      "From Tehran to UTC. From Tue Jan 6, Gym is due 3.5 hours later.",
     ]);
   });
 
@@ -273,7 +273,7 @@ describe("a timezone change and the owner's reviewers", () => {
     await owner.setTimezone("Pacific/Honolulu");
 
     expect(s.notifier.sentTo(reviewer, "timezone-changed").map((n) => n.payload.body)).toEqual([
-      "London to Honolulu. Gym is due 10 hours later from Tue Jan 6.",
+      "From London to Honolulu. From Tue Jan 6, Gym is due 10 hours later.",
     ]);
     for (const who of [oura, ended, fresh]) expect(s.notifier.sentTo(who, "timezone-changed")).toEqual([]);
   });

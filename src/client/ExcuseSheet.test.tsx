@@ -67,7 +67,7 @@ describe("ExcuseSheet", () => {
     expect(text).toContain("Sun Jan 4Missed");
     expect(text).toContain("$5 held while Ana decides");
     expect(text).toContain("38h left to file an excuse");
-    expect(text).toContain("Covers 1 day. $5 is held off what you owe until it's decided.");
+    expect(text).toContain("Covers 1 day. You won't owe the $5 for these days unless the excuse is rejected.");
   });
 
   test("opened on a day of a Weekly count pact, its week is the one shown, and excusing it excuses the week", async () => {

@@ -229,7 +229,7 @@ export function useNow(): number {
 /** "New · edit for 7 min", next to the name of a pact in its edit window. Nothing once it's closed. */
 export function EditWindowChip({ closesAt, now }: { closesAt: string | null; now: number }) {
   const minutes = minutesLeft(closesAt, now);
-  return minutes === null ? null : <span className="chip c-new">New · edit for {minutes} min</span>;
+  return minutes === null ? null : <span className="chip c-new">New · editable for {minutes} min</span>;
 }
 
 export function Empty({ title, body, children }: { title: string; body: string; children?: ReactNode }) {

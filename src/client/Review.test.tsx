@@ -62,12 +62,12 @@ test("a vacation item says whose it is, its days and pacts, and what each pact g
   expect(within(card).getByText("The pact ends.")).toBeTruthy();
   expect(
     within(card).getByText(
-      "Approving excuses all of these and stops their reminders on these days. Once approved, it can't be changed.",
+      "If you approve, these days are excused with no reminders. An approved vacation can't be undone.",
     ),
   ).toBeTruthy();
 });
 
-test("rejecting a vacation needs a reason and says Jordan's pacts keep every day", async () => {
+test("rejecting a vacation needs a reason and says Jordan's pacts count these days as usual", async () => {
   const spies = stubApi({
     reviewQueue: answers<ReviewQueueResponse>([VACATION], []),
     waitingOnReply: answers<ReviewQueueResponse>([]),
@@ -78,7 +78,7 @@ test("rejecting a vacation needs a reason and says Jordan's pacts keep every day
 
   const reason = screen.getByRole("textbox", { name: "Why are you rejecting it? (required)" });
   expect(reason.getAttribute("placeholder")).toBe("e.g. Not two weeks before the gym challenge ends");
-  expect(screen.getByText("Rejecting keeps every day of Jordan's pacts as it is.")).toBeTruthy();
+  expect(screen.getByText("If you reject it, Jordan's pacts count these days as usual.")).toBeTruthy();
   await user.type(reason, "Not now");
   await user.click(screen.getByRole("button", { name: "Reject" }));
 
@@ -101,7 +101,7 @@ test("approving an item the system withdrew says why it was withdrawn", async ()
   await user.click(await screen.findByRole("button", { name: "Approve" }));
 
   expect(spies.decide).toHaveBeenCalledWith("v1", { kind: "approve" });
-  expect(await screen.findByText("Withdrawn: Gym Ended.")).toBeTruthy();
+  expect(await screen.findByText("Withdrawn because Gym has ended.")).toBeTruthy();
   expect(screen.queryByText("That item isn't in your queue any more.")).toBeNull();
 });
 
@@ -148,13 +148,13 @@ test("a vacation holding penalties lists each held day, and approving and reject
   expect(within(card).getByText("Week of Dec 21 · Missed · $10 held")).toBeTruthy();
   expect(
     within(card).getByText(
-      "Approving removes $15 in held penalties. It excuses all of these and stops their reminders on these days. Once approved, it can't be changed.",
+      "If you approve, these days are excused with no reminders, and Jordan Lee won't owe the $15 held for them. An approved vacation can't be undone.",
     ),
   ).toBeTruthy();
 
   await user.click(screen.getByRole("button", { name: "Reject" }));
   expect(
-    screen.getByText("Rejecting makes $15 owed again and leaves the days not judged yet to be judged as usual."),
+    screen.getByText("If you reject it, Jordan Lee owes the $15 again. The other days count as usual."),
   ).toBeTruthy();
 });
 
@@ -198,7 +198,7 @@ test("an end request says the pact ends once the week open now is judged", async
   expect(within(card).getByRole("heading", { name: "End Gym" })).toBeTruthy();
   expect(
     within(card).getByText(
-      "Approving ends Gym after Sun Jan 18, once this week is judged. Penalties already judged stay on Jordan Lee's ledger.",
+      "If you approve, the pact ends after Sun Jan 18, once this week has been judged. Jordan Lee still owes the penalties for days already missed.",
     ),
   ).toBeTruthy();
 });
@@ -212,6 +212,8 @@ test("an end request with nothing open says approving ends the pact now", async 
 
   const card = await screen.findByRole("article");
   expect(
-    within(card).getByText("Approving ends Gym now. Penalties already judged stay on Jordan Lee's ledger."),
+    within(card).getByText(
+      "If you approve, the pact ends now. Jordan Lee still owes the penalties for days already missed.",
+    ),
   ).toBeTruthy();
 });

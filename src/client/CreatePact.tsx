@@ -328,14 +328,14 @@ function KindStep({
             <CameraIcon />
           </span>
           <b>Camera</b>
-          <small>Take a photo each time. Your reviewer checks it.</small>
+          <small>Take a photo each time. A reviewer checks it.</small>
         </button>
         <button className="kind-tile" disabled={!ouraAvailable} onClick={() => onPick("oura")}>
           <span className="tico">
             <RingIcon />
           </span>
           <b>Oura Ring</b>
-          <small>Your ring reports when you got into bed. Nothing to submit.</small>
+          <small>Your ring tells Pact when you got into bed. You don't need to submit anything.</small>
           {!ouraAvailable && <span className="chip c-soon">Oura isn't set up yet</span>}
         </button>
         <button className="kind-tile" disabled={!ankiAvailable} onClick={() => onPick("anki")}>
@@ -343,11 +343,10 @@ function KindStep({
             <CardsIcon />
           </span>
           <b>Anki</b>
-          <small>Finish a deck each day. Pact checks AnkiWeb after you sync. Nothing to submit.</small>
+          <small>Finish a deck each day and sync. Pact checks AnkiWeb, so you don't need to submit anything.</small>
           {!ankiAvailable && <span className="chip c-soon">Anki isn't set up yet</span>}
         </button>
       </div>
-      <small className="muted">You can't change this later.</small>
     </>
   );
 }
@@ -364,7 +363,8 @@ function ConnectStep() {
           <b>Oura asks you to sign in and allow Pact.</b>
         </div>
         <p>
-          Pact checks when your main sleep each night starts. Your reviewers see only Satisfied or Missed and that time.
+          Pact checks when you start your main sleep each night. Your reviewers see only that time and whether you were
+          in bed on time.
         </p>
       </div>
       <small className="muted">You'll come back here to set your bedtime.</small>
@@ -380,8 +380,8 @@ function ConnectAnkiStep({ login, onChange }: { login: AnkiLogin; onChange: (cha
       <AnkiLoginFields login={login} onChange={onChange} />
       <p className="tos">AnkiWeb doesn't officially allow other apps to sign in, and could suspend your account.</p>
       <p className="keeps">
-        Pact trades your password for an AnkiWeb sign-in key, then forgets the password. It keeps the key, encrypted,
-        and only ever reads your decks. Disconnect on Profile to delete it.
+        Pact uses your password once to get a sign-in key from AnkiWeb, then forgets the password. Pact stores the key
+        encrypted and only reads your decks. To delete the key, disconnect AnkiWeb in Profile.
       </p>
     </>
   );
@@ -461,7 +461,8 @@ function CheckStep({
       </div>
       <div className="alert info">
         <p>
-          {!editing && "It's Active as soon as you create it."}
+          {!editing &&
+            `The pact starts as soon as you create it. You can edit or delete it for the first ${EDIT_WINDOW_TEXT}.`}
           {first.kind === "loaded" && (
             <>
               {" "}
@@ -471,7 +472,7 @@ function CheckStep({
                 </>
               ) : schedule.kind === "weekly-count" ? (
                 <>
-                  The first week starts <b>{formatDate(first.first.date)}</b>, due by the end of Sunday.
+                  Your first week starts <b>{formatDate(first.first.date)}</b> and ends on Sunday.
                 </>
               ) : schedule.kind === "one-time" ? (
                 <>
@@ -479,7 +480,8 @@ function CheckStep({
                 </>
               ) : (
                 <>
-                  The first one is <b>{formatDate(first.first.date)}</b>, due {dueBy ? clockText(dueBy) : "midnight"}.
+                  Your first day is <b>{formatDate(first.first.date)}</b>, due by{" "}
+                  {dueBy ? clockText(dueBy) : "midnight"}.
                 </>
               )}
             </>
@@ -488,8 +490,8 @@ function CheckStep({
             // On this device's clock: the form has no profile timezone, and the window ends minutes from now.
             <>
               {" "}
-              Your {EDIT_WINDOW_TEXT} end at {clockTime(editing.editWindowClosesAt, undefined)}. Saving doesn't add
-              more.
+              You can edit this pact until {clockTime(editing.editWindowClosesAt, undefined)}. Saving doesn't extend
+              that time.
             </>
           )}
         </p>

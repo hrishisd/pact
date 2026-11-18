@@ -819,7 +819,7 @@ export type ConnectionProblem = "needs-reconnecting" | "not-connected";
 /** What a broken connection costs and what to do, as its push and its alerts say after "… needs reconnecting." */
 export const RECONNECT_TEXT: Record<ConnectionService, string> = {
   oura: "A night with no data by 6pm counts as Missed. Reconnect before then.",
-  anki: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
+  anki: "If Pact can't see the deck finished by the due time, the day is missed. Reconnect before then.",
 };
 
 /**

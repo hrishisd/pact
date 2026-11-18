@@ -1,5 +1,5 @@
 // The Ledgers tab: one card per recipient, with what's owed, a status line
-// for an overdue bill, a bill due or a payment awaiting approval, and Record
+// for an overdue bill, a bill due or a payment waiting for approval, and Record
 // payment, each opening its ledger's page: the penalties Missed occurrences
 // added (and who rejected the evidence when that's why, or that an excuse
 // waiting for approval holds them), the bill each is on or goes on, the
@@ -140,9 +140,9 @@ function billText(bill: Json<LedgerPenalty>["bill"]): string {
     case "next-bill":
       return `Goes on the ${formatDate(bill.billedOn)} bill`;
     case "if-excuse-rejected":
-      return `Held while an excuse waits for approval · Goes on the ${formatDate(bill.billedOn)} bill if the excuse is rejected`;
+      return `Held until your excuse is decided. If it's rejected, it goes on the ${formatDate(bill.billedOn)} bill.`;
     case "if-vacation-rejected":
-      return "Held while a vacation waits for approval";
+      return "Held until your vacation is decided";
   }
 }
 
@@ -166,7 +166,7 @@ function PenaltyRow({
         </button>
         <small>
           {penalty.week
-            ? `Week of ${formatDate(penalty.occurrenceDate)}, ${penalty.week.sessions} of ${penalty.week.target}`
+            ? `Week of ${formatDate(penalty.occurrenceDate)}: ${penalty.week.sessions} of ${penalty.week.target} days done`
             : `Missed ${formatDate(penalty.occurrenceDate)}`}
           {` · ${billText(penalty.bill)}`}
           {penalty.held ? null : penalty.paidCents === penalty.amountCents ? (
@@ -197,7 +197,7 @@ function PaymentRow({ payment, timezone }: { payment: Json<LedgerPayment>; timez
   let amount: ReactNode;
   switch (state.kind) {
     case "waiting":
-      stateText = "Awaiting approval";
+      stateText = "Waiting for approval";
       amount = <span className="num muted">{money(payment.amountCents)}</span>;
       break;
     case "approved":
@@ -231,8 +231,8 @@ function RecordPaymentButton({ ledger, onRecord }: { ledger: Json<LedgerSummary>
 
 /**
  * The big owed amount, then one status line only when needed (overdue, else
- * a bill due, else payments awaiting approval), then any credit, then
- * lifetime paid.
+ * a bill due, else payments waiting for approval), then any credit, then
+ * the total paid.
  */
 function Summary({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezone: string }) {
   return (
@@ -241,7 +241,7 @@ function Summary({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezone: 
       <span className="meta">owed</span>
       <StatusLine ledger={ledger} timezone={timezone} />
       <CreditLine ledger={ledger} />
-      <span className="meta">Lifetime paid {money(ledger.paidCents)}</span>
+      <span className="meta">Paid in total: {money(ledger.paidCents)}</span>
     </span>
   );
 }
@@ -256,12 +256,12 @@ function StatusLine({ ledger, timezone }: { ledger: Json<LedgerSummary>; timezon
     );
   }
   if (ledger.awaitingCount === 1) {
-    return <span className="meta">{money(ledger.awaitingCents)} payment awaiting approval</span>;
+    return <span className="meta">{money(ledger.awaitingCents)} payment waiting for approval</span>;
   }
   if (ledger.awaitingCount > 1) {
     return (
       <span className="meta">
-        {ledger.awaitingCount} payments awaiting approval · {money(ledger.awaitingCents)}
+        {ledger.awaitingCount} payments waiting for approval · {money(ledger.awaitingCents)}
       </span>
     );
   }
@@ -277,7 +277,7 @@ function CreditLine({ ledger }: { ledger: Json<LedgerSummary> }) {
   if (ledger.creditCents <= 0) return null;
   const credit = `${money(ledger.creditCents)} credit`;
   const waitsOn = ledger.creditWaitsOn;
-  if (waitsOn.length === 0) return <span className="meta">{credit} · pays your next penalties</span>;
+  if (waitsOn.length === 0) return <span className="meta">{credit}. It pays your next penalties.</span>;
   return (
     <span className="meta">
       {credit} if the {waitsOn.join(" and ")} {waitsOn.length === 1 ? "is" : "are"} approved

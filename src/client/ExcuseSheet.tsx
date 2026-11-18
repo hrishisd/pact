@@ -103,7 +103,7 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
 
 const OPEN_REFUSAL_TEXT: Record<"pact-not-found" | "edit-window-open", string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": `Excuses open once the ${EDIT_WINDOW_TEXT} are up.`,
+  "edit-window-open": `You can file excuses once the ${EDIT_WINDOW_TEXT} for editing are over.`,
 };
 
 /** The preview for some dates: `key` says which, so a stale one isn't taken for the current. */
@@ -262,7 +262,7 @@ function ExcuseForm({
           <span className="meta">
             {covered === 0
               ? "Pick at least one day that can be excused."
-              : `Covers ${covered} ${covered === 1 ? "day" : "days"}.${held > 0 ? ` ${money(held)} is held off what you owe until it's decided.` : ""}`}
+              : `Covers ${covered} ${covered === 1 ? "day" : "days"}.${held > 0 ? ` You won't owe the ${money(held)} for these days unless the excuse is rejected.` : ""}`}
           </span>
         )}
         {error && <p className="error small">{error}</p>}
@@ -285,7 +285,7 @@ function scheduleWords(pact: Pact): { schedule: string; weekly: boolean } {
 /** What a range with no days (or weeks) of the pact says. */
 function noDaysText(pact: Pact, from: string, to: string): string {
   const { schedule, weekly } = scheduleWords(pact);
-  return `No ${pact.name} ${weekly ? "week" : "day"} ${from === to ? `on ${formatDate(from)}` : `between ${formatDate(from)} and ${formatDate(to)}`}. It's ${schedule}.`;
+  return `The pact has no ${weekly ? "weeks" : "days"} ${from === to ? `on ${formatDate(from)}` : `between ${formatDate(from)} and ${formatDate(to)}`}. Its schedule is ${schedule}.`;
 }
 
 /**
@@ -596,7 +596,7 @@ function onlyAfter(preview: Preview, day: string): Preview {
 
 const DATES_REFUSAL_TEXT: Record<ExcuseDatesRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-open": `Excuses open once the ${EDIT_WINDOW_TEXT} are up.`,
+  "edit-window-open": `You can file excuses once the ${EDIT_WINDOW_TEXT} for editing are over.`,
   "invalid-dates": "The last day is before the first. Pick the dates again.",
   "too-many-days": `One excuse can cover at most ${MAX_EXCUSE_SPAN_DAYS} days. Pick fewer.`,
 };
@@ -605,6 +605,6 @@ const FILE_REFUSAL_TEXT: Record<FileExcuseRefusal, string> = {
   ...DATES_REFUSAL_TEXT,
   "blank-reason": "Write a reason first.",
   "text-too-long": TEXT_TOO_LONG_TEXT,
-  "too-many-photos": `An excuse can have at most ${MAX_EXCUSE_PHOTOS} photos. Remove some.`,
+  "too-many-photos": `You can add at most ${MAX_EXCUSE_PHOTOS} photos.`,
   "nothing-to-excuse": "None of these days can be excused now.",
 };

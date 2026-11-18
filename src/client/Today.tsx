@@ -130,10 +130,7 @@ export function Today({
       {(today) =>
         // Story 4: a new user's first screen says what to do next.
         !today.hasPacts ? (
-          <Empty
-            title="Nothing to do right now"
-            body="Invite a friend to review your pacts, then create your first pact."
-          >
+          <Empty title="Welcome to Pact" body="Invite a friend to review your pacts, then create your first pact.">
             <div className="row2">
               <button className="btn primary" onClick={onInvite}>
                 Invite a friend
@@ -414,7 +411,7 @@ function Section({
               now={now}
               chip={
                 <span className="chip c-soon">
-                  {card.startDate === null ? "Opens" : "Starts"} {formatDate(card.opensOn)}
+                  {card.startDate === null ? "Next:" : "Starts"} {formatDate(card.opensOn)}
                 </span>
               }
               onOpen={() => onOpenPact(card.pactId, card.name)}
@@ -497,10 +494,10 @@ function NoOuraDataCard({
       <div className="meta">
         {checking
           ? "Checking Oura…"
-          : `${night} night hasn't synced. ${ouraConnectionProblem ? "Reconnect Oura to count it." : "Open the Oura app."}`}
+          : `${night} night hasn't synced yet. ${ouraConnectionProblem ? "Reconnect Oura to count it." : "Open the Oura app to sync it."}`}
       </div>
       <div className="meta due">
-        Counts as missed at {NIGHT_CLOSES_TEXT} · {timeLeft(Date.parse(card.closesAt) - now)}
+        Missed at {NIGHT_CLOSES_TEXT} if it hasn't synced · {timeLeft(Date.parse(card.closesAt) - now)}
       </div>
       {tonight && (
         <div className="meta">
@@ -595,10 +592,10 @@ function CheckingAnkiWeb() {
 function missedLine({ detail, occurrenceDate }: Json<TodayMissedCard>, timezone: string): string {
   switch (detail?.kind) {
     case "closed":
-      return `Evidence was due by ${clockText(detail.dueBy)}.`;
+      return `Your photo was due by ${clockText(detail.dueBy)}.`;
     case "week": {
       const { sessions, target } = detail.progress;
-      return `Week of ${formatDate(occurrenceDate)} · ${sessions} of ${target}, ${target - sessions} short`;
+      return `Week of ${formatDate(occurrenceDate)} · ${sessions} of ${target} days, ${target - sessions} short`;
     }
     case "anki":
       return `${formatDate(occurrenceDate)} · ${ankiMissText(detail.lastCheck, timezone)}`;
@@ -713,7 +710,7 @@ function OverdueAlert({
         {money(alert.overdueCents)} overdue to {alert.recipientName}.
       </b>
       <span className="small">
-        Your {formatDate(alert.billedOn)} bill was due {formatDay(alert.dueAt, timezone)}.
+        Your bill from {formatDate(alert.billedOn)} was due {formatDay(alert.dueAt, timezone)}.
         {reviewerNames.length > 0 &&
           ` ${listNames(reviewerNames)} ${reviewerNames.length === 1 ? "has" : "have"} been told.`}
       </span>
@@ -778,7 +775,9 @@ function ReviewerQuestionAlert({
         {alert.reviewerName} asked about {questionSubject(alert.item)}
       </b>
       <span>“{alert.question}”</span>
-      <span className="small muted">It's waiting on your reply. {alert.reviewerName} can still decide it.</span>
+      <span className="small muted">
+        {alert.reviewerName} is waiting for your reply, but can still decide without it.
+      </span>
       <div className="row2">
         <button className="btn sm primary" onClick={onReply}>
           Reply
@@ -812,7 +811,7 @@ const TAKE_THE_L_REFUSAL_TEXT: Record<TakeTheLRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",
   "excuse-not-found": "This excuse wasn't found.",
   "vacation-not-found": "This vacation wasn't found.",
-  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see where it stands.",
+  "nothing-to-accept": "There's nothing to accept now. Reopen Today to see the latest.",
 };
 
 /**
@@ -901,7 +900,7 @@ function RejectedEvidenceAlert({
       </b>
       <span>“{alert.reason}”</span>
       {alert.week ? (
-        <span className="small">Doesn't count toward this week · make it up by Sunday</span>
+        <span className="small">This day doesn't count toward the week. Make it up on another day by Sunday.</span>
       ) : (
         <span className="small">
           {formatDate(alert.occurrenceDate)} is Missed ·{" "}
@@ -974,7 +973,9 @@ function RejectedExcuseAlert({
           </>
         )}
         {alert.hasDaysNotJudged &&
-          (owedAgain ? ", and days not judged yet are judged as usual" : " · days not judged yet are judged as usual")}
+          (owedAgain
+            ? ". Days that haven't been checked yet count as usual."
+            : " · Days that haven't been checked yet count as usual.")}
       </span>
       <div className="row2">
         {refileLabel && (
@@ -1020,7 +1021,7 @@ function RejectedVacationAlert({
         {alert.owedAgainCents > 0 ? (
           <b className="pen">{money(alert.owedAgainCents)} is owed again</b>
         ) : (
-          "your pacts keep all their days"
+          "These days count as usual."
         )}
       </span>
       {excusable && (
@@ -1149,11 +1150,11 @@ const WEEKLY_ALREADY_REJECTED_TEXT = "Today's photo was rejected. Make it up ano
 const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",
   "no-photos": "Take a photo first.",
-  "too-many-photos": `Evidence can have at most ${MAX_EVIDENCE_PHOTOS} photos. Remove some.`,
-  "not-open": "This occurrence is closed. Evidence counts only until its due time.",
-  "evidence-waiting": "Evidence for today is already waiting for approval.",
-  "already-approved": "Evidence for today is already approved.",
-  "already-judged": "Today is already Missed, so new photos can't count.",
+  "too-many-photos": `You can send at most ${MAX_EVIDENCE_PHOTOS} photos.`,
+  "not-open": "This day has closed. Photos count only until the due time.",
+  "evidence-waiting": "Today's photo is already waiting for approval.",
+  "already-approved": "Today's photo is already approved.",
+  "already-judged": "Today is already marked as missed, so new photos won't count.",
 };
 
 /**

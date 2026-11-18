@@ -124,7 +124,7 @@ export function Chip({ chip }: { chip: OccurrencePresentation["chip"] }) {
 /** Why a day in the dates is skipped, as the sheet's Skipped rows say it. */
 export const SKIP_REASON_TEXT: Record<ExcuseSkipReason, string> = {
   satisfied: "Satisfied",
-  excused: "Already Excused",
+  excused: "Already excused",
   "on-waiting-excuse": "Already on an excuse waiting for approval",
   "on-waiting-vacation": "On a vacation waiting for approval",
   "window-closed": `Missed more than ${EXCUSE_WINDOW_TEXT} ago`,
