@@ -198,13 +198,13 @@ describe("a rejected vacation's alert", () => {
     yesterday: [],
   });
 
-  test("names the reviewer, quotes the reason, and says the pacts keep all their days", async () => {
+  test("names the reviewer, quotes the reason, and says the days count as usual", async () => {
     stubApi({ today: answers(rejected(0)) });
     renderToday();
     const alert = await screen.findByRole("status");
     expect(within(alert).getByText("Sam rejected your vacation")).toBeTruthy();
     expect(within(alert).getByText("“Not two weeks before the gym challenge ends”")).toBeTruthy();
-    expect(alert.textContent).toContain("Dec 20 – Jan 2 · your pacts keep all their days");
+    expect(alert.textContent).toContain("Dec 20 – Jan 2 · These days count as usual.");
   });
 
   test("with held penalties, says what's owed again; Take the L sends at once and reloads Today", async () => {
@@ -286,7 +286,7 @@ describe("the vacation banner", () => {
     expect(within(banner).getByText("Going to Portugal")).toBeTruthy();
     expect(
       within(banner).getByText(
-        "Bed by midnight and Gym are Excused on these days, with no reminders and no penalties.",
+        "Bed by midnight and Gym are excused on these days. You won't get reminders or penalties.",
       ),
     ).toBeTruthy();
     expect(within(banner).queryByText("14 nights off · Dec 20 – Jan 2")).toBeNull();
@@ -307,7 +307,7 @@ describe("the vacation banner", () => {
 
     const banner = await screen.findByRole("status");
     expect(
-      within(banner).getByText("Your pacts are Excused on these days, with no reminders and no penalties."),
+      within(banner).getByText("Your pacts are excused on these days. You won't get reminders or penalties."),
     ).toBeTruthy();
   });
 });

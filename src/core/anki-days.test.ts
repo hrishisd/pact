@@ -743,7 +743,7 @@ describe("AnkiWeb refusing Pact's login", () => {
         kind: "connection-problem",
         payload: {
           title: "AnkiWeb needs reconnecting",
-          body: "A day whose deck isn't finished by its due time counts as Missed. Reconnect before then.",
+          body: "If Pact can't see the deck finished by the due time, the day is missed. Reconnect before then.",
           url: "/",
         },
       },
