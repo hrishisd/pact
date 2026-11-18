@@ -97,8 +97,8 @@ export function Review({
             title="Nothing to review"
             body={
               waitingList
-                ? "What's left is waiting on a reply, below."
-                : "When a friend picks you as a reviewer, their evidence, excuses, payments, change requests and vacations show up here."
+                ? "The items below are waiting for a reply."
+                : "When a friend picks you as a reviewer, their photos, excuses, payments, change requests, and vacations appear here for you to approve or reject."
             }
           />
           {waitingList}
@@ -232,7 +232,9 @@ function WaitingOnReply({
           </div>
         </section>
       ))}
-      <p className="small muted">Out of your queue until they reply. You can still open one and decide it.</p>
+      <p className="small muted">
+        These come back to your queue when they reply. You can still open one and decide it now.
+      </p>
     </>
   );
 }
@@ -252,16 +254,16 @@ type ChangeReviewItem = Extract<Json<ReviewItem>, { kind: "change-request" }>;
 type VacationReviewItem = Extract<Json<ReviewItem>, { kind: "vacation" }>;
 
 /** Why a decision didn't go through: the item was withdrawn, or another refusal. */
-function refusalText(result: Extract<DecideResponse, { ok: false }>): string {
+function refusalText(result: Extract<DecideResponse, { ok: false }>, ownerName: string): string {
   if (result.reason !== "withdrawn") return REFUSAL_TEXT[result.reason];
   const { withdrawal } = result;
   switch (withdrawal.reason) {
     case "owner":
-      return "Its owner withdrew it.";
+      return `${ownerName} withdrew it.`;
     case "pact-ended":
-      return `Withdrawn: ${listNames(withdrawal.pactNames)} Ended.`;
+      return `Withdrawn because ${listNames(withdrawal.pactNames)} ${withdrawal.pactNames.length === 1 ? "has" : "have"} ended.`;
     case "no-longer-needed":
-      return "Withdrawn: no longer needed.";
+      return "Withdrawn because it's no longer needed.";
   }
 }
 
@@ -300,26 +302,26 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
           </span>
         )}
         <div className="stack-sm">
-          <span className="label">What counts</span>
+          <span className="label">The photo should show</span>
           <span>{item.description}</span>
         </div>
         <PhotoLinks photoIds={item.photoIds} />
       </article>
       <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
-        itemId={item.id}
+        item={item}
         onAsk={onAsk}
         placeholder="e.g. This looks like it's from last week"
         cost={
           item.week ? (
             <p className="small">
-              Rejecting means {weekdayName(item.occurrenceDate)} doesn't count toward {item.ownerName}'s{" "}
-              {item.week.target}× this week. They can make it up another day.
+              If you reject it, {weekdayName(item.occurrenceDate)} won't count toward {item.ownerName}'s{" "}
+              {item.week.target} days this week. {item.ownerName} can make it up on another day.
             </p>
           ) : (
             <p className="small">
-              Rejecting makes {weekdayName(item.occurrenceDate)} Missed and adds {money(item.penaltyCents)} to{" "}
-              {item.ownerName}'s {item.recipientName} ledger.
+              If you reject it, {weekdayName(item.occurrenceDate)} is missed and {item.ownerName} owes{" "}
+              {item.recipientName} {money(item.penaltyCents)} more.
             </p>
           )
         }
@@ -339,8 +341,8 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
   const notJudged = item.days.some(({ status }) => status.kind === "not-judged");
   // What rejecting does, each half only when it applies.
   const rejectCost = [
-    ...(held ? [`makes ${held} owed again`] : []),
-    ...(notJudged ? ["leaves the days not judged yet to be judged as usual"] : []),
+    ...(held ? [`${item.ownerName} owes the ${held} again.`] : []),
+    ...(notJudged ? ["Days that haven't been checked yet count as usual."] : []),
   ];
   const which = item.days.length === 1 ? excuseDatesText(item.days) : `all ${item.days.length} days`;
   return (
@@ -377,16 +379,17 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
           })}
         </div>
         <p className="muted small">
-          Approving makes {which} Excused{held && ` and removes ${held} in held penalties`}.
-          {notJudged && " Days not judged yet are Excused when they end."}
+          If you approve, {which} {item.days.length === 1 ? "is" : "are"} excused
+          {held ? ` and ${item.ownerName} won't owe the ${held} held for them` : ""}.
+          {notJudged && " Days that haven't ended yet are excused when they end."}
         </p>
       </article>
       <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
-        itemId={item.id}
+        item={item}
         onAsk={onAsk}
         placeholder="e.g. You were at the party, not sick"
-        cost={rejectCost.length > 0 && <p className="small">Rejecting {rejectCost.join(" and ")}.</p>}
+        cost={rejectCost.length > 0 && <p className="small">If you reject it, {rejectCost.join(" ")}</p>}
         onDecided={onDecided}
       />
     </>
@@ -407,7 +410,7 @@ function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { i
         {item.endsPact ? (
           <p className="small">
             {item.ending && `Approving ends ${item.pactName} ${endsWhenText(item.current, item.ending)}. `}
-            Penalties already judged stay on {item.ownerName}'s ledger.
+            {item.ownerName} still owes the penalties for days already missed.
           </p>
         ) : (
           <>
@@ -419,10 +422,10 @@ function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { i
       </article>
       <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
-        itemId={item.id}
+        item={item}
         onAsk={onAsk}
         placeholder={item.endsPact ? "e.g. Give it another month" : "e.g. $5 is what makes it stick"}
-        cost={<p className="small">Rejecting keeps {item.pactName} as it is.</p>}
+        cost={<p className="small">If you reject it, the pact stays as it is.</p>}
         onDecided={onDecided}
       />
     </>
@@ -448,12 +451,12 @@ function PaymentItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: P
           <dd>{formatDayTime(item.recordedAt, timezone)}</dd>
         </dl>
         <p className="muted small">
-          Approving lowers what {item.ownerName} owes {item.recipientName} to {money(item.owedAfterApprovalCents)}.
+          If you approve, {item.ownerName} will owe {item.recipientName} {money(item.owedAfterApprovalCents)}.
         </p>
       </article>
       <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
-        itemId={item.id}
+        item={item}
         onAsk={onAsk}
         placeholder="e.g. The screenshot shows a different amount"
         onDecided={onDecided}
@@ -511,20 +514,21 @@ function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
           })}
         </div>
         <p className="muted small">
-          {held ? `Approving removes ${held} in held penalties. It excuses` : "Approving excuses"} all of these and
-          stops their reminders on these days. Once approved, it can't be changed.
+          If you approve, these days are excused with no reminders
+          {held ? `, and ${item.ownerName} won't owe the ${held} held for them` : ""}. An approved vacation can't be
+          undone.
         </p>
       </article>
       <Thread thread={item.thread} viewer="reviewer" timezone={timezone} />
       <Decision
-        itemId={item.id}
+        item={item}
         onAsk={onAsk}
         placeholder="e.g. Not two weeks before the gym challenge ends"
         cost={
           <p className="small">
             {held
-              ? `Rejecting makes ${held} owed again and leaves the days not judged yet to be judged as usual.`
-              : `Rejecting keeps every day of ${firstName(item.ownerName)}'s pacts as it is.`}
+              ? `If you reject it, ${item.ownerName} owes the ${held} again. The other days count as usual.`
+              : `If you reject it, ${firstName(item.ownerName)}'s pacts count these days as usual.`}
           </p>
         }
         onDecided={onDecided}
@@ -539,13 +543,13 @@ function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
  * Ask opens a sheet for a question to the owner.
  */
 function Decision({
-  itemId,
+  item,
   placeholder,
   cost,
   onDecided,
   onAsk,
 }: {
-  itemId: string;
+  item: Json<ReviewItem>;
   onAsk: () => void;
   /** An example reason for the reason box. */
   placeholder: string;
@@ -560,8 +564,8 @@ function Decision({
     run: decide,
   } = useSend(
     async (decision: ReviewDecision) => {
-      const result = await api.decide(itemId, decision);
-      onDecided(result.ok ? null : refusalText(result));
+      const result = await api.decide(item.id, decision);
+      onDecided(result.ok ? null : refusalText(result, item.ownerName));
     },
     (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
   );
