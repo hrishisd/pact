@@ -136,9 +136,9 @@ class Oura implements OuraAdapter {
   readonly #refreshing = new Map<AccountId, Promise<Tokens | null>>();
   /**
    * Whether Oura refusing Pact's app has been emailed: each further refusal
-   * is only logged until a token request succeeds again, as every account's
-   * refresh would otherwise email each tick. In memory: a restart costs at
-   * most one more email.
+   * is only logged until Oura accepts the app again (a success or an
+   * `invalid_grant`), as every account's refresh would otherwise email each
+   * tick. In memory: a restart costs at most one more email.
    */
   #appRefusalEmailed = false;
 
@@ -309,7 +309,11 @@ class Oura implements OuraAdapter {
     });
     if (response.status === 400 || response.status === 401) {
       const error = await oauthErrorOf(response);
-      if (error === "invalid_grant") return null;
+      if (error === "invalid_grant") {
+        // Oura read Pact's credentials to get this far, so the app works.
+        this.#appRefusalEmailed = false;
+        return null;
+      }
       this.#alertAppRefused(response.status, error);
       throw new AppRefused(`Oura token request refused Pact's app: HTTP ${response.status} ${error ?? "no error"}`);
     }
@@ -325,8 +329,8 @@ class Oura implements OuraAdapter {
 
   /**
    * Oura asks every client to name itself: a missing or generic User-Agent
-   * may be refused with a 403, which a sleep request reads as a lapsed
-   * membership.
+   * may be refused with a 403, which marks the account disconnected (Needs
+   * reconnecting).
    */
   #userAgent(): string {
     return `Pact (+${this.#client.appUrl})`;
@@ -337,8 +341,8 @@ class Oura implements OuraAdapter {
       title: "Oura refused Pact's app",
       text:
         `Oura's token endpoint refused Pact's app: HTTP ${status}, ${error ?? "no error"}. ` +
-        `Check the Oura app's credentials (OURA_CLIENT_ID, OURA_CLIENT_SECRET); accounts keep their tokens ` +
-        `and are tried again each tick`,
+        `Check OURA_CLIENT_ID, OURA_CLIENT_SECRET and the token URL (invalid_request usually means the wrong one); ` +
+        `accounts keep their tokens and are tried again each tick`,
       withoutEmail: this.#appRefusalEmailed,
     });
     this.#appRefusalEmailed = true;

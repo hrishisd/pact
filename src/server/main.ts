@@ -79,7 +79,7 @@ const oura: OuraAdapter | null = config.oura
       {
         ...config.oura,
         redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString(),
-        appUrl: config.auth.url,
+        appUrl: new URL(config.auth.url).origin,
       },
       clock,
       { raiseOperatorAlert: alerts.raise },

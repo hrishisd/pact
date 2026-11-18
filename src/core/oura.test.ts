@@ -43,7 +43,10 @@ class FakeOura {
    * that spends nothing.
    */
   loseNextRefresh: "after-grant" | "before-grant" | null = null;
-  /** What the token endpoint answers every request instead, when set: Oura refusing Pact's own app. */
+  /**
+   * What the token endpoint answers every request instead, when set: Oura
+   * refusing Pact's own app. A string body is sent as plain text, not JSON.
+   */
   appRefusal: { status: number; body: unknown } | null = null;
   #issued = 0;
   #validAccess = new Set<string>();
@@ -57,7 +60,10 @@ class FakeOura {
       this.tokenRequests.push(body);
       this.tokenUrls.push(url.origin + url.pathname);
       await this.hold;
-      if (this.appRefusal) return Response.json(this.appRefusal.body, { status: this.appRefusal.status });
+      if (this.appRefusal) {
+        const { status, body } = this.appRefusal;
+        return typeof body === "string" ? new Response(body, { status }) : Response.json(body, { status });
+      }
       if (body.get("client_id") !== CLIENT.clientId || body.get("client_secret") !== CLIENT.clientSecret) {
         return Response.json({ error: "invalid_client" }, { status: 401 });
       }
@@ -232,7 +238,7 @@ describe("connecting", () => {
       {
         to: s.operatorEmail,
         subject: "Pact operator alert: Oura refused Pact's app",
-        text: expect.stringMatching(/HTTP 401.*invalid_client.*credentials/),
+        text: expect.stringMatching(/HTTP 401.*invalid_client.*OURA_CLIENT_SECRET.*token URL/),
       },
     ]);
 
@@ -243,6 +249,19 @@ describe("connecting", () => {
       expect.stringMatching(/HTTP 401.*invalid_client/),
       expect.stringMatching(/HTTP 400.*no error/),
     ]);
+    expect(s.mailer.sent).toHaveLength(1);
+  });
+
+  test("a refused code after Pact's app was refused proves the app works again: a later app refusal emails again", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    oura.appRefusal = { status: 401, body: { error: "invalid_client" } };
+    await expect(adapter.connect(owner.id, "good-code")).rejects.toThrow("invalid_client");
+    oura.appRefusal = null;
+    expect(await adapter.connect(owner.id, "bad-code")).toEqual({ ok: false, reason: "exchange-failed" });
+    oura.appRefusal = { status: 401, body: { error: "invalid_client" } };
+    await expect(adapter.connect(owner.id, "good-code")).rejects.toThrow("invalid_client");
+    expect(s.mailer.sent).toHaveLength(2);
   });
 });
 
@@ -408,7 +427,7 @@ describe("sleep periods", () => {
         {
           to: s.operatorEmail,
           subject: "Pact operator alert: Oura refused Pact's app",
-          text: expect.stringMatching(new RegExp(`HTTP ${status}.*invalid_client.*credentials`)),
+          text: expect.stringMatching(new RegExp(`HTTP ${status}.*invalid_client.*OURA_CLIENT_SECRET.*token URL`)),
         },
       ]);
       // Nothing was spent, so the refresh's outcome isn't unknown.
@@ -433,6 +452,23 @@ describe("sleep periods", () => {
       expect(s.mailer.sent).toHaveLength(2);
     },
   );
+
+  test("a refresh refused with HTTP 400 and a body that isn't JSON is Pact's app refused: the account keeps its tokens", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    oura.appRefusal = { status: 400, body: "Bad Request" };
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("HTTP 400");
+    expect(s.mailer.sent).toEqual([
+      {
+        to: s.operatorEmail,
+        subject: "Pact operator alert: Oura refused Pact's app",
+        text: expect.stringMatching(/HTTP 400.*no error/),
+      },
+    ]);
+    oura.appRefusal = null;
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+  });
 
   test("the token request waits longer than a sleep request before giving up", async () => {
     const s = scenario();
