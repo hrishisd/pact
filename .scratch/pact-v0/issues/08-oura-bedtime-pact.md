@@ -76,7 +76,7 @@ The No Oura data card, check-now, the 3pm push and disconnection handling (09). 
 - Does `bedtime_start` carry an offset?
 - Is sleep under about 3 hours ever reported as `long_sleep`?
 - Is `end_date` inclusive? Each request asks for the night's date through two days later, so either way works.
-- Are Oura's authorize and token URLs `cloud.ouraring.com/oauth/authorize` and `api.ouraring.com/oauth/token`? They're configurable in `src/core/oura.ts`.
+- Are Oura's authorize and token URLs `cloud.ouraring.com/oauth/authorize` and `api.ouraring.com/oauth/token`? They're configurable in `src/core/oura.ts`. (2026-11-18, ticket 20: the token URL is now `moi.ouraring.com/oauth/v2/ext/oauth-token`, from Oura's discovery document, because apps made on the new developer portal at `developer.ouraring.com` are refused at the old one. The authorize URL stays; a real connect confirms both, in `manual-checks.md`.)
 
 **Rate limit.** A third-party integration page (nango.dev) gives 5000 requests per 5 minutes. Oura's OpenAPI spec says there are per-token and per-app limits and that approved apps have none. Polling once a minute per account with a night waiting is far below either.
 

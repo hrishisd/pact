@@ -23,6 +23,10 @@ Evidence and sources: `.scratch/pact-v0/oura-api-research.md`, section 4.
 
 ## Acceptance criteria
 
-- [ ] Code exchange and refresh both POST to the new token endpoint by default, shown by a test in `src/core/oura.test.ts`.
-- [ ] `manual-checks.md` points at `developer.ouraring.com` for creating the app, and its connect check confirms that a real connect succeeds with the new endpoint.
-- [ ] `npm run check` passes.
+- [x] Code exchange and refresh both POST to the new token endpoint by default, shown by a test in `src/core/oura.test.ts`.
+- [x] `manual-checks.md` points at `developer.ouraring.com` for creating the app, and its connect check confirms that a real connect succeeds with the new endpoint.
+- [x] `npm run check` passes.
+
+## Comments
+
+- 2026-11-18: Built on `claude/festive-goldberg-cvw6p4`, pending merge to `main`. `DEFAULTS.tokenUrl` in `src/core/oura.ts` is `https://moi.ouraring.com/oauth/v2/ext/oauth-token`; test: `oura.test.ts`, "exchanges codes and refresh tokens at Oura's token endpoint on its login server". The fake Oura now answers on the new path. Whether a real connect succeeds is the connect check in `manual-checks.md` (Oura Ring section).

@@ -17,10 +17,14 @@ const CLIENT: OuraClient = {
   tokenKey: Buffer.alloc(32, 7).toString("base64"),
 };
 const RANGE = { startDate: "2026-01-05", endDate: "2026-01-06" };
+/** The fake's token endpoint, on the same path as Oura's. */
+const TOKEN_URL = "https://moi.oura.test/oauth/v2/ext/oauth-token";
 
 /** Oura's side: issues tokens (each refresh token works once) and serves sleep to a valid access token. */
 class FakeOura {
   readonly tokenRequests: URLSearchParams[] = [];
+  /** Each token request's address, without its query. */
+  readonly tokenUrls: string[] = [];
   readonly sleepRequests: { url: URL; authorization: string | null }[] = [];
   periods: OuraSleepPeriod[] = [sleep("Mon 23:00")];
   pageSize = Infinity;
@@ -42,9 +46,10 @@ class FakeOura {
 
   fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input));
-    if (url.pathname === "/oauth/token") {
+    if (url.pathname === "/oauth/v2/ext/oauth-token") {
       const body = new URLSearchParams(String(init?.body));
       this.tokenRequests.push(body);
+      this.tokenUrls.push(url.origin + url.pathname);
       await this.hold;
       if (body.get("client_id") !== CLIENT.clientId || body.get("client_secret") !== CLIENT.clientSecret) {
         return Response.json({ error: "invalid_client" }, { status: 401 });
@@ -109,7 +114,7 @@ async function connected(s: Scenario, options: Partial<OuraAdapterOptions> = {})
   const adapter = adapterOn(s, {
     fetch: oura.fetch as typeof fetch,
     authorizeUrl: "https://cloud.oura.test/oauth/authorize",
-    tokenUrl: "https://api.oura.test/oauth/token",
+    tokenUrl: TOKEN_URL,
     apiBase: "https://api.oura.test",
     ...options,
   });
@@ -133,6 +138,22 @@ test("the authorize page asks for the daily scope, with the browser's state", ()
 });
 
 describe("connecting", () => {
+  test("exchanges codes and refresh tokens at Oura's token endpoint on its login server", async () => {
+    const s = scenario();
+    const oura = new FakeOura();
+    const adapter = adapterOn(s, { fetch: oura.fetch as typeof fetch });
+    const owner = await s.signIn("owner");
+    expect(await adapter.connect(owner.id, "good-code")).toEqual({ ok: true });
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+
+    expect(oura.tokenRequests.map((r) => r.get("grant_type"))).toEqual(["authorization_code", "refresh_token"]);
+    expect(oura.tokenUrls).toEqual([
+      "https://moi.ouraring.com/oauth/v2/ext/oauth-token",
+      "https://moi.ouraring.com/oauth/v2/ext/oauth-token",
+    ]);
+  });
+
   test("exchanges the code and stores the tokens encrypted", async () => {
     const s = scenario();
     const { oura, adapter } = await connected(s);
@@ -327,7 +348,7 @@ describe("sleep periods", () => {
 
     s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
     // Spent elsewhere: Oura no longer takes it.
-    await oura.fetch("https://api.oura.test/oauth/token", {
+    await oura.fetch(TOKEN_URL, {
       method: "POST",
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "refresh-2", ...secret() }).toString(),
     });
@@ -340,11 +361,11 @@ describe("sleep periods", () => {
     const { oura, adapter, owner } = await connected(s);
     s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
     const slow = adapterOn(s, {
-      tokenUrl: "https://api.oura.test/oauth/token",
+      tokenUrl: TOKEN_URL,
       apiBase: "https://api.oura.test",
       timeoutMs: 20,
       fetch: (async (input: string | URL | Request, init?: RequestInit) => {
-        if (new URL(String(input)).pathname === "/oauth/token") {
+        if (String(input) === TOKEN_URL) {
           // Answer once three sleep timeouts have passed, unless the token request's own timeout fires first.
           const outlasted = AbortSignal.timeout(60);
           await new Promise<void>((resolve, reject) => {
@@ -375,7 +396,7 @@ describe("sleep periods", () => {
     oura.sleepStatus = null;
     s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
     // Spent elsewhere: Oura no longer takes it.
-    await oura.fetch("https://api.oura.test/oauth/token", {
+    await oura.fetch(TOKEN_URL, {
       method: "POST",
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "refresh-1", ...secret() }).toString(),
     });

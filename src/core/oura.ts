@@ -54,7 +54,10 @@ export type OuraAdapter = OuraSource & OuraConnector & { close(): void };
 
 const DEFAULTS = {
   authorizeUrl: "https://cloud.ouraring.com/oauth/authorize",
-  tokenUrl: "https://api.ouraring.com/oauth/token",
+  // Oura's login server since 2026, from its discovery document. Its docs
+  // still name api.ouraring.com/oauth/token, which refuses codes from apps
+  // made on the new developer portal.
+  tokenUrl: "https://moi.ouraring.com/oauth/v2/ext/oauth-token",
   apiBase: "https://api.ouraring.com",
   timeoutMs: 10_000,
   tokenTimeoutMs: 30_000,
