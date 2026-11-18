@@ -50,14 +50,14 @@ test("Withdraw asks first, then withdraws and says the pacts keep their days", a
   const { user } = renderWithUser(<VacationSection message={null} onPlan={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "Withdraw" }));
 
-  expect(screen.getByText("Withdraw this vacation? Your pacts keep all their days.")).toBeTruthy();
+  expect(screen.getByText("Withdraw this vacation? These days will count as usual.")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "Keep it" }));
   expect(spies.withdrawVacation).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole("button", { name: "Withdraw" }));
   await user.click(screen.getByRole("button", { name: "Withdraw" }));
 
-  expect(await screen.findByText("Vacation withdrawn. Your pacts keep all their days.")).toBeTruthy();
+  expect(await screen.findByText("Vacation withdrawn. These days count as usual.")).toBeTruthy();
   expect(spies.withdrawVacation).toHaveBeenCalledWith("v1");
   expect(await screen.findByText("None planned")).toBeTruthy();
 });
@@ -100,7 +100,7 @@ test("Reply opens a box that sends to the reviewer who asked, then says it's bac
   await user.type(screen.getByRole("textbox", { name: "Reply" }), "Yes, 10 minutes a day");
   await user.click(send);
 
-  expect(await screen.findByText("Reply sent. It's back with Sam and Alex.")).toBeTruthy();
+  expect(await screen.findByText("Reply sent. Sam or Alex can decide it now.")).toBeTruthy();
   expect(spies.reply).toHaveBeenCalledWith("v1", "Yes, 10 minutes a day");
   expect(await screen.findByText("Waiting for approval")).toBeTruthy();
 });
@@ -125,7 +125,7 @@ test("Withdraw on a vacation holding penalties says what becomes owed", async ()
   const { user } = renderWithUser(<VacationSection message={null} onPlan={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "Withdraw" }));
 
-  expect(screen.getByText("Withdraw this vacation? $15 held becomes owed.")).toBeTruthy();
+  expect(screen.getByText("Withdraw this vacation? You'll owe the $15 that's held.")).toBeTruthy();
 });
 
 test("Withdraw on a vacation holding penalties says the held days can be excused for 48 hours", async () => {
@@ -139,7 +139,7 @@ test("Withdraw on a vacation holding penalties says the held days can be excused
 
   expect(
     screen.getByText(
-      "Withdraw this vacation? $15 held becomes owed, and Mon Dec 21 to Wed Dec 23 can be excused for 48 hours.",
+      "Withdraw this vacation? You'll owe the $15 that's held. You can file an excuse for Mon Dec 21 to Wed Dec 23 for the next 48 hours.",
     ),
   ).toBeTruthy();
 });

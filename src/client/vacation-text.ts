@@ -41,7 +41,7 @@ export function coveredText(
   if (schedule.kind === "one-time") {
     return first
       ? { head: `Deadline ${formatDate(schedule.deadline)} excused`, lines: ["The pact ends."] }
-      : { head: `Deadline ${formatDate(schedule.deadline)} isn't in these days`, lines: [] };
+      : { head: `Deadline ${formatDate(schedule.deadline)} isn't during your vacation`, lines: [] };
   }
   if (schedule.kind === "weekly-count") {
     return {
