@@ -13,7 +13,7 @@ type RemindersForm = Pick<Form, "kind" | "scheduleKind" | "deadline" | "inBedBy"
 /** The core's refusals about reminders, in the owner's words. */
 export const REMINDER_PROBLEMS = {
   "invalid-reminders": "Pick a time for each reminder, or remove it.",
-  "reminder-after-due-time": "A reminder is at or after the due time, so it would never go off. Make it earlier.",
+  "reminder-after-due-time": "A reminder is set for the due time or later, so it would never go off. Make it earlier.",
 } satisfies Partial<Record<CreatePactRefusal, string>>;
 
 /**
@@ -81,14 +81,14 @@ export function RemindersStep({
       )}
       <small className="muted">
         {oura
-          ? `They go off every scheduled night before ${due}, even if you're already in bed. Pact can't tell until your ring syncs, usually the next morning.`
+          ? `Reminders go off every scheduled night before ${due}, even if you're already in bed. Pact can't tell you're in bed until your ring syncs.`
           : form.kind === "anki"
-            ? `They go off on scheduled days before ${due}, only while the deck isn't finished as of Pact's last check, and say how many cards are left.`
+            ? `Reminders go off on scheduled days before ${due}, unless Pact has already seen the deck finished.`
             : dated
-              ? `Each goes off once, on its date, before ${due} on the deadline, only if you haven't submitted a photo yet.`
+              ? `Each reminder goes off once, at the date and time you set, if you haven't submitted a photo yet. Set it before ${due} on the deadline date.`
               : scheduleKind === "weekly-count"
-                ? `They go off each day before ${due} that you haven't submitted a photo, until the week's target is met.`
-                : `They go off on scheduled days before ${due}, only if you haven't submitted a photo yet.`}
+                ? `Reminders go off before ${due} on each day you haven't submitted a photo, until you've submitted enough photos for the week.`
+                : `Reminders go off on scheduled days before ${due}, if you haven't submitted a photo yet.`}
         {hint && ` ${hint}`}
       </small>
     </>

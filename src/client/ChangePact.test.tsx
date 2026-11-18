@@ -73,7 +73,7 @@ test.each<[AppliesNow[], string]>([
   [["new-reviewer"], " The new reviewer changes now."],
   [["new-reviewers"], " The new reviewers change now."],
   [["name", "new-reviewer"], " The name and the new reviewer change now."],
-  [["name", "reminders", "new-reviewers"], " The name, the reminders and the new reviewers change now."],
+  [["name", "reminders", "new-reviewers"], " The name, the reminders, and the new reviewers change now."],
 ])("what applies now inside %j reads %j", (appliesNow, text) => {
   expect(nowLine(appliesNow)).toBe(text);
 });

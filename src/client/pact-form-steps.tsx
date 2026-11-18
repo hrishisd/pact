@@ -68,7 +68,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "no-reviewers": "Pick at least one reviewer.",
   "not-a-friend": "Only friends can be reviewers.",
   "pact-not-found": "This pact wasn't found.",
-  "edit-window-closed": `The ${EDIT_WINDOW_TEXT} are up.`,
+  "edit-window-closed": `The ${EDIT_WINDOW_TEXT} for editing are over. To change the pact now, use Request change on its page.`,
   "evidence-kind-fixed": "A pact's evidence kind can't change.",
 };
 
@@ -192,7 +192,7 @@ function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>
               update(form.named || inBedBy === "" ? { inBedBy } : { inBedBy, name: inBedByName(inBedBy) });
             }}
           />
-          <small>Late is when your ring says you got into bed after this.</small>
+          <small>If your ring shows you got into bed after this time, the night is missed.</small>
         </label>
         <NameField form={form} update={update} placeholder="e.g. In bed by midnight" />
       </>
@@ -212,7 +212,7 @@ function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>
           placeholder="e.g. Me at the gym with the equipment visible"
           onChange={(e) => update({ description: e.target.value })}
         />
-        <small>Your reviewer sees this when checking your photo.</small>
+        <small>Reviewers see this when they check your photo.</small>
       </label>
     </>
   );
@@ -235,7 +235,7 @@ function AnkiGoalStep({ form, update }: { form: Form; update: (change: Partial<F
       <div className="alert bad" role="status">
         <span>
           {reason === "disconnected"
-            ? "AnkiWeb didn't accept Pact's sign-in. Connect AnkiWeb again from Profile."
+            ? "AnkiWeb rejected Pact's sign-in. Reconnect AnkiWeb in Profile."
             : reason === "not-connected"
               ? "Connect AnkiWeb first."
               : `Couldn't load your decks. ${failed ? failureText(failed.error, "Check your connection.") : "AnkiWeb didn't answer."}`}
@@ -280,10 +280,7 @@ function AnkiGoalStep({ form, update }: { form: Form; update: (change: Partial<F
       <div className="field">
         <span>Deck to finish each day</span>
         {picker}
-        <small>
-          Subdecks count in their parent, as in Anki's deck list. Renaming or moving the deck in Anki doesn't break the
-          pact.
-        </small>
+        <small>Cards in subdecks count toward the parent deck, as in Anki.</small>
       </div>
       {picked && (
         <div className="card">
@@ -292,9 +289,7 @@ function AnkiGoalStep({ form, update }: { form: Form; update: (change: Partial<F
             <span className="leftbig">{left(picked)}</span>{" "}
             <span className="muted">{left(picked) === 1 ? "card" : "cards"} left</span>
           </div>
-          <p className="small muted">
-            Finished means New, Learn and Due all at 0, Anki's "Congratulations! You have finished this deck for now."
-          </p>
+          <p className="small muted">The deck is finished when New, Learn and Due are all 0.</p>
         </div>
       )}
       <NameField form={form} update={update} placeholder="e.g. Spanish" />
@@ -414,7 +409,7 @@ function ScheduleStep({
             </div>
           </div>
           <small className="muted">
-            Any days you like, one photo a day. One penalty for each day you're short when the week ends.
+            Pick any days, with one photo per day. When the week ends, you pay one penalty for each day you're short.
           </small>
         </>
       ) : (
@@ -445,16 +440,16 @@ function ScheduleStep({
       )}
       <small className="muted">
         {oura
-          ? `Each night is judged when your ring syncs. A night with no sleep data by ${NIGHT_CLOSES_TEXT} the next day counts as missed.`
+          ? `Pact checks each night when your ring syncs. If there's no sleep data by ${NIGHT_CLOSES_TEXT} the next day, the night is missed.`
           : anki
-            ? `Each day is judged from AnkiWeb. Finish the deck and sync before ${until}. A day Pact hasn't seen finished by then counts as missed.`
+            ? `Finish the deck and sync before ${until}. If AnkiWeb doesn't show the deck finished by then, the day is missed.`
             : oneTime
               ? form.submitAnytime
-                ? `You can submit any day until the deadline, until ${until} on its date.`
-                : `You can submit on the deadline's date only, until ${until}.`
+                ? `You can submit your photo any day until ${until} on the deadline date.`
+                : `You can submit your photo only on the deadline date, until ${until}.`
               : weekly
-                ? `You can submit on any day of the week, until ${until}.`
-                : `You can submit on scheduled days only, until ${until}.`}
+                ? `You can submit a photo on any day of the week, until ${until} that day.`
+                : `You can submit a photo only on the days you picked, until ${until}.`}
       </small>
       {termsOfFormKind(form).includes("due-by") && (
         <>
@@ -484,7 +479,8 @@ function ScheduleStep({
               />
               {anki && (
                 <small>
-                  Up to when your Anki day ends, usually 4:00am. A time after midnight counts for the evening before.
+                  Pick a time from noon until your Anki day ends, usually 4:00am. A time after midnight means early the
+                  next morning.
                 </small>
               )}
             </label>
@@ -520,7 +516,8 @@ function OneTimeWindow({ form, update }: { form: Form; update: (change: Partial<
         </label>
       </div>
       <small className="muted">
-        The deadline must be at least an hour after you create it. Then it's judged once, and Ended.
+        The deadline must be at least an hour after you create the pact. Pact checks it once at the deadline, and then
+        the pact ends.
       </small>
     </>
   );
@@ -554,8 +551,8 @@ function DateRange({ form, update, weekly }: { form: Form; update: (change: Part
       </div>
       <small className="muted">
         {weekly
-          ? "It starts the Monday after you create it, or the first Monday from the start date if that's later. Only whole weeks up to the end date count, then it's Ended."
-          : `It starts with the first ${oura ? "night" : "day"} that's due at least an hour after you create it, or on the start date if that's later. After the end date it makes no more ${oura ? "nights" : "days"} and is Ended.`}
+          ? "The pact starts the Monday after you create it, or on the first Monday on or after the start date. Only full Monday–Sunday weeks up to the end date count. Then the pact ends."
+          : `The first ${oura ? "night" : "day"} is the first one due at least an hour after you create the pact, or the start date if that's later. After the end date, no new ${oura ? "nights" : "days"} are scheduled and the pact ends.`}
       </small>
     </>
   );
@@ -643,7 +640,7 @@ function PenaltyStep({
         >
           Pick a recipient
         </button>
-        <small>Who you pay when you miss.</small>
+        <small>The person or organization you pay when you miss.</small>
       </>
     );
   }
@@ -738,7 +735,7 @@ export function ReviewersStep({
         <div className="card">
           <h3>No friends yet</h3>
           <p className="muted">
-            Only friends can review your pacts. Invite one, and they show up here once they accept.
+            Only friends can review your pacts. Invite a friend, and they'll appear here after they accept.
           </p>
           <div className="row2">
             <button className="btn primary" onClick={onInvite}>
@@ -773,10 +770,10 @@ export function ReviewersStep({
       <small className="muted">
         {hint ??
           (kind === "oura"
-            ? "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses."
+            ? "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses, change requests, and payments."
             : kind === "anki"
-              ? "AnkiWeb decides each day, so there's nothing to review. Reviewers decide on your excuses and change requests."
-              : "Any reviewer you pick can check your photos.")}
+              ? "AnkiWeb decides each day, so there's nothing to review. Reviewers decide on your excuses, change requests, and payments."
+              : "One of your reviewers must approve each photo. Reviewers also decide on your excuses, change requests, and payments.")}
       </small>
     </>
   );

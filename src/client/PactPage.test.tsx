@@ -251,6 +251,6 @@ describe("the sheets that change a term at once", () => {
     await user.click(await screen.findByRole("button", { name: "Change reminders" }));
     await user.click(screen.getByRole("button", { name: "Save reminders" }));
 
-    expect(await screen.findByText(/A reminder is at or after the due time/)).toBeTruthy();
+    expect(await screen.findByText(/A reminder is set for the due time or later/)).toBeTruthy();
   });
 });

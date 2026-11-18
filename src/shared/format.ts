@@ -37,10 +37,10 @@ export function dateSpan(from: LocalDate, to: LocalDate): string {
     : `${monthDay(from)} – ${monthDay(to)}`;
 }
 
-/** Pact names as a push lists them: "Gym", "Gym and Reading", or "Gym, Reading and 2 more". */
+/** Pact names as a push lists them: "Gym", "Gym and Reading", or "Gym, Reading, and 2 more". */
 export function pactNamesText(names: readonly string[]): string {
   if (names.length <= 2) return names.join(" and ");
-  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+  return `${names[0]}, ${names[1]}, and ${names.length - 2} more`;
 }
 
 /** An instant, as an ISO string, as its day in `timeZone` (the profile's): "Thu Oct 22", like `formatDate`. */

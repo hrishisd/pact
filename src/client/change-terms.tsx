@@ -283,7 +283,8 @@ export function startsText(request: Json<TermsChangeRequestView>, lead: string):
 /** "Sam", "Sam and Alex", "Sam, Alex and Jo". */
 export function listNames(list: string[], last = "and"): string {
   if (list.length <= 1) return list[0] ?? "";
-  return `${list.slice(0, -1).join(", ")} ${last} ${list.at(-1)}`;
+  if (list.length === 2) return `${list[0]} ${last} ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")}, ${last} ${list.at(-1)}`;
 }
 
 function names(reviewers: { name: string }[]): string {
