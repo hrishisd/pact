@@ -21,9 +21,14 @@ OAuth error bodies carry an `error` field (RFC 6749 section 5.2). Only `invalid_
 
 ## Acceptance criteria
 
-- [ ] A refresh refused with `invalid_grant` marks the account Needs reconnecting, as today.
-- [ ] A refresh refused with `invalid_client` (as 400, and as 401) leaves the account connected, keeps its tokens, raises one operator alert, and doesn't mark the refresh outcome unknown. A later successful refresh works normally.
-- [ ] A connect refused with `invalid_client` shows the owner "failed" and raises the operator alert.
-- [ ] Tests in `src/core/oura.test.ts`, written first and seen failing.
-- [ ] `docs/behaviour.md` updated.
-- [ ] `npm run check` passes.
+- [x] A refresh refused with `invalid_grant` marks the account Needs reconnecting, as today.
+- [x] A refresh refused with `invalid_client` (as 400, and as 401) leaves the account connected, keeps its tokens, raises one operator alert, and doesn't mark the refresh outcome unknown. A later successful refresh works normally.
+- [x] A connect refused with `invalid_client` shows the owner "failed" and raises the operator alert.
+- [x] Tests in `src/core/oura.test.ts`, written first and seen failing.
+- [x] `docs/behaviour.md` updated.
+- [x] `npm run check` passes.
+
+## Comments
+
+- 2026-11-18: Built on `claude/festive-goldberg-cvw6p4`, pending merge to `main`. `#tokenRequest` in `src/core/oura.ts` reads the answer's `error` (`oauthErrorOf`); anything but `invalid_grant` on a 400 or 401 raises the "Oura refused Pact's app" operator alert and throws an `AppRefused`, which `#refresh` doesn't mark as maybe spent. A connect refused that way throws, which the server already turns into the failed result. Tests: `oura.test.ts`, "a refresh Oura refuses for Pact's app (invalid_client, HTTP 400/401)" and "a connect Oura refuses for Pact's app, not the code". `invalid_grant` keeps the existing tests ("a refused refresh token, or a 403").
+- As in `anki.ts`, every refusal writes the `OPERATOR_ALERT` log line, and only the first is emailed. Unlike AnkiWeb's, the flag is one for the whole app (`#appRefusalEmailed`), not per account, since a broken app setup refuses every account; any successful token request clears it.

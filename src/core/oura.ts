@@ -37,7 +37,10 @@ export interface OuraAdapterOptions {
   timeoutMs?: number;
   /** For token requests: longer, since a refresh abandoned after Oura granted it can't be recovered. */
   tokenTimeoutMs?: number;
-  /** The operator alert path (operator-alerts.ts), for a refresh token a lost answer spent. */
+  /**
+   * The operator alert path (operator-alerts.ts), for a refresh token a lost
+   * answer spent, and for Oura refusing Pact's own app.
+   */
   raiseOperatorAlert: RaiseOperatorAlert;
 }
 
@@ -129,6 +132,13 @@ class Oura implements OuraAdapter {
   readonly #box: SecretBox;
   /** Refreshes in progress, by account: a second caller waits for the first's result. */
   readonly #refreshing = new Map<AccountId, Promise<Tokens | null>>();
+  /**
+   * Whether Oura refusing Pact's app has been emailed: each further refusal
+   * is only logged until a token request succeeds again, as every account's
+   * refresh would otherwise email each tick. In memory: a restart costs at
+   * most one more email.
+   */
+  #appRefusalEmailed = false;
 
   constructor(db: Db, client: OuraClient, clock: Clock, options: OuraAdapterOptions) {
     this.#db = db;
@@ -237,6 +247,7 @@ class Oura implements OuraAdapter {
    * A refresh that throws (a timeout, a network error, a 5xx) may still have
    * spent the refresh token, so it's marked; if Oura then refuses that
    * refresh token, an operator alert says the lost answer most likely spent it.
+   * One Oura refused for Pact's app spent nothing, so it isn't marked.
    */
   #refresh(account: AccountId, stale: string): Promise<Tokens | null> {
     const running = this.#refreshing.get(account);
@@ -249,6 +260,7 @@ class Oura implements OuraAdapter {
       try {
         tokens = await this.#tokenRequest({ grant_type: "refresh_token", refresh_token: current.refreshToken });
       } catch (error) {
+        if (error instanceof AppRefused) throw error;
         this.#db
           .prepare(`UPDATE oura_token SET refresh_outcome_unknown_at = ? WHERE account_id = ? AND generation = ?`)
           .run(this.#clock.now().toISOString(), account, current.generation);
@@ -275,7 +287,13 @@ class Oura implements OuraAdapter {
     return refreshing;
   }
 
-  /** Oura's token endpoint. Null when it refuses the grant (a 400 or 401); throws on anything else. */
+  /**
+   * Oura's token endpoint. Null when it refuses the grant (`invalid_grant`);
+   * throws on anything else. Any other 400 or 401 (`invalid_client`, say, or
+   * no readable error) means Pact's app is set up wrong, not that the
+   * account's code or refresh token is no good: it raises an operator alert
+   * and throws an AppRefused.
+   */
   async #tokenRequest(grant: Record<string, string>): Promise<Tokens | null> {
     const response = await this.#fetch(this.#urls.tokenUrl, {
       method: "POST",
@@ -287,14 +305,32 @@ class Oura implements OuraAdapter {
       }).toString(),
       signal: AbortSignal.timeout(this.#tokenTimeoutMs),
     });
-    if (response.status === 400 || response.status === 401) return null;
+    if (response.status === 400 || response.status === 401) {
+      const error = await oauthErrorOf(response);
+      if (error === "invalid_grant") return null;
+      this.#alertAppRefused(response.status, error);
+      throw new AppRefused(`Oura token request refused Pact's app: HTTP ${response.status} ${error ?? "no error"}`);
+    }
     if (!response.ok) throw new Error(`Oura token request failed: HTTP ${response.status}`);
+    this.#appRefusalEmailed = false;
     const body = (await response.json()) as { access_token: string; refresh_token: string; expires_in: number };
     return {
       accessToken: body.access_token,
       refreshToken: body.refresh_token,
       expiresAt: new Date(this.#clock.now().getTime() + body.expires_in * 1000),
     };
+  }
+
+  #alertAppRefused(status: number, error: string | null): void {
+    this.#raiseOperatorAlert({
+      title: "Oura refused Pact's app",
+      text:
+        `Oura's token endpoint refused Pact's app: HTTP ${status}, ${error ?? "no error"}. ` +
+        `Check the Oura app's credentials (OURA_CLIENT_ID, OURA_CLIENT_SECRET); accounts keep their tokens ` +
+        `and are tried again each tick`,
+      withoutEmail: this.#appRefusalEmailed,
+    });
+    this.#appRefusalEmailed = true;
   }
 
   #load(account: AccountId): StoredTokens | null {
@@ -367,4 +403,13 @@ class Oura implements OuraAdapter {
   #decrypt(stored: string): string {
     return this.#box.decrypt(stored);
   }
+}
+
+/** Oura refused Pact's own app at its token endpoint: the account's grant wasn't spent. */
+class AppRefused extends Error {}
+
+/** The `error` of an OAuth error answer (RFC 6749 section 5.2), or null when there's none to read. */
+async function oauthErrorOf(response: Response): Promise<string | null> {
+  const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  return typeof body?.error === "string" ? body.error : null;
 }
