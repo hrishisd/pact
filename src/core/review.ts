@@ -119,7 +119,7 @@ export function ownerReply(ctx: CoreContext, accountId: AccountId, itemId: strin
     itemKind: item.row.kind,
     itemId,
     title: `${name} replied about their ${item.handler.describe(ctx, item.row).what}`,
-    body: `“${text}” It's back in your queue.`,
+    body: `“${text}” You can decide it now.`,
     url: APP_PATHS.review,
   });
   return { ok: true };

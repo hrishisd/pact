@@ -34,7 +34,7 @@ async function showLedgers(ledger: Ledger) {
 describe("a ledger's credit", () => {
   test("shows beside owed $0, saying it pays the next penalties", async () => {
     await showLedgers(sam({ creditCents: 500 }));
-    expect(screen.getByText("$5 credit · pays your next penalties")).toBeTruthy();
+    expect(screen.getByText("$5 credit. It pays your next penalties.")).toBeTruthy();
   });
 
   test("while an excuse holding a paid penalty waits, it's a credit only if the excuse is approved", async () => {

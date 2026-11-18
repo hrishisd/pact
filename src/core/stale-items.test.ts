@@ -26,7 +26,7 @@ describe("the reviewer's daily reminder", () => {
           count: 1,
           oldestItemKind: "evidence",
           oldestItemId: evidenceId,
-          title: "1 item waits for your review",
+          title: "1 item is waiting for your review",
           body: "The oldest, owner's evidence for Gym, has waited 2 days.",
           url: "/review",
         },
@@ -65,7 +65,7 @@ describe("the reviewer's daily reminder", () => {
     await s.advanceTo("Wed 09:00");
 
     expect(s.notifier.sentTo(reviewer, "stale-review-items").map((n) => [n.payload.title, n.payload.body])).toEqual([
-      ["3 items wait for your review", "The oldest, owner's evidence for Gym, has waited 2 days."],
+      ["3 items are waiting for your review", "The oldest, owner's evidence for Gym, has waited 2 days."],
     ]);
   });
 
@@ -142,7 +142,7 @@ describe("a question waiting on the owner's reply", () => {
           itemKind: "evidence",
           itemId: evidenceId,
           title: "reviewer asked about your evidence for Gym 2 days ago",
-          body: "Reply so they can decide.",
+          body: "Reply so reviewer can decide.",
           url: `/evidence/${evidenceId}`,
         },
       },
@@ -157,7 +157,7 @@ describe("a question waiting on the owner's reply", () => {
     expect(ownerReminders()).toHaveLength(2);
     // Back in the queue Thursday 10:00: more than 24 hours by Saturday 09:00, not by Friday's.
     expect(reviewerReminders().map((n) => [n.payload.title, n.payload.body])).toEqual([
-      ["1 item waits for your review", "The oldest, owner's evidence for Gym, has waited 2 days."],
+      ["1 item is waiting for your review", "The oldest, owner's evidence for Gym, has waited 2 days."],
     ]);
   });
 

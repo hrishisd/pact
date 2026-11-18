@@ -64,11 +64,11 @@ export function VacationSection({
   );
 }
 
-/** "Sent to Sam Rivera and Alex Chen. …", or with one reviewer "Sam Rivera reviews it. …". */
+/** "Sent to Sam Rivera and Alex Chen. Until one of them approves it, …", or with one reviewer "Sam Rivera reviews it. Until then, …". */
 function sentTo(names: string[]): string {
   return names.length === 1
-    ? `${names[0]} reviews it. Nothing changes until it's approved.`
-    : `Sent to ${listNames(names)}. Nothing changes until one of them approves it.`;
+    ? `${names[0]} reviews it. Until then, your pacts run as usual.`
+    : `Sent to ${listNames(names)}. Until one of them approves it, your pacts run as usual.`;
 }
 
 const CHIPS: Record<VacationCard["state"]["kind"], { className: string; text: string }> = {

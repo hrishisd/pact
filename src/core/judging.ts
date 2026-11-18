@@ -35,16 +35,16 @@ export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate)
   };
   const schedule = scheduleOf(pact.schedule);
   const recipient = recipientName(ctx, pact.recipient_id);
-  let body = `${formatDate(date)} · ${money(pact.penalty_cents)} to ${recipient}`;
+  let body = `${formatDate(date)} · ${money(pact.penalty_cents)} penalty to ${recipient}`;
   if (schedule.kind === "weekly-count") {
     const { sessions, target } = weekProgress(ctx, pactId, date);
     const short = target - sessions;
-    body = `Week of ${formatDate(date)} · ${short} short · ${money(short * pact.penalty_cents)} to ${recipient}`;
+    body = `Week of ${formatDate(date)} · ${short} ${short === 1 ? "day" : "days"} short · ${money(short * pact.penalty_cents)} penalty to ${recipient}`;
   }
   ctx.enqueue({
     recipient: pact.owner_account_id,
     kind: "missed-occurrence",
-    payload: { pactId, occurrenceDate: date, title: `${pact.name} is Missed`, body, url: APP_PATHS.pact(pactId) },
+    payload: { pactId, occurrenceDate: date, title: `You missed ${pact.name}`, body, url: APP_PATHS.pact(pactId) },
   });
 }
 

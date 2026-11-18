@@ -150,7 +150,7 @@ describe("a pact's other reviewers are told who was added", () => {
           pactId: gym,
           added: [third.id],
           title: "owner added third as a reviewer",
-          body: "Gym · third can now decide its review items too.",
+          body: "Gym · third can now review it too.",
           url: "/review",
         },
       },
@@ -192,7 +192,7 @@ describe("a pact's other reviewers are told who was added", () => {
           payload: expect.objectContaining({
             added: expect.arrayContaining([zed.id, alex.id]),
             title: "owner added alex and zed as reviewers",
-            body: "Gym · They can now decide its review items too.",
+            body: "Gym · They can now review it too.",
           }),
         }),
       ]);
@@ -1039,7 +1039,7 @@ describe("ending a pact", () => {
 
     expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", endedAt: s.at("Tue+1 00:00"), ending: null });
     expect(s.notifier.sentTo(owner, "change-request-decided").at(-1)).toMatchObject({
-      payload: { body: "Gym is Ended" },
+      payload: { body: "Gym has ended" },
     });
     await s.advanceTo("Sat+1 12:00");
     expect(penaltyDays(owner, "Gym")).toEqual([s.date("Mon"), s.date("Wed"), s.date("Fri"), s.date("Mon+1")]);

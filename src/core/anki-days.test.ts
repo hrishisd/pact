@@ -185,7 +185,7 @@ describe("judging an Anki day", () => {
         detail: { kind: "anki", lastCheck: { cardsLeft: 12, checkedAt: s.at("Tue 23:50") } },
       }),
     ]);
-    expect(s.notifier.sentTo(owner).map((n) => n.payload.title)).toContain("Spanish is Missed");
+    expect(s.notifier.sentTo(owner).map((n) => n.payload.title)).toContain("You missed Spanish");
   });
 
   test("a finished deck on the next morning's clock still counts for the Anki day it's for, not the next", async () => {
@@ -625,8 +625,8 @@ describe("reminders", () => {
     await s.advanceTo("Tue 23:00");
     await s.advanceTo("Wed 01:30");
     expect(s.notifier.sentTo(owner, "reminder").map((n) => n.payload.body)).toEqual([
-      "Due at 2:00am. Not checked yet.",
-      "Due at 2:00am. Not checked yet.",
+      "Due at 2:00am. Pact hasn't checked your deck yet.",
+      "Due at 2:00am. Pact hasn't checked your deck yet.",
     ]);
   });
 });

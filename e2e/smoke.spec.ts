@@ -141,7 +141,7 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
     await sheet.getByRole("button", { name: "Choose screenshot" }).click();
     await (await chooser).setFiles({ name: "venmo.png", mimeType: "image/png", buffer: PNG });
     await sheet.getByRole("button", { name: "Send for approval" }).click();
-    await expect(owner.getByRole("button", { name: /^Sam \$5 owed \$5 payment awaiting approval/ })).toBeVisible();
+    await expect(owner.getByRole("button", { name: /^Sam \$5 owed \$5 payment waiting for approval/ })).toBeVisible();
   });
 });
 

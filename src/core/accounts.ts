@@ -158,8 +158,8 @@ function tellReviewersOfLaterDueTimes(
       named.set(reviewerId, [...(named.get(reviewerId) ?? []), pact.name]);
   }
   const hours = Math.round(shiftMs / (30 * 60 * 1000)) / 2;
-  const later = `${hours} ${hours === 1 ? "hour" : "hours"} later from ${formatDate(until)}`;
-  const title = `${accountName(ctx, ownerId)} changed timezone`;
+  const later = `${hours} ${hours === 1 ? "hour" : "hours"} later`;
+  const title = `${accountName(ctx, ownerId)} changed their timezone`;
   for (const [recipient, names] of named) {
     ctx.enqueue({
       recipient,
@@ -169,7 +169,7 @@ function tellReviewersOfLaterDueTimes(
         from,
         to,
         title,
-        body: `${cityOf(from)} to ${cityOf(to)}. ${pactNamesText(names)} ${names.length === 1 ? "is" : "are"} due ${later}.`,
+        body: `From ${cityOf(from)} to ${cityOf(to)}. From ${formatDate(until)}, ${pactNamesText(names)} ${names.length === 1 ? "is" : "are"} due ${later}.`,
         url: APP_PATHS.review,
       },
     });

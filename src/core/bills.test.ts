@@ -392,7 +392,7 @@ describe("Overdue", () => {
     const told = () => s.notifier.sentTo(reviewer, "overdue-bill");
     await s.advanceTo("Wed+2 18:00");
     expect(told().map((n) => n.payload)).toEqual([
-      expect.objectContaining({ title: "owner is overdue", body: "$15 to Sam, due Wed Jan 21" }),
+      expect.objectContaining({ title: "owner's bill is overdue", body: "$15 to Sam was due Wed Jan 21" }),
     ]);
     expect(s.notifier.sentTo(second, "overdue-bill")).toHaveLength(1);
     for (const day of ["Thu+2", "Fri+2", "Sat+2", "Sun+2", "Mon+3", "Tue+3"]) await s.advanceTo(`${day} 18:00`);

@@ -109,7 +109,8 @@ function remindReviewer(ctx: CoreContext, reviewerId: AccountId, timezone: strin
       count: queue.length,
       oldestItemKind: oldest.item.kind,
       oldestItemId: oldest.item.id,
-      title: queue.length === 1 ? "1 item waits for your review" : `${queue.length} items wait for your review`,
+      title:
+        queue.length === 1 ? "1 item is waiting for your review" : `${queue.length} items are waiting for your review`,
       body: `The oldest, ${oldest.item.ownerName}'s ${what}, has waited ${daysText(oldest.since, t, timezone)}.`,
       url: APP_PATHS.review,
     },
@@ -126,7 +127,7 @@ function remindOwner(ctx: CoreContext, ownerId: AccountId, timezone: string, t: 
       itemKind: oldest.item.kind,
       itemId: oldest.item.id,
       title: `${oldest.reviewerName} asked about your ${what} ${daysText(oldest.askedAt, t, timezone)} ago`,
-      body: "Reply so they can decide.",
+      body: `Reply so ${oldest.reviewerName} can decide.`,
       url: ownerPath,
     },
   });

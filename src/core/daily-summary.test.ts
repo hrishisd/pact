@@ -9,7 +9,7 @@ import { ok } from "./testing/queries.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 
 const FOOTER = [
-  "You're getting this because you turned on the daily summary in Pact. It comes at 09:00 your time, only on days something has waited more than a day.",
+  "You're getting this because you turned on the daily summary in Pact. It comes at 9am your time, only on days something has waited more than a day.",
   "Turn it off in Profile: https://pact.example.test/profile",
 ].join("\n");
 
@@ -24,7 +24,7 @@ function failuresIn(s: Scenario) {
 
 /** The daily summaries sent to `name`'s address, in order. */
 function summariesTo(s: Scenario, name: string) {
-  return s.mailer.sent.filter((email) => email.to === `${name}@example.test` && email.subject === "Pact Daily Summary");
+  return s.mailer.sent.filter((email) => email.to === `${name}@example.test` && email.subject === "Pact daily summary");
 }
 
 /** The owner with Gym, every day, reviewed by "reviewer" and "second", and its evidence submitted at `at`. */
@@ -104,12 +104,12 @@ describe("the reviewer's section", () => {
     expect(summariesTo(s, "reviewer")).toEqual([
       {
         to: "reviewer@example.test",
-        subject: "Pact Daily Summary",
+        subject: "Pact daily summary",
         text: [
-          "1 item waits for your review.",
+          "1 item is waiting for your review.",
           "",
           "Items waiting for your review",
-          "Each has waited in your Review Queue more than a day.",
+          "Each has waited more than a day.",
           "",
           "owner's evidence",
           "Gym · waited 1 day",
@@ -152,10 +152,10 @@ describe("the reviewer's section", () => {
 
     const [email] = summariesTo(s, "reviewer");
     expect(email?.text.split("\n").slice(0, 16)).toEqual([
-      "3 items wait for your review.",
+      "3 items are waiting for your review.",
       "",
       "Items waiting for your review",
-      "Each has waited in your Review Queue more than a day.",
+      "Each has waited more than a day.",
       "",
       "owner's payment",
       "To Sam · waited 3 days",
@@ -170,7 +170,7 @@ describe("the reviewer's section", () => {
       "",
     ]);
     // Not picked for the vacation.
-    expect(summariesTo(s, "second")[0]?.text.split("\n")[0]).toBe("2 items wait for your review.");
+    expect(summariesTo(s, "second")[0]?.text.split("\n")[0]).toBe("2 items are waiting for your review.");
   });
 
   test("nothing waited more than 24 hours: no email", async () => {
@@ -211,7 +211,7 @@ describe("the reviewer's section", () => {
     await s.advanceTo("Wed 09:00");
 
     const html = summariesTo(s, "reviewer")[0]?.html ?? "";
-    expect(html).toContain("1 item waits for your review.");
+    expect(html).toContain("1 item is waiting for your review.");
     expect(html).toContain("Items waiting for your review");
     expect(html).toContain("owner&#39;s evidence");
     expect(html).toContain("Gym &#38; &#60;Swim&#62; · waited 1 day");
@@ -233,7 +233,7 @@ describe("the owner's section", () => {
 
     expect(summariesTo(s, "owner").map((email) => email.text)).toEqual([
       [
-        "1 question waits for your reply.",
+        "1 question is waiting for your reply.",
         "",
         "Questions waiting for your reply",
         "Your reviewers asked about these instead of deciding them. Reply so they can decide.",
@@ -278,10 +278,10 @@ describe("an owner who is also a reviewer", () => {
     const emails = summariesTo(s, "owner");
     expect(emails).toHaveLength(1);
     expect(emails[0]?.text.split("\n").slice(0, 18)).toEqual([
-      "1 item waits for your review. 1 question waits for your reply.",
+      "1 item is waiting for your review. 1 question is waiting for your reply.",
       "",
       "Items waiting for your review",
-      "Each has waited in your Review Queue more than a day.",
+      "Each has waited more than a day.",
       "",
       "reviewer's evidence",
       "Read · waited 1 day",

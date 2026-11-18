@@ -186,8 +186,8 @@ describe("the 15:00 push", () => {
         kind: "connection-problem",
         payload: {
           occurrenceDate: s.date("Tue"),
-          title: "No Oura data",
-          body: "No Oura data for Tue night yet. Sync your ring before 6pm or it counts as missed.",
+          title: "Tue night hasn't synced",
+          body: "Open the Oura app to sync it before 6pm, or the night is missed.",
           url: "/",
         },
       },
@@ -235,7 +235,7 @@ describe("the 15:00 push", () => {
     await s.advanceTo("Wed 09:00");
     expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
       expect.objectContaining({
-        payload: expect.objectContaining({ title: "No Oura data", occurrenceDate: s.date("Tue") }),
+        payload: expect.objectContaining({ title: "Tue night hasn't synced", occurrenceDate: s.date("Tue") }),
       }),
     ]);
   });
@@ -333,7 +333,7 @@ describe("a disconnected connection", () => {
     await s.advanceTo("Wed 15:00");
     expect(s.notifier.sentTo(owner, "connection-problem").map((n) => n.payload.body)).toEqual([
       "A night with no data by 6pm counts as Missed. Reconnect before then.",
-      "No Oura data for Tue night yet. Reconnect Oura before 6pm or it counts as missed.",
+      "Reconnect Oura before 6pm, or the night is missed.",
     ]);
   });
 });

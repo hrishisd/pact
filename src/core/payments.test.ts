@@ -320,7 +320,7 @@ describe("deciding a payment", () => {
     await s.advanceTo("Wed+2 18:00");
     const aboutSam = s.notifier.sentTo(reviewer, "overdue-bill").filter((n) => n.payload.recipientId === sam.id);
     expect(aboutSam.map((n) => n.payload)).toEqual([
-      expect.objectContaining({ title: "owner is overdue", body: "$5 to Sam, due Wed Jan 21" }),
+      expect.objectContaining({ title: "owner's bill is overdue", body: "$5 to Sam was due Wed Jan 21" }),
     ]);
     expect(
       owner.today().alerts.filter((alert) => alert.kind === "bill-overdue" && alert.recipientId === sam.id),

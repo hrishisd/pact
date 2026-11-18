@@ -37,7 +37,7 @@ test("a waiting vacation's card says what it covers and who it went to", async (
   expect(screen.getByText("Going to Portugal")).toBeTruthy();
   expect(screen.getByText("All recurring pacts · 14 days")).toBeTruthy();
   expect(
-    screen.getByText("Sent to Sam Rivera and Alex Chen. Nothing changes until one of them approves it."),
+    screen.getByText("Sent to Sam Rivera and Alex Chen. Until one of them approves it, your pacts run as usual."),
   ).toBeTruthy();
   expect(screen.queryByText("None planned")).toBeNull();
 });
@@ -116,7 +116,7 @@ test("an approved vacation says who approved it and that it can't be changed, wi
   expect(await screen.findByText("Approved")).toBeTruthy();
   expect(screen.getByText("Approved by Sam Rivera. It can't be changed now.")).toBeTruthy();
   expect(screen.getByText("All recurring pacts · 14 days")).toBeTruthy();
-  expect(screen.queryByText(/Nothing changes until/)).toBeNull();
+  expect(screen.queryByText(/your pacts run as usual/)).toBeNull();
   expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
 });
 

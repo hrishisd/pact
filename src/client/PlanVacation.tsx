@@ -263,14 +263,17 @@ function VacationSteps({
                   return pact && <CoverRow key={pact.id} pact={pact} preview={pactPreview} from={from} to={to} />;
                 })}
               </div>
-              <p className="small muted">Reminders stop on these days for the pacts on vacation.</p>
+              <p className="small muted">Once approved, reminders stop on these days for the pacts on vacation.</p>
             </section>
           )}
           {shown?.ok && shown.preview.coversNothing ? (
             <p className="error">There's nothing left for this vacation to cover.</p>
           ) : (
             <div className="alert info">
-              <p className="small">Nothing changes until it's approved, and once it is, it can't be changed.</p>
+              <p className="small">
+                Until it's approved, your pacts run as usual. If you miss a day it covers, the penalty is held until a
+                reviewer decides. Once approved, the vacation can't be changed.
+              </p>
             </div>
           )}
           {sendError && <p className="error">{sendError}</p>}

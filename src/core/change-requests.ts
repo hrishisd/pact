@@ -267,7 +267,7 @@ function addReviewersNow(ctx: CoreContext, pact: PactRow, ownerName: string, add
     pactId: pact.id,
     added: newcomers.map((friend) => friend.id),
     title: `${ownerName} added ${namesText} as ${names.length === 1 ? "a reviewer" : "reviewers"}`,
-    body: `${pact.name} · ${names.length === 1 ? names[0] : "They"} can now decide its review items too.`,
+    body: `${pact.name} · ${names.length === 1 ? names[0] : "They"} can now review it too.`,
     url: APP_PATHS.review,
   });
 }
@@ -975,7 +975,7 @@ export function decideChangeRequest(
       body = `${pact.name} ends after ${formatDate(timing.lastDay)}`;
     } else {
       endPact(ctx, pact.id, "end-request", now);
-      body = `${pact.name} is Ended`;
+      body = `${pact.name} has ended`;
     }
   } else {
     const { before, after } = request;

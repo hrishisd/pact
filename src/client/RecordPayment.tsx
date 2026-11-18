@@ -62,8 +62,8 @@ export function RecordPaymentSheet({
         </span>
         <small>
           {ledger.awaitingCents === 0
-            ? `Up to ${money(payableCents)}.`
-            : `Up to ${money(payableCents)}, as ${money(ledger.awaitingCents)} is awaiting approval.`}
+            ? `You can record up to ${money(payableCents)}.`
+            : `You can record up to ${money(payableCents)}, because ${money(ledger.awaitingCents)} is already waiting for approval.`}
           {tooMuch && <b className="error"> {overLimitText(ledger)}</b>}
         </small>
       </label>
@@ -114,7 +114,7 @@ const REFUSAL_TEXT: Record<Exclude<RecordPaymentRefusal, "payment-exceeds-owed">
   "text-too-long": TEXT_TOO_LONG_TEXT,
 };
 
-/** An amount over the ledger's `payableCents`: more than owed, or, with payments awaiting approval, more than what's left. */
+/** An amount over the ledger's `payableCents`: more than owed, or, with payments waiting for approval, more than what's left. */
 function overLimitText(ledger: Json<LedgerSummary>): string {
   return ledger.awaitingCents === 0 ? "That's more than you owe." : `That's more than ${money(ledger.payableCents)}.`;
 }

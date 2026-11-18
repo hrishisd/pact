@@ -56,8 +56,8 @@ describe("each kind records one notification for each person it's for", () => {
         payload: {
           pactId: gym,
           occurrenceDate: s.date("Mon"),
-          title: "Gym is Missed",
-          body: "Mon Jan 5 · $5 to Sam",
+          title: "You missed Gym",
+          body: "Mon Jan 5 · $5 penalty to Sam",
           url: `/pacts/${gym}`,
         },
       },

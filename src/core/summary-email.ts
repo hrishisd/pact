@@ -22,9 +22,9 @@ interface Section {
   link: { label: string; path: string };
 }
 
-const SUBJECT = "Pact Daily Summary";
+const SUBJECT = "Pact daily summary";
 const FOOTER =
-  "You're getting this because you turned on the daily summary in Pact. It comes at 09:00 your time, only on days something has waited more than a day.";
+  "You're getting this because you turned on the daily summary in Pact. It comes at 9am your time, only on days something has waited more than a day.";
 const TURN_OFF = "Turn it off in Profile";
 
 /**
@@ -38,8 +38,9 @@ export function summaryEmail(
 ): Email {
   const { waiting, questions } = lists;
   const lead = [
-    waiting.length > 0 && `${count(waiting.length, "item waits", "items wait")} for your review.`,
-    questions.length > 0 && `${count(questions.length, "question waits", "questions wait")} for your reply.`,
+    waiting.length > 0 && `${count(waiting.length, "item is waiting", "items are waiting")} for your review.`,
+    questions.length > 0 &&
+      `${count(questions.length, "question is waiting", "questions are waiting")} for your reply.`,
   ]
     .filter(Boolean)
     .join(" ");
@@ -47,7 +48,7 @@ export function summaryEmail(
   if (waiting.length > 0) {
     sections.push({
       heading: "Items waiting for your review",
-      intro: "Each has waited in your Review Queue more than a day.",
+      intro: "Each has waited more than a day.",
       lines: waiting,
       link: { label: "Open your Review Queue", path: APP_PATHS.review },
     });
@@ -129,7 +130,7 @@ function html(lead: string, sections: Section[], url: (path: string) => string):
   );
 }
 
-/** "1 item waits", "4 items wait". */
+/** "1 item is waiting", "4 items are waiting". */
 function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }

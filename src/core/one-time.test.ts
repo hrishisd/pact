@@ -238,7 +238,7 @@ describe("judging", () => {
       expect(pactOf(owner, taxes).stage).toBe("ended");
       expect(s.notifier.sentTo(owner, "missed-occurrence")).toEqual([
         expect.objectContaining({
-          payload: expect.objectContaining({ occurrenceDate: s.date("Thu"), body: "Thu Jan 8 · $5 to Sam" }),
+          payload: expect.objectContaining({ occurrenceDate: s.date("Thu"), body: "Thu Jan 8 · $5 penalty to Sam" }),
         }),
       ]);
       // Missed in the last 48 hours, it's on Today though the pact has Ended.

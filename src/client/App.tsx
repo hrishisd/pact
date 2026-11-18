@@ -100,7 +100,7 @@ function SignIn() {
     <Centered>
       <div className="brand">
         <h1>Pact</h1>
-        <p className="muted">Commitments with money on the line, checked by your friends.</p>
+        <p className="muted">Put money on your goals. Your friends check that you meet them.</p>
       </div>
       <button
         className="btn block google"

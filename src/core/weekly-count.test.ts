@@ -76,7 +76,7 @@ describe("the spec's examples", () => {
       expect.objectContaining({
         payload: expect.objectContaining({
           occurrenceDate: s.date("Mon+1"),
-          body: "Week of Mon Jan 12 · 1 short · $5 to Sam",
+          body: "Week of Mon Jan 12 · 1 day short · $5 penalty to Sam",
         }),
       }),
     ]);
@@ -399,7 +399,7 @@ describe("a week judged by a late decision", () => {
 
     expect(pushes(s, owner).slice(-2)).toEqual([
       ["evidence-decided", "reviewer approved your evidence"],
-      ["missed-occurrence", "Piano is Missed"],
+      ["missed-occurrence", "You missed Piano"],
     ]);
     expect(s.notifier.sentTo(owner, "missed-occurrence")).toHaveLength(1);
     expect(penalties(owner).map((p) => [p.date, p.cents])).toEqual([[s.date("Mon+1"), 1000]]);
@@ -420,7 +420,7 @@ describe("a week judged by a late decision", () => {
 
     expect(pushes(s, owner).slice(-2)).toEqual([
       ["evidence-decided", "reviewer rejected your evidence"],
-      ["missed-occurrence", "Piano is Missed"],
+      ["missed-occurrence", "You missed Piano"],
     ]);
     expect(owed(owner)).toBe(500);
   });
@@ -672,7 +672,7 @@ describe("reminders", () => {
 
     expect(reminderDays(s, owner)).toEqual([s.date("Tue+1")]);
     expect(s.notifier.sentTo(owner, "reminder")[0]?.payload.body).toBe(
-      "1 of 3 this week. Today's photo is due at midnight.",
+      "1 of 3 days done this week. Today's photo is due at midnight.",
     );
   });
 
