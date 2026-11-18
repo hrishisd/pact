@@ -61,10 +61,11 @@ const STEP_TITLES: Record<FormStep, string> = {
 const REFUSALS: Record<Exclude<ChangePactRefusal, CreatePactRefusal>, string> = {
   ...AT_ONCE_REFUSAL_TEXT,
   "change-request-waiting":
-    "A change request is waiting. Until it's decided or you withdraw it, only the name, reminders and new reviewers can change.",
-  "end-approved": "Its end is approved, so until it Ends only the name, reminders and new reviewers can change.",
+    "A change request is already waiting. Until it's decided or you withdraw it, you can only change the name and reminders, or add reviewers.",
+  "end-approved":
+    "Ending this pact is approved. Until it ends, you can only change the name and reminders, or add reviewers.",
   "pact-started": "It has already started, so the start date can't change.",
-  "schedule-kind-fixed": "The kind of schedule can't change now. Make a new pact for that.",
+  "schedule-kind-fixed": "You can't change the type of schedule. Create a new pact instead.",
   "nothing-changed": "Nothing changed yet.",
 };
 
@@ -179,8 +180,9 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           onInvite={onInvite}
           kindFixed
           hints={{
-            reviewers: "Adding a reviewer applies at once. Removing one needs approval. There's always at least one.",
-            reminders: "Changes apply at once.",
+            reviewers:
+              "Adding a reviewer applies right away. Removing one needs approval. A pact must keep at least one reviewer.",
+            reminders: "Changes apply right away without approval.",
           }}
         />
       </div>
@@ -305,7 +307,7 @@ function VerdictBox({
       return (
         <div className="verdict at-once">
           <p>
-            <b>Applies now.</b> It doesn't change what counts, so no approval.
+            <b>Applies now.</b> No approval needed, because it doesn't change what you have to do.
           </p>
         </div>
       );
@@ -315,10 +317,10 @@ function VerdictBox({
           <p>
             <b>
               {oneTime
-                ? "Applies now, without approval."
-                : `Applies without approval from ${formatDate(outcome.appliesFrom)}.`}
+                ? "Applies now. No approval needed, because it makes the pact stricter."
+                : `Applies from ${formatDate(outcome.appliesFrom)}. No approval needed, because it makes the pact stricter.`}
             </b>
-            {outcome.todayKeepsCents !== null && ` ${open} keeps ${money(outcome.todayKeepsCents)} per miss.`}
+            {outcome.todayKeepsCents !== null && ` ${open} penalty stays ${money(outcome.todayKeepsCents)}.`}
             {nowLine(outcome.appliesNow)}
           </p>
         </div>
@@ -330,10 +332,10 @@ function VerdictBox({
       return (
         <div className="verdict needs-approval">
           <p>
-            <b>{who}</b> Until then {pactName} keeps its current terms
+            <b>{who}</b> Until then, the pact keeps its current terms.
             {outcome.bundlesStricter &&
-              ", the stricter changes too, since a change that relaxes anything is reviewed as a whole"}
-            .{nowLine(outcome.appliesNow)}
+              " Part of this change makes the pact easier, so the whole change waits for approval, including the stricter parts."}
+            {nowLine(outcome.appliesNow)}
           </p>
         </div>
       );

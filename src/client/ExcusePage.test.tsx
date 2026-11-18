@@ -24,6 +24,6 @@ test("an excuse withdrawn when its pact Ended, its days past the end, says why a
 
   renderWithUser(<ExcusePage excuseId="away" timezone="America/New_York" onOpenPact={vi.fn()} />);
 
-  expect(await screen.findByText(/Withdrawn when Gym Ended/)).toBeTruthy();
+  expect(await screen.findByText(/Withdrawn because the pact ended/)).toBeTruthy();
   expect(screen.queryByText("Days")).toBeNull();
 });

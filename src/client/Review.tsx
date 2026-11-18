@@ -409,13 +409,13 @@ function ChangeRequestItem({ item, timezone, onDecided, onAsk }: ItemProps & { i
         {item.note !== null && <span className="quote">“{item.note}”</span>}
         {item.endsPact ? (
           <p className="small">
-            {item.ending && `Approving ends ${item.pactName} ${endsWhenText(item.current, item.ending)}. `}
+            {item.ending && `If you approve, the pact ends ${endsWhenText(item.current, item.ending)}. `}
             {item.ownerName} still owes the penalties for days already missed.
           </p>
         ) : (
           <>
             <DiffList changes={item.changes} />
-            <p className="small">{startsText(item, "Approving applies")}</p>
+            <p className="small">{startsText(item, "If you approve, it applies")}</p>
             <EverythingElse request={item} />
           </>
         )}

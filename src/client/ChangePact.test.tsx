@@ -61,7 +61,7 @@ test("a refused change offers its button again, with why", async () => {
   await vi.waitFor(() => expect((apply as HTMLButtonElement).disabled).toBe(false));
   await user.click(apply);
 
-  expect(await screen.findByText("This pact has Ended.")).toBeTruthy();
+  expect(await screen.findByText("This pact has ended.")).toBeTruthy();
   expect(onDone).not.toHaveBeenCalled();
   expect((apply as HTMLButtonElement).disabled).toBe(false);
 });

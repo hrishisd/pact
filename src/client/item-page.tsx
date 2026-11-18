@@ -19,7 +19,7 @@ const ITEM_KINDS: Record<ItemKind, { label: string; className: string; Icon: typ
   evidence: { label: "Evidence", className: "k-evidence", Icon: CameraIcon },
   excuse: { label: "Excuse", className: "k-excuse", Icon: ExcuseIcon },
   payment: { label: "Payment", className: "k-payment", Icon: DollarIcon },
-  "change-request": { label: "Change", className: "k-change", Icon: PencilIcon },
+  "change-request": { label: "Change request", className: "k-change", Icon: PencilIcon },
   vacation: { label: "Vacation", className: "k-vacation", Icon: SuitcaseIcon },
 };
 
@@ -87,15 +87,15 @@ export function StateLine({ state, timezone }: { state: Json<ItemState>; timezon
   );
 }
 
-/** Who withdrew an item, or why it was: "You withdrew it", "Withdrawn when Gym Ended", "Withdrawn: no longer needed". */
+/** Who withdrew an item, or why it was: "You withdrew it", "Withdrawn because the pact ended", "Withdrawn because it was no longer needed". */
 export function withdrawnText(withdrawal: Json<Withdrawal>): string {
   switch (withdrawal.reason) {
     case "owner":
       return "You withdrew it";
     case "pact-ended":
-      return `Withdrawn when ${listNames(withdrawal.pactNames)} Ended`;
+      return "Withdrawn because the pact ended";
     case "no-longer-needed":
-      return "Withdrawn: no longer needed";
+      return "Withdrawn because it was no longer needed";
   }
 }
 

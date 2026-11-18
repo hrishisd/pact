@@ -58,7 +58,7 @@ test("a refused delete offers Delete pact again, with why", async () => {
   await user.click(await screen.findByRole("button", { name: "Delete" }));
   await user.click(screen.getByRole("button", { name: "Delete pact" }));
 
-  expect(await screen.findByText("The 10 minutes are up.")).toBeTruthy();
+  expect(await screen.findByText("The 10 minutes for editing are over. To stop the pact, use End pact.")).toBeTruthy();
   expect(onDeleted).not.toHaveBeenCalled();
   expect((screen.getByRole("button", { name: "Delete pact" }) as HTMLButtonElement).disabled).toBe(false);
 });
@@ -105,7 +105,7 @@ test("a pact whose end was approved says when it ends, and offers neither End pa
 
   expect(
     await screen.findByText(
-      "Ending approved: Gym ends after Thu Jan 8, once that day is judged. Penalties already judged stay on the ledger.",
+      "Ending approved. The pact ends after Thu Jan 8, once that day has been judged. You still owe penalties for days already missed.",
     ),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "End pact" })).toBeNull();
@@ -195,7 +195,7 @@ describe("the sheets that change a term at once", () => {
     await user.click(await screen.findByRole("button", { name: "Change name" }));
     await user.click(screen.getByRole("button", { name: "Save name" }));
 
-    expect(await screen.findByText("This pact has Ended.")).toBeTruthy();
+    expect(await screen.findByText("This pact has ended.")).toBeTruthy();
   });
 
   test("Add a reviewer sends only the friends picked", async () => {

@@ -198,7 +198,7 @@ test("an end request says the pact ends once the week open now is judged", async
   expect(within(card).getByRole("heading", { name: "End Gym" })).toBeTruthy();
   expect(
     within(card).getByText(
-      "Approving ends Gym after Sun Jan 18, once this week is judged. Jordan Lee still owes the penalties for days already missed.",
+      "If you approve, the pact ends after Sun Jan 18, once this week has been judged. Jordan Lee still owes the penalties for days already missed.",
     ),
   ).toBeTruthy();
 });
@@ -212,6 +212,8 @@ test("an end request with nothing open says approving ends the pact now", async 
 
   const card = await screen.findByRole("article");
   expect(
-    within(card).getByText("Approving ends Gym now. Jordan Lee still owes the penalties for days already missed."),
+    within(card).getByText(
+      "If you approve, the pact ends now. Jordan Lee still owes the penalties for days already missed.",
+    ),
   ).toBeTruthy();
 });

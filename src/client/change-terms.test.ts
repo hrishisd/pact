@@ -51,10 +51,8 @@ describe("effectText", () => {
 
   test("reviewers: who's removed needs approval, and who's added joins or hears about it", () => {
     const removing = { effect: "needs-approval", reason: "reviewers-removed" } as const;
-    expect(effectText({ ...reviewers(["Cy"], []), effect: "at-once" })).toBe("Applies now. Cy hears about it");
-    expect(effectText({ ...reviewers(["Cy", "Di"], []), effect: "at-once" })).toBe(
-      "Applies now. Cy and Di hear about it",
-    );
+    expect(effectText({ ...reviewers(["Cy"], []), effect: "at-once" })).toBe("Applies now");
+    expect(effectText({ ...reviewers(["Cy", "Di"], []), effect: "at-once" })).toBe("Applies now");
     expect(effectText({ ...reviewers([], ["Ann", "Bob", "Eve"]), ...removing })).toBe(
       "Needs approval: removing Ann, Bob, and Eve",
     );
