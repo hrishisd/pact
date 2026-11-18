@@ -109,7 +109,7 @@ export function InvitePage({
               {initial(inviterName)}
             </span>
             <h1>{inviterName} invited you to Pact</h1>
-            <p className="muted">Put money on your goals. Your friends check that you meet them.</p>
+            <p className="muted">Commitments with money on the line, checked by your friends.</p>
           </div>
           <div className="card">
             <b>Accepting makes you friends.</b>
