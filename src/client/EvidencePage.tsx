@@ -57,7 +57,7 @@ function EvidenceView({
           <span className="meta">{formatDate(evidence.occurrenceDate)}</span>
         </div>
         <div className="stack-sm">
-          <span className="label">What counts</span>
+          <span className="label">The photo should show</span>
           <span>{evidence.description}</span>
         </div>
         <StateLine state={evidence.state} timezone={timezone} />
