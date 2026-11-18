@@ -343,7 +343,7 @@ describe("Waiting for approval", () => {
 
   test("a waiting evidence row opens its evidence page, not the pact", async () => {
     const { user } = renderToday();
-    await user.click(await screen.findByRole("button", { name: /Gym\s*Evidence · Mon Jan 5/ }));
+    await user.click(await screen.findByRole("button", { name: /Gym\s*Photo · Mon Jan 5/ }));
     expect(openers.evidence).toHaveBeenCalledWith("photo-1");
     expect(onOpenPact).not.toHaveBeenCalled();
   });

@@ -145,7 +145,7 @@ describe("Waiting on", () => {
 
   test("a waiting evidence row opens its evidence page", async () => {
     const { user } = renderPactPage();
-    await user.click(await screen.findByRole("button", { name: /Gym\s*Evidence · Mon Jan 5/ }));
+    await user.click(await screen.findByRole("button", { name: /Gym\s*Photo · Mon Jan 5/ }));
     expect(openers.evidence).toHaveBeenCalledWith("photo-1");
   });
 

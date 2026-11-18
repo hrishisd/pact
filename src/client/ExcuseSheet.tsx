@@ -262,7 +262,7 @@ function ExcuseForm({
           <span className="meta">
             {covered === 0
               ? "Pick at least one day that can be excused."
-              : `Covers ${covered} ${covered === 1 ? "day" : "days"}.${held > 0 ? ` ${money(held)} is held off what you owe until it's decided.` : ""}`}
+              : `Covers ${covered} ${covered === 1 ? "day" : "days"}.${held > 0 ? ` You won't owe the ${money(held)} for these days unless the excuse is rejected.` : ""}`}
           </span>
         )}
         {error && <p className="error small">{error}</p>}

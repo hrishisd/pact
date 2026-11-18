@@ -16,7 +16,7 @@ type ItemKind = ReviewItem["kind"];
 
 /** Each kind's name, colour and icon, on its tile and in its rows. */
 const ITEM_KINDS: Record<ItemKind, { label: string; className: string; Icon: typeof CameraIcon }> = {
-  evidence: { label: "Evidence", className: "k-evidence", Icon: CameraIcon },
+  evidence: { label: "Photo", className: "k-evidence", Icon: CameraIcon },
   excuse: { label: "Excuse", className: "k-excuse", Icon: ExcuseIcon },
   payment: { label: "Payment", className: "k-payment", Icon: DollarIcon },
   "change-request": { label: "Change request", className: "k-change", Icon: PencilIcon },

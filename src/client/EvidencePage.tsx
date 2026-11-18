@@ -23,7 +23,11 @@ export function EvidencePage({
   const { state, reload } = useLoad(() => api.evidence(evidenceId), API_PATHS.evidenceItem(evidenceId));
 
   return (
-    <LoadedFound state={state} what="This evidence" notFound={{ title: "Evidence not found", body: "It isn't yours." }}>
+    <LoadedFound
+      state={state}
+      what="This evidence"
+      notFound={{ title: "Photo not found", body: "It isn't one of yours." }}
+    >
       {({ evidence }) => (
         <EvidenceView evidence={evidence} timezone={timezone} onOpenPact={onOpenPact} onReplied={reload} />
       )}
