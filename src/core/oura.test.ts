@@ -14,6 +14,7 @@ const CLIENT: OuraClient = {
   clientId: "pact-client",
   clientSecret: "pact-secret",
   redirectUri: "https://pact.example/api/oura/callback",
+  appUrl: "https://pact.example",
   tokenKey: Buffer.alloc(32, 7).toString("base64"),
 };
 const RANGE = { startDate: "2026-01-05", endDate: "2026-01-06" };
@@ -25,6 +26,8 @@ class FakeOura {
   readonly tokenRequests: URLSearchParams[] = [];
   /** Each token request's address, without its query. */
   readonly tokenUrls: string[] = [];
+  /** The User-Agent of every request, token and sleep alike, in order. */
+  readonly userAgents: (string | null)[] = [];
   readonly sleepRequests: { url: URL; authorization: string | null }[] = [];
   periods: OuraSleepPeriod[] = [sleep("Mon 23:00")];
   pageSize = Infinity;
@@ -48,6 +51,7 @@ class FakeOura {
 
   fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input));
+    this.userAgents.push(new Headers(init?.headers).get("User-Agent"));
     if (url.pathname === "/oauth/v2/ext/oauth-token") {
       const body = new URLSearchParams(String(init?.body));
       this.tokenRequests.push(body);
@@ -193,6 +197,16 @@ describe("connecting", () => {
     db.close();
 
     await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("Invalid authentication tag length");
+  });
+
+  test("every request names Pact and its address in the User-Agent", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+    expect(oura.tokenRequests.map((r) => r.get("grant_type"))).toEqual(["authorization_code", "refresh_token"]);
+    expect(oura.sleepRequests).toHaveLength(1);
+    expect(oura.userAgents).toEqual(Array(3).fill("Pact (+https://pact.example)"));
   });
 
   test("forgetting an account deletes its tokens: it's disconnected, with no call to Oura", async () => {

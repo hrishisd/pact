@@ -23,6 +23,8 @@ export interface OuraClient {
   clientSecret: string;
   /** Where Oura sends the browser back with a code: the server's callback route. */
   redirectUri: string;
+  /** The server's address, named in the User-Agent of every request, as Oura asks. */
+  appUrl: string;
   /** 32 bytes, base64: encrypts the stored tokens. */
   tokenKey: string;
 }
@@ -229,7 +231,7 @@ class Oura implements OuraAdapter {
 
   #get(url: URL, accessToken: string): Promise<Response> {
     return this.#fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}`, "User-Agent": this.#userAgent() },
       signal: AbortSignal.timeout(this.#timeoutMs),
     });
   }
@@ -297,7 +299,7 @@ class Oura implements OuraAdapter {
   async #tokenRequest(grant: Record<string, string>): Promise<Tokens | null> {
     const response = await this.#fetch(this.#urls.tokenUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": this.#userAgent() },
       body: new URLSearchParams({
         ...grant,
         client_id: this.#client.clientId,
@@ -319,6 +321,15 @@ class Oura implements OuraAdapter {
       refreshToken: body.refresh_token,
       expiresAt: new Date(this.#clock.now().getTime() + body.expires_in * 1000),
     };
+  }
+
+  /**
+   * Oura asks every client to name itself: a missing or generic User-Agent
+   * may be refused with a 403, which a sleep request reads as a lapsed
+   * membership.
+   */
+  #userAgent(): string {
+    return `Pact (+${this.#client.appUrl})`;
   }
 
   #alertAppRefused(status: number, error: string | null): void {

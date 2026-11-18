@@ -14,5 +14,9 @@ Oura asks API clients to send a `User-Agent` header that names the app (`.scratc
 
 ## Acceptance criteria
 
-- [ ] A test in `src/core/oura.test.ts` shows the header on token and sleep requests.
-- [ ] `npm run check` passes.
+- [x] A test in `src/core/oura.test.ts` shows the header on token and sleep requests.
+- [x] `npm run check` passes.
+
+## Comments
+
+- 2026-11-18: Built on `claude/festive-goldberg-cvw6p4`, pending merge to `main`. `OuraClient` has an `appUrl`, which `src/server/main.ts` sets to `config.auth.url`; `#userAgent` in `src/core/oura.ts` sends `Pact (+<appUrl>)` on the code exchange, refresh and sleep requests. Test: `oura.test.ts`, "every request names Pact and its address in the User-Agent". `devOura` is unchanged.
