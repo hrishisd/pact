@@ -2,7 +2,7 @@
 
 Things that need a signed-in `flyctl`, a real Oura Ring, a real phone or real push notifications. Tick items off here; when one turns up a bug, file it under `issues/` and link it.
 
-Who does what: the human doesn't run commands. Every command here (`scripts/prod-db.sh`, `scripts/prod-log.sh`, `flyctl`, `openssl`) is for an agent running on the human's own computer, where `flyctl` is signed in; a cloud session has no `flyctl`. Steps marked **(human)** need the human's hands: a browser signed in to Oura, the ring, or the phone. An agent walks the human through those one at a time.
+Who does what: the human doesn't run commands. Every command here (`scripts/prod-db.sh`, `scripts/prod-log.sh`, `flyctl`, `openssl`) is for an agent, which can run them on the human's own computer or in a cloud session: both have a signed-in `flyctl` (see `docs/agents/production.md`). Steps marked **(human)** need the human's hands: a browser signed in to Oura, the ring, or the phone. An agent walks the human through those one at a time.
 
 Last updated 2026-11-04, after ticket 18's backend fixes (migrations 23 and 24).
 
@@ -41,11 +41,11 @@ Oura is off in production until its secrets are set. Connecting shows "Oura isn'
 
 Setup, in order:
 
-- [ ] **(human)** At cloud.ouraring.com, open the API application for Pact (create one if there's none). Add `https://pact.hrishisd.com/api/oura/callback` as a redirect address, and copy the client id and client secret to give the agent.
+- [ ] **(human)** At developer.ouraring.com, open the API application for Pact (create one if there's none; new apps are made there, not at cloud.ouraring.com). Add `https://pact.hrishisd.com/api/oura/callback` as a redirect address, and copy the client id and client secret to give the agent.
 - [ ] Agent: `flyctl secrets set -a pact-hrishisd OURA_CLIENT_ID=… OURA_CLIENT_SECRET=… OURA_TOKEN_KEY=$(openssl rand -base64 32)`. Setting secrets restarts the machine. Production starts without them, so there's no deploy ordering to worry about. Keep `OURA_TOKEN_KEY` only in Fly: losing it means every owner reconnects.
 - [ ] Agent: `curl -sS https://pact.hrishisd.com/health` is ok, and `scripts/prod-log.sh tail 100` shows no Oura start-up error.
-- [ ] **(human)** In the app: Profile, connect Oura, approve on Oura's page, land back on Pact connected.
-- [ ] Connect a real ring and record one `sleep` response (scrubbed). Answer ticket 08's open questions: does `bedtime_start` carry a UTC offset, is sleep under about 3 hours ever `long_sleep`, is `end_date` inclusive, and are the authorize and token URLs right? Seed the fake Oura source from the recording.
+- [ ] **(human)** In the app: Profile, connect Oura, approve on Oura's page, land back on Pact connected. This confirms that a real connect succeeds at the token endpoint on `moi.ouraring.com` (ticket 20); "Oura didn't connect" here means it doesn't.
+- [ ] Connect a real ring and record one `sleep` response (scrubbed). Answer ticket 08's open questions: does `bedtime_start` carry a UTC offset, is sleep under about 3 hours ever `long_sleep`, is `end_date` inclusive, and does the authorize URL still work with the `daily` scope? Seed the fake Oura source from the recording.
 - [ ] **(human)** Make a bedtime pact and live through a few nights: Satisfied, Missed (late), an approved excuse, and an on-time bedtime that syncs in the morning after an excuse was approved (it should be Satisfied).
 - [ ] **(human)** The No Oura data card the morning after, before the ring syncs; "Checking Oura…" when Today opens; the 3pm Connection problem push if it still hasn't synced.
 - [ ] **(human)** Revoke Pact's access in Oura: the connection shows Needs reconnecting, with Reconnect on Today, the pact page and Profile. Reconnect, and the waiting night is judged. Disconnect warns how many Active pacts use Oura.

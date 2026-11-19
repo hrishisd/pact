@@ -14,13 +14,20 @@ const CLIENT: OuraClient = {
   clientId: "pact-client",
   clientSecret: "pact-secret",
   redirectUri: "https://pact.example/api/oura/callback",
+  appUrl: "https://pact.example",
   tokenKey: Buffer.alloc(32, 7).toString("base64"),
 };
 const RANGE = { startDate: "2026-01-05", endDate: "2026-01-06" };
+/** The fake's token endpoint, on the same path as Oura's. */
+const TOKEN_URL = "https://moi.oura.test/oauth/v2/ext/oauth-token";
 
 /** Oura's side: issues tokens (each refresh token works once) and serves sleep to a valid access token. */
 class FakeOura {
   readonly tokenRequests: URLSearchParams[] = [];
+  /** Each token request's address, without its query. */
+  readonly tokenUrls: string[] = [];
+  /** The User-Agent of every request, token and sleep alike, in order. */
+  readonly userAgents: (string | null)[] = [];
   readonly sleepRequests: { url: URL; authorization: string | null }[] = [];
   periods: OuraSleepPeriod[] = [sleep("Mon 23:00")];
   pageSize = Infinity;
@@ -36,16 +43,27 @@ class FakeOura {
    * that spends nothing.
    */
   loseNextRefresh: "after-grant" | "before-grant" | null = null;
+  /**
+   * What the token endpoint answers every request instead, when set: Oura
+   * refusing Pact's own app. A string body is sent as plain text, not JSON.
+   */
+  appRefusal: { status: number; body: unknown } | null = null;
   #issued = 0;
   #validAccess = new Set<string>();
   #validRefresh = new Set<string>();
 
   fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input));
-    if (url.pathname === "/oauth/token") {
+    this.userAgents.push(new Headers(init?.headers).get("User-Agent"));
+    if (url.pathname === "/oauth/v2/ext/oauth-token") {
       const body = new URLSearchParams(String(init?.body));
       this.tokenRequests.push(body);
+      this.tokenUrls.push(url.origin + url.pathname);
       await this.hold;
+      if (this.appRefusal) {
+        const { status, body } = this.appRefusal;
+        return typeof body === "string" ? new Response(body, { status }) : Response.json(body, { status });
+      }
       if (body.get("client_id") !== CLIENT.clientId || body.get("client_secret") !== CLIENT.clientSecret) {
         return Response.json({ error: "invalid_client" }, { status: 401 });
       }
@@ -109,7 +127,7 @@ async function connected(s: Scenario, options: Partial<OuraAdapterOptions> = {})
   const adapter = adapterOn(s, {
     fetch: oura.fetch as typeof fetch,
     authorizeUrl: "https://cloud.oura.test/oauth/authorize",
-    tokenUrl: "https://api.oura.test/oauth/token",
+    tokenUrl: TOKEN_URL,
     apiBase: "https://api.oura.test",
     ...options,
   });
@@ -133,6 +151,22 @@ test("the authorize page asks for the daily scope, with the browser's state", ()
 });
 
 describe("connecting", () => {
+  test("exchanges codes and refresh tokens at Oura's token endpoint on its login server", async () => {
+    const s = scenario();
+    const oura = new FakeOura();
+    const adapter = adapterOn(s, { fetch: oura.fetch as typeof fetch });
+    const owner = await s.signIn("owner");
+    expect(await adapter.connect(owner.id, "good-code")).toEqual({ ok: true });
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+
+    expect(oura.tokenRequests.map((r) => r.get("grant_type"))).toEqual(["authorization_code", "refresh_token"]);
+    expect(oura.tokenUrls).toEqual([
+      "https://moi.ouraring.com/oauth/v2/ext/oauth-token",
+      "https://moi.ouraring.com/oauth/v2/ext/oauth-token",
+    ]);
+  });
+
   test("exchanges the code and stores the tokens encrypted", async () => {
     const s = scenario();
     const { oura, adapter } = await connected(s);
@@ -171,6 +205,16 @@ describe("connecting", () => {
     await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("Invalid authentication tag length");
   });
 
+  test("every request names Pact and its address in the User-Agent", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+    expect(oura.tokenRequests.map((r) => r.get("grant_type"))).toEqual(["authorization_code", "refresh_token"]);
+    expect(oura.sleepRequests).toHaveLength(1);
+    expect(oura.userAgents).toEqual(Array(3).fill("Pact (+https://pact.example)"));
+  });
+
   test("forgetting an account deletes its tokens: it's disconnected, with no call to Oura", async () => {
     const s = scenario();
     const { oura, adapter, owner } = await connected(s);
@@ -183,6 +227,41 @@ describe("connecting", () => {
     const s = scenario();
     const { adapter, owner } = await connected(s);
     expect(await adapter.connect(owner.id, "bad-code")).toEqual({ ok: false, reason: "exchange-failed" });
+  });
+
+  test("a connect Oura refuses for Pact's app, not the code, fails and alerts the operator", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    oura.appRefusal = { status: 401, body: { error: "invalid_client" } };
+    await expect(adapter.connect(owner.id, "good-code")).rejects.toThrow("invalid_client");
+    expect(s.mailer.sent).toEqual([
+      {
+        to: s.operatorEmail,
+        subject: "Pact operator alert: Oura refused Pact's app",
+        text: expect.stringMatching(/HTTP 401.*invalid_client.*OURA_CLIENT_SECRET.*token URL/),
+      },
+    ]);
+
+    // An answer with no error at all is Pact's problem too, not the code's.
+    oura.appRefusal = { status: 400, body: { status: 400, title: "Bad Request" } };
+    await expect(adapter.connect(owner.id, "good-code")).rejects.toThrow("HTTP 400");
+    expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([
+      expect.stringMatching(/HTTP 401.*invalid_client/),
+      expect.stringMatching(/HTTP 400.*no error/),
+    ]);
+    expect(s.mailer.sent).toHaveLength(1);
+  });
+
+  test("a refused code after Pact's app was refused proves the app works again: a later app refusal emails again", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    oura.appRefusal = { status: 401, body: { error: "invalid_client" } };
+    await expect(adapter.connect(owner.id, "good-code")).rejects.toThrow("invalid_client");
+    oura.appRefusal = null;
+    expect(await adapter.connect(owner.id, "bad-code")).toEqual({ ok: false, reason: "exchange-failed" });
+    oura.appRefusal = { status: 401, body: { error: "invalid_client" } };
+    await expect(adapter.connect(owner.id, "good-code")).rejects.toThrow("invalid_client");
+    expect(s.mailer.sent).toHaveLength(2);
   });
 });
 
@@ -327,7 +406,7 @@ describe("sleep periods", () => {
 
     s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
     // Spent elsewhere: Oura no longer takes it.
-    await oura.fetch("https://api.oura.test/oauth/token", {
+    await oura.fetch(TOKEN_URL, {
       method: "POST",
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "refresh-2", ...secret() }).toString(),
     });
@@ -335,16 +414,72 @@ describe("sleep periods", () => {
     expect(s.logs.filter((line) => line.includes("OPERATOR_ALERT"))).toEqual([]);
   });
 
+  test.each([400, 401])(
+    "a refresh Oura refuses for Pact's app (invalid_client, HTTP %i) keeps the account, emails the operator once",
+    async (status) => {
+      const s = scenario();
+      const { oura, adapter, owner } = await connected(s);
+      s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+      oura.appRefusal = { status, body: { error: "invalid_client" } };
+      await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("invalid_client");
+      await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("invalid_client");
+      expect(s.mailer.sent).toEqual([
+        {
+          to: s.operatorEmail,
+          subject: "Pact operator alert: Oura refused Pact's app",
+          text: expect.stringMatching(new RegExp(`HTTP ${status}.*invalid_client.*OURA_CLIENT_SECRET.*token URL`)),
+        },
+      ]);
+      // Nothing was spent, so the refresh's outcome isn't unknown.
+      const db = openWithPragmas(s.dbPath);
+      expect(db.prepare(`SELECT refresh_outcome_unknown_at FROM oura_token`).get()).toEqual({
+        refresh_outcome_unknown_at: null,
+      });
+      db.close();
+
+      // Fixed: the same refresh token works, and a later refusal emails again.
+      oura.appRefusal = null;
+      expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+      expect(oura.tokenRequests.map((r) => r.get("refresh_token"))).toEqual([
+        null,
+        "refresh-1",
+        "refresh-1",
+        "refresh-1",
+      ]);
+      s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+      oura.appRefusal = { status, body: { error: "invalid_client" } };
+      await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("invalid_client");
+      expect(s.mailer.sent).toHaveLength(2);
+    },
+  );
+
+  test("a refresh refused with HTTP 400 and a body that isn't JSON is Pact's app refused: the account keeps its tokens", async () => {
+    const s = scenario();
+    const { oura, adapter, owner } = await connected(s);
+    s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
+    oura.appRefusal = { status: 400, body: "Bad Request" };
+    await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("HTTP 400");
+    expect(s.mailer.sent).toEqual([
+      {
+        to: s.operatorEmail,
+        subject: "Pact operator alert: Oura refused Pact's app",
+        text: expect.stringMatching(/HTTP 400.*no error/),
+      },
+    ]);
+    oura.appRefusal = null;
+    expect(await adapter.sleepPeriods(owner.id, RANGE)).toEqual({ ok: true, periods: oura.periods });
+  });
+
   test("the token request waits longer than a sleep request before giving up", async () => {
     const s = scenario();
     const { oura, adapter, owner } = await connected(s);
     s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
     const slow = adapterOn(s, {
-      tokenUrl: "https://api.oura.test/oauth/token",
+      tokenUrl: TOKEN_URL,
       apiBase: "https://api.oura.test",
       timeoutMs: 20,
       fetch: (async (input: string | URL | Request, init?: RequestInit) => {
-        if (new URL(String(input)).pathname === "/oauth/token") {
+        if (String(input) === TOKEN_URL) {
           // Answer once three sleep timeouts have passed, unless the token request's own timeout fires first.
           const outlasted = AbortSignal.timeout(60);
           await new Promise<void>((resolve, reject) => {
@@ -375,7 +510,7 @@ describe("sleep periods", () => {
     oura.sleepStatus = null;
     s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
     // Spent elsewhere: Oura no longer takes it.
-    await oura.fetch("https://api.oura.test/oauth/token", {
+    await oura.fetch(TOKEN_URL, {
       method: "POST",
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: "refresh-1", ...secret() }).toString(),
     });

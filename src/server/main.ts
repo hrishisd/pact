@@ -76,7 +76,11 @@ const alerts = operatorAlerts({
 const oura: OuraAdapter | null = config.oura
   ? ouraAdapter(
       config.dbPath,
-      { ...config.oura, redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString() },
+      {
+        ...config.oura,
+        redirectUri: new URL(API_PATHS.ouraCallback, config.auth.url).toString(),
+        appUrl: new URL(config.auth.url).origin,
+      },
       clock,
       { raiseOperatorAlert: alerts.raise },
     )
