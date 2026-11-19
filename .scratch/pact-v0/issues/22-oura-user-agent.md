@@ -1,6 +1,6 @@
 # 22 Name Pact in every request to Oura
 
-Status: ready-for-agent
+Status: done
 Blocked by: 21
 
 ## Problem
@@ -21,3 +21,4 @@ Oura asks API clients to send a `User-Agent` header that names the app (`.scratc
 
 - 2026-11-18: Built on `claude/festive-goldberg-cvw6p4`, pending merge to `main`. `OuraClient` has an `appUrl`, which `src/server/main.ts` sets to `config.auth.url`; `#userAgent` in `src/core/oura.ts` sends `Pact (+<appUrl>)` on the code exchange, refresh and sleep requests. Test: `oura.test.ts`, "every request names Pact and its address in the User-Agent". `devOura` is unchanged.
 - 2026-11-18: Review follow-ups: `main.ts` passes `new URL(config.auth.url).origin` as `appUrl`, so no path or trailing slash reaches the User-Agent; `#userAgent`'s comment now says a 403 marks the account disconnected (Needs reconnecting).
+- 2026-11-19: Landed on `main` through the pull request for `claude/festive-goldberg-cvw6p4`.
