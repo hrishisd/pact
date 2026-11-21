@@ -130,6 +130,53 @@ test("decks and counts send the host key and the account's own copy, follow a ne
   ]);
 });
 
+test("each decks and counts check logs one anki-fetch line: whether it downloaded and why, the sizes and the times", async () => {
+  // The operator reads these to see how often Pact downloads the whole
+  // collection. No host key, deck name or card content goes in the line.
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  const reuse = { action: "reuse", required: 0, checkSeconds: 0.4321 };
+  const download = {
+    action: "download",
+    reason: "no-copy",
+    required: 2,
+    downloadedBytes: 52_428_800,
+    prunedBytes: 31_457_280,
+    checkSeconds: 0.25,
+    downloadSeconds: 6.1,
+    pruneSeconds: 2.004,
+  };
+  const { adapter } = adapterFor(
+    s,
+    fakeScript(
+      (request) =>
+        okLogin(request) ??
+        (request.op === "decks"
+          ? { ok: true, decks: DECKS, rolloverHour: 4, endpoint: null, fetch: reuse }
+          : {
+              ok: true,
+              ankiDate: "2026-01-06",
+              asOf: 0,
+              decks: { "1": null },
+              names: {},
+              endpoint: null,
+              fetch: download,
+            }),
+    ).run,
+  );
+  await adapter.login(owner.id, "owner@example.test", "right");
+
+  await adapter.decks(owner.id);
+  await adapter.deckCounts(owner.id, ["1"]);
+
+  expect(s.logs).toEqual([
+    `anki-fetch op:decks account:${owner.id} fetch:reuse required:0 checkSeconds:0.43`,
+    `anki-fetch op:counts account:${owner.id} fetch:download reason:no-copy required:2 downloadedBytes:52428800 ` +
+      `prunedBytes:31457280 checkSeconds:0.25 downloadSeconds:6.10 pruneSeconds:2.00`,
+  ]);
+  expect(s.logs.join("\n")).toMatch(/^[A-Za-z0-9_ .:\n-]+$/);
+});
+
 test("an auth error is disconnected; a network error throws; a protocol error throws and alerts the operator", async () => {
   const s = scenario();
   const owner = await s.signIn("owner");

@@ -16,11 +16,11 @@ const SCRIPT = join(import.meta.dirname, "anki_check.py");
 
 /**
  * Loads the script by path and runs `fresh_copy` with a recording Collection;
- * prints the calls as JSON, the warning it returned or its own failure answer
- * if it raised, and the change stamp left on disk.
+ * prints the calls as JSON, the warning and fetch facts it returned or its own
+ * failure answer if it raised, the change stamp left on disk and the copy's size.
  */
 const DRIVER = `
-import importlib.util, json, sqlite3, sys
+import importlib.util, json, os, sqlite3, sys
 
 spec = importlib.util.spec_from_file_location("anki_check", sys.argv[1])
 anki_check = importlib.util.module_from_spec(spec)
@@ -70,6 +70,9 @@ class Collection:
         calls.append(["download", auth.endpoint, server_usn, upload])
         sql("create table col (mod, scm, usn, ls)")
         sql("insert into col values (?, ?, ?, ?)", *given["downloaded"])
+        # Note content: what the prune removes, so the pruned copy is smaller than the download.
+        sql("create table notes (flds)")
+        sql("insert into notes values (?)", "x" * 200_000)
     def reopen(self, after_full_sync=False):
         calls.append(["reopen", after_full_sync])
         self.db = DB()
@@ -79,6 +82,8 @@ class Collection:
             move_mod()
         if given["moves"] == "fails":
             raise RuntimeError("disk full")
+        sql("delete from notes")
+        sql("vacuum")
     def close(self, downgrade):
         # As Anki's: nothing once the connection is closed.
         if self.db is None:
@@ -89,13 +94,24 @@ class Collection:
             move_mod()
 
 auth = Auth()
-warning = failure = None
+warning = fetch = failure = None
 try:
-    col, warning = anki_check.fresh_copy(Collection, path, auth)
+    col, warning, fetch = anki_check.fresh_copy(Collection, path, auth)
 except Exception as error:
     failure = anki_check.failure(error)
 stamp = sql("select mod, scm, usn, ls from col")[0] if given["required"] != 0 else None
-json.dump({"calls": calls, "endpoint": auth.endpoint, "warning": warning, "failure": failure, "stamp": stamp}, sys.stdout)
+json.dump(
+    {
+        "calls": calls,
+        "endpoint": auth.endpoint,
+        "warning": warning,
+        "fetch": fetch,
+        "failure": failure,
+        "stamp": stamp,
+        "size": os.path.getsize(path),
+    },
+    sys.stdout,
+)
 `;
 
 /** The col row's change stamp as downloaded: mod, scm, usn, ls. */
@@ -151,8 +167,10 @@ function freshCopy(given: {
     calls: unknown[][];
     endpoint: string | null;
     warning: string | null;
+    fetch: Record<string, unknown> | null;
     failure: { ok: false; error: string; message: string } | null;
     stamp: number[] | null;
+    size: number;
   };
 }
 
@@ -173,8 +191,10 @@ test("with no copy yet, it asks AnkiWeb's change check first and downloads from 
     ],
     endpoint: "https://sync7.ankiweb.net/",
     warning: null,
+    fetch: expect.objectContaining({ action: "download", reason: "no-copy" }),
     failure: null,
     stamp: DOWNLOADED,
+    size: expect.any(Number),
   });
 });
 
@@ -198,8 +218,10 @@ test("with a copy, it downloads only when the change check says something change
     ],
     endpoint: "https://sync7.ankiweb.net/",
     warning: null,
+    fetch: expect.objectContaining({ action: "reuse" }),
     failure: null,
     stamp: null,
+    size: 0,
   });
   expect(freshCopy({ copy: true, required: FULL_SYNC, newEndpoint: null }).calls).toEqual([
     ["open", true],
@@ -209,6 +231,42 @@ test("with a copy, it downloads only when the change check says something change
     ["reopen", true],
     ...PRUNE,
   ]);
+});
+
+test("it reports what it fetched: whether it downloaded and why, the sizes before and after pruning, and the time each step took", () => {
+  // The adapter logs these, so the operator can see how often Pact downloads
+  // the whole collection, and whether its own downloads cause more.
+  const seconds = expect.any(Number);
+  const noCopy = freshCopy({ copy: false, required: NO_CHANGES, newEndpoint: null });
+  const changed = freshCopy({ copy: true, required: FULL_SYNC, newEndpoint: null });
+  for (const [run, reason, required] of [
+    [noCopy, "no-copy", NO_CHANGES],
+    [changed, "changes", FULL_SYNC],
+  ] as const) {
+    expect(run.fetch).toEqual({
+      action: "download",
+      reason,
+      required,
+      downloadedBytes: expect.any(Number),
+      prunedBytes: run.size,
+      checkSeconds: seconds,
+      downloadSeconds: seconds,
+      pruneSeconds: seconds,
+    });
+    // The download held 200 kB of note content, which the prune removed.
+    expect(run.fetch!.downloadedBytes).toBeGreaterThan(200_000);
+    expect(run.size).toBeLessThan(200_000);
+  }
+
+  expect(freshCopy({ copy: true, required: NO_CHANGES, newEndpoint: null }).fetch).toEqual({
+    action: "reuse",
+    required: NO_CHANGES,
+    checkSeconds: seconds,
+  });
+  for (const { fetch } of [noCopy, changed]) {
+    for (const key of ["checkSeconds", "downloadSeconds", "pruneSeconds"])
+      expect(fetch![key]).toBeGreaterThanOrEqual(0);
+  }
 });
 
 test("a stamp moved by pruning is put back, and the check goes on with a warning", () => {
