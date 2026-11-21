@@ -18,7 +18,10 @@ Rules it keeps (see .scratch/anki-evidence/spec.md, Adapter):
   - The collection opens with server=True, so Anki never writes this
     server's UTC offset into the owner's collection config.
   - Each run asks sync_status on a fresh backend (a backend caches the answer
-    for 5 minutes), and follows AnkiWeb's new endpoint when it redirects.
+    for 5 minutes), and follows AnkiWeb's new endpoint when it redirects. It
+    asks before every download, the first included, as Anki's own clients
+    do: the first download sent without it, to AnkiWeb's default endpoint,
+    failed in production ("missing original size").
   - It downloads the collection, without media, only when sync_status says
     something changed, or there's no copy yet.
   - Counts are Anki's deck list counts at `as_of`: the owner's last answer on
@@ -106,12 +109,13 @@ def fresh_copy(Collection, path: str, auth):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     exists = os.path.exists(path)
     col = Collection(path, server=True)
-    if exists:
-        status = col.sync_status(auth)
-        if status.new_endpoint:
-            auth.endpoint = status.new_endpoint
-        if status.required == NO_CHANGES:
-            return col
+    # Asked even with no copy yet, as Anki's own clients ask before any download: only this
+    # check follows AnkiWeb's redirect to the account's own endpoint, which the download needs.
+    status = col.sync_status(auth)
+    if status.new_endpoint:
+        auth.endpoint = status.new_endpoint
+    if exists and status.required == NO_CHANGES:
+        return col
     col.close_for_full_sync()
     col.full_upload_or_download(auth=auth, server_usn=None, upload=False)
     col.reopen(after_full_sync=True)
