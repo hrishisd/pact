@@ -642,6 +642,34 @@ describe("reminders", () => {
     expect(reminders()).toHaveLength(1);
   });
 
+  test("AnkiWeb is checked as a reminder goes off: a deck finished since the last check stops it", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, deckShows } = await ownerWithAnki(s);
+    const pactId = ok(
+      await owner.createPact({ ...ankiPact(sam.id, reviewer, { days: ["tue", "wed"] }), reminders: ["20:00"] }),
+    ).pactId;
+    const reminders = () => s.notifier.sentTo(owner, "reminder");
+    const calls = () => s.ankiSource.countCalls.length;
+
+    // Tuesday: checked at 19:15, finished at 19:30, and checked again as the 20:00 reminder goes off.
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 19:15");
+    await s.advanceTo("Tue 19:15");
+    deckShows({}, s.date("Tue"), "Tue 19:30");
+    await s.advanceTo("Tue 19:30");
+    expect(calls()).toBe(1);
+    await s.advanceTo("Tue 20:00");
+    expect(calls()).toBe(2);
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
+    expect(reminders()).toEqual([]);
+
+    // Wednesday: not finished, so the reminder goes, with the cards left as the reminder's check found them.
+    deckShows({ review: 42 }, s.date("Wed"), "Wed 19:15");
+    await s.advanceTo("Wed 19:15");
+    deckShows({ review: 7 }, s.date("Wed"), "Wed 19:30");
+    await s.advanceTo("Wed 20:00");
+    expect(reminders().map((n) => n.payload.body)).toEqual(["7 cards left, due at midnight"]);
+  });
+
   test("a reminder after midnight goes off the morning after, and must be before the due time", async () => {
     const s = scenario();
     const { owner, reviewer, sam } = await ownerWithAnki(s);
