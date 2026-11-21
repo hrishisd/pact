@@ -31,3 +31,4 @@ Evidence and sources: `.scratch/pact-v0/oura-api-research.md`, section 4.
 
 - 2026-11-18: Built on `claude/festive-goldberg-cvw6p4`, pending merge to `main`. `DEFAULTS.tokenUrl` in `src/core/oura.ts` is `https://moi.ouraring.com/oauth/v2/ext/oauth-token`; test: `oura.test.ts`, "exchanges codes and refresh tokens at Oura's token endpoint on its login server". The fake Oura now answers on the new path. Whether a real connect succeeds is the connect check in `manual-checks.md` (Oura Ring section).
 - 2026-11-19: Landed on `main` through the pull request for `claude/festive-goldberg-cvw6p4`.
+- 2026-11-21: Confirmed in production: the owner's real connect succeeded at the new token endpoint (a token row was stored, no operator alerts). A real refresh is still unconfirmed; see `manual-checks.md`.
