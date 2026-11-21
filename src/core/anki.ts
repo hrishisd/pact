@@ -45,7 +45,7 @@ export interface AnkiAdapterOptions {
   python?: string;
   /** How long one run may take: a download of a large collection takes a while. Default 120s. */
   timeoutMs?: number;
-  /** Where the adapter writes log lines (a failed login). Default: console.log. */
+  /** Where the adapter writes log lines (a failed login, what each check fetched). Default: console.log. */
   log?: (line: string) => void;
   /** The operator alert path (operator-alerts.ts), for a protocol error or a warning from the script. */
   raiseOperatorAlert: RaiseOperatorAlert;
@@ -157,10 +157,29 @@ interface ScriptAnswers {
 type ScriptFailure = { ok: false; error: "auth" | "network" | "protocol"; message: string };
 
 /**
- * The script's answer to an `op` request. A success can carry a warning for
- * the operator, such as the copy's change stamp put back after pruning.
+ * What a decks or counts run fetched (`fresh_copy` in anki_check.py): the copy
+ * reused, or downloaded with no copy yet or because AnkiWeb reported changes.
+ * `required` is AnkiWeb's sync status (0 no changes, 1 normal sync, 2 full sync).
  */
-type ScriptAnswer<Op extends ScriptOp> = ({ ok: true; warning?: string } & ScriptAnswers[Op]) | ScriptFailure;
+type Fetch = { required: number; checkSeconds: number } & (
+  | { action: "reuse" }
+  | {
+      action: "download";
+      reason: "no-copy" | "changes";
+      downloadedBytes: number;
+      prunedBytes: number;
+      downloadSeconds: number;
+      pruneSeconds: number;
+    }
+);
+
+/**
+ * The script's answer to an `op` request. A decks or counts success says what
+ * it fetched, and can carry a warning for the operator, such as the copy's
+ * change stamp put back after pruning.
+ */
+type ScriptAnswer<Op extends ScriptOp> =
+  ({ ok: true; warning?: string; fetch?: Fetch } & ScriptAnswers[Op]) | ScriptFailure;
 
 /** A field each op's successful answer must have, and what's wrong when it doesn't. */
 const ANSWER_CHECKS: { [Op in ScriptOp]: { field: keyof ScriptAnswers[Op]; missing: string } } = {
@@ -253,13 +272,13 @@ class Anki implements AnkiAdapter {
   }
 
   async decks(account: AccountId): Promise<AnkiDeckListResult> {
-    const answer = await this.#withLogin(account, (login) => this.#ask({ op: "decks", ...login }));
+    const answer = await this.#withLogin(account, "decks", (login) => this.#ask({ op: "decks", ...login }));
     if (answer === null) return { ok: false, reason: "disconnected" };
     return { ok: true, decks: answer.decks, rolloverHour: answer.rolloverHour };
   }
 
   async deckCounts(account: AccountId, deckIds: readonly string[]): Promise<AnkiCountsResult> {
-    const answer = await this.#withLogin(account, (login) =>
+    const answer = await this.#withLogin(account, "counts", (login) =>
       this.#ask({ op: "counts", ...login, deckIds: [...deckIds] }),
     );
     if (answer === null) return { ok: false, reason: "disconnected" };
@@ -279,10 +298,12 @@ class Anki implements AnkiAdapter {
   /**
    * Runs `operation` with the account's stored login, one at a time per
    * account, and keeps the endpoint AnkiWeb moved it to. Null when there's no
-   * login, or AnkiWeb refused it. A network or protocol error throws.
+   * login, or AnkiWeb refused it. A network or protocol error throws. A
+   * success logs what the run fetched.
    */
-  async #withLogin<Op extends ScriptOp>(
+  async #withLogin<Op extends "decks" | "counts">(
     account: AccountId,
+    op: Op,
     operation: (login: { hostKey: string; endpoint: string | null; collection: string }) => Promise<ScriptAnswer<Op>>,
   ): Promise<({ ok: true; warning?: string } & ScriptAnswers[Op]) | null> {
     return this.#oneAtATime(account, async () => {
@@ -298,6 +319,7 @@ class Anki implements AnkiAdapter {
         throw new Error(`AnkiWeb ${answer.error} error: ${answer.message}`);
       }
       this.#protocolErrorEmailed.delete(account);
+      if (answer.fetch !== undefined) this.#log(fetchLine(op, account, answer.fetch));
       if (answer.warning !== undefined) this.#alertWarning(account, answer.warning);
       if (answer.endpoint !== row.endpoint && answer.endpoint !== null) {
         this.#db.prepare(`UPDATE anki_connection SET endpoint = ? WHERE account_id = ?`).run(answer.endpoint, account);
@@ -364,6 +386,30 @@ class Anki implements AnkiAdapter {
     const copy = this.#copyOf(account);
     for (const path of [copy, `${copy}-wal`, `${copy}-shm`, `${copy}-journal`]) rmSync(path, { force: true });
   }
+}
+
+/**
+ * One greppable line saying what a check fetched, to see how often Pact
+ * downloads whole collections: letters, digits, spaces and `_ . : -` only,
+ * which `scripts/prod-log.sh grep` can search for. No host key, deck name or
+ * card content.
+ */
+function fetchLine(op: "decks" | "counts", account: AccountId, fetch: Fetch): string {
+  const seconds = (value: number) => value.toFixed(2);
+  const facts =
+    fetch.action === "reuse"
+      ? [`fetch:reuse`, `required:${fetch.required}`, `checkSeconds:${seconds(fetch.checkSeconds)}`]
+      : [
+          `fetch:download`,
+          `reason:${fetch.reason}`,
+          `required:${fetch.required}`,
+          `downloadedBytes:${fetch.downloadedBytes}`,
+          `prunedBytes:${fetch.prunedBytes}`,
+          `checkSeconds:${seconds(fetch.checkSeconds)}`,
+          `downloadSeconds:${seconds(fetch.downloadSeconds)}`,
+          `pruneSeconds:${seconds(fetch.pruneSeconds)}`,
+        ];
+  return ["anki-fetch", `op:${op}`, `account:${account}`, ...facts].join(" ");
 }
 
 /** Runs anki_check.py with `python`, giving up after `timeoutMs`. */

@@ -13,9 +13,9 @@ and writes one on stdout:
           "names": {id: full name, for each deck still there}, "endpoint": ...}
 
 or {"ok": false, "error": "auth" | "network" | "protocol", "message": ...}.
-A decks or counts answer also holds "warning": message when the copy's change
-stamp had to be put back after pruning (see `fresh_copy`); the check still
-succeeded.
+A decks or counts answer also holds "fetch": what the run fetched, for the
+adapter's log line (see `fresh_copy`), and "warning": message when the copy's
+change stamp had to be put back after pruning; the check still succeeded.
 
 Rules it keeps (see .scratch/anki-evidence/spec.md, Adapter):
   - The collection opens with server=True, so Anki never writes this
@@ -80,8 +80,8 @@ def run(request: dict) -> dict:
     auth = SyncAuth(hkey=request["hostKey"])
     if request.get("endpoint"):
         auth.endpoint = request["endpoint"]
-    col, warning = fresh_copy(Collection, path, auth)
-    extra = {} if warning is None else {"warning": warning}
+    col, warning, fetch = fresh_copy(Collection, path, auth)
+    extra = {"fetch": fetch, **({} if warning is None else {"warning": warning})}
     try:
         if op == "decks":
             tree = col._backend.deck_tree(now=int(time.time()))
@@ -121,7 +121,11 @@ def run(request: dict) -> dict:
 def fresh_copy(Collection, path: str, auth):
     """The owner's collection, downloaded again if AnkiWeb has changes, opened on a fresh backend.
 
-    Returns the open collection, and a warning if pruning moved the change stamp, else None.
+    Returns the open collection; a warning if pruning moved the change stamp, else None; and
+    what it fetched, for the adapter's log line: "action" ("reuse" or "download"), the
+    "required" AnkiWeb's change check answered and the "checkSeconds" it took, and for a
+    download, its "reason" ("no-copy" or "changes"), the copy's size as downloaded and as
+    pruned ("downloadedBytes", "prunedBytes") and the "downloadSeconds" and "pruneSeconds".
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     exists = os.path.exists(path)
@@ -129,14 +133,26 @@ def fresh_copy(Collection, path: str, auth):
     try:
         # Asked even with no copy yet, as Anki's own clients ask before any download: only this
         # check follows AnkiWeb's redirect to the account's own endpoint, which the download needs.
+        started = time.monotonic()
         status = col.sync_status(auth)
+        fetch = {"required": int(status.required), "checkSeconds": time.monotonic() - started}
         if status.new_endpoint:
             auth.endpoint = status.new_endpoint
         if exists and status.required == NO_CHANGES:
-            return col, None
+            return col, None, {"action": "reuse", **fetch}
+        started = time.monotonic()
         download(col, auth)
+        fetch = {
+            "action": "download",
+            "reason": "changes" if exists else "no-copy",
+            **fetch,
+            "downloadedBytes": os.path.getsize(path),
+            "downloadSeconds": time.monotonic() - started,
+        }
         stamp = change_stamp(col)
+        started = time.monotonic()
         prune(col)
+        fetch["pruneSeconds"] = time.monotonic() - started
         # The stamp is checked on disk once Anki has closed the file, as the next run's
         # sync_status reads it. Anki doesn't count the prune as a change today. If a bumped
         # package did, the copy would no longer match AnkiWeb, and every check would download
@@ -145,8 +161,9 @@ def fresh_copy(Collection, path: str, auth):
         # safe for this one row: the col table has no index on Anki's own collation.
         col.close(downgrade=False)
         warning = restore_stamp(path, stamp)
+        fetch["prunedBytes"] = os.path.getsize(path)
         col.reopen()
-        return col, warning
+        return col, warning, fetch
     except BaseException:
         col.close(downgrade=False)  # a no-op once Anki's connection is closed
         raise

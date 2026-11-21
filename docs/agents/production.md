@@ -11,6 +11,7 @@ Use `scripts/prod-log.sh`: it only reads logs, so it runs without a permission p
 | The server's own output, back past restarts (capped at about 20 MB) | `scripts/prod-log.sh tail 500` |
 | Search it (letters, digits, spaces and `_ . : -` only) | `scripts/prod-log.sh grep OPERATOR_ALERT` |
 | Evidence upload sizes and times (one line per upload) | `scripts/prod-log.sh grep evidence-upload` |
+| Anki collection downloads: whether each check downloaded and why, sizes and times (one line per deck list or counts check) | `scripts/prod-log.sh grep anki-fetch`, or `grep fetch:download` for downloads only |
 | Litestream's output, or the very latest lines | `scripts/prod-log.sh fly` (only about the last 100 lines) |
 | Database counts: `schema-version`, `penalty-totals`, `pact-cursors` | `scripts/prod-db.sh penalty-totals` |
 | Any read-only SQL query (one statement, up to 500 rows as JSON lines) | `scripts/prod-db.sh query 'SELECT id, status FROM pact'`. The connection is read-only and statements that can write are refused. Rows can hold names and emails: select only the columns you need. |
