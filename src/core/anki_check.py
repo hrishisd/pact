@@ -13,6 +13,9 @@ and writes one on stdout:
           "names": {id: full name, for each deck still there}, "endpoint": ...}
 
 or {"ok": false, "error": "auth" | "network" | "protocol", "message": ...}.
+A decks or counts answer also holds "warning": message when the copy's change
+stamp had to be put back after pruning (see `fresh_copy`); the check still
+succeeded.
 
 Rules it keeps (see .scratch/anki-evidence/spec.md, Adapter):
   - The collection opens with server=True, so Anki never writes this
@@ -24,10 +27,12 @@ Rules it keeps (see .scratch/anki-evidence/spec.md, Adapter):
     failed in production ("missing original size").
   - It downloads the collection, without media, only when sync_status says
     something changed, or there's no copy yet.
-  - After each download it blanks the notes' content (`prune`), so the copy
-    Pact keeps holds no card text: cards, decks, deck options, config and the
-    review log stay. A copy from before pruning is pruned at its next
-    download. Pruning must leave the change stamp alone, or the check fails.
+  - After each download it blanks the note fields (`prune`), so the copy Pact
+    keeps holds no note content. The rest stays: note rows (ids, tags),
+    cards, notetypes, decks with their descriptions, deck options, config
+    and the review log. A copy from before pruning is pruned at its next
+    download. The collection's change stamp is left as downloaded, put back
+    if pruning moved it.
   - Counts are Anki's deck list counts at `as_of`: the owner's last answer on
     the current Anki day, or now with none.
   - It never uploads (`download` is its only full sync) and never calls
@@ -37,6 +42,7 @@ Rules it keeps (see .scratch/anki-evidence/spec.md, Adapter):
 
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -74,7 +80,8 @@ def run(request: dict) -> dict:
     auth = SyncAuth(hkey=request["hostKey"])
     if request.get("endpoint"):
         auth.endpoint = request["endpoint"]
-    col = fresh_copy(Collection, path, auth)
+    col, warning = fresh_copy(Collection, path, auth)
+    extra = {} if warning is None else {"warning": warning}
     try:
         if op == "decks":
             tree = col._backend.deck_tree(now=int(time.time()))
@@ -83,6 +90,7 @@ def run(request: dict) -> dict:
                 "decks": list(walk(tree, None, None)),
                 "rolloverHour": rollover_hour(col),
                 "endpoint": auth.endpoint or None,
+                **extra,
             }
         if op == "counts":
             as_of = last_answer_today(col) or time.time()
@@ -103,6 +111,7 @@ def run(request: dict) -> dict:
                 "decks": decks,
                 "names": names,
                 "endpoint": auth.endpoint or None,
+                **extra,
             }
         raise ValueError(f"unknown op {op!r}")
     finally:
@@ -110,20 +119,37 @@ def run(request: dict) -> dict:
 
 
 def fresh_copy(Collection, path: str, auth):
-    """The owner's collection, downloaded again if AnkiWeb has changes, opened on a fresh backend."""
+    """The owner's collection, downloaded again if AnkiWeb has changes, opened on a fresh backend.
+
+    Returns the open collection, and a warning if pruning moved the change stamp, else None.
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     exists = os.path.exists(path)
     col = Collection(path, server=True)
-    # Asked even with no copy yet, as Anki's own clients ask before any download: only this
-    # check follows AnkiWeb's redirect to the account's own endpoint, which the download needs.
-    status = col.sync_status(auth)
-    if status.new_endpoint:
-        auth.endpoint = status.new_endpoint
-    if exists and status.required == NO_CHANGES:
-        return col
-    download(col, auth)
-    prune(col)
-    return col
+    try:
+        # Asked even with no copy yet, as Anki's own clients ask before any download: only this
+        # check follows AnkiWeb's redirect to the account's own endpoint, which the download needs.
+        status = col.sync_status(auth)
+        if status.new_endpoint:
+            auth.endpoint = status.new_endpoint
+        if exists and status.required == NO_CHANGES:
+            return col, None
+        download(col, auth)
+        stamp = change_stamp(col)
+        prune(col)
+        # The stamp is checked on disk once Anki has closed the file, as the next run's
+        # sync_status reads it. Anki doesn't count the prune as a change today. If a bumped
+        # package did, the copy would no longer match AnkiWeb, and every check would download
+        # and prune again. That doesn't make the counts wrong, so the stamp is put back and the
+        # check goes on, with a warning the adapter raises as an operator alert. Plain sqlite3 is
+        # safe for this one row: the col table has no index on Anki's own collation.
+        col.close(downgrade=False)
+        warning = restore_stamp(path, stamp)
+        col.reopen()
+        return col, warning
+    except BaseException:
+        col.close(downgrade=False)  # a no-op once Anki's connection is closed
+        raise
 
 
 def download(col, auth) -> None:
@@ -138,29 +164,39 @@ def download(col, auth) -> None:
 
 
 def prune(col) -> None:
-    """Blank the notes' content, so the stored copy holds none of the owner's card text.
+    """Blank the note fields, so the stored copy holds none of the owner's note content.
 
-    Counting (the deck tree, the last answer, rollover, deck names) never reads notes.
-    The review log stays: daily limits read today's answers. It runs through Anki's own
-    connection: the vacuum rebuilds indexes on Anki's own collation, which plain sqlite3 lacks.
+    Counting (the deck tree, the last answer, rollover, deck names) never reads note fields.
+    The review log stays whole: the script's own `last_answer_today` (as_of) reads today's
+    answers, and dropping older ones saved only 4 MB on the owner's collection. It runs
+    through Anki's own connection: the vacuum rebuilds indexes on Anki's own collation,
+    which plain sqlite3 lacks.
     """
-    stamp = change_stamp(col)
     col.db.execute("update notes set flds = '', sfld = '', csum = 0")
     col.optimize()  # vacuum, so the file shrinks
-    # Anki doesn't count this as a change today. If a bumped anki package did, the copy would
-    # differ from AnkiWeb's and be downloaded again at every check. That fails here, as a
-    # protocol error the operator is emailed about, rather than being put right with plain
-    # sqlite3 after close: it can only follow a bump of the pinned package, whose other
-    # assumptions (that counting never reads notes) then need checking too, and a hand-
-    # written stamp would hide the change.
-    after = change_stamp(col)
-    if after != stamp:
-        raise RuntimeError(f"pruning the copy changed its change stamp (mod, usn, ls) from {stamp} to {after}")
+
+
+# The col row's change stamp. sync_status compares mod, scm and ls with AnkiWeb's
+# (`get_collection_timestamps`, `compared_to_remote`); usn is kept as downloaded too.
+STAMP = "mod, scm, usn, ls"
 
 
 def change_stamp(col) -> list:
-    """What sync_status compares with AnkiWeb's: when the collection changed, and when it last synced."""
-    return list(col.db.first("select mod, usn, ls from col"))
+    return list(col.db.first(f"select {STAMP} from col"))
+
+
+def restore_stamp(path: str, stamp: list):
+    """Put the closed copy's change stamp back to `stamp` if it moved: a warning saying so, or None."""
+    db = sqlite3.connect(path)
+    try:
+        on_disk = list(db.execute(f"select {STAMP} from col").fetchone())
+        if on_disk == stamp:
+            return None
+        with db:
+            db.execute("update col set mod = ?, scm = ?, usn = ?, ls = ?", stamp)
+    finally:
+        db.close()
+    return f"pruning moved the copy's change stamp ({STAMP}) from {stamp} to {on_disk}; it was put back"
 
 
 def walk(node, parent_id, prefix):

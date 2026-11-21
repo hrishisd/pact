@@ -16,16 +16,29 @@ const SCRIPT = join(import.meta.dirname, "anki_check.py");
 
 /**
  * Loads the script by path and runs `fresh_copy` with a recording Collection;
- * prints the calls as JSON, and the script's own failure answer if it raised.
+ * prints the calls as JSON, the warning it returned or its own failure answer
+ * if it raised, and the change stamp left on disk.
  */
 const DRIVER = `
-import importlib.util, json, sys
+import importlib.util, json, sqlite3, sys
 
 spec = importlib.util.spec_from_file_location("anki_check", sys.argv[1])
 anki_check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(anki_check)
 given = json.load(sys.stdin)
+path = given["collection"]
 calls = []
+
+def sql(statement, *args):
+    """The stand-in keeps the col row in the file itself, so the script's plain sqlite3 sees it."""
+    db = sqlite3.connect(path)
+    with db:
+        rows = db.execute(statement, args).fetchall()
+    db.close()
+    return rows
+
+def move_mod():
+    sql("update col set mod = mod + 1")
 
 class Status:
     required = given["required"]
@@ -34,16 +47,13 @@ class Status:
 class Auth:
     endpoint = None
 
-# The col row's change stamp: mod, usn, ls.
-stamp = [1700000000000, 42, 1700000000000]
-
 class DB:
-    """Anki's connection, open only while the collection is: records writes, answers stamp reads."""
-    def first(self, sql, *args):
-        assert sql.startswith("select"), sql
-        return list(stamp)
-    def execute(self, sql, *args):
-        calls.append(["execute", sql, *args])
+    """Anki's connection: records writes, and reads the col row from the file."""
+    def first(self, statement, *args):
+        assert statement.startswith("select"), statement
+        return list(sql(statement, *args)[0])
+    def execute(self, statement, *args):
+        calls.append(["execute", statement, *args])
 
 class Collection:
     def __init__(self, path, server):
@@ -58,25 +68,50 @@ class Collection:
         self.db = None
     def full_upload_or_download(self, *, auth, server_usn, upload):
         calls.append(["download", auth.endpoint, server_usn, upload])
-    def reopen(self, after_full_sync):
+        sql("create table col (mod, scm, usn, ls)")
+        sql("insert into col values (?, ?, ?, ?)", *given["downloaded"])
+    def reopen(self, after_full_sync=False):
         calls.append(["reopen", after_full_sync])
         self.db = DB()
     def optimize(self):
         calls.append(["optimize"])
-        if given["optimizeBumpsMod"]:
-            stamp[0] += 1
+        if given["moves"] == "optimize":
+            move_mod()
+        if given["moves"] == "fails":
+            raise RuntimeError("disk full")
+    def close(self, downgrade):
+        # As Anki's: nothing once the connection is closed.
+        if self.db is None:
+            return
+        calls.append(["close", downgrade])
+        self.db = None
+        if given["moves"] == "close":
+            move_mod()
 
 auth = Auth()
+warning = failure = None
 try:
-    anki_check.fresh_copy(Collection, given["collection"], auth)
-    failure = None
+    col, warning = anki_check.fresh_copy(Collection, path, auth)
 except Exception as error:
     failure = anki_check.failure(error)
-json.dump({"calls": calls, "endpoint": auth.endpoint, "failure": failure}, sys.stdout)
+stamp = sql("select mod, scm, usn, ls from col")[0] if given["required"] != 0 else None
+json.dump({"calls": calls, "endpoint": auth.endpoint, "warning": warning, "failure": failure, "stamp": stamp}, sys.stdout)
 `;
 
-/** The prune `fresh_copy` runs after each download: note content blanked, revlog kept, then a vacuum. */
-const PRUNE = [["execute", "update notes set flds = '', sfld = '', csum = 0"], ["optimize"]];
+/** The col row's change stamp as downloaded: mod, scm, usn, ls. */
+const DOWNLOADED = [1700000000500, 1600000000000, 42, 1700000000500];
+
+/**
+ * What `fresh_copy` runs after each download: the note fields blanked, then a
+ * vacuum, and the copy closed so the stamp can be checked on disk. The review
+ * log stays: `last_answer_today` reads today's answers.
+ */
+const PRUNE = [
+  ["execute", "update notes set flds = '', sfld = '', csum = 0"],
+  ["optimize"],
+  ["close", false],
+  ["reopen", false],
+];
 
 // Anki's sync status values (SyncStatus.Required).
 const NO_CHANGES = 0;
@@ -88,7 +123,13 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function freshCopy(given: { copy: boolean; required: number; newEndpoint: string | null; optimizeBumpsMod?: boolean }) {
+function freshCopy(given: {
+  copy: boolean;
+  required: number;
+  newEndpoint: string | null;
+  /** What moves the copy's mod, as a future anki package might, or makes the prune fail. */
+  moves?: "optimize" | "close" | "fails";
+}) {
   const collection = join(dir, "collections", "owner.anki2");
   if (given.copy) {
     mkdirSync(join(dir, "collections"), { recursive: true });
@@ -100,7 +141,8 @@ function freshCopy(given: { copy: boolean; required: number; newEndpoint: string
       collection,
       required: given.required,
       newEndpoint: given.newEndpoint,
-      optimizeBumpsMod: given.optimizeBumpsMod ?? false,
+      downloaded: DOWNLOADED,
+      moves: given.moves ?? null,
     }),
     encoding: "utf8",
   });
@@ -108,7 +150,9 @@ function freshCopy(given: { copy: boolean; required: number; newEndpoint: string
   return JSON.parse(run.stdout) as {
     calls: unknown[][];
     endpoint: string | null;
+    warning: string | null;
     failure: { ok: false; error: string; message: string } | null;
+    stamp: number[] | null;
   };
 }
 
@@ -128,7 +172,9 @@ test("with no copy yet, it asks AnkiWeb's change check first and downloads from 
       ...PRUNE,
     ],
     endpoint: "https://sync7.ankiweb.net/",
+    warning: null,
     failure: null,
+    stamp: DOWNLOADED,
   });
 });
 
@@ -151,7 +197,9 @@ test("with a copy, it downloads only when the change check says something change
       ["sync_status", null],
     ],
     endpoint: "https://sync7.ankiweb.net/",
+    warning: null,
     failure: null,
+    stamp: null,
   });
   expect(freshCopy({ copy: true, required: FULL_SYNC, newEndpoint: null }).calls).toEqual([
     ["open", true],
@@ -163,27 +211,23 @@ test("with a copy, it downloads only when the change check says something change
   ]);
 });
 
-test("after each download it blanks the notes' content, and keeps the review log", () => {
-  // Counting reads cards, decks, deck options, config and today's review log,
-  // never note content, so the stored copy keeps none of the owner's card
-  // text. The review log stays: daily limits read today's answers.
-  const { calls, failure } = freshCopy({ copy: true, required: FULL_SYNC, newEndpoint: null });
-  expect(failure).toBeNull();
-  expect(calls.slice(calls.findIndex((call) => call[0] === "reopen"))).toEqual([["reopen", true], ...PRUNE]);
+test("a stamp moved by pruning is put back, and the check goes on with a warning", () => {
+  // A stamp that no longer matches AnkiWeb's would make every check download
+  // again. The counts are still right, so the check succeeds, and the warning
+  // tells the operator that the anki package changed how it treats the prune.
+  for (const moves of ["optimize", "close"] as const) {
+    const { calls, warning, failure, stamp } = freshCopy({ copy: true, required: FULL_SYNC, newEndpoint: null, moves });
+    expect(calls.slice(-PRUNE.length)).toEqual(PRUNE);
+    expect(failure).toBeNull();
+    expect(stamp).toEqual(DOWNLOADED);
+    expect(warning).toMatch(/change stamp \(mod, scm, usn, ls\).*put back/);
+  }
 });
 
-test("a copy kept because nothing changed isn't pruned again", () => {
-  // A copy downloaded before pruning existed is pruned at its next download.
-  expect(freshCopy({ copy: true, required: NO_CHANGES, newEndpoint: null }).calls).not.toContainEqual(PRUNE[0]);
-});
-
-test("a prune that changes the collection's change stamp fails the check as a protocol error", () => {
-  // A stamp that no longer matches AnkiWeb's means a full download at every
-  // check, so it must not pass quietly: the pinned anki package has changed
-  // how it treats Pact's own writes.
-  const { calls, failure } = freshCopy({ copy: false, required: FULL_SYNC, newEndpoint: null, optimizeBumpsMod: true });
-  expect(calls).toContainEqual(["optimize"]);
-  expect(failure).toEqual({ ok: false, error: "protocol", message: expect.stringContaining("change stamp") });
+test("a prune that fails closes the collection", () => {
+  const { calls, failure } = freshCopy({ copy: true, required: FULL_SYNC, newEndpoint: null, moves: "fails" });
+  expect(calls.slice(-2)).toEqual([["optimize"], ["close", false]]);
+  expect(failure).toEqual({ ok: false, error: "protocol", message: "RuntimeError: disk full" });
 });
 
 test("the script has one way to AnkiWeb's full sync, and it only downloads", () => {

@@ -47,7 +47,7 @@ export interface AnkiAdapterOptions {
   timeoutMs?: number;
   /** Where the adapter writes log lines (a failed login). Default: console.log. */
   log?: (line: string) => void;
-  /** The operator alert path (operator-alerts.ts), for a protocol error. */
+  /** The operator alert path (operator-alerts.ts), for a protocol error or a warning from the script. */
   raiseOperatorAlert: RaiseOperatorAlert;
 }
 
@@ -156,8 +156,11 @@ interface ScriptAnswers {
 
 type ScriptFailure = { ok: false; error: "auth" | "network" | "protocol"; message: string };
 
-/** The script's answer to an `op` request. */
-type ScriptAnswer<Op extends ScriptOp> = ({ ok: true } & ScriptAnswers[Op]) | ScriptFailure;
+/**
+ * The script's answer to an `op` request. A success can carry a warning for
+ * the operator, such as the copy's change stamp put back after pruning.
+ */
+type ScriptAnswer<Op extends ScriptOp> = ({ ok: true; warning?: string } & ScriptAnswers[Op]) | ScriptFailure;
 
 /** A field each op's successful answer must have, and what's wrong when it doesn't. */
 const ANSWER_CHECKS: { [Op in ScriptOp]: { field: keyof ScriptAnswers[Op]; missing: string } } = {
@@ -184,6 +187,12 @@ class Anki implements AnkiAdapter {
    * otherwise email each time. In memory: a restart costs at most one more email.
    */
   readonly #protocolErrorEmailed = new Set<AccountId>();
+  /**
+   * Accounts whose warning has been emailed while the adapter runs: one comes
+   * with each download, which the next check doesn't repeat, but a day can
+   * hold many. Each further one is only logged.
+   */
+  readonly #warningEmailed = new Set<AccountId>();
   /** The operation running for each account: the next waits for it. */
   readonly #running = new Map<AccountId, Promise<unknown>>();
 
@@ -275,7 +284,7 @@ class Anki implements AnkiAdapter {
   async #withLogin<Op extends ScriptOp>(
     account: AccountId,
     operation: (login: { hostKey: string; endpoint: string | null; collection: string }) => Promise<ScriptAnswer<Op>>,
-  ): Promise<({ ok: true } & ScriptAnswers[Op]) | null> {
+  ): Promise<({ ok: true; warning?: string } & ScriptAnswers[Op]) | null> {
     return this.#oneAtATime(account, async () => {
       const row = this.#db
         .prepare(`SELECT host_key, endpoint FROM anki_connection WHERE account_id = ?`)
@@ -289,6 +298,7 @@ class Anki implements AnkiAdapter {
         throw new Error(`AnkiWeb ${answer.error} error: ${answer.message}`);
       }
       this.#protocolErrorEmailed.delete(account);
+      if (answer.warning !== undefined) this.#alertWarning(account, answer.warning);
       if (answer.endpoint !== row.endpoint && answer.endpoint !== null) {
         this.#db.prepare(`UPDATE anki_connection SET endpoint = ? WHERE account_id = ?`).run(answer.endpoint, account);
       }
@@ -305,6 +315,18 @@ class Anki implements AnkiAdapter {
       withoutEmail: this.#protocolErrorEmailed.has(account),
     });
     this.#protocolErrorEmailed.add(account);
+  }
+
+  /** The check succeeded, but something the operator should look at happened on the way. */
+  #alertWarning(account: AccountId, warning: string): void {
+    this.#raiseOperatorAlert({
+      title: "Anki check warning",
+      text:
+        `Anki check warning for account ${account}: ${warning}. ` +
+        `The check succeeded; the pinned anki package may have changed how it treats the stored copy.`,
+      withoutEmail: this.#warningEmailed.has(account),
+    });
+    this.#warningEmailed.add(account);
   }
 
   /**
