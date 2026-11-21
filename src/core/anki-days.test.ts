@@ -2,8 +2,9 @@
 // each Anki day from AnkiWeb's counts. A day is Satisfied at the first check
 // that finds its deck finished (New, Learn and Due all 0) for that Anki day,
 // evaluated before its due time, and Missed at its due time without one.
-// AnkiWeb is checked every 10 minutes per account while a day is open and
-// not judged, before the tick's write transaction.
+// AnkiWeb is checked every hour per account while a day is open and not
+// judged, and every 10 minutes in the last hour before its due time, before
+// the tick's write transaction.
 //
 // The scenarios' Anki days start at 4am (the fake's rollover hour), in New
 // York, the scenario's timezone.
@@ -401,7 +402,17 @@ describe("judging an Anki day", () => {
 });
 
 describe("checking AnkiWeb", () => {
-  test("an account with an Anki day open is checked every 10 minutes, and not once the day is judged", async () => {
+  /** Ticks every minute from `from` (inclusive) for `minutes` minutes, on the given day. */
+  const tickEveryMinute = async (s: Scenario, day: string, from: string, minutes: number) => {
+    const [h, m] = from.split(":").map(Number);
+    for (let i = 0; i < minutes; i++) {
+      const total = h! * 60 + m! + i;
+      const time = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+      await s.advanceTo(`${day} ${time}`);
+    }
+  };
+
+  test("an account with an Anki day open is checked every hour, and not once the day is judged", async () => {
     const s = scenario();
     const { owner, createPact, deckShows } = await ownerWithAnki(s);
     await createPact({ days: ["tue", "wed"] });
@@ -412,24 +423,44 @@ describe("checking AnkiWeb", () => {
     expect(calls()).toBe(0);
 
     deckShows({ review: 42 }, s.date("Tue"), "Tue 04:00");
-    for (let minute = 0; minute < 30; minute++) {
-      await s.advanceTo(`Tue 04:${String(minute).padStart(2, "0")}`);
-    }
-    expect(calls()).toBe(3);
+    await tickEveryMinute(s, "Tue", "04:00", 120);
+    expect(calls()).toBe(2);
     expect(s.ankiSource.countCalls[0]).toEqual({ account: owner.id, deckIds: [SPANISH] });
 
-    deckShows({}, s.date("Tue"), "Tue 04:29");
-    await s.advanceTo("Tue 04:30");
-    expect(calls()).toBe(4);
-    await s.advanceTo("Tue 05:00");
+    deckShows({}, s.date("Tue"), "Tue 05:30");
+    await tickEveryMinute(s, "Tue", "06:00", 1);
+    expect(calls()).toBe(3);
+    await s.advanceTo("Tue 07:00");
     await s.advanceTo("Tue 23:00");
     await s.advanceTo("Wed 03:59");
-    expect(calls()).toBe(4);
+    expect(calls()).toBe(3);
 
     // Wednesday's Anki day opens.
     deckShows({ review: 42 }, s.date("Wed"), "Wed 04:00");
     await s.advanceTo("Wed 04:00");
-    expect(calls()).toBe(5);
+    expect(calls()).toBe(4);
+  });
+
+  test("in the last hour before the due time, an open day is checked every 10 minutes", async () => {
+    const s = scenario();
+    const { createPact, deckShows } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 21:00");
+
+    // Due at midnight: at 22:00, then 23:00, 23:10, 23:20, 23:30, 23:40 and 23:50.
+    await tickEveryMinute(s, "Tue", "22:00", 120);
+    expect(s.ankiSource.countCalls).toHaveLength(7);
+  });
+
+  test("a deck finished in the last hour is Satisfied by the scheduler alone", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    const pactId = await createPact({ days: ["tue"] });
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 21:00");
+    await tickEveryMinute(s, "Tue", "22:00", 105);
+    deckShows({}, s.date("Tue"), "Tue 23:45");
+    await tickEveryMinute(s, "Tue", "23:45", 15);
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
   });
 
   test("an account with no Anki pact is never checked", async () => {
@@ -550,8 +581,8 @@ describe("Today", () => {
       expect.objectContaining({ kind: "anki", lastCheck: { cardsLeft: 42, checkedAt: s.at("Tue 21:10") } }),
     ]);
 
-    deckShows({}, s.date("Tue"), "Tue 21:30");
-    await s.advanceTo("Tue 21:30");
+    deckShows({}, s.date("Tue"), "Tue 22:10");
+    await s.advanceTo("Tue 22:10");
     expect(cards(owner, "to-do")).toEqual([]);
     s.setClockTo("Wed 12:00");
     expect(owner.today().yesterday).toEqual([
@@ -609,6 +640,34 @@ describe("reminders", () => {
     await s.advanceTo("Wed 20:30");
     await s.advanceTo("Wed 21:00");
     expect(reminders()).toHaveLength(1);
+  });
+
+  test("AnkiWeb is checked as a reminder goes off: a deck finished since the last check stops it", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam, deckShows } = await ownerWithAnki(s);
+    const pactId = ok(
+      await owner.createPact({ ...ankiPact(sam.id, reviewer, { days: ["tue", "wed"] }), reminders: ["20:00"] }),
+    ).pactId;
+    const reminders = () => s.notifier.sentTo(owner, "reminder");
+    const calls = () => s.ankiSource.countCalls.length;
+
+    // Tuesday: checked at 19:15, finished at 19:30, and checked again as the 20:00 reminder goes off.
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 19:15");
+    await s.advanceTo("Tue 19:15");
+    deckShows({}, s.date("Tue"), "Tue 19:30");
+    await s.advanceTo("Tue 19:30");
+    expect(calls()).toBe(1);
+    await s.advanceTo("Tue 20:00");
+    expect(calls()).toBe(2);
+    expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
+    expect(reminders()).toEqual([]);
+
+    // Wednesday: not finished, so the reminder goes, with the cards left as the reminder's check found them.
+    deckShows({ review: 42 }, s.date("Wed"), "Wed 19:15");
+    await s.advanceTo("Wed 19:15");
+    deckShows({ review: 7 }, s.date("Wed"), "Wed 19:30");
+    await s.advanceTo("Wed 20:00");
+    expect(reminders().map((n) => n.payload.body)).toEqual(["7 cards left, due at midnight"]);
   });
 
   test("a reminder after midnight goes off the morning after, and must be before the due time", async () => {
@@ -722,8 +781,8 @@ describe("AnkiWeb refusing Pact's login", () => {
     const s = scenario();
     const { owner, createPact, deckShows } = await ownerWithAnki(s);
     const pactId = await createPact({ days: ["tue"] });
-    deckShows({ review: 42 }, s.date("Tue"), "Tue 07:50");
-    await s.advanceTo("Tue 07:50");
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 07:00");
+    await s.advanceTo("Tue 07:00");
 
     s.ankiSource.disconnect(owner.id);
     await s.advanceTo("Tue 08:00");
@@ -900,8 +959,8 @@ describe("a deck gone from Anki", () => {
     await owner.ankiDecks();
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { anki: { deckName: "Spanish", deckMissing: true } } });
 
-    deckShows({ review: 5 }, s.date("Tue"), "Tue 20:10");
-    await s.advanceTo("Tue 20:10");
+    deckShows({ review: 5 }, s.date("Tue"), "Tue 21:00");
+    await s.advanceTo("Tue 21:00");
     expect(owner.pact(pactId)).toMatchObject({ ok: true, pact: { anki: { deckName: "Spanish", deckMissing: false } } });
     expect(cards(owner, "to-do")).toEqual([expect.objectContaining({ pactId, deckMissing: false })]);
   });
@@ -981,8 +1040,8 @@ describe("changing an Anki pact's deck", () => {
     expect(statusOn(owner, pactId, s.date("Tue"))).toBe("not-judged");
     expect(s.ankiSource.countCalls.at(-1)).toEqual({ account: owner.id, deckIds: [SPANISH] });
     expect(cards(owner, "to-do")).toEqual([expect.objectContaining({ pactId, deckName: "Spanish" })]);
-    deckShows({}, s.date("Tue"), "Tue 20:10");
-    await s.advanceTo("Tue 20:10");
+    deckShows({}, s.date("Tue"), "Tue 21:00");
+    await s.advanceTo("Tue 21:00");
     expect(statusOn(owner, pactId, s.date("Tue"))).toBe("satisfied");
 
     // Wednesday is on Italian.

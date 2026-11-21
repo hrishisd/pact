@@ -35,46 +35,19 @@ const REMINDER_LATE_MS = 15 * 60 * 1000;
  * approved excuse or vacation covers.
  */
 export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
-  const pacts = ctx.all<
-    Pick<
-      PactRow,
-      | "id"
-      | "name"
-      | "evidence_kind"
-      | "schedule"
-      | "reminders"
-      | "reminded_through"
-      | "anki_rollover_hour"
-      | "in_bed_by"
-      | "due_by"
-      | "created_at"
-    > & {
-      owner_account_id: AccountId;
-      timezone: string;
-    }
-  >(`SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
-              pact.anki_rollover_hour, pact.in_bed_by, pact.due_by, pact.created_at, pact.owner_account_id,
-              account.timezone
-       FROM pact JOIN account ON account.id = pact.owner_account_id
-       WHERE pact.stage = 'active'
-       ORDER BY pact.created_at, pact.id`);
   const dropped: DroppedReminder[] = [];
-  for (const pact of pacts) {
+  for (const pact of reminderPacts(ctx)) {
     const from = pact.reminded_through === null ? t : new Date(pact.reminded_through);
     if (from.getTime() >= t.getTime()) continue;
     ctx.db.prepare(`UPDATE pact SET reminded_through = ? WHERE id = ?`).run(t.toISOString(), pact.id);
-    const times = remindersOf(pact.reminders);
-    if (times.length === 0) continue;
-    const { timezone } = pact;
-    // A night's or an Anki day's reminder can go off the morning after, so start a day early.
-    const fromDate = addDays(localDateOf(from, timezone), -1);
-    const occurrences = occurrencesOf(ctx, pact.id, timezone);
-    const due = remindersDue(pact, times, occurrences, fromDate, localDateOf(t, timezone), timezone);
+    if (remindersOf(pact.reminders).length === 0) continue;
     // A reminder sent before the owner moved west comes round again: it went off already.
-    ctx.db.prepare(`DELETE FROM reminder_sent WHERE pact_id = ? AND date < ?`).run(pact.id, addDays(fromDate, -1));
-    for (const { date, dueAt, time, at } of due) {
-      if (at.getTime() <= from.getTime() || at.getTime() > t.getTime()) continue;
-      if (at.getTime() >= dueAt.getTime() || !worthReminding(ctx, pact, occurrences, date)) continue;
+    ctx.db
+      .prepare(`DELETE FROM reminder_sent WHERE pact_id = ? AND date < ?`)
+      .run(pact.id, addDays(remindersFromDate(from, pact.timezone), -1));
+    const { occurrences, due } = remindersBetween(ctx, pact, from, t);
+    for (const { date, time, at } of due) {
+      if (!worthReminding(ctx, pact, occurrences, date)) continue;
       const lateMs = t.getTime() - at.getTime();
       if (lateMs > REMINDER_LATE_MS) {
         dropped.push({ pactId: pact.id, date, time, lateMs });
@@ -101,6 +74,91 @@ export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
     });
   }
   return dropped;
+}
+
+/**
+ * The Active Anki pacts with a reminder that `remind` would send at `t`: due
+ * since the scheduler last looked, not more than 15 minutes late, about a day
+ * not judged yet. The tick checks their owners' AnkiWeb first, so a deck
+ * finished since the last check stops the reminder.
+ */
+export function ankiPactsToRemind(ctx: CoreContext, t: Date): Set<string> {
+  const pactIds = new Set<string>();
+  for (const pact of reminderPacts(ctx, "anki")) {
+    if (pact.reminded_through === null) continue;
+    const from = new Date(pact.reminded_through);
+    if (from.getTime() >= t.getTime()) continue;
+    const { occurrences, due } = remindersBetween(ctx, pact, from, t);
+    const sends = due.some(
+      ({ date, at }) => t.getTime() - at.getTime() <= REMINDER_LATE_MS && worthReminding(ctx, pact, occurrences, date),
+    );
+    if (sends) pactIds.add(pact.id);
+  }
+  return pactIds;
+}
+
+type ReminderPact = Pick<
+  PactRow,
+  | "id"
+  | "name"
+  | "evidence_kind"
+  | "schedule"
+  | "reminders"
+  | "reminded_through"
+  | "anki_rollover_hour"
+  | "in_bed_by"
+  | "due_by"
+  | "created_at"
+> & {
+  owner_account_id: AccountId;
+  timezone: string;
+};
+
+/** Every Active pact (or only those with `evidenceKind`), with what sending its reminders needs. */
+function reminderPacts(ctx: CoreContext, evidenceKind?: PactRow["evidence_kind"]): ReminderPact[] {
+  return ctx.all<ReminderPact>(
+    `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, pact.reminders, pact.reminded_through,
+            pact.anki_rollover_hour, pact.in_bed_by, pact.due_by, pact.created_at, pact.owner_account_id,
+            account.timezone
+       FROM pact JOIN account ON account.id = pact.owner_account_id
+       WHERE pact.stage = 'active' AND (? IS NULL OR pact.evidence_kind = ?)
+       ORDER BY pact.created_at, pact.id`,
+    evidenceKind ?? null,
+    evidenceKind ?? null,
+  );
+}
+
+/** A night's or an Anki day's reminder can go off the morning after, so the days to look at start a day early. */
+function remindersFromDate(from: Date, timezone: string): LocalDate {
+  return addDays(localDateOf(from, timezone), -1);
+}
+
+/**
+ * `pact`'s reminders whose time is after `from`, at or before `t`, and
+ * before their day's due time, with the pact's occurrences.
+ */
+function remindersBetween(
+  ctx: CoreContext,
+  pact: ReminderPact,
+  from: Date,
+  t: Date,
+): { occurrences: Occurrences; due: { date: LocalDate; time: string; at: Date }[] } {
+  const { timezone } = pact;
+  const occurrences = occurrencesOf(ctx, pact.id, timezone);
+  const times = remindersOf(pact.reminders);
+  if (times.length === 0) return { occurrences, due: [] };
+  const all = remindersDue(
+    pact,
+    times,
+    occurrences,
+    remindersFromDate(from, timezone),
+    localDateOf(t, timezone),
+    timezone,
+  );
+  const due = all.filter(
+    ({ at, dueAt }) => at.getTime() > from.getTime() && at.getTime() <= t.getTime() && at.getTime() < dueAt.getTime(),
+  );
+  return { occurrences, due };
 }
 
 /**

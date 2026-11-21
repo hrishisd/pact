@@ -8,13 +8,21 @@ import { noteAnkiResult } from "./judging.ts";
 import { coverOn } from "./covers.ts";
 import { isJudged } from "./occurrence-state.ts";
 import type { AnkiCountsResult, AnkiSource } from "./ports.ts";
+import { ankiPactsToRemind } from "./reminders.ts";
 import { settle } from "./settle.ts";
 import { ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
 
 /** The core ignores a check of AnkiWeb now this soon after the account's last one. */
 const ANKI_CHECK_INTERVAL_MS = 15_000;
 /** While an account has an Anki day open and not judged, the scheduler checks AnkiWeb this often. */
-const ANKI_POLL_INTERVAL_MS = 10 * 60 * 1000;
+const ANKI_POLL_INTERVAL_MS = 60 * 60 * 1000;
+/**
+ * In the last hour before a waiting day's due time, the scheduler checks this
+ * often instead: only a check before the due time can satisfy the day, so a
+ * deck finished late isn't Missed for want of a check.
+ */
+const ANKI_LAST_HOUR_POLL_INTERVAL_MS = 10 * 60 * 1000;
+const ANKI_LAST_HOUR_MS = 60 * 60 * 1000;
 
 /**
  * What the core keeps in memory about checking AnkiWeb, by account. `Core`
@@ -93,7 +101,7 @@ function ankiDaysWaiting(
   ctx: CoreContext,
   t: Date,
   owner?: AccountId,
-): { pactId: string; account: AccountId; deckId: string }[] {
+): { pactId: string; account: AccountId; deckId: string; dueAt: Date }[] {
   const pacts = ctx.all<{ id: string; owner_account_id: AccountId; timezone: string }>(
     `SELECT pact.id, pact.owner_account_id, account.timezone
        FROM pact
@@ -110,15 +118,24 @@ function ankiDaysWaiting(
     if (!open || t.getTime() >= open.dueAt.getTime() || isJudged(ctx, pact.id, open.date)) return [];
     // An approved excuse or vacation covers it: it's Excused at its due time whatever the deck shows.
     if (coverOn(ctx, pact.id, open.date)?.state === "approved") return [];
-    return [{ pactId: pact.id, account: pact.owner_account_id, deckId: ankiDeckOn(ctx, pact.id, open.date) }];
+    return [
+      {
+        pactId: pact.id,
+        account: pact.owner_account_id,
+        deckId: ankiDeckOn(ctx, pact.id, open.date),
+        dueAt: open.dueAt,
+      },
+    ];
   });
 }
 
 /**
  * Checks AnkiWeb for each account (or just `owner`) with an Anki day
  * waiting: one call per account, for every deck its waiting pacts are on.
- * A tick checks an account at most every 10 minutes; `owner`'s check now
- * always does. Accounts are checked at once, so a slow AnkiWeb delays the
+ * A tick checks an account at most every hour, or every 10 minutes once one
+ * of its waiting days is due within the hour, and always when a reminder
+ * for one of its waiting days goes off this tick (so a deck finished since
+ * the last check stops it); `owner`'s check now always does. Accounts are checked at once, so a slow AnkiWeb delays the
  * tick by its own call only, never by the sum of everyone's. A call that
  * throws is logged and forgotten, so the next tick tries again. A
  * "disconnected" answer checks nothing, and `recordAnkiChecks` marks the
@@ -133,14 +150,24 @@ export async function fetchAnki(
   owner?: AccountId,
 ): Promise<FetchedAnki[]> {
   const decks = new Map<AccountId, string[]>();
-  for (const { account, deckId } of ankiDaysWaiting(ctx, t, owner)) {
+  /** Accounts with a waiting day due within the hour: checked more often. */
+  const dueSoon = new Set<AccountId>();
+  /** Accounts with a reminder going off this tick for a waiting day: checked now. */
+  const reminding = new Set<AccountId>();
+  const toRemind = owner === undefined ? ankiPactsToRemind(ctx, t) : new Set<string>();
+  for (const { pactId, account, deckId, dueAt } of ankiDaysWaiting(ctx, t, owner)) {
     const list = decks.get(account) ?? [];
     if (!list.includes(deckId)) list.push(deckId);
     decks.set(account, list);
+    if (dueAt.getTime() - t.getTime() <= ANKI_LAST_HOUR_MS) dueSoon.add(account);
+    if (toRemind.has(pactId)) reminding.add(account);
   }
   const check = async (account: AccountId, deckIds: string[]): Promise<FetchedAnki | null> => {
     const last = polling.polls.get(account);
-    if (owner === undefined && last !== undefined && t.getTime() - last < ANKI_POLL_INTERVAL_MS) return null;
+    const interval = dueSoon.has(account) ? ANKI_LAST_HOUR_POLL_INTERVAL_MS : ANKI_POLL_INTERVAL_MS;
+    const shouldCheck =
+      owner !== undefined || reminding.has(account) || last === undefined || t.getTime() - last >= interval;
+    if (!shouldCheck) return null;
     polling.polls.set(account, t.getTime());
     const running = { startedAt: t.getTime() };
     const checks = polling.checksRunning.get(account) ?? new Set();
