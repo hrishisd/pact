@@ -83,6 +83,7 @@ This spec uses **Satisfied** for what v0 calls Kept. Ticket 01 renames it everyw
   - Open the collection with `server=True`. Otherwise Anki writes the server's UTC offset into the collection's config.
   - Run `sync_status` on a fresh backend each time (it caches answers for 5 minutes per backend). Follow `new_endpoint` when AnkiWeb redirects.
   - Download with `full_upload_or_download(upload=False, server_usn=None)`, which skips media.
+  - After each download, blank the notes' content (`flds`, `sfld`, `csum`) through Anki's own connection and vacuum, so the stored copy keeps only what counting needs: cards, decks, deck options, config and the review log. Pruning must leave `col.mod`, `usn` and `ls` unchanged. Never upload the pruned copy. Added in ticket 05 (`storage-brainstorm.md`, option A).
   - Compute counts with `col._backend.deck_tree(now=as_of)` and `find_deck_in_tree`. `as_of` is the last revlog entry on the Anki day, or the check time.
   - Never call `sync_collection`. It unburies cards and pushes local changes back to AnkiWeb.
 - The Docker image gains Python 3 (bookworm ships 3.11) and a pinned `anki` wheel. The wheel needs glibc 2.35 or later, and bookworm has 2.36.

@@ -24,10 +24,15 @@ Rules it keeps (see .scratch/anki-evidence/spec.md, Adapter):
     failed in production ("missing original size").
   - It downloads the collection, without media, only when sync_status says
     something changed, or there's no copy yet.
+  - After each download it blanks the notes' content (`prune`), so the copy
+    Pact keeps holds no card text: cards, decks, deck options, config and the
+    review log stay. A copy from before pruning is pruned at its next
+    download. Pruning must leave the change stamp alone, or the check fails.
   - Counts are Anki's deck list counts at `as_of`: the owner's last answer on
     the current Anki day, or now with none.
-  - It never uploads and never calls sync_collection, which unburies cards
-    and pushes local changes back to AnkiWeb.
+  - It never uploads (`download` is its only full sync) and never calls
+    sync_collection, which unburies cards and pushes local changes back to
+    AnkiWeb. Uploading the pruned copy would wipe the owner's notes.
 """
 
 import json
@@ -116,10 +121,46 @@ def fresh_copy(Collection, path: str, auth):
         auth.endpoint = status.new_endpoint
     if exists and status.required == NO_CHANGES:
         return col
+    download(col, auth)
+    prune(col)
+    return col
+
+
+def download(col, auth) -> None:
+    """Replace the copy with AnkiWeb's collection, without media: the script's only full sync.
+
+    Download only, never upload: the copy is pruned, so uploading it would replace the
+    owner's notes on AnkiWeb, and on every device that syncs, with blank ones.
+    """
     col.close_for_full_sync()
     col.full_upload_or_download(auth=auth, server_usn=None, upload=False)
     col.reopen(after_full_sync=True)
-    return col
+
+
+def prune(col) -> None:
+    """Blank the notes' content, so the stored copy holds none of the owner's card text.
+
+    Counting (the deck tree, the last answer, rollover, deck names) never reads notes.
+    The review log stays: daily limits read today's answers. It runs through Anki's own
+    connection: the vacuum rebuilds indexes on Anki's own collation, which plain sqlite3 lacks.
+    """
+    stamp = change_stamp(col)
+    col.db.execute("update notes set flds = '', sfld = '', csum = 0")
+    col.optimize()  # vacuum, so the file shrinks
+    # Anki doesn't count this as a change today. If a bumped anki package did, the copy would
+    # differ from AnkiWeb's and be downloaded again at every check. That fails here, as a
+    # protocol error the operator is emailed about, rather than being put right with plain
+    # sqlite3 after close: it can only follow a bump of the pinned package, whose other
+    # assumptions (that counting never reads notes) then need checking too, and a hand-
+    # written stamp would hide the change.
+    after = change_stamp(col)
+    if after != stamp:
+        raise RuntimeError(f"pruning the copy changed its change stamp (mod, usn, ls) from {stamp} to {after}")
+
+
+def change_stamp(col) -> list:
+    """What sync_status compares with AnkiWeb's: when the collection changed, and when it last synced."""
+    return list(col.db.first("select mod, usn, ls from col"))
 
 
 def walk(node, parent_id, prefix):

@@ -116,6 +116,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - Days still to do are polled every 10 minutes, and the owner can check now at most every 15 seconds (`ANKI_POLL_INTERVAL_MS`, `anki-days.ts`; `ankiDaysWaiting`, `anki-days.ts`).
 - A check still running at the due time holds judging for up to 3 minutes (`ANKI_CHECK_HOLDS_JUDGING_MS`, `judging.ts`).
 - Losing the connection marks it Needs reconnecting (`markDisconnected`, `connections.ts`). A deck that no longer exists raises an alert (`anki_pact_deck`).
+- Pact keeps one copy of each owner's collection, downloaded from AnkiWeb without media only when AnkiWeb says it changed (`fresh_copy`, `anki_check.py`). After each download the notes' content is blanked, so the copy holds no card text: cards, decks, deck options, config and the review log stay, which is all counting reads (`prune`). A copy downloaded before pruning was added is pruned at its next download; there is no migration. If pruning ever changed the collection's change stamp (the anki package's behaviour changed), the check fails as an AnkiWeb protocol error rather than downloading again at every check. The script never uploads: the pruned copy would wipe the owner's notes on AnkiWeb (`download`). Disconnecting deletes the copy. Test: `anki-check.test.ts`.
 
 ## Covers: excuses, vacations and holds
 
