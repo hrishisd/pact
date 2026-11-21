@@ -22,3 +22,9 @@ Things that need a real AnkiWeb account, AnkiMobile or the Mac. Steps marked **(
   It checks that real AnkiWeb answers a stale host key with an auth error (`anki_check.py` maps it to "disconnected"). If it answers something else, the log shows a failed check or an `OPERATOR_ALERT` every 10 minutes instead.
 - [ ] Delete a test deck that an Anki pact is on, in Anki, and sync. The pact page and Today show "The … deck is gone from Anki" within 10 minutes.
 - [ ] Reconnect from Profile and from the Today alert on a phone: the email and password fields fill from the password manager.
+
+## After ticket 05
+
+- [ ] After the deploy, once the phone has synced and Pact has downloaded again, `/data/anki/` holds a much smaller copy (the owner's 88.6 MB collection pruned to about 25 MB), and `scripts/prod-log.sh grep OPERATOR_ALERT` shows no "Anki check warning" about the change stamp.
+- [ ] The log still shows a download only after the phone synced, not at every check: a pruned copy still matches AnkiWeb's change stamp.
+- [ ] On every bump of the anki package, on a copy of a real collection: after the script exits, compare the `col` row (`mod`, `scm`, `usn`, `ls`) with the downloaded values, and compare `anki_check.py`'s counts before and after `prune` at the same times.

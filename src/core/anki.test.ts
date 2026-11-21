@@ -184,6 +184,47 @@ test("a protocol error is logged every time but emailed once per account, until 
   expect(emailedAbout()).toEqual(["owner", "friend", "owner"]);
 });
 
+test("a warning from the script alerts the operator, emailed once per account, and the counts still come back", async () => {
+  // The script put the copy's change stamp back after pruning: the counts are
+  // right, but the pinned anki package changed how it treats the copy.
+  const s = scenario();
+  const owner = await s.signIn("owner");
+  const warning =
+    "pruning moved the copy's change stamp (mod, scm, usn, ls) from [1, 2, 3, 1] to [9, 2, 3, 1]; it was put back";
+  const counts = {
+    ok: true,
+    ankiDate: "2026-01-06",
+    asOf: Date.parse("2026-01-07T02:05:00Z"),
+    decks: { "1": { new: 0, learn: 0, review: 3 } },
+    names: { "1": "Spanish" },
+    endpoint: null,
+    warning,
+  };
+  const { adapter } = adapterFor(s, fakeScript((request) => okLogin(request) ?? counts).run);
+  await adapter.login(owner.id, "owner@example.test", "right");
+
+  for (let check = 0; check < 2; check++) {
+    expect(await adapter.deckCounts(owner.id, ["1"])).toEqual({
+      ok: true,
+      ankiDate: "2026-01-06",
+      asOf: new Date("2026-01-07T02:05:00Z"),
+      decks: { "1": { new: 0, learn: 0, review: 3 } },
+      names: { "1": "Spanish" },
+    });
+  }
+  expect(s.logs).toEqual([
+    expect.stringMatching(/^OPERATOR_ALERT Anki check warning.*change stamp.*put back/),
+    expect.stringMatching(/^OPERATOR_ALERT Anki check warning/),
+  ]);
+  expect(s.mailer.sent).toEqual([
+    {
+      to: s.operatorEmail,
+      subject: "Pact operator alert: Anki check warning",
+      text: expect.stringContaining(`Anki check warning for account ${owner.id}: ${warning}`),
+    },
+  ]);
+});
+
 test("an answer that isn't one is a login AnkiWeb can't answer; a success without a host key throws", async () => {
   const s = scenario();
   const owner = await s.signIn("owner");
