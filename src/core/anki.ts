@@ -202,7 +202,7 @@ class Anki implements AnkiAdapter {
   readonly #raiseOperatorAlert: RaiseOperatorAlert;
   /**
    * Accounts whose protocol error has been emailed since AnkiWeb last answered
-   * them: each further one is only logged, as a check every 10 minutes would
+   * them: each further one is only logged, as a check every hour or less would
    * otherwise email each time. In memory: a restart costs at most one more email.
    */
   readonly #protocolErrorEmailed = new Set<AccountId>();
