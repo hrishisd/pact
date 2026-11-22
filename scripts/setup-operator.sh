@@ -331,11 +331,21 @@ write_env GOOGLE_CLIENT_ID "$GOOGLE_CLIENT_ID"
 write_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
 
 # ── 9 ─────────────────────────────────────────────────────────────────────
-stage "Operator email and session secret"
+stage "Operator email, Gmail and session secret"
 say "The operator email is the Google account whose first sign-in creates the first account."
 say "Every other account will need an invite."
 ask OPERATOR_EMAIL "Your Google account email:"
 write_env OPERATOR_EMAIL "$OPERATOR_EMAIL"
+say "Pact sends email (operator alerts, daily summaries) from a Gmail account, today the"
+say "operator's own, through smtp.gmail.com with an app password. Production won't start without it."
+open_url "https://myaccount.google.com/apppasswords"
+step "Sign in as the account email goes from. App passwords need 2-Step Verification on."
+step "Create an app password named Pact and copy it (shown once; the spaces don't matter)."
+note "An app password opens the whole mailbox (ADR 0002). Google may refuse one on a new account."
+ask GMAIL_ADDRESS "Gmail address email is sent from:"
+ask_secret GMAIL_APP_PASSWORD "App password (hidden):"
+write_env GMAIL_ADDRESS "$GMAIL_ADDRESS"
+write_env GMAIL_APP_PASSWORD "$GMAIL_APP_PASSWORD"
 if [[ -n "$(_existing BETTER_AUTH_SECRET || true)" ]]; then
   BETTER_AUTH_SECRET=$(_existing BETTER_AUTH_SECRET)
   say "Keeping the existing session secret (changing it would sign everyone out)."
@@ -377,11 +387,11 @@ say "These names are exactly what the server and litestream.yml read:"
 for name in OPERATOR_EMAIL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET BETTER_AUTH_SECRET \
             LITESTREAM_BUCKET LITESTREAM_ENDPOINT LITESTREAM_ACCESS_KEY_ID LITESTREAM_SECRET_ACCESS_KEY \
             PHOTOS_BUCKET PHOTOS_ENDPOINT PHOTOS_ACCESS_KEY_ID PHOTOS_SECRET_ACCESS_KEY \
-            VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY; do
+            VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY GMAIL_ADDRESS GMAIL_APP_PASSWORD; do
   note "  $name"
 done
 note "NODE_ENV, PORT, PACT_DB_PATH and BETTER_AUTH_URL=https://$DOMAIN are in fly.toml [env], not secrets."
-if confirm "Set these 14 secrets on '$FLY_APP' (staged: they apply on the next deploy)?"; then
+if confirm "Set these 16 secrets on '$FLY_APP' (staged: they apply on the next deploy)?"; then
   # Through stdin, so no secret shows up in the process list.
   printf '%s\n' \
     "OPERATOR_EMAIL=$OPERATOR_EMAIL" \
@@ -398,8 +408,10 @@ if confirm "Set these 14 secrets on '$FLY_APP' (staged: they apply on the next d
     "PHOTOS_SECRET_ACCESS_KEY=$PHOTOS_SECRET_ACCESS_KEY" \
     "VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY" \
     "VAPID_PRIVATE_KEY=$VAPID_PRIVATE_KEY" \
+    "GMAIL_ADDRESS=$GMAIL_ADDRESS" \
+    "GMAIL_APP_PASSWORD=$GMAIL_APP_PASSWORD" \
     | if fly secrets import --stage -a "$FLY_APP"; then
-        printf '  %s✓ set%s 14 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP"
+        printf '  %s✓ set%s 16 Fly secrets on %s\n' "$GREEN" "$RESET" "$FLY_APP"
       else
         warn "fly secrets import failed: fix the error above and re-run this wizard"
       fi
