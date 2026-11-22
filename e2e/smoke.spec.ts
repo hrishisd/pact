@@ -24,7 +24,6 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
   const owner = await (await browser.newContext()).newPage();
   const reviewer = await (await browser.newContext()).newPage();
 
-  /** Moves the server's clock `minutes` forward, and both browsers' clocks with it. */
   /** The owner's Today card for Gym showing `chip`: its name opens the pact, its buttons sit beside it. */
   const gymCard = (chip: string) =>
     owner
@@ -32,6 +31,7 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
       .filter({ has: owner.getByRole("heading", { name: "Gym" }) })
       .filter({ hasText: chip });
 
+  /** Moves the server's clock `minutes` forward, and both browsers' clocks with it. */
   async function advance(minutes: number): Promise<Date> {
     const response = await owner.request.post(DEV_ADVANCE_PATH, { data: { minutes } satisfies DevAdvanceRequest });
     expect(response.ok()).toBe(true);
