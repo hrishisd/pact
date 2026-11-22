@@ -1,6 +1,6 @@
 # 01 A check now says when it couldn't reach the service
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: `../spec.md`, "A check that can't reach the service".

@@ -1,6 +1,6 @@
 # 02 Pull to refresh on the four tabs
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: `../spec.md`, "Where", "What a pull does" and "The indicator". Prototype: branch `prototype/pull-to-refresh`, style B.

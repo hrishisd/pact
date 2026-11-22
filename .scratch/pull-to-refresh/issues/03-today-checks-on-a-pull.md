@@ -1,6 +1,6 @@
 # 03 A pull on Today checks Oura and AnkiWeb
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02
 
 Spec: `../spec.md`, "What a pull does", "Feedback on the cards" and "A check that can't reach the service".
