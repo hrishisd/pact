@@ -3,16 +3,17 @@
 
 import { describe, expect, test } from "vitest";
 import type { NewPact } from "../shared/types.ts";
+import { ownerWithAnki } from "./testing/anki-pact.ts";
 import { bedtimePact, ownerWithOura } from "./testing/bedtime-pact.ts";
 import { cameraPact, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
-import { ok } from "./testing/queries.ts";
+import { ok, statusOn } from "./testing/queries.ts";
 
-/** A pact created at "Mon 10:00", so its window closes at "Mon 10:10". */
-async function newGym(s: Scenario) {
+/** A pact created at "Mon 10:00", with the reminders in `reminders`, so its window closes at "Mon 10:10". */
+async function newGym(s: Scenario, { reminders }: { reminders?: string[] } = {}) {
   const people = await ownerWithReviewers(s);
   s.setClockTo("Mon 10:00");
-  const gym = await people.createPact("Gym", MON_WED_FRI, { reviewers: [people.reviewer] });
+  const gym = await people.createPact("Gym", MON_WED_FRI, { reviewers: [people.reviewer], reminders });
   const edited = (changes: Partial<NewPact> = {}): NewPact => ({
     ...cameraPact("Gym", MON_WED_FRI, { recipientId: people.sam.id, reviewers: [people.reviewer] }),
     ...changes,
@@ -187,6 +188,38 @@ describe("deleting a pact in its edit window", () => {
     expect(owner.today().waiting).toEqual([]);
     await s.advanceTo("Mon 10:10");
     expect(reviewer.reviewQueue()).toEqual([]);
+    expect(s.notifier.sentTo(reviewer)).toEqual([]);
+  });
+
+  test("after one of its reminders went off in the window", async () => {
+    const s = scenario();
+    const { owner, reviewer, gym } = await newGym(s, { reminders: ["10:05"] });
+    await s.advanceTo("Mon 10:01");
+    await s.advanceTo("Mon 10:06");
+    expect(s.notifier.sentTo(owner, "reminder")).toHaveLength(1);
+
+    expect(await owner.deletePact(gym)).toEqual({ ok: true });
+
+    expect(owner.pacts()).toEqual([]);
+    await s.advanceTo("Mon 10:10");
+    await s.advanceTo("Tue 00:00");
+    expect(s.notifier.sentTo(reviewer)).toEqual([]);
+  });
+
+  test("after a check of AnkiWeb satisfied its day in the window", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact, deckShows } = await ownerWithAnki(s);
+    s.setClockTo("Mon 10:00");
+    const spanish = await createPact();
+    deckShows({}, s.date("Mon"), "Mon 10:01");
+    await owner.checkAnki();
+    expect(statusOn(owner, spanish, s.date("Mon"))).toBe("satisfied");
+
+    expect(await owner.deletePact(spanish)).toEqual({ ok: true });
+
+    expect(owner.pacts()).toEqual([]);
+    await s.advanceTo("Mon 10:10");
+    await s.advanceTo("Tue 00:00");
     expect(s.notifier.sentTo(reviewer)).toEqual([]);
   });
 });
