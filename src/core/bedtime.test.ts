@@ -547,6 +547,23 @@ describe("polling Oura", () => {
 
     expect(night(reviewer, theirPact, s.date("Mon"))).toBe("satisfied");
   });
+
+  test("one account's slow Oura doesn't hold up fetching another's", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithOura(s);
+    await createPact("00:00");
+    const theirs = await ownerWithOura(s, reviewer);
+    const theirPact = await theirs.createPact("00:00");
+    s.ouraSource.addSleep(reviewer.id, sleep("Mon 23:00"));
+
+    const slow = s.ouraSource.holdSleepPeriods(owner.id);
+    const ticking = s.advanceTo("Tue 07:00");
+    await slow.started;
+    expect(s.ouraSource.calls.map((call) => call.account).sort()).toEqual([owner.id, reviewer.id].sort());
+    slow.release();
+    await ticking;
+    expect(night(reviewer, theirPact, s.date("Mon"))).toBe("satisfied");
+  });
 });
 
 describe("Today", () => {
