@@ -24,7 +24,7 @@ A volume lives on one physical server, and Fly won't move a machine that has one
 
 ## Restoring on boot
 
-Before starting the app, the entrypoint runs `litestream restore -if-db-not-exists -if-replica-exists`. It then starts the app under `litestream replicate -exec`. A normal restart finds the database already on the volume and skips the restore. A fresh volume gets the latest replica. On the very first deploy there is no replica, so the app starts empty. Litestream must be 0.5.1 or later, because 0.5.0 dropped `-if-replica-exists`.
+Before starting the app, the entrypoint runs `litestream restore -if-db-not-exists -if-replica-exists`. It then starts the app under `litestream replicate -exec`. A normal restart finds the database already on the volume and skips the restore. A fresh volume gets the latest replica. On the very first deploy there is no replica, so the app starts empty. Litestream must be 0.5.1 or later, because 0.5.0 dropped `-if-replica-exists`. On Fly the entrypoint refuses to start without `LITESTREAM_BUCKET`, so a lost secret can't start an empty database or run with no backups; the deploy's secrets check (`scripts/check-fly-secrets.sh`) also requires the `LITESTREAM_*` names.
 
 When a restore happens, the server raises an operator alert that gives the time of the restored database's last scheduler tick. That shows how much was lost, including when backups had silently stopped long before.
 
