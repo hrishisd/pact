@@ -16,8 +16,8 @@ Spec: `../spec.md`, "A check that can't reach the service".
 
 ## Acceptance criteria
 
-- [x] A check now whose call to Oura or AnkiWeb throws answers unreachable; one that succeeds, is skipped or finds a refused login answers ok (`oura.test.ts`, `anki-days.test.ts`).
-- [x] A protocol error or Oura refusing Pact's app answers ok (`anki.test.ts`, `oura.test.ts`).
+- [x] A check now whose call to Oura or AnkiWeb throws answers unreachable; one that succeeds, is skipped or finds a refused login answers ok (`oura-no-data.test.ts`, `anki-days.test.ts`).
+- [x] A protocol error or Oura refusing Pact's app answers ok (the adapters in `anki.test.ts`, `oura.test.ts`; the answer in `anki-days.test.ts`, `oura-no-data.test.ts`).
 - [x] Each route passes the core's answer through (`app.test.ts`).
 - [x] `docs/behaviour.md` says what a check now answers.
 

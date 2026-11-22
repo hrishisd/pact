@@ -62,7 +62,7 @@ Each of the four tabs (Today, Pacts, Review, Ledgers) has pull to refresh. Pulli
 
 - When a check sent by a pull can't reach AnkiWeb or Oura (a timeout, a network failure, or the Anki check script failing), the card says so under its last check: "Couldn't reach AnkiWeb. Pact will try again." or "Couldn't reach Oura. Pact will try again." It stays until a check of that service succeeds.
 - The check endpoints' answers report this failure. Today, `POST /api/oura/check` and `POST /api/anki/check` answer `{ ok: true }` whatever happened.
-- Only checks sent by a pull show it. The automatic checks (on opening Today, on coming back to the front, and the scheduler's) stay silent, as now.
+- Only checks sent by a pull show it. The automatic checks (on opening Today, on coming back to the front, and the scheduler's) stay silent, as now. A pull that waits for Today's own check, already running, shows what that check found (added in review).
 - A refused login and a protocol error keep their current handling and show no such line. A refused login marks the connection Needs reconnecting, and Today shows its alert. A protocol error (AnkiWeb answering in a way Pact doesn't understand) raises its operator alert.
 - No operator email for unreachable services: a short outage is nobody's to fix.
 
@@ -77,6 +77,6 @@ Each of the four tabs (Today, Pacts, Review, Ledgers) has pull to refresh. Pulli
 
 ## Testing decisions
 
-- Core: the check commands report a failure to reach the service, and report none when the check is skipped or there is nothing to check. Tested in `oura.test.ts` and `anki-days.test.ts` with fake sources that throw.
+- Core: the check commands report a failure to reach the service, and report none when the check is skipped or there is nothing to check. Tested in `oura-no-data.test.ts` and `anki-days.test.ts` with fake sources that throw.
 - Client: a pull on Today sends both checks, then reloads; a pull on the other tabs only reloads; a pull while one runs is ignored; a failed check sent by a pull shows the line on its card until a check succeeds. Tested with the existing client test setup by firing touch events on the scroll area.
 - The gesture's feel on a real iPhone, inside the installed app, is a manual check (`manual-checks.md`): the pull must not fight iOS's own bounce on the scroll area.

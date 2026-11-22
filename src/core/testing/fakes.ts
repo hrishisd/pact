@@ -175,6 +175,30 @@ export class InMemoryPhotoStore implements PhotoStore {
 }
 
 /**
+ * A fake source's call held open, as a slow service would: `started`
+ * resolves once it's called; it answers once `release` is called, or throws
+ * the error given to `fail`, as an unreachable service would.
+ */
+export interface HeldCall {
+  started: Promise<void>;
+  release: () => void;
+  fail: (error: Error) => void;
+}
+
+/** A `HeldCall`, and what the source awaits for it: `started` to call, then `released`. */
+function holdCall(): { held: HeldCall; hold: { started: () => void; released: Promise<void> } } {
+  let started = () => {};
+  let release = () => {};
+  let fail = (_error: Error) => {};
+  const called = new Promise<void>((resolve) => (started = resolve));
+  const released = new Promise<void>((resolve, reject) => {
+    release = resolve;
+    fail = reject;
+  });
+  return { held: { started: called, release, fail }, hold: { started, released } };
+}
+
+/**
  * Serves the sleep periods a test has given each account, filtered to the
  * requested days, or "disconnected" for an account the test disconnected.
  */
@@ -183,6 +207,14 @@ export class FakeOuraSource implements OuraSource {
   readonly #disconnected = new Set<AccountId>();
   /** Every call, in order: whose sleep periods, and for which days. */
   readonly calls: ({ account: AccountId } & OuraDateRange)[] = [];
+  readonly #holds = new Map<AccountId, { started: () => void; released: Promise<void> }>();
+
+  /** Holds `account`'s next sleepPeriods call open (`HeldCall`). */
+  holdSleepPeriods(account: AccountId): HeldCall {
+    const { held, hold } = holdCall();
+    this.#holds.set(account, hold);
+    return held;
+  }
 
   addSleep(account: AccountId, ...periods: OuraSleepPeriod[]): void {
     this.#periods.set(account, [...(this.#periods.get(account) ?? []), ...periods]);
@@ -198,6 +230,12 @@ export class FakeOuraSource implements OuraSource {
 
   async sleepPeriods(account: AccountId, range: OuraDateRange): Promise<OuraSleepResult> {
     this.calls.push({ account, ...range });
+    const hold = this.#holds.get(account);
+    if (hold) {
+      this.#holds.delete(account);
+      hold.started();
+      await hold.released;
+    }
     if (this.#disconnected.has(account)) return { ok: false, reason: "disconnected" };
     const periods = (this.#periods.get(account) ?? []).filter(
       (p) => p.day >= range.startDate && p.day <= range.endDate,
@@ -253,16 +291,11 @@ export class FakeAnkiSource implements AnkiSource {
     this.#disconnected.delete(account);
   }
 
-  /**
-   * Holds `account`'s next deckCounts call open, as a slow AnkiWeb would:
-   * `started` resolves once it's called, and it answers once `release` is called.
-   */
-  holdDeckCounts(account: AccountId): { started: Promise<void>; release: () => void } {
-    let started = () => {};
-    let release = () => {};
-    const called = new Promise<void>((resolve) => (started = resolve));
-    this.#holds.set(account, { started, released: new Promise((resolve) => (release = resolve)) });
-    return { started: called, release };
+  /** Holds `account`'s next deckCounts call open (`HeldCall`), as a slow AnkiWeb would. */
+  holdDeckCounts(account: AccountId): HeldCall {
+    const { held, hold } = holdCall();
+    this.#holds.set(account, hold);
+    return held;
   }
 
   async decks(account: AccountId): Promise<AnkiDeckListResult> {

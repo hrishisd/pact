@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, test, vi } from "vitest";
 import type {
@@ -16,6 +16,7 @@ import { Pacts } from "./Pacts.tsx";
 import { PULL_THRESHOLD_PX, PullToRefresh, useRefreshOnPull } from "./pull-to-refresh.tsx";
 import { Review } from "./Review.tsx";
 import { answers, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
+import { useLoad } from "./ui.tsx";
 
 /** Whether the tab is busy refreshing: "true" while the bar runs, null otherwise. */
 const busy = () => screen.getByRole("main").getAttribute("aria-busy");
@@ -29,12 +30,17 @@ function Tab({ refresh }: { refresh: () => Promise<unknown> }) {
   return <p>A tab</p>;
 }
 
-function shell(refresh: () => Promise<unknown>, pullable = true) {
-  return renderWithUser(
+/** The shell, showing `tab`. */
+function shellWith(tab: ReactElement, pullable = true) {
+  return (
     <PullToRefresh pullable={pullable} header={<h1>Today</h1>} mainClassName="scroll gut">
-      <Tab refresh={refresh} />
-    </PullToRefresh>,
+      {tab}
+    </PullToRefresh>
   );
+}
+
+function shell(refresh: () => Promise<unknown>, pullable = true) {
+  return renderWithUser(shellWith(<Tab refresh={refresh} />, pullable));
 }
 
 /** A refresh the test finishes by calling `done`. */
@@ -113,6 +119,42 @@ describe("the pull", () => {
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
+  test("a tab left while its refresh runs ends the bar; the next tab's pull is its own", async () => {
+    const first = heldRefresh();
+    const { rerender } = shell(first.refresh);
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
+    await waitFor(() => expect(busy()).toBe("true"));
+
+    const next = heldRefresh();
+    rerender(shellWith(<Tab key="next" refresh={next.refresh} />));
+    await waitFor(() => expect(busy()).toBeNull());
+
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
+    expect(next.refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(busy()).toBe("true"));
+    // The first tab's refresh settling now doesn't end the next tab's.
+    await act(async () => first.done());
+    expect(busy()).toBe("true");
+    next.done();
+    await waitFor(() => expect(busy()).toBeNull());
+  });
+
+  test("a tab that reloads on a pull and is left before the reload answers settles its refresh", async () => {
+    const settled = vi.fn();
+    function Loading() {
+      const { reload } = useLoad(() => new Promise<never>(() => {}));
+      useRefreshOnPull(() => reload().then(settled));
+      return <p>A loading tab</p>;
+    }
+    const { rerender } = renderWithUser(shellWith(<Loading />));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
+    await waitFor(() => expect(busy()).toBe("true"));
+
+    rerender(shellWith(<Tab refresh={() => Promise.resolve()} />));
+
+    await waitFor(() => expect(settled).toHaveBeenCalledTimes(1));
+  });
+
   test("a page opened from a tab has no pull", () => {
     const refresh = vi.fn(() => Promise.resolve());
     shell(refresh, false);
@@ -184,5 +226,34 @@ describe("in the app", () => {
     const before = spies.pacts.mock.calls.length;
     pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(spies.pacts).toHaveBeenCalledTimes(before + 1));
+  });
+
+  test("a tab left while its pull reloads it ends the bar, and the next tab's pull reloads that tab", async () => {
+    window.history.replaceState(null, "", APP_PATHS.pacts);
+    const spies = stubApi({
+      me: answers(me),
+      // The pull's reload never answers.
+      pacts: vi
+        .fn<() => Promise<PactsResponse>>()
+        .mockResolvedValueOnce([])
+        .mockReturnValue(new Promise(() => {})),
+      today: answers<TodayResponse>({ hasPacts: false, alerts: [], sections: [], waiting: [], yesterday: [] }),
+      reviewQueue: answers<ReviewQueueResponse>([]),
+      waitingOnReply: answers<WaitingOnReplyResponse>([]),
+      ledgers: answers<LedgersResponse>([]),
+    });
+    const { user } = renderWithUser(<App />);
+    await screen.findByText("No pacts yet");
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
+    await waitFor(() => expect(busy()).toBe("true"));
+
+    await user.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "Ledgers" }));
+    await screen.findByText("No ledgers yet");
+    await waitFor(() => expect(busy()).toBeNull());
+
+    const before = spies.ledgers.mock.calls.length;
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
+    await waitFor(() => expect(spies.ledgers).toHaveBeenCalledTimes(before + 1));
+    await waitFor(() => expect(busy()).toBeNull());
   });
 });

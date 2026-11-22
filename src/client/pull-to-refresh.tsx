@@ -48,28 +48,44 @@ export function PullToRefresh({
   const content = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const current = useRef<Refresh | null>(null);
-  const running = useRef(false);
+  /** The refresh running now, if any. */
+  const running = useRef<{ refresh: Refresh } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const register = useCallback<Register>((refresh) => {
-    current.current = refresh;
-    return () => {
-      if (current.current === refresh) current.current = null;
-    };
+  /** Ends `run`, unless a newer run has taken its place. */
+  const end = useCallback((run: { refresh: Refresh }) => {
+    if (running.current !== run) return;
+    running.current = null;
+    setRefreshing(false);
   }, []);
 
+  const register = useCallback<Register>(
+    (refresh) => {
+      current.current = refresh;
+      return () => {
+        if (current.current === refresh) current.current = null;
+        // A tab left while its refresh runs ends the run, so the bar stops
+        // and the next tab can be pulled; its refresh may never settle.
+        if (running.current?.refresh === refresh) end(running.current);
+      };
+    },
+    [end],
+  );
+
   const run = useCallback(async () => {
-    running.current = true;
+    const refresh = current.current;
+    if (!refresh) return;
+    const thisRun = { refresh };
+    running.current = thisRun;
     setRefreshing(true);
     try {
-      await current.current?.();
+      await refresh();
     } catch {
       // The tab shows its own failure (a "couldn't load" line); the bar just stops.
     } finally {
-      running.current = false;
-      setRefreshing(false);
+      end(thisRun);
     }
-  }, []);
+  }, [end]);
 
   useEffect(() => {
     const scroller = scroll.current;
@@ -88,7 +104,8 @@ export function PullToRefresh({
     };
     const start = (e: TouchEvent) => {
       // Only from the top, one finger, and not while a refresh runs.
-      startY = running.current || e.touches.length !== 1 || scroller.scrollTop > 0 ? null : e.touches[0]!.clientY;
+      startY =
+        running.current !== null || e.touches.length !== 1 || scroller.scrollTop > 0 ? null : e.touches[0]!.clientY;
     };
     const move = (e: TouchEvent) => {
       if (startY === null) return;

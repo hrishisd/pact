@@ -29,18 +29,27 @@ export async function checkOura(
   const now = ctx.clock.now();
   const recent = recentCheckNow(ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS);
   if (recent) return recent;
-  ouraChecks.set(accountId, { at: now.getTime(), result: { ok: true } });
+  // Stored before Oura answers, so a check now while this one runs waits for what it finds.
+  const result = askOura(ctx, accountId, ouraSource, command, now);
+  ouraChecks.set(accountId, { at: now.getTime(), result });
+  return result;
+}
+
+/** `checkOura`'s call to Oura, and judging what it reports. */
+async function askOura(
+  ctx: CoreContext,
+  accountId: AccountId,
+  ouraSource: OuraSource,
+  command: Command,
+  now: Date,
+): Promise<CheckNowResult> {
   const fetched = await fetchSleep(ctx, ouraSource, now, accountId);
   await command(() => {
     for (const account of fetched.disconnected) markDisconnected(ctx, "oura", account, fetched.askedAt);
     noteOuraClock(ctx, fetched.sleep, now);
     judgeNights(ctx, now, fetched.sleep, accountId);
   });
-  const result: CheckNowResult = fetched.unreached.includes(accountId)
-    ? { ok: false, reason: "unreachable" }
-    : { ok: true };
-  ouraChecks.set(accountId, { at: now.getTime(), result });
-  return result;
+  return fetched.unreached.includes(accountId) ? { ok: false, reason: "unreachable" } : { ok: true };
 }
 
 /**

@@ -51,7 +51,8 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
  * Loads on mount, and again on `reload()`, keeping the last data meanwhile
  * and if the reload fails. Only the newest load's answer counts: an older one
  * arriving after it is dropped. `reload()`'s promise settles once a load it
- * started, or a newer one, has answered, whether it loaded or failed.
+ * started, or a newer one, has answered, whether it loaded or failed, or once
+ * the screen goes away, which drops the load.
  *
  * With a `key` (the API path it loads), what it loads is remembered
  * (last-loaded.ts), and the screen opened again starts with that while it
@@ -90,6 +91,15 @@ export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<
       },
     );
   }, [loads]);
+  // A screen gone away answers no load, so its waiting reloads settle now.
+  useEffect(
+    () => () => {
+      const gone = waiting.current;
+      waiting.current = [];
+      for (const reload of gone) reload.answered();
+    },
+    [],
+  );
   const reload = useCallback(
     () =>
       new Promise<void>((answered) => {

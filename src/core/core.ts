@@ -583,9 +583,10 @@ class Core implements PactCore {
   /** The email pass running, if any: at most one at a time, apart from `#delivery`. */
   #emailPass: Promise<void> | null = null;
   /**
-   * When each account last checked Oura now. In memory: a restart forgets
-   * it, which costs at most one more call. Set before the call, so two
-   * checks at once make one.
+   * When each account last checked Oura now, and its answer. In memory: a
+   * restart forgets it, which costs at most one more call. Set before the
+   * call, so two checks at once make one, and the second waits for the
+   * first's answer.
    */
   readonly #ouraChecks: ChecksNow = new Map();
   /** When each account's AnkiWeb was checked, and the checks still running. */

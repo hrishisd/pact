@@ -267,11 +267,11 @@ describe("a pull on Today", () => {
     expect(screen.queryByText(ANKI_UNREACHED)).toBeNull();
   });
 
-  test("an Oura out of reach says so on the No Oura data card", async () => {
+  test("an Oura out of reach says so on the No Oura data card, until a check answers ok", async () => {
     const spies = stubApi({
       today: answers(OURA_WAITING),
       checkAnki: answers({ ok: true }),
-      checkOura: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
+      checkOura: answers<CheckNowResult>({ ok: true }, UNREACHABLE, { ok: true }),
     });
     renderInShell();
     await opened(spies);
@@ -279,6 +279,34 @@ describe("a pull on Today", () => {
 
     pullDown();
     expect(await within(await card("In bed by 11")).findByText(OURA_UNREACHED)).toBeTruthy();
+    await waitFor(() => expect(busy()).toBeNull());
+
+    pullDown();
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(screen.queryByText(OURA_UNREACHED)).toBeNull();
+  });
+
+  test("a pull while Today's own check runs waits for that check, and shows what it found", async () => {
+    let answer: (result: CheckNowResult) => void = () => {};
+    const spies = stubApi({
+      today: answers(TODAY),
+      checkAnki: () => new Promise<CheckNowResult>((resolve) => (answer = resolve)),
+      checkOura: answers({ ok: true }),
+    });
+    renderInShell();
+    await card("Spanish");
+    await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(1));
+
+    pullDown();
+    await waitFor(() => expect(spies.checkOura).toHaveBeenCalledTimes(1));
+    expect(busy()).toBe("true");
+    const loads = spies.today.mock.calls.length;
+    answer(UNREACHABLE);
+
+    expect(await within(await card("Spanish")).findByText(ANKI_UNREACHED)).toBeTruthy();
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(spies.checkAnki).toHaveBeenCalledTimes(1);
+    expect(spies.today.mock.calls.length).toBeGreaterThan(loads);
   });
 
   test("a check Today sends by itself that can't reach AnkiWeb says nothing", async () => {

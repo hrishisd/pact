@@ -191,6 +191,25 @@ describe("checking Oura now", () => {
     expect(await theirs.owner.checkOura()).toEqual({ ok: true });
   });
 
+  test("a check while one runs makes no call and answers what that one finds", async () => {
+    const s = scenario();
+    const { owner } = await tueNightWaiting(s);
+    await s.advanceTo("Wed 09:00");
+    const calls = s.ouraSource.calls.length;
+
+    s.setClockTo("2026-01-07T09:00:20-05:00");
+    const call = s.ouraSource.holdSleepPeriods(owner.id);
+    const first = owner.checkOura();
+    await call.started;
+    s.setClockTo("2026-01-07T09:00:25-05:00");
+    const second = owner.checkOura();
+    call.fail(new Error("Oura sleep request failed: timed out"));
+
+    expect(await second).toEqual({ ok: false, reason: "unreachable" });
+    expect(await first).toEqual({ ok: false, reason: "unreachable" });
+    expect(s.ouraSource.calls.length - calls).toBe(1);
+  });
+
   test("a failure Pact already raised as an operator alert answers ok", async () => {
     const s = scenario();
     const { owner } = await tueNightWaiting(s);

@@ -88,14 +88,24 @@ export async function checkAnki(
   const recent = recentCheckNow(polling.checks, accountId, now, ANKI_CHECK_INTERVAL_MS);
   if (recent) return recent;
   if (ankiDaysWaiting(ctx, now, accountId).length === 0) return { ok: true };
-  polling.checks.set(accountId, { at: now.getTime(), result: { ok: true } });
-  const fetched = await fetchAnki(ctx, ankiSource, polling, now, accountId);
-  await command(() => recordAnkiChecks(ctx, fetched.checks));
-  const result: CheckNowResult = fetched.unreached.includes(accountId)
-    ? { ok: false, reason: "unreachable" }
-    : { ok: true };
+  // Stored before AnkiWeb answers, so a check now while this one runs waits for what it finds.
+  const result = askAnki(ctx, accountId, polling, ankiSource, command, now);
   polling.checks.set(accountId, { at: now.getTime(), result });
   return result;
+}
+
+/** `checkAnki`'s call to AnkiWeb, and judging what it finds. */
+async function askAnki(
+  ctx: CoreContext,
+  accountId: AccountId,
+  polling: AnkiPolling,
+  ankiSource: AnkiSource,
+  command: Command,
+  now: Date,
+): Promise<CheckNowResult> {
+  const fetched = await fetchAnki(ctx, ankiSource, polling, now, accountId);
+  await command(() => recordAnkiChecks(ctx, fetched.checks));
+  return fetched.unreached.includes(accountId) ? { ok: false, reason: "unreachable" } : { ok: true };
 }
 
 /**

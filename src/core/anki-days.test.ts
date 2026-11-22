@@ -505,6 +505,25 @@ describe("checking AnkiWeb", () => {
     expect(s.ankiSource.countCalls).toHaveLength(1);
   });
 
+  test("check now while one runs makes no call and answers what that one finds", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 20:00");
+
+    s.setClockTo("Tue 20:00");
+    const call = s.ankiSource.holdDeckCounts(owner.id);
+    const first = owner.checkAnki();
+    await call.started;
+    s.clock.set(new Date(s.at("Tue 20:00").getTime() + 5_000));
+    const second = owner.checkAnki();
+    call.fail(new Error("AnkiWeb network error: timed out"));
+
+    expect(await second).toEqual({ ok: false, reason: "unreachable" });
+    expect(await first).toEqual({ ok: false, reason: "unreachable" });
+    expect(s.ankiSource.countCalls).toHaveLength(1);
+  });
+
   test("check now answers ok when it's skipped, finds the login refused, or fails on what the operator was told of", async () => {
     const s = scenario();
     const { owner, createPact, deckShows } = await ownerWithAnki(s);
