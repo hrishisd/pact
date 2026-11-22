@@ -3,7 +3,7 @@
 // emails the operator's address (OPERATOR_EMAIL). The email skips the outbox
 // and the database, so it still goes after a restore from an old backup. The
 // push, for the alerts that have one, is the core's, through the outbox
-// (core.ts).
+// (`pushOperatorAlert`, outbox.ts).
 
 import type { Mailer } from "./ports.ts";
 
