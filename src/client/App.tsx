@@ -18,6 +18,7 @@ import { loadAndRemember, reloadWhenForgotten } from "./last-loaded.ts";
 import { LedgerPage, Ledgers } from "./Ledgers.tsx";
 import { inviteTokenFromPath, opensProfileSheet, useNavigation, type Page, type TabId } from "./navigation.ts";
 import { PactPage } from "./PactPage.tsx";
+import { PullToRefresh } from "./pull-to-refresh.tsx";
 import { PaymentPage } from "./PaymentPage.tsx";
 import { PlanVacation } from "./PlanVacation.tsx";
 import { Pacts } from "./Pacts.tsx";
@@ -372,21 +373,29 @@ function Shell({
 
   return (
     <div className="app">
-      <header className="hdr gut">
-        {page && (
-          <button className="iconbtn" aria-label="Back" onClick={nav.back}>
-            <BackIcon />
-          </button>
-        )}
-        <h1>
-          {title}
-          <span className="sub">{subtitle}</span>
-        </h1>
-        <button className="avatar" aria-label="Profile" onClick={openProfile}>
-          {initial(profile.name)}
-        </button>
-      </header>
-      <main className={foot ? "scroll gut has-foot" : "scroll gut"}>{body}</main>
+      {/* A tab has pull to refresh; a page opened from one doesn't. */}
+      <PullToRefresh
+        pullable={page === null}
+        mainClassName={foot ? "scroll gut has-foot" : "scroll gut"}
+        header={
+          <>
+            {page && (
+              <button className="iconbtn" aria-label="Back" onClick={nav.back}>
+                <BackIcon />
+              </button>
+            )}
+            <h1>
+              {title}
+              <span className="sub">{subtitle}</span>
+            </h1>
+            <button className="avatar" aria-label="Profile" onClick={openProfile}>
+              {initial(profile.name)}
+            </button>
+          </>
+        }
+      >
+        {body}
+      </PullToRefresh>
       <nav className="tabbar" aria-label="Main">
         {(Object.keys(TABS) as TabId[]).map((id) => {
           const { label, Icon } = TABS[id];

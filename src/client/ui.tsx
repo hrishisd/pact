@@ -1,6 +1,6 @@
 // Small building blocks shared by several screens.
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { failureText } from "./api.ts";
 import { lastLoaded, loadAndRemember } from "./last-loaded.ts";
@@ -50,7 +50,8 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
 /**
  * Loads on mount, and again on `reload()`, keeping the last data meanwhile
  * and if the reload fails. Only the newest load's answer counts: an older one
- * arriving after it is dropped.
+ * arriving after it is dropped. `reload()`'s promise settles once a load it
+ * started, or a newer one, has answered, whether it loaded or failed.
  *
  * With a `key` (the API path it loads), what it loads is remembered
  * (last-loaded.ts), and the screen opened again starts with that while it
@@ -59,25 +60,45 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
  * (the reload would never reach it), nor for a screen that sends what it
  * loaded back in a command: remembered data could undo a change made since.
  */
-export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<T>; reload: () => void } {
+export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<T>; reload: () => Promise<void> } {
   const [state, setState] = useState<Load<T>>(() => {
     const last = key === undefined ? undefined : lastLoaded<T>(key);
     return last === undefined ? { kind: "loading" } : { kind: "loaded", data: last, reloadFailed: null };
   });
   const [loads, setLoads] = useState(0);
+  const requested = useRef(0);
+  /** Each `reload()` waiting for an answer, with the load it asked for. */
+  const waiting = useRef<{ load: number; answered: () => void }[]>([]);
   // A reload runs the cleanup first, which drops the load before it. `load`
   // is left out of the deps on purpose: callers pass a new function each
   // render, and a screen showing something else gets a new `key` instead.
-  useEffect(
+  useEffect(() => {
+    const answered = () => {
+      const done = waiting.current.filter((reload) => reload.load <= loads);
+      waiting.current = waiting.current.filter((reload) => reload.load > loads);
+      for (const reload of done) reload.answered();
+    };
+    return settleUnlessDropped(
+      key === undefined ? load() : loadAndRemember(key, load),
+      (data) => {
+        setState((before) => settledLoad(before, { ok: true, data }));
+        answered();
+      },
+      (error) => {
+        setState((before) => settledLoad(before, { ok: false, error }));
+        answered();
+      },
+    );
+  }, [loads]);
+  const reload = useCallback(
     () =>
-      settleUnlessDropped(
-        key === undefined ? load() : loadAndRemember(key, load),
-        (data) => setState((before) => settledLoad(before, { ok: true, data })),
-        (error) => setState((before) => settledLoad(before, { ok: false, error })),
-      ),
-    [loads],
+      new Promise<void>((answered) => {
+        requested.current += 1;
+        waiting.current.push({ load: requested.current, answered });
+        setLoads(requested.current);
+      }),
+    [],
   );
-  const reload = useCallback(() => setLoads((n) => n + 1), []);
   return { state, reload };
 }
 

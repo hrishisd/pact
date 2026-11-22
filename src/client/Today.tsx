@@ -63,6 +63,7 @@ import { usePhotoPicks } from "./photos.ts";
 import { VacationBanner } from "./VacationBanner.tsx";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
+import { useRefreshOnPull } from "./pull-to-refresh.tsx";
 import { EditWindowChip, Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** What the File excuse sheet is open on: a pact, and the day it was opened from (none for the pact-page form). */
@@ -98,6 +99,7 @@ export function Today({
   onInvite: () => void;
 }) {
   const { state, reload } = useLoad(api.today, API_PATHS.today);
+  useRefreshOnPull(reload);
   const today = loadedData(state);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
