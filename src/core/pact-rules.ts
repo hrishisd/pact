@@ -17,7 +17,7 @@ import {
   type Schedule,
 } from "../shared/types.ts";
 import { laterDate, mondayOf, weekdayOf } from "./calendar.ts";
-import type { ChangeableTerms, TermDiff } from "./changes.ts";
+import type { ChangeableTerms } from "./changes.ts";
 import {
   ankiDueByFits,
   ankiDueByOrder,
@@ -324,19 +324,3 @@ export function storedTerms(json: string): ChangeableTerms {
     ...(JSON.parse(json) as Partial<ChangeableTerms>),
   } as ChangeableTerms;
 }
-
-/** How a review item's push names each changed term. */
-export const TERM_LABELS: Record<TermDiff["term"], string> = {
-  name: "Name",
-  description: "Photo shows",
-  deck: "Deck",
-  "in-bed-by": "In bed by",
-  schedule: "Days",
-  "due-by": "Due by",
-  "start-date": "Starts",
-  "end-date": "Ends",
-  penalty: "Penalty",
-  recipient: "Recipient",
-  reviewers: "Reviewers",
-  reminders: "Reminders",
-};

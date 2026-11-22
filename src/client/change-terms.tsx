@@ -15,7 +15,17 @@ import type {
   Schedule,
   TermChange,
 } from "../shared/types.ts";
-import { clockText, EDIT_WINDOW_TEXT, formatDate, money, remindersText, scheduleText } from "./format.ts";
+import {
+  clockText,
+  EDIT_WINDOW_TEXT,
+  formatDate,
+  listNames,
+  money,
+  remindersText,
+  scheduleText,
+  TERM_LABELS,
+  termLabel,
+} from "./format.ts";
 
 export type Term = TermChange["term"];
 
@@ -29,27 +39,6 @@ type Change = Json<TermChange>;
 type Current = Json<CurrentTerms>;
 /** A change request that changes terms rather than ending the pact. */
 type TermsChangeRequestView = Extract<ChangeRequestView, { endsPact: false }>;
-
-export const TERM_LABELS: Record<Term, string> = {
-  name: "Name",
-  description: "Photo shows",
-  deck: "Deck",
-  "in-bed-by": "In bed by",
-  schedule: "Days",
-  "due-by": "Due by",
-  "start-date": "Starts",
-  "end-date": "Ends",
-  penalty: "Penalty",
-  recipient: "Recipient",
-  reviewers: "Reviewers",
-  reminders: "Reminders",
-};
-
-/** A term's label on a pact with `schedule`: a Weekly count pact's schedule is its Target, a One-time pact's its Deadline. */
-export function termLabel(term: Term, schedule: Pick<Schedule, "kind">): string {
-  if (term === "schedule" && schedule.kind === "weekly-count") return "Target";
-  return term === "schedule" && schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term];
-}
 
 /**
  * When an approved end takes effect, for a pact of this evidence kind and
@@ -278,13 +267,6 @@ export function startsText(request: Json<TermsChangeRequestView>, lead: string):
       ? ""
       : ` ${openOccurrenceText(schedule)} penalty stays ${money(start.todayKeepsCents)}.`;
   return `${lead} from ${formatDate(start.appliesFrom)}, the first ${unit} of this pact that hasn't started yet.${today}`;
-}
-
-/** "Sam", "Sam and Alex", "Sam, Alex and Jo". */
-export function listNames(list: string[], last = "and"): string {
-  if (list.length <= 1) return list[0] ?? "";
-  if (list.length === 2) return `${list[0]} ${last} ${list[1]}`;
-  return `${list.slice(0, -1).join(", ")}, ${last} ${list.at(-1)}`;
 }
 
 function names(reviewers: { name: string }[]): string {

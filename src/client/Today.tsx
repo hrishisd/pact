@@ -37,7 +37,6 @@ import {
 } from "../shared/types.ts";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
-import { listNames } from "./change-terms.tsx";
 import {
   ankiMissText,
   clockText,
@@ -49,6 +48,7 @@ import {
   formatDay,
   formatDueAt,
   hoursLeft,
+  listNames,
   minutesLeft,
   money,
   NIGHT_CLOSES_TEXT,

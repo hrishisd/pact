@@ -6,9 +6,8 @@ import type { ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
 import { formatDate, formatDay } from "../shared/format.ts";
 import type { ItemState, QuestionThread, ReviewItem, TodayWaitingItem, Withdrawal } from "../shared/types.ts";
-import { listNames } from "./change-terms.tsx";
 import { datesText } from "./excuse-days.tsx";
-import { formatDayTime, money } from "./format.ts";
+import { formatDayTime, listNames, money } from "./format.ts";
 import { CameraIcon, DollarIcon, ExcuseIcon, PencilIcon, SuitcaseIcon } from "./icons.tsx";
 import { ReplyBox, Thread } from "./questions.tsx";
 

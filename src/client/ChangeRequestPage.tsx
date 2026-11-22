@@ -7,8 +7,8 @@
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { DiffList, endsWhenText, EverythingElse, listNames, startsText } from "./change-terms.tsx";
-import { formatDayTime } from "./format.ts";
+import { DiffList, endsWhenText, EverythingElse, startsText } from "./change-terms.tsx";
+import { formatDayTime, listNames } from "./format.ts";
 import { ItemKindHeader, ItemStateChip, OwnerThread, StateLine } from "./item-page.tsx";
 import { LoadedFound, useLoad, useSend } from "./ui.tsx";
 
