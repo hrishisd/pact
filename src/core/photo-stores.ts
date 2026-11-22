@@ -49,11 +49,16 @@ export interface R2Bucket {
 /**
  * Each photo is one object, keyed by its id, in a private bucket. Requests are
  * signed with the clock's time; `fetch` is replaceable so tests stay offline.
+ * A request, body included, gives up after `timeoutMs`, so an R2 outage fails
+ * a send quickly instead of leaving it waiting for minutes. A store abandoned
+ * after R2 kept the object leaves an object nothing names, which is harmless
+ * in a private bucket.
  */
 export function r2PhotoStore(
   { bucket, endpoint, accessKeyId, secretAccessKey }: R2Bucket,
   clock: Clock,
   fetch: (request: Request) => Promise<Response> = globalThis.fetch,
+  timeoutMs = 30_000,
 ): PhotoStore {
   const client = new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" });
   const objectUrl = (photoId: string) => `${endpoint.replace(/\/+$/, "")}/${bucket}/${photoId}`;
@@ -74,6 +79,7 @@ export function r2PhotoStore(
           headers: { "content-type": photo.contentType },
           body: photo.bytes as Uint8Array<ArrayBuffer>,
           aws: { datetime: signedAt() },
+          signal: AbortSignal.timeout(timeoutMs),
         }),
       );
       if (!response.ok) throw new Error(`R2 refused to store photo ${photoId}: ${response.status}`);
@@ -83,7 +89,11 @@ export function r2PhotoStore(
     async fetch(photoId: string): Promise<Photo | null> {
       if (!PHOTO_ID.test(photoId)) return null;
       const response = await fetch(
-        await client.sign(objectUrl(photoId), { method: "GET", aws: { datetime: signedAt() } }),
+        await client.sign(objectUrl(photoId), {
+          method: "GET",
+          aws: { datetime: signedAt() },
+          signal: AbortSignal.timeout(timeoutMs),
+        }),
       );
       if (response.status === 404) return null;
       if (!response.ok) throw new Error(`R2 refused to fetch photo ${photoId}: ${response.status}`);
