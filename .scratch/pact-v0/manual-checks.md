@@ -27,6 +27,7 @@ The deploy at 17:32Z on 2026-11-04 was the first to include PR #2. `/health` was
 The screens for tickets 10–17 were checked only in headless Chromium at 390×844.
 
 - [ ] Push notifications arrive for each new kind: New bill, Overdue bill, Reminder, a reviewer's question and the owner's reply ("Comment" setting), a change request decided, and Connection problem. Turning each setting off stops it.
+- [ ] With notifications on, turn off Allow Notifications for Pact in iOS Settings, then switch back to Pact without closing it: Profile says "Blocked on this iPhone" and Today shows its blocked alert (`usePush`, `push.ts`). If it still says on, iOS doesn't update the permission for a suspended Home Screen app, and only a cold start shows it.
 - [ ] Native date and time fields work in Create pact: due-by time, start and end dates, the One-time deadline, and reminder times (a date and a time for One-time).
 - [ ] Request change: the Check view, a Change sheet per term, the diff with "Stricter" / "Needs approval" tags, the optional Why? note, Withdraw change. End pact's sheet.
 - [ ] Reviewer questions: Ask from a review item, the owner's Reply from the Today alert on the item's page, and the item leaving and returning to the queue.
