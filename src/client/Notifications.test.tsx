@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import type { NotificationsResponse } from "../shared/api.ts";
 import { NotificationsSection } from "./Notifications.tsx";
@@ -19,6 +19,79 @@ function settings(enabled: boolean): NotificationsResponse {
 function showSection() {
   return renderWithUser(<NotificationsSection push={{ state: "on", turnOn: vi.fn() }} onSetUp={vi.fn()} />);
 }
+
+/** An answer the test holds until it calls `release` (or `fail`). */
+function held<T>() {
+  let release!: (value: T) => void;
+  let fail!: (cause: unknown) => void;
+  const answer = new Promise<T>((resolve, reject) => {
+    release = resolve;
+    fail = reject;
+  });
+  return { answer, release, fail };
+}
+
+describe("the push switches", () => {
+  const review = () => screen.getByRole("switch", { name: /Something to review/ });
+  const questions = () => screen.getByRole("switch", { name: /Questions and replies/ });
+
+  test("two switches turned off together stay off while their saves come back one by one", async () => {
+    const first = held<NotificationsResponse["settings"]>();
+    const second = held<NotificationsResponse["settings"]>();
+    stubApi({
+      notifications: async () => settings(false),
+      setNotificationSetting: vi.fn().mockReturnValueOnce(first.answer).mockReturnValueOnce(second.answer),
+    });
+    const { user } = showSection();
+    await screen.findByRole("switch", { name: /Something to review/ });
+
+    await user.click(review());
+    await user.click(questions());
+    // The server saved the first before the second arrived, so its answer still has the second on.
+    first.release([
+      { setting: "review-item", enabled: false },
+      { setting: "comment", enabled: true },
+    ]);
+    await act(() => first.answer);
+
+    expect(review()).toHaveProperty("checked", false);
+    expect(questions()).toHaveProperty("checked", false);
+
+    second.release([
+      { setting: "review-item", enabled: false },
+      { setting: "comment", enabled: false },
+    ]);
+    await act(() => second.answer);
+
+    expect(review()).toHaveProperty("checked", false);
+    expect(questions()).toHaveProperty("checked", false);
+  });
+
+  test("a failed save turns back only its own switch, not one saved meanwhile", async () => {
+    const first = held<NotificationsResponse["settings"]>();
+    stubApi({
+      notifications: async () => settings(false),
+      setNotificationSetting: vi
+        .fn()
+        .mockReturnValueOnce(first.answer)
+        .mockResolvedValueOnce([
+          { setting: "review-item", enabled: true },
+          { setting: "comment", enabled: false },
+        ]),
+    });
+    const { user } = showSection();
+    await screen.findByRole("switch", { name: /Something to review/ });
+
+    await user.click(review());
+    await user.click(questions());
+    first.fail(onOurSide);
+    await act(() => first.answer.catch(() => {}));
+
+    expect(review()).toHaveProperty("checked", true);
+    expect(questions()).toHaveProperty("checked", false);
+    expect(screen.getByText("Couldn't save. Something went wrong on our side. Try again in a minute.")).toBeTruthy();
+  });
+});
 
 describe("the Email section", () => {
   test("below the push list: one Daily summary switch, off to start with, and the address it goes to", async () => {

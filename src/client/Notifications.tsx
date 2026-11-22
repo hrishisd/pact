@@ -220,14 +220,21 @@ export function NotificationsSection({ push: { state }, onSetUp }: { push: Push;
   const [error, setError] = useState<string | null>(null);
   const settings = changed ?? data?.settings ?? null;
 
+  // Each save touches only its own switch: two in flight at once mustn't undo each other.
+  const show = (setting: NotificationSetting, enabled: boolean) =>
+    setChanged(
+      (current) => (current ?? settings)?.map((s) => (s.setting === setting ? { setting, enabled } : s)) ?? null,
+    );
+
   const toggle = async (setting: NotificationSetting, enabled: boolean) => {
     if (!settings) return;
     setError(null);
-    setChanged(settings.map((s) => (s.setting === setting ? { setting, enabled } : s)));
+    show(setting, enabled);
     try {
-      setChanged(await api.setNotificationSetting({ setting, enabled }));
+      const saved = await api.setNotificationSetting({ setting, enabled });
+      show(setting, saved.find((s) => s.setting === setting)?.enabled ?? enabled);
     } catch (cause) {
-      setChanged(settings);
+      show(setting, !enabled);
       setError(saveFailureText(cause));
     }
   };
