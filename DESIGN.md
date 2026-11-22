@@ -25,7 +25,7 @@ This branch is design work only. Do not change domain rules in `src/core`, serve
 Build every screen from the parts iOS people already know, and make them behave the way iOS does.
 
 **Adopt**
-- Structure: a floating tab bar for the four root screens, a navigation bar with a Large Title on root screens and an inline title with a labelled back button on pushed ones, sheets with detents for short flows, inset grouped lists for settings and terms. See "Mobile only".
+- Structure: a floating tab bar for the four root screens, a navigation bar holding a Large Title on root screens and an inline title with a labelled back button on pushed ones, sheets with detents for short flows, inset grouped lists for settings and terms. See "Mobile only".
 - Type: the system fonts (SF Pro, New York, SF Mono) on Apple's Dynamic Type ramp, so text follows the phone's text-size setting. See "Type".
 - Touch: 44pt minimum targets, safe areas on every edge, the primary action in thumb reach.
 - Materials: floating chrome (the tab bar, a scrolled navigation bar) is translucent `--material` with a blur, so content shows through it as it does in iOS. Content itself stays opaque.
@@ -41,6 +41,7 @@ Build every screen from the parts iOS people already know, and make them behave 
 | Switches are green when on | Switches are ink when on | Green means Satisfied; a setting is not an outcome |
 | Use SF Symbols | Lucide, drawn at SF Symbols' weight (stroke 1.75, 24px in bars and rows, 20px inline) | SF Symbols' license limits them to apps on Apple platforms; Pact runs in Safari |
 | Pair important moments with haptics | No haptics | The web can't trigger them on iPhone |
+| Large Titles sit below the navigation bar and collapse into it on scroll | Every title sits in the bar, level with the profile avatar, and stays put | Each screen keeps its title and controls on one line |
 
 ## Tokens
 
@@ -246,7 +247,8 @@ Pact runs as an iPhone home-screen web app (`display: standalone`, `orientation:
 - Two `theme-color` metas, one per scheme: `#F1F4F0` with `media="(prefers-color-scheme: light)"` and `#101412` with `media="(prefers-color-scheme: dark)"`.
 
 **Navigation bar**
-- Root screens (Today, Pacts, Review, Ledgers) open with a Large Title (`large-title`) under the status bar. Once the page scrolls, it collapses into an inline `nav-title`, centered, and the bar behind it becomes `--material` with `--material-blur` and a `rule` hairline at its bottom edge. Before scrolling the bar has no background and no hairline. The Large Title is the first thing in the scrolling content (so it scrolls away with it), and the bar sits above the content rather than over it, so nothing scrolls behind its material.
+- Every title sits in the bar, on one line with the profile avatar. Root screens (Today, Pacts, Review, Ledgers) show their Large Title (`large-title`) left-aligned in the bar, with Today's date under it, and it stays there as the content scrolls. This departs from iOS, where a Large Title sits below the bar and collapses on scroll: one row keeps every screen's title level with its controls.
+- Once the content scrolls, the bar becomes `--material` with `--material-blur` and a `rule` hairline at its bottom edge. Before scrolling it has no background and no hairline. The bar sits above the content rather than over it, so nothing scrolls behind its material.
 - Pushed screens (a pact, a ledger, an excuse) show the inline title from the start, with the back button top left: a `ChevronLeft` plus the parent screen's title ("Pacts"), in `ink`, at least 44pt tall. Not a circled icon button.
 - At most one trailing control on the right (the profile avatar, or one text button such as "Edit").
 
@@ -456,7 +458,7 @@ Suggested order, one PR each:
 2. Fonts: system stacks, drop Google Fonts.
 3. Icons: Lucide, per the table above.
 4. Floating tab bar: the capsule over the content, `--material`, scroll padding, the sliding selection.
-5. Navigation bar: Large Titles that collapse on scroll, labelled back buttons.
+5. Navigation bar: titles in the bar level with Profile, labelled back buttons.
 6. Dynamic Type: the type ramp in `rem`, following the phone's text size.
 7. Dark theme: verify every screen in Carbon, including the heat map and photo viewer.
 8. Rules: danger buttons, held penalties in `waiting`, banner priority, ReviewRow, ChangeRequest diff, TermsCard clause.

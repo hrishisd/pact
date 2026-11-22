@@ -381,21 +381,22 @@ function Shell({
         mainClassName={foot ? "scroll gut has-foot" : "scroll gut"}
         header={
           <>
-            <span className="nav-lead">
-              {page && (
-                <button className="backbtn" aria-label={`Back to ${backTo}`} onClick={nav.back}>
-                  <BackIcon />
-                  <span>{backTo}</span>
-                </button>
-              )}
-            </span>
-            {/* A page's title is its heading; a tab's heading is its Large Title, which this repeats once scrolled. */}
+            {/* A page: Back, then its title centred. A tab: its Large Title, level with Profile. */}
             {page ? (
-              <h1 className="nav-title">{title}</h1>
+              <>
+                <span className="nav-lead">
+                  <button className="backbtn" aria-label={`Back to ${backTo}`} onClick={nav.back}>
+                    <BackIcon />
+                    <span>{backTo}</span>
+                  </button>
+                </span>
+                <h1 className="nav-title">{title}</h1>
+              </>
             ) : (
-              <span className="nav-title collapsible" aria-hidden="true">
+              <h1 className="large-title">
                 {title}
-              </span>
+                {subtitle && <span className="sub">{subtitle}</span>}
+              </h1>
             )}
             <span className="nav-trail">
               <button className="avatar" aria-label="Profile" onClick={openProfile}>
@@ -405,12 +406,6 @@ function Shell({
           </>
         }
       >
-        {!page && (
-          <h1 className="large-title">
-            {title}
-            {subtitle && <span className="sub">{subtitle}</span>}
-          </h1>
-        )}
         {body}
       </PullToRefresh>
       {/* --tab-index places the capsule that marks the current tab. */}

@@ -27,8 +27,8 @@ export function useRefreshOnPull(refresh: Refresh): void {
   useEffect(() => register(() => latest.current()), [register]);
 }
 
-/** How far the content scrolls before the header counts as scrolled: about a Large Title's height. */
-const SCROLLED_PX = 36;
+/** How far the content scrolls before the header counts as scrolled, and turns to material. */
+const SCROLLED_PX = 4;
 
 /**
  * The shell's header and scroll area. On a tab (`pullable`), the scroll area
@@ -54,7 +54,7 @@ export function PullToRefresh({
   /** The refresh running now, if any. */
   const running = useRef<{ refresh: Refresh } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  // Scrolled past a Large Title: the header shows its inline title on material.
+  // Scrolled: the header turns to material, with a hairline under it.
   const [scrolled, setScrolled] = useState(false);
 
   /** Ends `run`, unless a newer run has taken its place. */

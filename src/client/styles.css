@@ -244,9 +244,9 @@ p {
   margin: 0 auto;
   background: var(--background);
 }
-/* The navigation bar, as iOS draws it: Back (with what it returns to) on the left, the
-   inline title centred, one control on the right. On a tab the inline title appears
-   once its Large Title has scrolled away; scrolled, the bar turns to material. */
+/* The navigation bar: on a page, Back (with what it returns to) on the left and the
+   title centred; on a tab, its Large Title on the left. Profile on the right, level
+   with either. Once the content scrolls, the bar turns to material. */
 .hdr {
   display: grid;
   /* Equal sides keep the title centred; each fits Back and a short title before truncating. */
@@ -289,6 +289,11 @@ p {
 .nav-trail {
   justify-self: end;
 }
+/* Beside a Large Title, Profile lines up with the title's line, not the date under it. */
+.large-title ~ .nav-trail {
+  align-self: start;
+  margin-top: 3px;
+}
 .nav-title {
   font-family: var(--font-sans);
   font-size: 17px;
@@ -298,17 +303,6 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.nav-title.collapsible {
-  opacity: 0;
-}
-.hdr.scrolled .nav-title.collapsible {
-  opacity: 1;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .nav-title.collapsible {
-    transition: opacity var(--duration-fade);
-  }
 }
 /* Back: a chevron and the title of the screen it returns to, at least 44pt tall. */
 .backbtn {
@@ -331,8 +325,11 @@ p {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A tab's Large Title: the first thing in its content, so it scrolls away. */
+/* A tab's Large Title, in the bar level with Profile: it takes the Back and title columns. */
 .large-title {
+  grid-column: 1 / 3;
+  justify-self: start;
+  min-width: 0;
   font-size: 34px;
   line-height: 41px;
 }
