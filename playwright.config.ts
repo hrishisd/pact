@@ -4,7 +4,7 @@
 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 // Not the dev server's ports (3000, 5173), so a dev server can keep running.
 const PORT = 3100;
@@ -24,6 +24,14 @@ export default defineConfig({
     locale: "en-US",
     trace: "retain-on-failure",
   },
+  // Phone sizes in WebKit, as every user is on iPhone Safari (DESIGN.md, "Testing on localhost").
+  // The smoke flow shares one server, its database and its clock, so one project at a time:
+  // `npm run test:e2e` runs `iphone`; `npx playwright test --project=iphone-se` runs another.
+  projects: [
+    { name: "iphone", use: { ...devices["iPhone 15"] } },
+    { name: "iphone-se", use: { ...devices["iPhone SE"] } },
+    { name: "iphone-dark", use: { ...devices["iPhone 15"], colorScheme: "dark" } },
+  ],
   webServer: {
     // The built client, served by the server itself: no Vite, so no port shared with `npm run dev`.
     command: `rm -rf "${DATA_DIR}" && npm run build && npm start`,

@@ -14,7 +14,7 @@
     "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/server/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=iphone",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "lint": "prettier --check . && knip && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-conventions.ts && shellcheck scripts/*.sh .claude/hooks/*.sh .githooks/*",
@@ -28,6 +28,7 @@
     "better-auth": "^1.7.14",
     "better-sqlite3": "^12.11.1",
     "hono": "^4.13.14",
+    "lucide-react": "^1.77.0",
     "nodemailer": "^10.5.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

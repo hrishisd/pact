@@ -4,6 +4,7 @@
 
 - Layers: `src/core` decides every domain rule behind `AccountView` (`src/core/core.ts`); `src/server` translates HTTP to core calls; `src/client` renders what the core returns; `src/shared` holds the wire types and paths both sides import.
 - Read `CODING_STANDARDS.md` before writing code.
+- Read `DESIGN.md` before any UI change: tokens, type, mobile rules, icons and components.
 - Read `docs/behaviour.md` for how the app behaves now. The feature specs under `.scratch/` record designs as they were decided.
 - Run `npm run check` before calling work done.
 
