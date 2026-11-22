@@ -1693,3 +1693,48 @@ details.folded .kv {
 .vacban .list .covrow {
   padding: 8px 12px;
 }
+
+/* Pull to refresh on a tab (pull-to-refresh.tsx): the content follows the finger, and a
+   line under the header grows to full width at the threshold, then runs as a moving bar
+   until the refresh is done. The bar moves even under Reduce Motion, by choice. */
+.hdr {
+  position: relative;
+}
+.pullcontent {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pullcontent.springing {
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.pullbar {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 0;
+  height: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  pointer-events: none;
+}
+.pullbar.working {
+  width: 100% !important;
+  border-radius: 0;
+  background: linear-gradient(90deg, transparent 0, var(--accent) 30%, var(--accent) 60%, transparent 90%) no-repeat;
+  background-size: 50% 100%;
+  animation: pullbar 1.1s linear infinite;
+}
+@keyframes pullbar {
+  from {
+    background-position: -100% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+/* Under a Today card: a check a pull sent couldn't reach Oura or AnkiWeb. */
+.meta.unreached {
+  color: var(--due);
+  font-weight: 600;
+}

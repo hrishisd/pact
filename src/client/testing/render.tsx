@@ -2,7 +2,7 @@
 // screen with a user to drive it, and answer its api calls with typed stubs
 // instead of a server.
 
-import { cleanup, render, type RenderResult } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, type RenderResult } from "@testing-library/react";
 import { userEvent, type UserEvent } from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, vi, type MockInstance } from "vitest";
@@ -10,6 +10,7 @@ import type { Json } from "../../shared/api.ts";
 import type { PactTerms } from "../../shared/types.ts";
 import { api, ApiError } from "../api.ts";
 import { forgetLoaded, stopReloading } from "../last-loaded.ts";
+import { PULL_THRESHOLD_PX } from "../pull-to-refresh.tsx";
 
 type Api = typeof api;
 type PactPage = Json<PactTerms>;
@@ -81,6 +82,18 @@ export function cameraPact(editWindowClosesAt: string | null = null): PactPage {
     ending: null,
     stage: "active",
   };
+}
+
+/**
+ * Drags one finger `finger` px down the tab's scroll area from its top, and
+ * lets go. The content moves half as far: by default, just to the threshold,
+ * so it refreshes.
+ */
+export function pullDown(finger = 2 * PULL_THRESHOLD_PX, scrollArea: HTMLElement = screen.getByRole("main")): void {
+  fireEvent.touchStart(scrollArea, { touches: [{ clientY: 100 }] });
+  fireEvent.touchMove(scrollArea, { touches: [{ clientY: 100 + finger / 2 }] });
+  fireEvent.touchMove(scrollArea, { touches: [{ clientY: 100 + finger }] });
+  fireEvent.touchEnd(scrollArea, { touches: [] });
 }
 
 /** Renders `ui` on the document, with a user who clicks and types through it. */

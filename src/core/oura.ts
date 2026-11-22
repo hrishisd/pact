@@ -16,7 +16,14 @@ import { openWithPragmas, type Db } from "./db.ts";
 import { secretBox, type SecretBox } from "./secret-box.ts";
 import type { AccountId } from "../shared/types.ts";
 import type { RaiseOperatorAlert } from "./operator-alerts.ts";
-import type { Clock, OuraDateRange, OuraSleepPeriod, OuraSleepResult, OuraSource } from "./ports.ts";
+import {
+  OperatorAlerted,
+  type Clock,
+  type OuraDateRange,
+  type OuraSleepPeriod,
+  type OuraSleepResult,
+  type OuraSource,
+} from "./ports.ts";
 
 export interface OuraClient {
   clientId: string;
@@ -420,8 +427,8 @@ class Oura implements OuraAdapter {
   }
 }
 
-/** Oura refused Pact's own app at its token endpoint: the account's grant wasn't spent. */
-class AppRefused extends Error {}
+/** Oura refused Pact's own app at its token endpoint: the account's grant wasn't spent. An operator alert says so. */
+class AppRefused extends OperatorAlerted {}
 
 /** The `error` of an OAuth error answer (RFC 6749 section 5.2), or null when there's none to read. */
 async function oauthErrorOf(response: Response): Promise<string | null> {

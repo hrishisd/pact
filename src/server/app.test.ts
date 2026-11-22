@@ -2591,6 +2591,13 @@ describe("connecting AnkiWeb", () => {
     expect(await owner.post<CheckAnkiResponse>(API_PATHS.ankiCheck)).toMatchObject({ status: 200, body: { ok: true } });
     expect(s.ankiSource.countCalls).toEqual([{ account: owner.accountId, deckIds: ["1"] }]);
 
+    s.setClockTo("Wed 20:01");
+    s.ankiSource.deckCounts = () => Promise.reject(new Error("AnkiWeb network error: timed out"));
+    expect(await owner.post<CheckAnkiResponse>(API_PATHS.ankiCheck)).toMatchObject({
+      status: 200,
+      body: { ok: false, reason: "unreachable" },
+    });
+
     const after = await owner.post<DisconnectAnkiResponse>(API_PATHS.ankiDisconnect);
     expect(after.body.connections).toEqual([]);
     expect(s.ankiForgets).toEqual([owner.accountId]);
@@ -2819,6 +2826,17 @@ describe("connecting Oura", () => {
 
     for (const response of [first, again]) expect(response).toEqual({ status: 200, body: { ok: true } });
     expect(s.ouraSource.calls.map((call) => call.account)).toEqual([owner.accountId]);
+  });
+
+  test("checking Oura now says when Oura couldn't be reached", async () => {
+    const { s, owner } = await ownerWithBedtimePact();
+    s.setClockTo("Tue 09:00");
+    s.ouraSource.sleepPeriods = () => Promise.reject(new Error("Oura sleep request failed: HTTP 503"));
+
+    expect(await owner.post<CheckOuraResponse>(API_PATHS.ouraCheck)).toEqual({
+      status: 200,
+      body: { ok: false, reason: "unreachable" },
+    });
   });
 
   test("checking Oura now with Oura not set up answers ok and asks nothing", async () => {

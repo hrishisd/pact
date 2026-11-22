@@ -28,6 +28,7 @@ import type {
   ChangePactResult,
   ChangePreviewResult,
   ChangeRequestResult,
+  CheckNowResult,
   CreatePactResult,
   DailySummarySetting,
   DecideResult,
@@ -115,7 +116,15 @@ import {
   setReminders,
   withdrawChangeRequest,
 } from "./change-requests.ts";
-import { connectAnki, connectOura, disconnectAnki, disconnectOura, markDisconnected, profile } from "./connections.ts";
+import {
+  connectAnki,
+  connectOura,
+  disconnectAnki,
+  disconnectOura,
+  markDisconnected,
+  profile,
+  type ChecksNow,
+} from "./connections.ts";
 import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { acceptMiss, evidencePage, submitEvidence } from "./evidence.ts";
@@ -335,10 +344,11 @@ export interface AccountView {
    * Checks Oura now for the account's bedtime nights not judged yet, as a
    * tick would, and judges what it reports. Ignored less than 15 seconds after
    * the account's last check, with no night waiting, or without a working
-   * connection. A failing call changes nothing; a "disconnected" one marks
+   * connection. A failing call changes nothing and answers unreachable,
+   * unless Pact raised it as an operator alert; a "disconnected" one marks
    * the connection Needs reconnecting.
    */
-  checkOura(): Promise<void>;
+  checkOura(): Promise<CheckNowResult>;
   /**
    * Removes the account's Oura connection. Its Active bedtime pacts keep
    * running: their nights count as Missed until the owner connects again.
@@ -359,9 +369,10 @@ export interface AccountView {
    * Checks AnkiWeb now for the account's Anki days open and not judged yet,
    * as a tick would, and judges what it finds. Ignored less than 15 seconds
    * after the account's last check, or with no day waiting. A failing call
-   * changes nothing.
+   * changes nothing and answers unreachable, unless Pact raised it as an
+   * operator alert (a protocol error).
    */
-  checkAnki(): Promise<void>;
+  checkAnki(): Promise<CheckNowResult>;
   /** Removes the account's AnkiWeb connection. Its Active Anki pacts keep running, and their days count as Missed. */
   disconnectAnki(): Promise<void>;
   today(): Today;
@@ -572,11 +583,12 @@ class Core implements PactCore {
   /** The email pass running, if any: at most one at a time, apart from `#delivery`. */
   #emailPass: Promise<void> | null = null;
   /**
-   * When each account last checked Oura now. In memory: a restart forgets
-   * it, which costs at most one more call. Set before the call, so two
-   * checks at once make one.
+   * When each account last checked Oura now, and its answer. In memory: a
+   * restart forgets it, which costs at most one more call. Set before the
+   * call, so two checks at once make one, and the second waits for the
+   * first's answer.
    */
-  readonly #ouraChecks = new Map<AccountId, number>();
+  readonly #ouraChecks: ChecksNow = new Map();
   /** When each account's AnkiWeb was checked, and the checks still running. */
   readonly #ankiPolling: AnkiPolling = { checks: new Map(), polls: new Map(), checksRunning: new Map() };
 
@@ -762,7 +774,7 @@ class Core implements PactCore {
         const givenUp = alertGivenUpEmails(this.#ctx, giveUpEmails(this.#ctx, t));
         closeEditWindows(this.#ctx, t);
         // Before judging at due times: a check made before a day's due time can still satisfy it.
-        recordAnkiChecks(this.#ctx, checked);
+        recordAnkiChecks(this.#ctx, checked.checks);
         settleAll(this.#ctx, t);
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
         noteOuraClock(this.#ctx, fetched.sleep, t);
