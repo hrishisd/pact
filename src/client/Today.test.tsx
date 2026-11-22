@@ -122,11 +122,35 @@ describe("a Today card's own buttons", () => {
     });
   });
 
-  test("Enter on the card itself opens the pact", async () => {
+  test("Enter on the card's name opens the pact", async () => {
     const { user } = renderToday();
-    (await card("Spanish")).focus();
+    within(await card("Spanish"))
+      .getByRole("button", { name: "Spanish" })
+      .focus();
     await user.keyboard("{Enter}");
     expect(onOpenPact).toHaveBeenCalledWith("spanish", "Spanish");
+  });
+
+  test("a card's actions sit beside the button that opens it, not inside it, so each is reached on its own", async () => {
+    renderToday();
+    for (const [name, action] of [
+      ["Spanish", /^File excuse/],
+      ["Gym", /^File excuse/],
+      ["Pay Sam", /^Record payment/],
+    ] as const) {
+      const opener = within(await card(name)).getByRole("button", { name });
+      expect(within(opener).queryByRole("button")).toBeNull();
+      expect(within(await card(name)).getByRole("button", { name: action })).toBeTruthy();
+    }
+    // The card itself isn't a link wrapped around them.
+    expect(screen.queryByRole("link", { name: /Spanish|Gym|Pay Sam/ })).toBeNull();
+  });
+
+  test("a click on a card's own button doesn't open the pact", async () => {
+    const { user } = renderToday();
+    await user.click(within(await card("Gym")).getByRole("button", { name: /^File excuse/ }));
+    await screen.findByRole("dialog", { name: "Excuse Gym, Sun Jan 4" });
+    expect(onOpenPact).not.toHaveBeenCalled();
   });
 
   test("Enter on an Anki card's File excuse opens the excuse sheet, not the pact", async () => {

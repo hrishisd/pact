@@ -1196,28 +1196,21 @@ const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
 };
 
 /**
- * A card's own buttons and forms. A click or Enter on them stays here
- * rather than opening what the card opens. Other keys go on, so Escape still
- * reaches an open sheet.
+ * A card's own buttons and forms, drawn above the card's opener (see
+ * `PactCard`), so a tap on them stays theirs rather than opening the pact.
  */
 function CardActions({ className, children }: { className: string; children: ReactNode }) {
-  return (
-    <div
-      className={className}
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.stopPropagation();
-      }}
-    >
-      {children}
-    </div>
-  );
+  return <div className={`${className} card-actions`}>{children}</div>;
 }
 
 /**
  * A Today card: the pact's name (or for a bill, "Pay Sam"), a chip, its
  * penalty (or the bill's amount) in red, then whatever the section adds.
  * Tapping it opens the pact (or the ledger).
+ *
+ * The name is the button that opens it, stretched over the whole card, and
+ * the card's actions sit beside it rather than inside it, as on Ledgers: a
+ * screen reader reaches the opener and each action on its own.
  */
 function PactCard({
   name,
@@ -1238,18 +1231,14 @@ function PactCard({
   children?: ReactNode;
 }) {
   return (
-    <article
-      className={minutesLeft(editWindowClosesAt, now) === null ? "card tcard" : "card tcard fresh"}
-      role="link"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onOpen();
-      }}
-    >
+    <article className={minutesLeft(editWindowClosesAt, now) === null ? "card tcard" : "card tcard fresh"}>
       <div className="spread">
         <span className="namerow">
-          <h3>{name}</h3>
+          <h3>
+            <button className="tcard-open" onClick={onOpen}>
+              {name}
+            </button>
+          </h3>
           <EditWindowChip closesAt={editWindowClosesAt} now={now} />
         </span>
         {chip}

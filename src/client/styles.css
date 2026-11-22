@@ -378,9 +378,37 @@ p {
   text-align: center;
 }
 
-/* Today's cards: tapping one opens its pact. */
+/* Today's cards: tapping one opens its pact. The name's button stretches over
+   the whole card; the card's actions are drawn above it. */
 .tcard {
+  position: relative;
   cursor: pointer;
+}
+.tcard-open {
+  background: none;
+  border: 0;
+  padding: 0;
+  letter-spacing: inherit;
+  text-align: left;
+  text-wrap: inherit;
+  touch-action: manipulation;
+}
+.tcard-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+}
+.tcard-open:focus-visible {
+  outline: none;
+}
+.tcard-open:focus-visible::after {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.card-actions {
+  position: relative;
+  z-index: 1;
 }
 .tcard:hover {
   border-color: var(--muted);
