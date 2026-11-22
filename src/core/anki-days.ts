@@ -2,7 +2,7 @@
 // check now), and judging a day Satisfied once a check finds its deck done.
 
 import type { AccountId, AnkiDecksResult, CheckNowResult } from "../shared/types.ts";
-import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
+import { errorText, markDisconnected, recentCheckNow, type ChecksNow } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { noteAnkiResult } from "./judging.ts";
 import { coverOn } from "./covers.ts";
@@ -29,8 +29,8 @@ const ANKI_LAST_HOUR_MS = 60 * 60 * 1000;
  * makes one and holds it for its lifetime.
  */
 export interface AnkiPolling {
-  /** When each account last checked AnkiWeb now. In memory, as Core's `#ouraChecks`. */
-  readonly checks: Map<AccountId, number>;
+  /** When each account last checked AnkiWeb now, and what it answered. In memory, as Core's `#ouraChecks`. */
+  readonly checks: ChecksNow;
   /**
    * When each account's AnkiWeb was last checked, by a tick or check now. In
    * memory: a restart costs at most one more call. A check that fails is
@@ -85,12 +85,17 @@ export async function checkAnki(
   command: Command,
 ): Promise<CheckNowResult> {
   const now = ctx.clock.now();
-  if (checkedWithin(polling.checks, accountId, now, ANKI_CHECK_INTERVAL_MS)) return { ok: true };
+  const recent = recentCheckNow(polling.checks, accountId, now, ANKI_CHECK_INTERVAL_MS);
+  if (recent) return recent;
   if (ankiDaysWaiting(ctx, now, accountId).length === 0) return { ok: true };
-  polling.checks.set(accountId, now.getTime());
+  polling.checks.set(accountId, { at: now.getTime(), result: { ok: true } });
   const fetched = await fetchAnki(ctx, ankiSource, polling, now, accountId);
   await command(() => recordAnkiChecks(ctx, fetched.checks));
-  return fetched.unreached.includes(accountId) ? { ok: false, reason: "unreachable" } : { ok: true };
+  const result: CheckNowResult = fetched.unreached.includes(accountId)
+    ? { ok: false, reason: "unreachable" }
+    : { ok: true };
+  polling.checks.set(accountId, { at: now.getTime(), result });
+  return result;
 }
 
 /**

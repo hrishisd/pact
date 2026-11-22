@@ -6,7 +6,7 @@ import { addDays } from "../shared/calendar.ts";
 import { formatDate } from "../shared/format.ts";
 import type { AccountId, CheckNowResult, LocalDate } from "../shared/types.ts";
 import { earlierDate, laterDate, localDateOf } from "./calendar.ts";
-import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
+import { errorText, markDisconnected, recentCheckNow, type ChecksNow } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { coverOn, keepsToDo } from "./covers.ts";
 import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
@@ -22,20 +22,25 @@ const OURA_CHECK_INTERVAL_MS = 15_000;
 export async function checkOura(
   ctx: CoreContext,
   accountId: AccountId,
-  ouraChecks: Map<AccountId, number>,
+  ouraChecks: ChecksNow,
   ouraSource: OuraSource,
   command: Command,
 ): Promise<CheckNowResult> {
   const now = ctx.clock.now();
-  if (checkedWithin(ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS)) return { ok: true };
-  ouraChecks.set(accountId, now.getTime());
+  const recent = recentCheckNow(ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS);
+  if (recent) return recent;
+  ouraChecks.set(accountId, { at: now.getTime(), result: { ok: true } });
   const fetched = await fetchSleep(ctx, ouraSource, now, accountId);
   await command(() => {
     for (const account of fetched.disconnected) markDisconnected(ctx, "oura", account, fetched.askedAt);
     noteOuraClock(ctx, fetched.sleep, now);
     judgeNights(ctx, now, fetched.sleep, accountId);
   });
-  return fetched.unreached.includes(accountId) ? { ok: false, reason: "unreachable" } : { ok: true };
+  const result: CheckNowResult = fetched.unreached.includes(accountId)
+    ? { ok: false, reason: "unreachable" }
+    : { ok: true };
+  ouraChecks.set(accountId, { at: now.getTime(), result });
+  return result;
 }
 
 /**

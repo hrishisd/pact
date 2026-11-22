@@ -1733,3 +1733,8 @@ details.folded .kv {
     background-position: 200% 0;
   }
 }
+/* Under a Today card: a check a pull sent couldn't reach Oura or AnkiWeb. */
+.meta.unreached {
+  color: var(--due);
+  font-weight: 600;
+}

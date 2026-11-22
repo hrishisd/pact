@@ -1,7 +1,9 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { LedgerResponse, TodayResponse } from "../shared/api.ts";
-import { answers, onOurSide, renderWithUser, stubApi } from "./testing/render.tsx";
+import type { CheckNowResult } from "../shared/types.ts";
+import { PullToRefresh } from "./pull-to-refresh.tsx";
+import { answers, onOurSide, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
 import { Today } from "./Today.tsx";
 
 const NOW = "2026-01-05T15:00:00Z";
@@ -160,6 +162,131 @@ describe("a Today card's own buttons", () => {
     await screen.findByRole("dialog", { name: "Record a payment" });
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("a pull on Today", () => {
+  /** Tue night not judged yet: a No Oura data card. */
+  const OURA_WAITING: TodayResponse = {
+    ...TODAY,
+    sections: [
+      {
+        kind: "no-oura-data",
+        cards: [
+          {
+            pactId: "bed",
+            name: "In bed by 11",
+            penaltyCents: 1000,
+            occurrenceDate: "2026-01-04",
+            closesAt: "2026-01-05T23:00:00Z",
+            tonight: null,
+          },
+        ],
+      },
+      ...TODAY.sections,
+    ],
+  };
+  const UNREACHABLE = { ok: false, reason: "unreachable" } as const;
+  const ANKI_UNREACHED = "Couldn't reach AnkiWeb. Pact will try again.";
+  const OURA_UNREACHED = "Couldn't reach Oura. Pact will try again.";
+
+  function renderInShell() {
+    return renderWithUser(
+      <PullToRefresh pullable header={<h1>Today</h1>} mainClassName="scroll gut">
+        <Today
+          timezone="America/New_York"
+          onOpenPact={onOpenPact}
+          onOpenLedger={vi.fn()}
+          openers={openers}
+          onCreate={vi.fn()}
+          onInvite={vi.fn()}
+        />
+      </PullToRefresh>,
+    );
+  }
+  const busy = () => screen.getByRole("main").getAttribute("aria-busy");
+  /** Today has loaded, opened, checked what its cards wait on and reloaded: nothing running. */
+  async function opened(spies: { today: { mock: { calls: unknown[] } } }) {
+    await card("Spanish");
+    await waitFor(() => expect(spies.today.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(screen.queryByText("Checking AnkiWeb…")).toBeNull());
+  }
+
+  test("checks Oura and AnkiWeb, whatever cards show, then reloads Today", async () => {
+    const spies = stubApi({
+      today: answers(TODAY),
+      checkAnki: answers({ ok: true }),
+      checkOura: answers({ ok: true }),
+    });
+    renderInShell();
+    await opened(spies);
+    expect(spies.checkOura).not.toHaveBeenCalled();
+    const loads = spies.today.mock.calls.length;
+
+    pullDown();
+
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(spies.checkOura).toHaveBeenCalledTimes(1);
+    expect(spies.checkAnki).toHaveBeenCalledTimes(2);
+    expect(spies.today).toHaveBeenCalledTimes(loads + 1);
+  });
+
+  test("skips a service whose connection needs reconnecting", async () => {
+    const broken: TodayResponse = {
+      ...TODAY,
+      alerts: [{ kind: "connection", service: "oura", status: "needs-reconnecting" }],
+    };
+    const spies = stubApi({
+      today: answers(broken),
+      checkAnki: answers({ ok: true }),
+      checkOura: answers({ ok: true }),
+    });
+    renderInShell();
+    await opened(spies);
+    pullDown();
+    await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(spies.checkOura).not.toHaveBeenCalled();
+  });
+
+  test("an AnkiWeb out of reach says so on the Anki card, until a check answers ok", async () => {
+    const spies = stubApi({
+      today: answers(TODAY),
+      checkAnki: answers<CheckNowResult>({ ok: true }, UNREACHABLE, { ok: true }),
+      checkOura: answers({ ok: true }),
+    });
+    renderInShell();
+    await opened(spies);
+
+    pullDown();
+    expect(await within(await card("Spanish")).findByText(ANKI_UNREACHED)).toBeTruthy();
+    await waitFor(() => expect(busy()).toBeNull());
+
+    pullDown();
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(screen.queryByText(ANKI_UNREACHED)).toBeNull();
+  });
+
+  test("an Oura out of reach says so on the No Oura data card", async () => {
+    const spies = stubApi({
+      today: answers(OURA_WAITING),
+      checkAnki: answers({ ok: true }),
+      checkOura: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
+    });
+    renderInShell();
+    await opened(spies);
+    await waitFor(() => expect(screen.queryByText("Checking Oura…")).toBeNull());
+
+    pullDown();
+    expect(await within(await card("In bed by 11")).findByText(OURA_UNREACHED)).toBeTruthy();
+  });
+
+  test("a check Today sends by itself that can't reach AnkiWeb says nothing", async () => {
+    const spies = stubApi({ today: answers(TODAY), checkAnki: answers(UNREACHABLE) });
+    renderInShell();
+    await opened(spies);
+    expect(spies.checkAnki).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(ANKI_UNREACHED)).toBeNull();
   });
 });
 

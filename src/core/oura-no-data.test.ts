@@ -162,6 +162,9 @@ describe("checking Oura now", () => {
 
     s.setClockTo("2026-01-07T09:00:20-05:00");
     expect(await owner.checkOura()).toEqual({ ok: false, reason: "unreachable" });
+    // Skipped within 15 seconds: it answers what the last check found.
+    s.setClockTo("2026-01-07T09:00:30-05:00");
+    expect(await owner.checkOura()).toEqual({ ok: false, reason: "unreachable" });
 
     expect(statusOn(owner, pactId, s.date("Tue"))).toBe("not-judged");
     expect(owner.profile().connections).toEqual([expect.objectContaining({ status: "connected" })]);

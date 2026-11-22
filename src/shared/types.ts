@@ -373,8 +373,9 @@ export type AnkiDecksResult =
 /**
  * What a check of Oura or AnkiWeb now found: unreachable when its call to
  * the service failed (a timeout, a network failure, a 5xx, the Anki check
- * script failing). A check skipped, one that found the login refused, and a
- * failure Pact raised as an operator alert are all ok.
+ * script failing). One that found the login refused, one with nothing to
+ * check, and a failure Pact raised as an operator alert are ok. A check
+ * skipped within 15 seconds of the last answers what that one found.
  */
 export type CheckNowResult = { ok: true } | { ok: false; reason: "unreachable" };
 

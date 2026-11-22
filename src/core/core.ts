@@ -116,7 +116,15 @@ import {
   setReminders,
   withdrawChangeRequest,
 } from "./change-requests.ts";
-import { connectAnki, connectOura, disconnectAnki, disconnectOura, markDisconnected, profile } from "./connections.ts";
+import {
+  connectAnki,
+  connectOura,
+  disconnectAnki,
+  disconnectOura,
+  markDisconnected,
+  profile,
+  type ChecksNow,
+} from "./connections.ts";
 import { createContext, type CoreContext } from "./context.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { acceptMiss, evidencePage, submitEvidence } from "./evidence.ts";
@@ -579,7 +587,7 @@ class Core implements PactCore {
    * it, which costs at most one more call. Set before the call, so two
    * checks at once make one.
    */
-  readonly #ouraChecks = new Map<AccountId, number>();
+  readonly #ouraChecks: ChecksNow = new Map();
   /** When each account's AnkiWeb was checked, and the checks still running. */
   readonly #ankiPolling: AnkiPolling = { checks: new Map(), polls: new Map(), checksRunning: new Map() };
 

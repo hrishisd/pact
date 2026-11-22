@@ -40,7 +40,7 @@ Each of the four tabs (Today, Pacts, Review, Ledgers) has pull to refresh. Pulli
 
 - Every tab reloads its own data, as its `reload` does now: what was loaded stays on screen until the new data comes, and a failed reload shows the existing "couldn't load" line. A pull forgets nothing else loaded, like the app's other checks.
 - Today first sends **check Oura now** and **check Anki now**, then reloads when both have answered. It sends them whatever cards it shows: the core already asks Oura only for nights not judged yet, and AnkiWeb only for days still to do. It skips a service whose connection needs reconnecting, as the automatic checks do.
-- A pull within 15 seconds of the last check of a service: the core skips that check and says nothing. Today reloads as usual. The Anki card keeps the time of the last real check ("Checked 8:12am"), so it never claims a check that didn't happen. The answer doesn't report the skip, and Today shows no "Checked just now".
+- A pull within 15 seconds of the last check of a service: the core skips that check and says nothing. Today reloads as usual. The Anki card keeps the time of the last real check ("Checked 8:12am"), so it never claims a check that didn't happen. The answer doesn't report the skip, and Today shows no "Checked just now". It does repeat what the skipped-over check found, so a quick second pull can't clear a "Couldn't reach" line (added while building ticket 03).
 - A pull doesn't update the app to a new version.
 
 ### The indicator (prototype style B)

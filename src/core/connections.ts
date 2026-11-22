@@ -7,6 +7,7 @@ import { APP_PATHS } from "../shared/api.ts";
 import {
   RECONNECT_TEXT,
   type AccountId,
+  type CheckNowResult,
   type Connection,
   type ConnectionService,
   type Profile,
@@ -113,13 +114,21 @@ export function errorText(error: unknown): string {
   return error.name === "SyntaxError" ? error.name : `${error.name}: ${error.message}`;
 }
 
-/** Whether `accountId` checked a service within `intervalMs` before `now`, as `checks` records. */
-export function checkedWithin(
-  checks: ReadonlyMap<AccountId, number>,
+/** Each account's last check of a service now: when it was asked, and what it answered. In memory. */
+export type ChecksNow = Map<AccountId, { at: number; result: CheckNowResult }>;
+
+/**
+ * What the last check now of `accountId` answered, if it was asked within
+ * `intervalMs` before `now`: a check that soon is skipped and answers the
+ * same, so a skip never hides that the service couldn't be reached. Null
+ * when a check should ask.
+ */
+export function recentCheckNow(
+  checks: ChecksNow,
   accountId: AccountId,
   now: Date,
   intervalMs: number,
-): boolean {
+): CheckNowResult | null {
   const last = checks.get(accountId);
-  return last !== undefined && now.getTime() - last < intervalMs;
+  return last !== undefined && now.getTime() - last.at < intervalMs ? last.result : null;
 }

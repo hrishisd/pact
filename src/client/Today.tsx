@@ -20,6 +20,7 @@ import {
   type AcceptExcuseRejectionResult,
   type AcceptMissRefusal,
   type AcceptVacationRejectionResult,
+  type CheckNowResult,
   type ConnectionService,
   type LedgerSummary,
   type Refusal,
@@ -99,7 +100,6 @@ export function Today({
   onInvite: () => void;
 }) {
   const { state, reload } = useLoad(api.today, API_PATHS.today);
-  useRefreshOnPull(reload);
   const today = loadedData(state);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
@@ -108,21 +108,28 @@ export function Today({
   const brokenConnection = (service: ConnectionService) =>
     today?.alerts.some((alert) => alert.kind === "connection" && alert.service === service) ?? false;
   const ouraConnectionProblem = brokenConnection("oura");
+  const ankiConnectionProblem = brokenConnection("anki");
   // Checking can't help while the connection is broken.
-  const checking = useCheckNow(
+  const oura = useCheckNow(
     !ouraConnectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
     api.checkOura,
     reload,
     CHECK_OURA_EVERY_MS,
   );
-  const checkingAnki = useCheckNow(
-    !brokenConnection("anki") &&
+  const anki = useCheckNow(
+    !ankiConnectionProblem &&
       (today?.sections.some((section) => section.kind === "to-do" && section.cards.some((c) => c.kind === "anki")) ??
         false),
     api.checkAnki,
     reload,
     null,
   );
+  // A pull checks Oura and AnkiWeb whatever cards show (the core asks only
+  // about nights and days still waiting), then reloads Today.
+  useRefreshOnPull(async () => {
+    await Promise.all([ouraConnectionProblem || oura.pull(), ankiConnectionProblem || anki.pull()]);
+    await reload();
+  });
   // A waiting row or a reviewer's question opens the page of the item it's about.
   const open = (item: Json<TodayWaitingItem>) => openItem(item, openers);
 
@@ -171,8 +178,8 @@ export function Today({
                 section={section}
                 timezone={timezone}
                 now={now}
-                checkingOura={checking}
-                checkingAnki={checkingAnki}
+                oura={oura}
+                anki={anki}
                 ouraConnectionProblem={ouraConnectionProblem}
                 onOpenPact={onOpenPact}
                 onOpenLedger={onOpenLedger}
@@ -220,39 +227,67 @@ function alertKey(alert: Json<TodayAlert>): string {
   }
 }
 
+/** Under a card, after a check a pull sent couldn't reach the service. */
+const UNREACHED_TEXT: Record<ConnectionService, string> = {
+  oura: "Couldn't reach Oura. Pact will try again.",
+  anki: "Couldn't reach AnkiWeb. Pact will try again.",
+};
+
 /** How often Today checks Oura while a No Oura data card is on screen. */
 const CHECK_OURA_EVERY_MS = 30_000;
+
+/** Where a check of Oura or AnkiWeb stands, for its card. */
+interface CheckState {
+  /** A check is running now. */
+  checking: boolean;
+  /** A check sent by a pull couldn't reach the service, and no check since has answered ok. */
+  unreachable: boolean;
+}
 
 /**
  * While `active` (a No Oura data card, or an Anki day not judged, is on
  * screen), checks now at once, whenever the app comes back to the
  * foreground, and every `everyMs` while it's in front, if set; then
- * `onChecked` reloads Today. True while a check runs. The core ignores
- * checks that come too fast, so overlap is harmless.
+ * `onChecked` reloads Today. `pull` checks now whatever is on screen,
+ * joining a check already running, and leaves the reload to the pull.
+ * One check runs at a time; the core ignores checks that come too fast.
+ * Only a check a pull sent shows that the service couldn't be reached; any
+ * check that answers ok clears it.
  */
 function useCheckNow(
   active: boolean,
-  checkNow: () => Promise<unknown>,
+  checkNow: () => Promise<CheckNowResult>,
   onChecked: () => void,
   everyMs: number | null,
-): boolean {
+): CheckState & { pull: () => Promise<void> } {
   const [checking, setChecking] = useState(false);
-  const running = useRef(false);
+  const [unreachable, setUnreachable] = useState(false);
+  const running = useRef<Promise<CheckNowResult | null> | null>(null);
   const checked = useRef(onChecked);
   checked.current = onChecked;
+  // A check that didn't reach Pact answers null: the reload says so, not the card.
+  const send = useCallback(() => {
+    if (running.current) return running.current;
+    setChecking(true);
+    const sent = checkNow()
+      .catch(() => null)
+      .then((result) => {
+        running.current = null;
+        setChecking(false);
+        if (result?.ok) setUnreachable(false);
+        return result;
+      });
+    running.current = sent;
+    return sent;
+  }, [checkNow]);
   const check = useCallback(() => {
     if (running.current || document.visibilityState === "hidden") return;
-    running.current = true;
-    setChecking(true);
-    // A failed check leaves the card as it was; the next one tries again.
-    checkNow()
-      .catch(() => {})
-      .finally(() => {
-        running.current = false;
-        setChecking(false);
-        checked.current();
-      });
-  }, [checkNow]);
+    void send().then(() => checked.current());
+  }, [send]);
+  const pull = useCallback(async () => {
+    const result = await send();
+    if (result && !result.ok) setUnreachable(true);
+  }, [send]);
   useEffect(() => {
     if (!active) return;
     check();
@@ -266,15 +301,15 @@ function useCheckNow(
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [active, check, everyMs]);
-  return checking;
+  return { checking, unreachable, pull };
 }
 
 function Section({
   section,
   timezone,
   now,
-  checkingOura,
-  checkingAnki,
+  oura,
+  anki,
   ouraConnectionProblem,
   onOpenPact,
   onOpenLedger,
@@ -284,10 +319,10 @@ function Section({
   section: Json<TodaySection>;
   timezone: string;
   now: number;
-  /** Whether a check of Oura is running now. */
-  checkingOura: boolean;
-  /** Whether a check of AnkiWeb is running now. */
-  checkingAnki: boolean;
+  /** Where the check of Oura stands. */
+  oura: CheckState;
+  /** Where the check of AnkiWeb stands. */
+  anki: CheckState;
   /** Whether Pact can't read the owner's Oura: syncing won't help, reconnecting will. */
   ouraConnectionProblem: boolean;
   onOpenPact: (id: string, name: string) => void;
@@ -303,7 +338,7 @@ function Section({
           key={`no-oura-data:${card.pactId}:${card.occurrenceDate}`}
           card={card}
           now={now}
-          checking={checkingOura}
+          check={oura}
           ouraConnectionProblem={ouraConnectionProblem}
           onOpen={() => onOpenPact(card.pactId, card.name)}
           onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
@@ -330,7 +365,7 @@ function Section({
                 card={card}
                 timezone={timezone}
                 now={now}
-                checking={checkingAnki}
+                check={anki}
                 onOpen={() => onOpenPact(card.pactId, card.name)}
                 onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
               />
@@ -470,14 +505,14 @@ function WeekToDo({ card, week, timezone }: { card: Json<TodayToDoCard>; week: J
 function NoOuraDataCard({
   card,
   now,
-  checking,
+  check: { checking, unreachable },
   ouraConnectionProblem,
   onOpen,
   onFileExcuse,
 }: {
   card: Json<TodayNoOuraDataCard>;
   now: number;
-  checking: boolean;
+  check: CheckState;
   ouraConnectionProblem: boolean;
   onOpen: () => void;
   onFileExcuse: () => void;
@@ -498,6 +533,7 @@ function NoOuraDataCard({
           ? "Checking Oura…"
           : `${night} night hasn't synced yet. ${ouraConnectionProblem ? "Reconnect Oura to count it." : "Open the Oura app to sync it."}`}
       </div>
+      {unreachable && !checking && <div className="meta unreached">{UNREACHED_TEXT.oura}</div>}
       <div className="meta due">
         Missed at {NIGHT_CLOSES_TEXT} if it hasn't synced · {timeLeft(Date.parse(card.closesAt) - now)}
       </div>
@@ -524,7 +560,7 @@ function AnkiCard({
   card,
   timezone,
   now,
-  checking,
+  check: { checking, unreachable },
   onOpen,
   onFileExcuse,
 }: {
@@ -532,8 +568,7 @@ function AnkiCard({
   /** The profile's timezone, for when AnkiWeb was checked. */
   timezone: string;
   now: number;
-  /** Whether a check of AnkiWeb is running now. */
-  checking: boolean;
+  check: CheckState;
   onOpen: () => void;
   onFileExcuse: () => void;
 }) {
@@ -560,6 +595,7 @@ function AnkiCard({
       ) : (
         <div className="meta">{checking ? <CheckingAnkiWeb /> : "Not checked yet today."}</div>
       )}
+      {unreachable && !checking && <div className="meta unreached">{UNREACHED_TEXT.anki}</div>}
       <div className="meta due">
         Due at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} · {timeLeft(Date.parse(card.dueAt) - now)}
       </div>

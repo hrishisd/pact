@@ -6,21 +6,13 @@ import { Ledgers } from "./Ledgers.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { PULL_THRESHOLD_PX, PullToRefresh, useRefreshOnPull } from "./pull-to-refresh.tsx";
 import { Review } from "./Review.tsx";
-import { answers, renderWithUser, stubApi } from "./testing/render.tsx";
+import { answers, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
 
 /** Whether the tab is busy refreshing: "true" while the bar runs, null otherwise. */
 const busy = () => screen.getByRole("main").getAttribute("aria-busy");
 
 /** The finger's travel that pulls the content `px` far, after resistance. */
 const fingerFor = (px: number) => px * 2;
-
-/** Drags a finger down `by` px from the top of the tab's scroll area and lets go. */
-function pull(by: number, scrollArea = screen.getByRole("main")) {
-  fireEvent.touchStart(scrollArea, { touches: [{ clientY: 100 }] });
-  fireEvent.touchMove(scrollArea, { touches: [{ clientY: 100 + by / 2 }] });
-  fireEvent.touchMove(scrollArea, { touches: [{ clientY: 100 + by }] });
-  fireEvent.touchEnd(scrollArea, { touches: [] });
-}
 
 /** A tab whose refresh is `refresh`. */
 function Tab({ refresh }: { refresh: () => Promise<unknown> }) {
@@ -48,7 +40,7 @@ describe("the pull", () => {
     const { refresh, done } = heldRefresh();
     shell(refresh);
 
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
 
     expect(refresh).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(busy()).toBe("true"));
@@ -58,14 +50,14 @@ describe("the pull", () => {
 
   test("a refresh that fails still ends the bar", async () => {
     shell(() => Promise.reject(new Error("offline")));
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(busy()).toBeNull());
   });
 
   test("a pull short of the threshold refreshes nothing", () => {
     const refresh = vi.fn(() => Promise.resolve());
     shell(refresh);
-    pull(fingerFor(PULL_THRESHOLD_PX - 1));
+    pullDown(fingerFor(PULL_THRESHOLD_PX - 1));
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -74,7 +66,7 @@ describe("the pull", () => {
     shell(refresh);
     const main = screen.getByRole("main");
     Object.defineProperty(main, "scrollTop", { value: 200, configurable: true });
-    pull(fingerFor(PULL_THRESHOLD_PX + 20));
+    pullDown(fingerFor(PULL_THRESHOLD_PX + 20));
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -102,20 +94,20 @@ describe("the pull", () => {
   test("a pull while a refresh runs is ignored", async () => {
     const { refresh, done } = heldRefresh();
     shell(refresh);
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(busy()).toBe("true"));
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
     expect(refresh).toHaveBeenCalledTimes(1);
     done();
     await waitFor(() => expect(busy()).toBeNull());
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
   test("a page opened from a tab has no pull", () => {
     const refresh = vi.fn(() => Promise.resolve());
     shell(refresh, false);
-    pull(fingerFor(PULL_THRESHOLD_PX + 20));
+    pullDown(fingerFor(PULL_THRESHOLD_PX + 20));
     expect(refresh).not.toHaveBeenCalled();
   });
 });
@@ -132,7 +124,7 @@ describe("each tab's refresh", () => {
     const spies = stubApi({ pacts: answers<PactsResponse>([]) });
     inShell(<Pacts onOpenPact={() => {}} onCreate={() => {}} />);
     await screen.findByText("No pacts yet");
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(spies.pacts).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(busy()).toBeNull());
   });
@@ -144,7 +136,7 @@ describe("each tab's refresh", () => {
     });
     inShell(<Review timezone="America/New_York" onQueue={() => {}} />);
     await waitFor(() => expect(spies.waitingOnReply).toHaveBeenCalledTimes(1));
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(spies.reviewQueue).toHaveBeenCalledTimes(2));
     expect(spies.waitingOnReply).toHaveBeenCalledTimes(2);
   });
@@ -153,7 +145,7 @@ describe("each tab's refresh", () => {
     const spies = stubApi({ ledgers: answers<LedgersResponse>([]) });
     inShell(<Ledgers timezone="America/New_York" onOpenLedger={() => {}} />);
     await screen.findByText("No ledgers yet");
-    pull(fingerFor(PULL_THRESHOLD_PX));
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(spies.ledgers).toHaveBeenCalledTimes(2));
   });
 });

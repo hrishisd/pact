@@ -16,9 +16,15 @@ Pulling down at the top of Today, Pacts, Review or Ledgers and letting go past a
 
 ## Acceptance criteria
 
-- [ ] A pull past the threshold on each tab reloads it, and the bar shows until the reload answers (`pull-to-refresh.test.tsx`).
-- [ ] A pull short of the threshold, or one that starts below the top, reloads nothing.
-- [ ] A pull while a refresh runs is ignored.
-- [ ] Pages opened from a tab have no pull.
-- [ ] `docs/behaviour.md` describes the pull.
-- [ ] The manual checks in `../manual-checks.md` are listed for the human.
+- [x] A pull past the threshold on each tab reloads it, and the bar shows until the reload answers (`pull-to-refresh.test.tsx`).
+- [x] A pull short of the threshold, or one that starts below the top, reloads nothing.
+- [x] A pull while a refresh runs is ignored.
+- [x] Pages opened from a tab have no pull.
+- [x] `docs/behaviour.md` describes the pull.
+- [x] The manual checks in `../manual-checks.md` are listed for the human (not yet done: they need a phone).
+
+## Comments
+
+### 2026-11-22: built
+
+Built on branch `claude/dazzling-noether-u1w82i`, with the other pull to refresh tickets, for one pull request. Status stays until it is on `main`.

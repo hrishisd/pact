@@ -15,8 +15,14 @@ Today's refresh sends check Oura now and check Anki now together, whatever cards
 
 ## Acceptance criteria
 
-- [ ] A pull on Today sends both checks, then reloads Today (`Today.test.tsx`).
-- [ ] A pull skips a service whose connection needs reconnecting.
-- [ ] A pull whose Anki check answers unreachable shows the line on the Anki card; the next check that answers ok removes it. The same for Oura on the No Oura data card.
-- [ ] An automatic check that answers unreachable shows nothing.
-- [ ] `docs/behaviour.md` describes Today's pull.
+- [x] A pull on Today sends both checks, then reloads Today (`Today.test.tsx`).
+- [x] A pull skips a service whose connection needs reconnecting.
+- [x] A pull whose Anki check answers unreachable shows the line on the Anki card; the next check that answers ok removes it. The same for Oura on the No Oura data card.
+- [x] An automatic check that answers unreachable shows nothing.
+- [x] `docs/behaviour.md` describes Today's pull.
+
+## Comments
+
+### 2026-11-22: built
+
+Built on branch `claude/dazzling-noether-u1w82i`, with the other pull to refresh tickets, for one pull request. Status stays until it is on `main`.

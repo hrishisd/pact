@@ -497,8 +497,12 @@ describe("checking AnkiWeb", () => {
 
     s.setClockTo("Tue 20:00");
     expect(await owner.checkAnki()).toEqual({ ok: false, reason: "unreachable" });
+    // Skipped within 15 seconds: it answers what the last check found.
+    s.clock.set(new Date(s.at("Tue 20:00").getTime() + 10_000));
+    expect(await owner.checkAnki()).toEqual({ ok: false, reason: "unreachable" });
     s.clock.set(new Date(s.at("Tue 20:00").getTime() + 16_000));
     expect(await owner.checkAnki()).toEqual({ ok: true });
+    expect(s.ankiSource.countCalls).toHaveLength(1);
   });
 
   test("check now answers ok when it's skipped, finds the login refused, or fails on what the operator was told of", async () => {
