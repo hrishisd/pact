@@ -340,12 +340,7 @@ function Shell({
       case "today":
         return {
           title: label,
-          subtitle: new Intl.DateTimeFormat("en-US", {
-            timeZone: profile.timezone,
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-          }).format(new Date()),
+          subtitle: formatDay(new Date().toISOString(), profile.timezone),
           body: (
             <>
               <NotificationsAlert push={push} onSetUp={openNotifications} />
