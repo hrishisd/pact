@@ -1,13 +1,13 @@
 // Anki days: the deck picker's list, checking AnkiWeb (by the scheduler or
 // check now), and judging a day Satisfied once a check finds its deck done.
 
-import type { AccountId, AnkiDecksResult } from "../shared/types.ts";
+import type { AccountId, AnkiDecksResult, CheckNowResult } from "../shared/types.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { noteAnkiResult } from "./judging.ts";
 import { coverOn } from "./covers.ts";
 import { isJudged } from "./occurrence-state.ts";
-import type { AnkiCountsResult, AnkiSource } from "./ports.ts";
+import { OperatorAlerted, type AnkiCountsResult, type AnkiSource } from "./ports.ts";
 import { ankiPactsToRemind } from "./reminders.ts";
 import { settle } from "./settle.ts";
 import { ankiDeckList, ankiDeckName, ankiDeckOn, hasConnection, occurrencesOf } from "./rows.ts";
@@ -83,13 +83,14 @@ export async function checkAnki(
   polling: AnkiPolling,
   ankiSource: AnkiSource,
   command: Command,
-): Promise<void> {
+): Promise<CheckNowResult> {
   const now = ctx.clock.now();
-  if (checkedWithin(polling.checks, accountId, now, ANKI_CHECK_INTERVAL_MS)) return;
-  if (ankiDaysWaiting(ctx, now, accountId).length === 0) return;
+  if (checkedWithin(polling.checks, accountId, now, ANKI_CHECK_INTERVAL_MS)) return { ok: true };
+  if (ankiDaysWaiting(ctx, now, accountId).length === 0) return { ok: true };
   polling.checks.set(accountId, now.getTime());
   const fetched = await fetchAnki(ctx, ankiSource, polling, now, accountId);
-  await command(() => recordAnkiChecks(ctx, fetched));
+  await command(() => recordAnkiChecks(ctx, fetched.checks));
+  return fetched.unreached.includes(accountId) ? { ok: false, reason: "unreachable" } : { ok: true };
 }
 
 /**
@@ -137,7 +138,8 @@ function ankiDaysWaiting(
  * for one of its waiting days goes off this tick (so a deck finished since
  * the last check stops it); `owner`'s check now always does. Accounts are checked at once, so a slow AnkiWeb delays the
  * tick by its own call only, never by the sum of everyone's. A call that
- * throws is logged and forgotten, so the next tick tries again. A
+ * throws is logged and forgotten, so the next tick tries again; its account
+ * is in `unreached`, unless the failure was raised as an operator alert. A
  * "disconnected" answer checks nothing, and `recordAnkiChecks` marks the
  * connection Needs reconnecting. While a call runs, it holds judging
  * the days it may still satisfy (`ankiCheckHolds`).
@@ -148,7 +150,8 @@ export async function fetchAnki(
   polling: AnkiPolling,
   t: Date,
   owner?: AccountId,
-): Promise<FetchedAnki[]> {
+): Promise<{ checks: FetchedAnki[]; unreached: AccountId[] }> {
+  const unreached: AccountId[] = [];
   const decks = new Map<AccountId, string[]>();
   /** Accounts with a waiting day due within the hour: checked more often. */
   const dueSoon = new Set<AccountId>();
@@ -178,6 +181,7 @@ export async function fetchAnki(
     } catch (error) {
       polling.polls.delete(account);
       ctx.log(`AnkiWeb check for account ${account} failed, nothing checked: ${errorText(error)}`);
+      if (!(error instanceof OperatorAlerted)) unreached.push(account);
       return null;
     } finally {
       checks.delete(running);
@@ -185,7 +189,8 @@ export async function fetchAnki(
     }
   };
   const settled = await Promise.allSettled([...decks].map(([account, deckIds]) => check(account, deckIds)));
-  return settled.flatMap((outcome) => (outcome.status === "fulfilled" && outcome.value ? [outcome.value] : []));
+  const checks = settled.flatMap((outcome) => (outcome.status === "fulfilled" && outcome.value ? [outcome.value] : []));
+  return { checks, unreached };
 }
 
 /**

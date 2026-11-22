@@ -4,7 +4,7 @@
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
 import { formatDate } from "../shared/format.ts";
-import type { AccountId, LocalDate } from "../shared/types.ts";
+import type { AccountId, CheckNowResult, LocalDate } from "../shared/types.ts";
 import { earlierDate, laterDate, localDateOf } from "./calendar.ts";
 import { checkedWithin, errorText, markDisconnected } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
@@ -12,7 +12,7 @@ import { coverOn, keepsToDo } from "./covers.ts";
 import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { nightStartsAt, noOuraDataPushAt, utcOffsetMs, type Occurrence, type OuraOffset } from "./occurrences.ts";
 import { nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
-import type { OuraSleepPeriod, OuraSource } from "./ports.ts";
+import { OperatorAlerted, type OuraSleepPeriod, type OuraSource } from "./ports.ts";
 import { connectionProblem, occurrencesOf, ouraClockOf, ouraOffsetOf } from "./rows.ts";
 import { settle } from "./settle.ts";
 
@@ -25,9 +25,9 @@ export async function checkOura(
   ouraChecks: Map<AccountId, number>,
   ouraSource: OuraSource,
   command: Command,
-): Promise<void> {
+): Promise<CheckNowResult> {
   const now = ctx.clock.now();
-  if (checkedWithin(ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS)) return;
+  if (checkedWithin(ouraChecks, accountId, now, OURA_CHECK_INTERVAL_MS)) return { ok: true };
   ouraChecks.set(accountId, now.getTime());
   const fetched = await fetchSleep(ctx, ouraSource, now, accountId);
   await command(() => {
@@ -35,6 +35,7 @@ export async function checkOura(
     noteOuraClock(ctx, fetched.sleep, now);
     judgeNights(ctx, now, fetched.sleep, accountId);
   });
+  return fetched.unreached.includes(accountId) ? { ok: false, reason: "unreachable" } : { ok: true };
 }
 
 /**
@@ -172,6 +173,7 @@ export async function fetchSleep(
   }
   const sleep = new Map<AccountId, OuraSleepPeriod[]>();
   const disconnected: AccountId[] = [];
+  const unreached: AccountId[] = [];
   for (const [account, range] of ranges) {
     try {
       const result = await ouraSource.sleepPeriods(account, range);
@@ -179,9 +181,10 @@ export async function fetchSleep(
       else disconnected.push(account);
     } catch (error) {
       ctx.log(`Oura sleep for account ${account} failed, no data this tick: ${errorText(error)}`);
+      if (!(error instanceof OperatorAlerted)) unreached.push(account);
     }
   }
-  return { sleep, disconnected, askedAt };
+  return { sleep, disconnected, unreached, askedAt };
 }
 
 /**
@@ -258,9 +261,14 @@ function noteFirstSleep(ctx: CoreContext, pactId: string, date: LocalDate, bedti
     .run(bedtimeStart, at.toISOString(), pactId, date);
 }
 
-/** What `fetchSleep` got from Oura: sleep by account, the accounts it answered "disconnected" for, and when it was asked. */
+/**
+ * What `fetchSleep` got from Oura: sleep by account, the accounts it answered
+ * "disconnected" for, the accounts whose call failed (other than on a failure
+ * already raised as an operator alert), and when it was asked.
+ */
 interface FetchedSleep {
   sleep: Map<AccountId, OuraSleepPeriod[]>;
   disconnected: AccountId[];
+  unreached: AccountId[];
   askedAt: Date;
 }

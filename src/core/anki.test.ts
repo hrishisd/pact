@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { expect, onTestFinished, test } from "vitest";
 import { ankiAdapter, devAnki, type AnkiScriptRequest, type AnkiScriptRunner } from "./anki.ts";
 import { openWithPragmas } from "./db.ts";
+import { OperatorAlerted } from "./ports.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 
 const TOKEN_KEY = Buffer.alloc(32, 9).toString("base64");
@@ -187,9 +188,11 @@ test("an auth error is disconnected; a network error throws; a protocol error th
   expect(await adapter.deckCounts(owner.id, ["1"])).toEqual({ ok: false, reason: "disconnected" });
   answer = { ok: false, error: "network", message: "NetworkError: 503" };
   await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow("NetworkError: 503");
+  await expect(adapter.deckCounts(owner.id, ["1"])).rejects.not.toBeInstanceOf(OperatorAlerted);
   expect(s.logs.filter((line) => line.startsWith("OPERATOR_ALERT"))).toEqual([]);
   answer = { ok: false, error: "protocol", message: "DecodeError: unexpected field" };
-  await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow("DecodeError");
+  // Already the operator's to fix: a check now doesn't tell the owner AnkiWeb was out of reach.
+  await expect(adapter.deckCounts(owner.id, ["1"])).rejects.toThrow(OperatorAlerted);
   expect(s.logs).toEqual([expect.stringMatching(/^OPERATOR_ALERT AnkiWeb protocol error.*DecodeError/)]);
   expect(s.mailer.sent).toEqual([
     {

@@ -12,6 +12,7 @@
 import { describe, expect, test } from "vitest";
 import { WEEKDAYS, type PactChange } from "../shared/types.ts";
 import { ankiPact, ownerWithAnki, SPANISH } from "./testing/anki-pact.ts";
+import { OperatorAlerted } from "./ports.ts";
 import { failOnCall } from "./testing/fakes.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
 import { cards, dayOn, ok, pactOf, statusOn } from "./testing/queries.ts";
@@ -485,6 +486,38 @@ describe("checking AnkiWeb", () => {
     s.clock.set(new Date(s.at("Tue 20:00").getTime() + 26_000));
     await owner.checkAnki();
     expect(s.ankiSource.countCalls).toHaveLength(2);
+  });
+
+  test("check now says when AnkiWeb couldn't be reached", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 20:00");
+    failOnCall(s.ankiSource, "deckCounts", 1, new Error("AnkiWeb network error: timed out"));
+
+    s.setClockTo("Tue 20:00");
+    expect(await owner.checkAnki()).toEqual({ ok: false, reason: "unreachable" });
+    s.clock.set(new Date(s.at("Tue 20:00").getTime() + 16_000));
+    expect(await owner.checkAnki()).toEqual({ ok: true });
+  });
+
+  test("check now answers ok when it's skipped, finds the login refused, or fails on what the operator was told of", async () => {
+    const s = scenario();
+    const { owner, createPact, deckShows } = await ownerWithAnki(s);
+    await createPact({ days: ["tue"] });
+    deckShows({ review: 42 }, s.date("Tue"), "Tue 20:00");
+
+    s.setClockTo("Mon 20:00");
+    expect(await owner.checkAnki()).toEqual({ ok: true });
+    s.setClockTo("Tue 20:00");
+    failOnCall(s.ankiSource, "deckCounts", 1, new OperatorAlerted("AnkiWeb protocol error: unexpected reply"));
+    expect(await owner.checkAnki()).toEqual({ ok: true });
+    s.clock.set(new Date(s.at("Tue 20:00").getTime() + 5_000));
+    expect(await owner.checkAnki()).toEqual({ ok: true });
+    expect(s.ankiSource.countCalls).toEqual([]);
+    s.ankiSource.disconnect(owner.id);
+    s.clock.set(new Date(s.at("Tue 20:00").getTime() + 16_000));
+    expect(await owner.checkAnki()).toEqual({ ok: true });
   });
 
   test("check now does nothing while no Anki day waits", async () => {

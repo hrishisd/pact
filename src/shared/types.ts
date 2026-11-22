@@ -370,6 +370,14 @@ export type AnkiDecksResult =
   /** Not connected, AnkiWeb refused the login, or AnkiWeb couldn't be reached. */
   | { ok: false; reason: "not-connected" | "disconnected" | "unreachable" };
 
+/**
+ * What a check of Oura or AnkiWeb now found: unreachable when its call to
+ * the service failed (a timeout, a network failure, a 5xx, the Anki check
+ * script failing). A check skipped, one that found the login refused, and a
+ * failure Pact raised as an operator alert are all ok.
+ */
+export type CheckNowResult = { ok: true } | { ok: false; reason: "unreachable" };
+
 /** An Anki pact's deck, and when its Anki day starts. */
 export interface AnkiTerms {
   deckId: string;

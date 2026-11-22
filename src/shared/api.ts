@@ -4,6 +4,7 @@
 import type {
   AccountId,
   AnkiDecksResult,
+  CheckNowResult,
   AcceptExcuseRejectionResult,
   AcceptVacationRejectionResult,
   AcceptInviteResult,
@@ -545,8 +546,8 @@ export interface SetTimezoneRequest {
 }
 export type SetTimezoneResponse = Json<SetTimezoneResult>;
 
-/** POST /api/oura/check: always `{ ok: true }`, whether Oura was asked or the check was ignored. */
-export type CheckOuraResponse = OkResponse;
+/** POST /api/oura/check: `{ ok: true }` whether Oura was asked or the check was ignored, unreachable when Oura couldn't be reached. */
+export type CheckOuraResponse = CheckNowResult;
 
 /** POST /api/oura/disconnect: the profile, now without its Oura connection. */
 export type DisconnectOuraResponse = MeResponse;
@@ -565,8 +566,8 @@ export type ConnectAnkiResponse = { ok: true } | { ok: false; reason: "wrong-log
 /** GET /api/anki/decks */
 export type AnkiDecksResponse = Json<AnkiDecksResult>;
 
-/** POST /api/anki/check: always `{ ok: true }`, whether AnkiWeb was asked or the check was ignored. */
-export type CheckAnkiResponse = OkResponse;
+/** POST /api/anki/check: `{ ok: true }` whether AnkiWeb was asked or the check was ignored, unreachable when AnkiWeb couldn't be reached. */
+export type CheckAnkiResponse = CheckNowResult;
 
 /** POST /api/anki/disconnect: the profile, now without its AnkiWeb connection. */
 export type DisconnectAnkiResponse = MeResponse;

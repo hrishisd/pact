@@ -18,7 +18,13 @@ import { openWithPragmas, type Db } from "./db.ts";
 import { secretBox, type SecretBox } from "./secret-box.ts";
 import type { AccountId, AnkiCounts, AnkiDeck } from "../shared/types.ts";
 import type { RaiseOperatorAlert } from "./operator-alerts.ts";
-import type { AnkiCountsResult, AnkiDeckListResult, AnkiSource, Clock } from "./ports.ts";
+import {
+  OperatorAlerted,
+  type AnkiCountsResult,
+  type AnkiDeckListResult,
+  type AnkiSource,
+  type Clock,
+} from "./ports.ts";
 
 export interface AnkiSetup {
   /** 32 bytes, base64: encrypts the stored host keys. */
@@ -315,8 +321,10 @@ class Anki implements AnkiAdapter {
       const answer = await operation({ hostKey, endpoint: row.endpoint, collection: this.#copyOf(account) });
       if (!answer.ok) {
         if (answer.error === "auth") return null;
-        if (answer.error === "protocol") this.#alertProtocolError(account, answer.message);
-        throw new Error(`AnkiWeb ${answer.error} error: ${answer.message}`);
+        const text = `AnkiWeb ${answer.error} error: ${answer.message}`;
+        if (answer.error !== "protocol") throw new Error(text);
+        this.#alertProtocolError(account, answer.message);
+        throw new OperatorAlerted(text);
       }
       this.#protocolErrorEmailed.delete(account);
       if (answer.fetch !== undefined) this.#log(fetchLine(op, account, answer.fetch));

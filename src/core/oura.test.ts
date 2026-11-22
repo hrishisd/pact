@@ -8,7 +8,7 @@ import { openWithPragmas } from "./db.ts";
 import { ouraAdapter, type OuraAdapterOptions, type OuraClient } from "./oura.ts";
 import { sleep } from "./testing/bedtime-pact.ts";
 import { scenario, type Scenario } from "./testing/scenario.ts";
-import type { OuraSleepPeriod } from "./ports.ts";
+import { OperatorAlerted, type OuraSleepPeriod } from "./ports.ts";
 
 const CLIENT: OuraClient = {
   clientId: "pact-client",
@@ -422,7 +422,8 @@ describe("sleep periods", () => {
       s.clock.set(new Date(s.clock.now().getTime() + 86_400_000));
       oura.appRefusal = { status, body: { error: "invalid_client" } };
       await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("invalid_client");
-      await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toThrow("invalid_client");
+      // Already the operator's to fix: a check now doesn't tell the owner Oura was out of reach.
+      await expect(adapter.sleepPeriods(owner.id, RANGE)).rejects.toBeInstanceOf(OperatorAlerted);
       expect(s.mailer.sent).toEqual([
         {
           to: s.operatorEmail,

@@ -62,6 +62,14 @@ export type AnkiCountsResult =
   | { ok: false; reason: "disconnected" };
 
 /**
+ * What an Oura or Anki adapter throws for a failure it has already raised as
+ * an operator alert: an AnkiWeb protocol error, or Oura refusing Pact's own
+ * app. The core treats it as any failed call, except that a check now
+ * doesn't tell the owner the service couldn't be reached: it's Pact's to fix.
+ */
+export class OperatorAlerted extends Error {}
+
+/**
  * The owner's Anki collection, as AnkiWeb has it. One call is one check of
  * the collection, however many decks it asks about. Throwing (a timeout, a
  * 5xx, a protocol error) is a failed check.

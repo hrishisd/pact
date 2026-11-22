@@ -491,8 +491,7 @@ export function createApp({
   });
 
   app.post(API_PATHS.ouraCheck, async (c) => {
-    await account(c).checkOura();
-    return c.json<CheckOuraResponse>({ ok: true });
+    return c.json<CheckOuraResponse>(await account(c).checkOura());
   });
 
   app.post(API_PATHS.ouraDisconnect, async (c) => {
@@ -509,8 +508,7 @@ export function createApp({
   app.get(API_PATHS.ankiDecks, async (c) => c.json<AnkiDecksResponse>(await account(c).ankiDecks()));
 
   app.post(API_PATHS.ankiCheck, async (c) => {
-    await account(c).checkAnki();
-    return c.json<CheckAnkiResponse>({ ok: true });
+    return c.json<CheckAnkiResponse>(await account(c).checkAnki());
   });
 
   app.post(API_PATHS.ankiDisconnect, async (c) => {
