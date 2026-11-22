@@ -115,6 +115,9 @@ const importPattern = /\b(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g;
 const LAYER_IMPORTS: Record<string, (folder: string) => boolean> = {
   client: (folder) => folder === "client" || folder === "shared",
   core: (folder) => folder !== "server" && folder !== "client",
+  // Both sides import shared, so an import from it would reach the other side through it.
+  shared: (folder) => folder === "shared",
+  server: (folder) => folder !== "client",
 };
 
 const findings: string[] = [];

@@ -2,7 +2,16 @@
 // in scripts/ and runs the real config.ts; only fly.toml and the listing are fakes.
 
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { afterAll, describe, expect, test, vi } from "vitest";
@@ -12,7 +21,8 @@ import { loadConfig } from "./config.ts";
 // machine), so the 5 s default would fail a busy CI runner, not a bug.
 vi.setConfig({ testTimeout: 30_000 });
 
-const SCRIPT = join(import.meta.dirname, "..", "..", "scripts", "check-fly-secrets.sh");
+const REPO = join(import.meta.dirname, "..", "..");
+const SCRIPT = join(REPO, "scripts", "check-fly-secrets.sh");
 const DIGEST = "digest-that-must-never-be-printed";
 const IN_FLY_TOML = ["PACT_DB_PATH", "BETTER_AUTH_URL"];
 
@@ -74,7 +84,15 @@ function listing(names: string[], status = "Deployed"): string {
   return JSON.stringify(names.map((name) => ({ name, digest: DIGEST, status })));
 }
 
-const secretNames = () => requiredNames().filter((name) => !IN_FLY_TOML.includes(name));
+/** Read by the container's entrypoint and litestream.yml, not by loadConfig. */
+const BACKUP_NAMES = [
+  "LITESTREAM_BUCKET",
+  "LITESTREAM_ENDPOINT",
+  "LITESTREAM_ACCESS_KEY_ID",
+  "LITESTREAM_SECRET_ACCESS_KEY",
+];
+
+const secretNames = () => [...requiredNames().filter((name) => !IN_FLY_TOML.includes(name)), ...BACKUP_NAMES];
 
 /** Runs the check with a listing command that prints `stdout`. */
 function check(stdout: string, flyToml = FLY_TOML) {
@@ -112,6 +130,13 @@ describe("check-fly-secrets", () => {
     expect(output).not.toContain("PHOTOS_BUCKET");
     expect(output).not.toContain(DIGEST);
     expect(output).not.toContain("value-from-fly-toml");
+  });
+
+  test("fails naming a missing backup secret, which loadConfig doesn't read", () => {
+    const { status, output } = check(listing(secretNames().filter((n) => n !== "LITESTREAM_BUCKET")));
+    expect(status).not.toBe(0);
+    expect(output).toContain("::error::Production won't boot without: LITESTREAM_BUCKET.");
+    expect(output).not.toContain(DIGEST);
   });
 
   test("an optional secret that needs others fails without them: Oura's client id alone", () => {
@@ -212,5 +237,17 @@ describe("check-fly-secrets", () => {
       warned(result);
       expect(result.output).toContain("couldn't read the output of the secrets listing");
     });
+  });
+
+  test("the setup wizard sets every secret the check requires, so a from-scratch setup boots", () => {
+    // The secrets are the required names the real fly.toml's [env] doesn't give.
+    const flyToml = readFileSync(join(REPO, "fly.toml"), "utf8");
+    const envSection = /^\[env\]\n((?:[ \t]+.*\n|\n)*)/m.exec(flyToml)?.[1] ?? "";
+    const inEnv = [...envSection.matchAll(/^\s+([A-Z_]+)\s*=/gm)].map((match) => match[1]);
+    const wizard = readFileSync(join(REPO, "scripts", "setup-operator.sh"), "utf8");
+    const needed = [...requiredNames(), ...BACKUP_NAMES].filter((name) => !inEnv.includes(name));
+    expect(needed).toContain("GMAIL_APP_PASSWORD");
+    expect(needed).not.toContain("PACT_DB_PATH");
+    expect(needed.filter((name) => !wizard.includes(`"${name}=$${name}"`))).toEqual([]);
   });
 });

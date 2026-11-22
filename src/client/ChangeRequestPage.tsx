@@ -7,8 +7,8 @@
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { ChangeRequestDetail } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
-import { DiffList, endsWhenText, EverythingElse, listNames, startsText } from "./change-terms.tsx";
-import { formatDayTime } from "./format.ts";
+import { DiffList, endsWhenText, EverythingElse, startsText } from "./change-terms.tsx";
+import { formatDayTime, listNames } from "./format.ts";
 import { ItemKindHeader, ItemStateChip, OwnerThread, StateLine } from "./item-page.tsx";
 import { LoadedFound, useLoad, useSend } from "./ui.tsx";
 
@@ -27,7 +27,7 @@ export function ChangeRequestPage({
   const withdrawal = useSend(
     async (id: string) => {
       const withdrawn = await api.withdrawChangeRequest(id);
-      if (!withdrawn.ok) withdrawal.setError("It isn't waiting any more. Reopen it to see the latest.");
+      if (!withdrawn.ok) withdrawal.setError("It isn't waiting any more, so it wasn't withdrawn.");
       // Either way it isn't waiting now: reload to show where it stands.
       reload();
     },
@@ -99,10 +99,11 @@ function ChangeRequestView({
         )}
       </article>
       <OwnerThread itemId={request.id} thread={request.thread} timezone={timezone} onReplied={onReplied} />
+      {/* Outside the waiting part: a refusal reloads the page, which then shows it decided or withdrawn. */}
+      {error && <p className="error">{error}</p>}
       {waiting && (
         <>
           <p className="meta">Sent to {listNames(request.reviewerNames)}</p>
-          {error && <p className="error">{error}</p>}
           <button className="btn danger self-start" disabled={busy} onClick={() => withdraw(request.id)}>
             Withdraw change
           </button>

@@ -111,7 +111,9 @@ export function usePush(): Push {
   useEffect(() => {
     check();
     const onVisible = () => {
-      if (document.visibilityState === "visible" && stateRef.current !== "on") check();
+      // Turned on, it can still have been turned off in Settings meanwhile: the permission says so without a request.
+      if (document.visibilityState !== "visible") return;
+      if (stateRef.current !== "on" || Notification.permission !== "granted") check();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);

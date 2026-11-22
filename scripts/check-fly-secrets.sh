@@ -5,7 +5,8 @@
 # fly.toml's [env] and every secret Fly lists, Deployed or Staged (staged ones
 # apply on this deploy), set to a placeholder, and reports the names it still
 # misses. So an optional secret that needs others counts: OURA_CLIENT_ID alone
-# misses OURA_CLIENT_SECRET and OURA_TOKEN_KEY.
+# misses OURA_CLIENT_SECRET and OURA_TOKEN_KEY. It also requires the LITESTREAM_*
+# names the backup needs, which loadConfig doesn't read.
 #
 #   scripts/check-fly-secrets.sh FLY_TOML LIST_COMMAND...
 #
@@ -72,8 +73,16 @@ case "$checked" in
   *) skip "couldn't read the required names from config.ts" ;;
 esac
 
+# ── And the backup's names, which the entrypoint and litestream.yml read ─────
+# loadConfig never sees them; without the bucket the entrypoint refuses to
+# start on Fly rather than run with no backups (docker-entrypoint.sh).
+present=$'\n'"$env_names"$'\n'"$secret_names"$'\n'
+for name in LITESTREAM_BUCKET LITESTREAM_ENDPOINT LITESTREAM_ACCESS_KEY_ID LITESTREAM_SECRET_ACCESS_KEY; do
+  [[ "$present" == *$'\n'"$name"$'\n'* ]] || missing="${missing:+$missing, }$name"
+done
+
 if [ -n "$missing" ]; then
   echo "::error::Production won't boot without: ${missing//,/}. Set with: fly secrets set NAME=value --stage"
   exit 1
 fi
-echo "Fly secrets check passed: every variable config.ts requires is on Fly or in $fly_toml."
+echo "Fly secrets check passed: every variable config.ts and the backup require is on Fly or in $fly_toml."

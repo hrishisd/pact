@@ -12,7 +12,7 @@ import { coverOn, keepsToDo } from "./covers.ts";
 import { endedBedtimePacts, isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { nightStartsAt, noOuraDataPushAt, utcOffsetMs, type Occurrence, type OuraOffset } from "./occurrences.ts";
 import { nightOf, utcOffsetOf, wallClock } from "./oura-clock.ts";
-import { OperatorAlerted, type OuraSleepPeriod, type OuraSource } from "./ports.ts";
+import { OperatorAlerted, type OuraSleepPeriod, type OuraSleepResult, type OuraSource } from "./ports.ts";
 import { connectionProblem, occurrencesOf, ouraClockOf, ouraOffsetOf } from "./rows.ts";
 import { settle } from "./settle.ts";
 
@@ -156,6 +156,9 @@ function nightsWaiting(ctx: CoreContext, t: Date, owner?: AccountId): { pact: Pa
   return waiting;
 }
 
+/** One account's sleep periods call: what it answered, or what it threw. */
+type SleepFetched = { account: AccountId } & ({ result: OuraSleepResult } | { error: unknown });
+
 /**
  * The sleep periods of each account (or just `owner`) with a bedtime night
  * waiting on Oura and a working connection, for the days those nights
@@ -163,8 +166,9 @@ function nightsWaiting(ctx: CoreContext, t: Date, owner?: AccountId): { pact: Pa
  * reconnecting, cause no calls. A "disconnected" result is no data, and
  * the account is listed for `markDisconnected`. A call that fails (a
  * timeout, Oura erroring) is no data too, but never disconnected: it's
- * logged, the next tick tries again, and one account's Oura never holds up
- * anyone else's tick.
+ * logged, and the next tick tries again. Every account's call runs at once,
+ * so a slow Oura delays the tick by its own call only, never by the sum of
+ * everyone's.
  */
 export async function fetchSleep(
   ctx: CoreContext,
@@ -188,14 +192,25 @@ export async function fetchSleep(
   const sleep = new Map<AccountId, OuraSleepPeriod[]>();
   const disconnected: AccountId[] = [];
   const unreached: AccountId[] = [];
-  for (const [account, range] of ranges) {
-    try {
-      const result = await ouraSource.sleepPeriods(account, range);
-      if (result.ok) sleep.set(account, result.periods);
+  // Results are folded in the order the accounts were asked, so the lists and
+  // log lines keep a fixed order whichever call answers first.
+  const fetched = await Promise.all(
+    [...ranges].map(async ([account, range]): Promise<SleepFetched> => {
+      try {
+        return { account, result: await ouraSource.sleepPeriods(account, range) };
+      } catch (error) {
+        return { account, error };
+      }
+    }),
+  );
+  for (const outcome of fetched) {
+    const { account } = outcome;
+    if ("result" in outcome) {
+      if (outcome.result.ok) sleep.set(account, outcome.result.periods);
       else disconnected.push(account);
-    } catch (error) {
-      ctx.log(`Oura sleep for account ${account} failed, no data this tick: ${errorText(error)}`);
-      if (!(error instanceof OperatorAlerted)) unreached.push(account);
+    } else {
+      ctx.log(`Oura sleep for account ${account} failed, no data this tick: ${errorText(outcome.error)}`);
+      if (!(outcome.error instanceof OperatorAlerted)) unreached.push(account);
     }
   }
   return { sleep, disconnected, unreached, askedAt };

@@ -9,6 +9,7 @@ import { localDateOf, mondayOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { occurrenceView, weekProgress } from "./occurrence-state.ts";
 import { hasSchedule, oneTimeReminderAt, reminderAt, type Occurrences } from "./occurrences.ts";
+import { pushOperatorAlert } from "./outbox.ts";
 import {
   lastAnkiCheck,
   occurrencesOf,
@@ -59,19 +60,9 @@ export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
       if (sent.changes === 1) enqueueReminder(ctx, pact, date);
     }
   }
-  const operator = ctx.one<{ id: AccountId }>(`SELECT id FROM account WHERE is_operator = 1`);
-  if (dropped.length > 0 && operator) {
-    ctx.enqueue({
-      recipient: operator.id,
-      kind: "operator-alert",
-      payload: {
-        alert: "reminders-dropped",
-        dropped: dropped.length,
-        title: "Operator alert",
-        body: `${capitalized(droppedText(dropped.length))} after downtime.`,
-        url: APP_PATHS.today,
-      },
-    });
+  if (dropped.length > 0) {
+    const body = `${capitalized(droppedText(dropped.length))} after downtime.`;
+    pushOperatorAlert(ctx, { alert: "reminders-dropped", dropped: dropped.length }, body);
   }
   return dropped;
 }

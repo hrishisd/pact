@@ -1,7 +1,8 @@
-// How money, days and schedules are written, by the client and in notifications.
+// How money, days, schedules, a pact's terms and lists of names are written, by
+// the client and in notifications.
 
 import { parseClockTime, parseLocalDate } from "./calendar.ts";
-import { WEEKDAYS, type ClockTime, type LocalDate, type Schedule, type Weekday } from "./types.ts";
+import { WEEKDAYS, type ClockTime, type LocalDate, type Schedule, type TermChange, type Weekday } from "./types.ts";
 
 /** US cents as dollars: "$5" for whole dollars, "$5.50" otherwise. */
 export function money(cents: number): string {
@@ -35,6 +36,13 @@ export function dateSpan(from: LocalDate, to: LocalDate): string {
   return monthDay(from).startsWith(`${toMonth} `)
     ? `${monthDay(from)} – ${toDay}`
     : `${monthDay(from)} – ${monthDay(to)}`;
+}
+
+/** "Sam", "Sam and Alex", "Sam, Alex, and Jo", or with `last` "or", "Sam, Alex, or Jo". */
+export function listNames(list: readonly string[], last = "and"): string {
+  if (list.length <= 1) return list[0] ?? "";
+  if (list.length === 2) return `${list[0]} ${last} ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")}, ${last} ${list.at(-1)}`;
 }
 
 /** Pact names as a push lists them: "Gym", "Gym and Reading", or "Gym, Reading, and 2 more". */
@@ -114,6 +122,28 @@ export function scheduleText(schedule: Schedule): string {
   }
   if (schedule.days.length === WEEKDAYS.length) return "Every day";
   return schedule.days.map((day) => WEEKDAY_LABELS[day]).join(", ");
+}
+
+/** Each term's label, on screen and in a change request's push, whatever the pact's schedule (see `termLabel`). */
+export const TERM_LABELS: Record<TermChange["term"], string> = {
+  name: "Name",
+  description: "Photo shows",
+  deck: "Deck",
+  "in-bed-by": "In bed by",
+  schedule: "Days",
+  "due-by": "Due by",
+  "start-date": "Starts",
+  "end-date": "Ends",
+  penalty: "Penalty",
+  recipient: "Recipient",
+  reviewers: "Reviewers",
+  reminders: "Reminders",
+};
+
+/** A term's label on a pact with `schedule`: a Weekly count pact's schedule is its Target, a One-time pact's its Deadline. */
+export function termLabel(term: TermChange["term"], schedule: Pick<Schedule, "kind">): string {
+  if (term === "schedule" && schedule.kind === "weekly-count") return "Target";
+  return term === "schedule" && schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term];
 }
 
 /** A clock time as "12:00am" or "11:30pm". */

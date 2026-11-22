@@ -4,7 +4,7 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
-import { formatDate } from "../shared/format.ts";
+import { formatDate, listNames, termLabel } from "../shared/format.ts";
 import type {
   AccountId,
   AddReviewersResult,
@@ -52,7 +52,6 @@ import {
   remindersGoOffInTime,
   remindersInTime,
   storedTerms,
-  TERM_LABELS,
   wellFormedReminders,
 } from "./pact-rules.ts";
 import {
@@ -257,16 +256,10 @@ function addReviewersNow(ctx: CoreContext, pact: PactRow, ownerName: string, add
   if (pact.reviewers_notified_at === null) return;
   const newcomers = friendsSortedByName(ctx, added);
   const names = newcomers.map((friend) => friend.name);
-  const namesText =
-    names.length === 1
-      ? names[0]
-      : names.length === 2
-        ? `${names[0]} and ${names[1]}`
-        : `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
   tellAll(ctx, earlier, "reviewer-added", {
     pactId: pact.id,
     added: newcomers.map((friend) => friend.id),
-    title: `${ownerName} added ${namesText} as ${names.length === 1 ? "a reviewer" : "reviewers"}`,
+    title: `${ownerName} added ${listNames(names)} as ${names.length === 1 ? "a reviewer" : "reviewers"}`,
     body: `${pact.name} · ${names.length === 1 ? names[0] : "They"} can now review it too.`,
     url: APP_PATHS.review,
   });
@@ -780,7 +773,7 @@ export function sendChangeRequest(
     after === null
       ? []
       : termDiffs(before, after, dayClockOf(pact, pact.in_bed_by, pact.due_by)).map(({ term }) =>
-          term === "schedule" && after.schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term],
+          termLabel(term, after.schedule),
         );
   const body = [...what, ...(trimmed === "" ? [] : [`“${trimmed}”`])].join(" · ");
   tellAll(ctx, reviewersOf(ctx, pact.id), "review-item", {

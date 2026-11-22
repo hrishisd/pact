@@ -57,6 +57,15 @@ test("a push with no data still shows a notification, which iPhone requires of e
   expect(shown.map(([title]) => title)).toEqual(["Pact"]);
 });
 
+test("a push whose data isn't JSON, or is empty, still shows a notification", async () => {
+  const { fire, shown } = worker();
+
+  await fire("push", { data: { json: () => JSON.parse("hello") } });
+  await fire("push", { data: { json: () => JSON.parse("") } });
+
+  expect(shown.map(([title]) => title)).toEqual(["Pact", "Pact"]);
+});
+
 test("tapping with no window open opens the page", async () => {
   const { fire, opened } = worker();
 

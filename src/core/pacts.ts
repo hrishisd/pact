@@ -162,8 +162,13 @@ export function deletePact(ctx: CoreContext, accountId: AccountId, pactId: strin
   const row = ownPact(ctx, accountId, pactId);
   if (!row) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(row, ctx.clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
-  // In its window a pact has nothing judged, so no penalties: evidence is all it can have.
+  // In its window a pact can have evidence, reminders sent, a day an Anki check judged
+  // Satisfied and a night's first sleep from Oura. It has no penalty, since nothing is due
+  // within an hour of creation, and no excuse, vacation or change request, which the
+  // window refuses.
   removeEvidence(ctx, pactId, () => true);
+  ctx.db.prepare(`DELETE FROM occurrence WHERE pact_id = ?`).run(pactId);
+  ctx.db.prepare(`DELETE FROM reminder_sent WHERE pact_id = ?`).run(pactId);
   ctx.db.prepare(`DELETE FROM pact_reviewer WHERE pact_id = ?`).run(pactId);
   ctx.db.prepare(`DELETE FROM pact_earlier_timezone WHERE pact_id = ?`).run(pactId);
   ctx.db.prepare(`DELETE FROM pact WHERE id = ?`).run(pactId);

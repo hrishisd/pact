@@ -5,7 +5,12 @@ self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 self.addEventListener("push", (event) => {
-  const message = event.data?.json() ?? { title: "Pact", body: "", url: "/" };
+  // A payload that isn't our JSON still shows a notification: throwing here would show none.
+  let message = null;
+  try {
+    message = event.data?.json() ?? null;
+  } catch {}
+  if (typeof message?.title !== "string") message = { title: "Pact", body: "", url: "/" };
   event.waitUntil(
     self.registration.showNotification(message.title, {
       body: message.body,
