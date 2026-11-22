@@ -1,7 +1,16 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, test, vi } from "vitest";
-import type { LedgersResponse, PactsResponse, ReviewQueueResponse, WaitingOnReplyResponse } from "../shared/api.ts";
+import type {
+  LedgersResponse,
+  MeResponse,
+  PactsResponse,
+  ReviewQueueResponse,
+  TodayResponse,
+  WaitingOnReplyResponse,
+} from "../shared/api.ts";
+import { APP_PATHS } from "../shared/api.ts";
+import { App } from "./App.tsx";
 import { Ledgers } from "./Ledgers.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { PULL_THRESHOLD_PX, PullToRefresh, useRefreshOnPull } from "./pull-to-refresh.tsx";
@@ -147,5 +156,33 @@ describe("each tab's refresh", () => {
     await screen.findByText("No ledgers yet");
     pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(spies.ledgers).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("in the app", () => {
+  const me: MeResponse = {
+    email: "me@example.test",
+    name: "Me",
+    timezone: "America/New_York",
+    connections: [],
+    ouraAvailable: false,
+    ankiAvailable: false,
+  };
+
+  test("a tab's own screen has the pull", async () => {
+    window.history.replaceState(null, "", APP_PATHS.pacts);
+    const spies = stubApi({
+      me: answers(me),
+      pacts: answers<PactsResponse>([]),
+      today: answers<TodayResponse>({ hasPacts: false, alerts: [], sections: [], waiting: [], yesterday: [] }),
+      reviewQueue: answers<ReviewQueueResponse>([]),
+      waitingOnReply: answers<WaitingOnReplyResponse>([]),
+      ledgers: answers<LedgersResponse>([]),
+    });
+    renderWithUser(<App />);
+    await screen.findByText("No pacts yet");
+    const before = spies.pacts.mock.calls.length;
+    pullDown(fingerFor(PULL_THRESHOLD_PX));
+    await waitFor(() => expect(spies.pacts).toHaveBeenCalledTimes(before + 1));
   });
 });

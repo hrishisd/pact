@@ -375,7 +375,7 @@ function Shell({
     <div className="app">
       {/* A tab has pull to refresh; a page opened from one doesn't. */}
       <PullToRefresh
-        pullable={page === null}
+        pullable={page === undefined}
         mainClassName={foot ? "scroll gut has-foot" : "scroll gut"}
         header={
           <>
