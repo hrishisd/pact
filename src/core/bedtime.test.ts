@@ -556,11 +556,12 @@ describe("polling Oura", () => {
     const theirPact = await theirs.createPact("00:00");
     s.ouraSource.addSleep(reviewer.id, sleep("Mon 23:00"));
 
-    const slow = s.ouraSource.holdSleepPeriods(owner.id);
+    // Both held: whichever is asked first, the other is asked only if they run at once.
+    const slow = [s.ouraSource.holdSleepPeriods(owner.id), s.ouraSource.holdSleepPeriods(reviewer.id)];
     const ticking = s.advanceTo("Tue 07:00");
-    await slow.started;
+    await Promise.all(slow.map((held) => held.started));
     expect(s.ouraSource.calls.map((call) => call.account).sort()).toEqual([owner.id, reviewer.id].sort());
-    slow.release();
+    for (const held of slow) held.release();
     await ticking;
     expect(night(reviewer, theirPact, s.date("Mon"))).toBe("satisfied");
   });
