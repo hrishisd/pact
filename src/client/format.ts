@@ -122,6 +122,12 @@ export function hoursLeft(ms: number): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h`;
 }
 
+/** "File excuse · 31h left" until `excusableUntil`; nothing once it's passed. Today's Missed card and an Ended pact's page say it alike. */
+export function fileExcuseLabel(text: string, excusableUntil: string, now: number): string | null {
+  const ms = Date.parse(excusableUntil) - now;
+  return ms > 0 ? `${text} · ${hoursLeft(ms)} left` : null;
+}
+
 /** The whole minutes left until `closesAt`, rounded up: "7 min" holds until 6 have passed. Null once it's reached or if none. */
 export function minutesLeft(closesAt: string | null, now: number): number | null {
   if (closesAt === null) return null;

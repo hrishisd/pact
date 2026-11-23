@@ -44,10 +44,10 @@ import {
   dateSpan,
   dateUnlessToday,
   excusableText,
+  fileExcuseLabel,
   formatDate,
   formatDay,
   formatDueAt,
-  hoursLeft,
   listNames,
   minutesLeft,
   money,
@@ -866,12 +866,6 @@ function useTakeTheL(send: () => Promise<{ ok: true } | { ok: false; reason: Tak
     (failure) => failureText(failure, "Couldn't send. Check your connection and try again."),
   );
   return { busy, error, take: run };
-}
-
-/** "File excuse · 31h 12m left" until `excusableUntil`; nothing once it's passed. */
-function fileExcuseLabel(text: string, excusableUntil: string, now: number): string | null {
-  const ms = Date.parse(excusableUntil) - now;
-  return ms > 0 ? `${text} · ${hoursLeft(ms)} left` : null;
 }
 
 /** A Missed card's File excuse and Take the L. Clicks stay here rather than opening the pact. */

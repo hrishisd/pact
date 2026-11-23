@@ -1,6 +1,8 @@
 // The File excuse sheet (option A in the excuses prototype): one pact, opened
 // from a day (that day as a card, optionally run on to later days) or from
-// the pact page ("Which day?": a recent day, or a range of days ahead). A
+// the pact page ("Which day?": a recent day, or a range of days ahead). An
+// Ended pact has no days ahead: its page opens the sheet on its one day that
+// can be excused, as a card with no later days, or asks which of several. A
 // live preview lists the days the dates cover and skip, and the footer says
 // what filing holds.
 
@@ -45,8 +47,13 @@ type Preview = Json<ExcusePreview>;
 type Day = Json<ExcuseDay>;
 type Dates = { from: string; to: string };
 
-/** How the sheet was opened: on a day, or from the pact page with the days it offers. */
-type Opened = { from: "day"; day: string } | { from: "pact-page"; options: Json<ExcuseOptions> };
+/**
+ * How the sheet was opened: on a day, which `later` days can follow, or from
+ * the pact page with the days it offers, and whether Days ahead is one.
+ */
+type Opened =
+  | { from: "day"; day: string; later: boolean }
+  | { from: "pact-page"; options: Json<ExcuseOptions>; daysAhead: boolean };
 
 /** What the sheet needs before it can show the form. */
 type Loaded =
@@ -62,19 +69,19 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
     let live = true;
     const loading = api.pact(pactId);
     // From the pact page, the days it offers come with the pact; a refusal is the words for it.
-    const opening: Promise<Opened | string> =
+    const opening: Promise<Opened | Json<ExcuseOptions> | string> =
       day !== undefined
-        ? Promise.resolve({ from: "day", day })
+        ? Promise.resolve({ from: "day", day, later: true })
         : api
             .excuseOptions(pactId)
-            .then((options) =>
-              options.ok ? { from: "pact-page", options: options.options } : OPEN_REFUSAL_TEXT[options.reason],
-            );
+            .then((options) => (options.ok ? options.options : OPEN_REFUSAL_TEXT[options.reason]));
     Promise.all([loading, opening]).then(
-      ([pact, opened]) => {
+      ([pact, offered]) => {
         if (!live) return;
         if (!pact.ok) return setLoaded({ kind: "refused", text: "This pact wasn't found." });
-        if (typeof opened === "string") return setLoaded({ kind: "refused", text: opened });
+        if (typeof offered === "string") return setLoaded({ kind: "refused", text: offered });
+        const opened = "from" in offered ? offered : fromPactPage(pact.pact, offered);
+        if (opened === null) return setLoaded({ kind: "refused", text: "No day of this pact can be excused now." });
         setLoaded({ kind: "loaded", pact: pact.pact, opened });
       },
       (error: unknown) => live && setLoaded({ kind: "failed", error }),
@@ -84,7 +91,8 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
     };
   }, [pactId, day]);
 
-  const title = day === undefined ? `Excuse ${pactName}` : `Excuse ${pactName}, ${formatDate(day)}`;
+  const shownDay = loaded.kind === "loaded" && loaded.opened.from === "day" ? loaded.opened.day : day;
+  const title = shownDay === undefined ? `Excuse ${pactName}` : `Excuse ${pactName}, ${formatDate(shownDay)}`;
   return (
     <Sheet title={title} closeLabel="Cancel" onClose={onClose}>
       {loaded.kind === "loaded" ? (
@@ -98,6 +106,20 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
       ) : null}
     </Sheet>
   );
+}
+
+/**
+ * How the sheet opens from the pact page, with the days `options` offers. An
+ * Ended pact has no days ahead, so with one day to excuse it opens on that
+ * day, with no later days; with none, null.
+ */
+function fromPactPage(pact: Pact, options: Json<ExcuseOptions>): Opened | null {
+  if (pact.stage === "active") return { from: "pact-page", options, daysAhead: true };
+  const [only, ...others] = options.recentDays;
+  if (only === undefined) return null;
+  return others.length === 0
+    ? { from: "day", day: only.date, later: false }
+    : { from: "pact-page", options, daysAhead: false };
 }
 
 const OPEN_REFUSAL_TEXT: Record<"pact-not-found" | "edit-window-open", string> = {
@@ -223,9 +245,22 @@ function ExcuseForm({
         {weekly && ". Excusing any day excuses the whole week."}
       </span>
       {opened.from === "day" ? (
-        <DayDates pact={pact} day={opened.day} reviewers={reviewers} shown={picked} onDates={setDates} />
+        <DayDates
+          pact={pact}
+          day={opened.day}
+          later={opened.later}
+          reviewers={reviewers}
+          shown={picked}
+          onDates={setDates}
+        />
       ) : (
-        <PactPageDates pact={pact} options={opened.options} shown={picked} onDates={setDates} />
+        <PactPageDates
+          pact={pact}
+          options={opened.options}
+          daysAhead={opened.daysAhead}
+          shown={picked}
+          onDates={setDates}
+        />
       )}
       <label className="field">
         <span>Reason</span>
@@ -261,7 +296,7 @@ function ExcuseForm({
           <span className="meta">
             {covered === 0
               ? "Pick at least one day that can be excused."
-              : `Covers ${covered} ${covered === 1 ? "day" : "days"}.${held > 0 ? ` You won't owe the ${money(held)} for these days unless the excuse is rejected.` : ""}`}
+              : `Covers ${covered} ${covered === 1 ? "day" : "days"}.${held > 0 ? ` You won't owe the ${money(held)} for ${covered === 1 ? "this day" : "these days"} unless the excuse is rejected.` : ""}`}
           </span>
         )}
         {error && <p className="error small">{error}</p>}
@@ -288,18 +323,21 @@ function noDaysText(pact: Pact, from: string, to: string): string {
 }
 
 /**
- * Opened on a day: that day as a card, then "+ Later days too", which runs
- * the excuse on through a later date once picked. Reports the dates up.
+ * Opened on a day: that day as a card, then, if `later`, "+ Later days too",
+ * which runs the excuse on through a later date once picked. Reports the
+ * dates up.
  */
 function DayDates({
   pact,
   day,
+  later: laterOffered,
   reviewers,
   shown: { preview, problem, now, timezone },
   onDates,
 }: {
   pact: Pact;
   day: string;
+  later: boolean;
   reviewers: string;
   shown: Shown;
   onDates: (dates: Dates) => void;
@@ -352,9 +390,11 @@ function DayDates({
           {through !== "" && through < day && <p className="error small">Pick {formatDate(day)} or a later day.</p>}
         </>
       ) : (
-        <button className="btn sm self-start" onClick={() => setMore(true)}>
-          + Later days too, e.g. still sick
-        </button>
+        laterOffered && (
+          <button className="btn sm self-start" onClick={() => setMore(true)}>
+            + Later days too, e.g. still sick
+          </button>
+        )
       )}
     </>
   );
@@ -377,17 +417,19 @@ function pactPageDates({ choice, aheadFrom, aheadTo }: PageChoice): Dates {
 }
 
 /**
- * Opened from the pact page: "Which day?", a recent day or Days ahead, which
- * picks a range from today on. Reports the dates up.
+ * Opened from the pact page: "Which day?", a recent day or, if `daysAhead`,
+ * Days ahead, which picks a range from today on. Reports the dates up.
  */
 function PactPageDates({
   pact,
   options,
+  daysAhead,
   shown: { preview, problem, now, timezone },
   onDates,
 }: {
   pact: Pact;
   options: Json<ExcuseOptions>;
+  daysAhead: boolean;
   shown: Shown;
   onDates: (dates: Dates) => void;
 }) {
@@ -420,18 +462,20 @@ function PactPageDates({
               <DayChip status={d.status} now={now} timezone={timezone} week={weekly} oura={oura} />
             </label>
           ))}
-          <label className="opt">
-            <input
-              type="radio"
-              name="excuse-day"
-              checked={choice === "ahead"}
-              onChange={() => change({ choice: "ahead" })}
-            />
-            <span className="rt">
-              <b>Days ahead</b>
-              <small>A trip, or anything you know is coming</small>
-            </span>
-          </label>
+          {daysAhead && (
+            <label className="opt">
+              <input
+                type="radio"
+                name="excuse-day"
+                checked={choice === "ahead"}
+                onChange={() => change({ choice: "ahead" })}
+              />
+              <span className="rt">
+                <b>Days ahead</b>
+                <small>A trip, or anything you know is coming</small>
+              </span>
+            </label>
+          )}
         </div>
       </div>
       {choice === "ahead" && (
