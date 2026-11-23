@@ -273,6 +273,25 @@ export function Empty({ title, body, children }: { title: string; body: string; 
   );
 }
 
+/** How many sheets are open now; the page behind them is held still while any is. */
+let openSheets = 0;
+
+/**
+ * Holds the page behind a sheet still (the `sheet-open` class, styles.css) until
+ * the returned function is called and no other sheet is open. iOS WebKit can
+ * send a drag on a sheet to a scroll area under it (bugs.webkit.org 117059),
+ * scrolling the page and leaving the sheet stuck; one with overflow hidden
+ * can't scroll, so the drag stays with the sheet.
+ */
+function holdPageStill(): () => void {
+  openSheets += 1;
+  document.documentElement.classList.add("sheet-open");
+  return () => {
+    openSheets -= 1;
+    if (openSheets === 0) document.documentElement.classList.remove("sheet-open");
+  };
+}
+
 /**
  * A sheet that slides up over the screen: its title, maybe a link that closes
  * it (Done, Cancel), then `children`. Tapping outside it or pressing Escape closes it too.
@@ -295,6 +314,7 @@ export function Sheet({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  useEffect(holdPageStill, []);
 
   // On the body, so a sheet opened from inside a card or list isn't inside it.
   return createPortal(

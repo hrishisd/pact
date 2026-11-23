@@ -757,6 +757,15 @@ p {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  /* A scroll that reaches the sheet's top or bottom stays in the sheet. */
+  overscroll-behavior: contain;
+}
+/* While a sheet is open, the page behind it can't scroll: iOS WebKit can send a
+   drag on the sheet to the scroll area under it (bugs.webkit.org 117059), which
+   it can't do to one with overflow hidden. Not touch-action on .overlay: the
+   sheet inside it would stop scrolling too. Hiding keeps the page's scrollTop. */
+.sheet-open .scroll {
+  overflow: hidden;
 }
 /* A tall sheet scrolls; its parts keep their height instead of shrinking to fit. */
 .sheet > * {
