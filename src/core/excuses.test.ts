@@ -9,7 +9,7 @@ import type { NewExcuse, TodayAlert, Weekday } from "../shared/types.ts";
 import { EVERY_DAY, MON_WED_FRI, ownerWithReviewers, photo, recordPayment } from "./testing/camera-pact.ts";
 import type { AccountHandle } from "./testing/scenario.ts";
 import { changeRequestIdOf, scenario } from "./testing/scenario.ts";
-import { changed, ledgerHistory, ok, owed, penaltyDays, statusOn } from "./testing/queries.ts";
+import { changed, ledgerHistory, ok, owed, pactOf, penaltyDays, statusOn } from "./testing/queries.ts";
 
 /** An excuse for `from` to `to` (or just `from`), "Sick with the flu". */
 function sick(from: string, to = from): NewExcuse {
@@ -792,6 +792,85 @@ describe("the pact page", () => {
         ],
       },
     });
+  });
+});
+
+describe("until when the pact page offers File excuse", () => {
+  test("an Active pact: from its first miss, until that day's 48 hours are over, then the next miss's", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    await s.advanceTo("Mon 10:00");
+    expect(pactOf(owner, gym).excusableUntil).toBeNull();
+
+    await s.advanceTo("Tue 00:00");
+    expect(pactOf(owner, gym).excusableUntil).toEqual(s.at("Thu 00:00"));
+
+    // Monday's 48 hours end as Wednesday is judged Missed.
+    await s.advanceTo("Thu 00:00");
+    expect(pactOf(owner, gym).excusableUntil).toEqual(s.at("Sat 00:00"));
+  });
+
+  test("an Ended One-time pact: while its Missed occurrence's 48 hours last", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const dentist = await createPact("Dentist", { kind: "one-time", deadline: s.date("Thu"), submitAnytime: false });
+    await s.advanceTo("Fri 00:00");
+    expect(pactOf(owner, dentist)).toMatchObject({ stage: "ended", excusableUntil: s.at("Sun 00:00") });
+
+    s.setClockTo("Sat 23:59");
+    expect(pactOf(owner, dentist).excusableUntil).toEqual(s.at("Sun 00:00"));
+    await s.advanceTo("Sun 00:00");
+    expect(pactOf(owner, dentist).excusableUntil).toBeNull();
+  });
+
+  test("a Missed day under a waiting excuse isn't offered again; a rejection doesn't restart its window", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const dentist = await createPact("Dentist", { kind: "one-time", deadline: s.date("Thu"), submitAnytime: false });
+    await s.advanceTo("Fri 10:00");
+
+    const excuseId = await fileExcuse(owner, dentist, sick(s.date("Thu")));
+    expect(pactOf(owner, dentist).excusableUntil).toBeNull();
+    await reviewer.decide(excuseId, { kind: "reject", reason: "No" });
+    expect(pactOf(owner, dentist).excusableUntil).toEqual(s.at("Sun 00:00"));
+  });
+
+  test("an Ended pact with two Missed days: the sooner of their windows, then the other once that day is excused", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", EVERY_DAY, { dates: { endDate: s.date("Tue") } });
+    await s.advanceTo("Wed 10:00");
+    expect(pactOf(owner, gym)).toMatchObject({ stage: "ended", excusableUntil: s.at("Thu 00:00") });
+
+    await fileExcuse(owner, gym, sick(s.date("Mon")));
+    expect(pactOf(owner, gym).excusableUntil).toEqual(s.at("Fri 00:00"));
+  });
+
+  test("a One-time occurrence a rejection judged Missed before its date is offered, dated ahead", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const taxes = await createPact("Taxes", { kind: "one-time", deadline: s.date("Thu"), submitAnytime: true });
+    await s.advanceTo("Mon 09:11");
+    const evidenceId = ok(await owner.submitEvidence(taxes, [photo()])).evidenceId;
+    // Off, Submit anytime leaves the occurrence open only on Thursday; the evidence already submitted still counts.
+    await owner.changePact(
+      taxes,
+      changed(owner, taxes, { schedule: { kind: "one-time", deadline: s.date("Thu"), submitAnytime: false } }),
+    );
+    s.setClockTo("Tue 10:00");
+    await reviewer.decide(evidenceId, { kind: "reject", reason: "That's last year's return" });
+
+    expect(owner.excuseOptions(taxes)).toEqual({
+      ok: true,
+      options: {
+        today: s.date("Tue"),
+        recentDays: [{ date: s.date("Thu"), status: expect.objectContaining({ kind: "missed", cover: null }) }],
+      },
+    });
+    expect(pactOf(owner, taxes)).toMatchObject({ stage: "ended", excusableUntil: s.at("Thu 10:00") });
+    await fileExcuse(owner, taxes, sick(s.date("Thu")));
+    expect(owed(owner)).toBe(0);
   });
 });
 

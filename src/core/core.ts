@@ -396,7 +396,11 @@ export interface AccountView {
    * same rules as `fileExcuse`, which it never calls.
    */
   excusePreview(pactId: string, dates: ExcuseDates): ExcusePreviewResult;
-  /** What File excuse from the pact page offers: the owner's today, and the recent days an excuse would cover. */
+  /**
+   * What File excuse from the pact page offers: the owner's today, and the
+   * recent days an excuse would cover, Active or Ended, with a Missed day
+   * dated after today (a One-time occurrence a rejection judged early).
+   */
   excuseOptions(pactId: string): ExcuseOptionsResult;
   /**
    * The owner asks the pact's reviewers to treat the pact's scheduled days in

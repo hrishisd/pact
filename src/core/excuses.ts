@@ -70,25 +70,62 @@ export function excuseOptions(ctx: CoreContext, accountId: AccountId, pactId: st
   const pact = ownPact(ctx, accountId, pactId);
   if (!pact) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
+  return {
+    ok: true,
+    options: { today: localDateOf(now, timezone), recentDays: recentDays(ctx, pactId, timezone, now) },
+  };
+}
+
+/**
+ * Until when the pact page offers File excuse with a countdown: the soonest
+ * `excusableUntil` among the Missed days `excuseOptions` offers, or null
+ * when it offers none (or none yet, in the edit window).
+ */
+export function pactExcusableUntil(ctx: CoreContext, accountId: AccountId, pactId: string): Date | null {
+  const offered = excuseOptions(ctx, accountId, pactId);
+  if (!offered.ok) return null;
+  const closing = offered.options.recentDays.flatMap(({ status }) =>
+    status.kind === "missed" ? [status.excusableUntil.getTime()] : [],
+  );
+  return closing.length === 0 ? null : new Date(Math.min(...closing));
+}
+
+/**
+ * The pact's days an excuse filed at `now` would cover, newest first: those
+ * dated today or earlier, and a Missed one dated later, as a rejection can
+ * judge a One-time occurrence before its date.
+ */
+function recentDays(ctx: CoreContext, pactId: string, timezone: string, now: Date): ExcuseDay[] {
   const today = localDateOf(now, timezone);
-  // Days before today an excuse could cover: Missed in the last 48 hours, or still waiting on evidence.
+  // Missed in the last 48 hours, or (before today) still waiting on evidence.
   const since = new Date(now.getTime() - EXCUSE_WINDOW_MS).toISOString();
+  const missedRecently = `outcome = 'missed' AND ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} > ?`;
   const earliest = (
     ctx.db
       .prepare(
         `SELECT MIN(date) AS date FROM occurrence
-         WHERE pact_id = ? AND date < ?
-           AND (outcome IS NULL OR (outcome = 'missed' AND ${excuseWindowOpensSql("occurrence.pact_id", "occurrence.date", "occurrence.judged_at")} > ?))`,
+         WHERE pact_id = ? AND date < ? AND (outcome IS NULL OR (${missedRecently}))`,
       )
       .get(pactId, today, since) as { date: LocalDate | null }
   ).date;
-  const { overlapping } = occurrencesOf(ctx, pactId, timezone);
-  const recentDays = overlapping(earliest ?? today, today)
+  const { overlapping, between } = occurrencesOf(ctx, pactId, timezone);
+  const throughToday = overlapping(earliest ?? today, today);
+  const missedAhead = ctx
+    .all<{
+      date: LocalDate;
+    }>(
+      `SELECT date FROM occurrence WHERE pact_id = ? AND date > ? AND ${missedRecently} ORDER BY date`,
+      pactId,
+      today,
+      since,
+    )
+    .filter(({ date }) => !throughToday.some((occurrence) => occurrence.date === date))
+    .flatMap(({ date }) => between(date, date));
+  return [...throughToday, ...missedAhead]
     .filter((occurrence) => !dueAfterEnd(ctx, pactId, occurrence))
     .map((occurrence) => excuseDay(ctx, pactId, occurrence))
     .filter((day) => excuseSkipReason(ctx, pactId, day, now) === null)
     .toReversed();
-  return { ok: true, options: { today, recentDays } };
 }
 
 export async function fileExcuse(
