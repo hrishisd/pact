@@ -80,7 +80,7 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
         if (!live) return;
         if (!pact.ok) return setLoaded({ kind: "refused", text: "This pact wasn't found." });
         if (typeof offered === "string") return setLoaded({ kind: "refused", text: offered });
-        const opened = "from" in offered ? offered : fromPactPage(pact.pact, offered);
+        const opened = "from" in offered ? offered : fromPactPage(offered);
         if (opened === null) return setLoaded({ kind: "refused", text: "No day of this pact can be excused now." });
         setLoaded({ kind: "loaded", pact: pact.pact, opened });
       },
@@ -109,12 +109,12 @@ export function ExcuseSheet({ pactId, pactName, day, timezone, onClose, onFiled 
 }
 
 /**
- * How the sheet opens from the pact page, with the days `options` offers. An
- * Ended pact has no days ahead, so with one day to excuse it opens on that
- * day, with no later days; with none, null.
+ * How the sheet opens from the pact page, with the days `options` offers.
+ * With no Days ahead (an Ended pact), one day to excuse opens on that day,
+ * with no later days; none, null.
  */
-function fromPactPage(pact: Pact, options: Json<ExcuseOptions>): Opened | null {
-  if (pact.stage === "active") return { from: "pact-page", options, daysAhead: true };
+function fromPactPage(options: Json<ExcuseOptions>): Opened | null {
+  if (options.daysAhead) return { from: "pact-page", options, daysAhead: true };
   const [only, ...others] = options.recentDays;
   if (only === undefined) return null;
   return others.length === 0
@@ -238,6 +238,8 @@ function ExcuseForm({
   const picked: Shown = { preview: shown, problem, now, timezone };
 
   const held = current?.ok ? current.preview.heldCents : 0;
+  // On Weekly count the core covers whole weeks.
+  const unit = weekly ? "week" : "day";
   return (
     <>
       <span className="meta excuse-sub">
@@ -296,7 +298,7 @@ function ExcuseForm({
           <span className="meta">
             {covered === 0
               ? "Pick at least one day that can be excused."
-              : `Covers ${covered} ${covered === 1 ? "day" : "days"}.${held > 0 ? ` You won't owe the ${money(held)} for ${covered === 1 ? "this day" : "these days"} unless the excuse is rejected.` : ""}`}
+              : `Covers ${covered} ${covered === 1 ? unit : `${unit}s`}.${held > 0 ? ` You won't owe the ${money(held)} for ${covered === 1 ? `this ${unit}` : `these ${unit}s`} unless the excuse is rejected.` : ""}`}
           </span>
         )}
         {error && <p className="error small">{error}</p>}

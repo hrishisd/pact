@@ -67,3 +67,4 @@ The pact page offers File excuse for any Missed day still inside its 48-hour exc
 ## Comments
 
 - Built on branch `claude/vibrant-albattani-lkkw1n`. Checks for the phone: [`manual-checks.md`](manual-checks.md).
+- After code review, the pact page's field is `excuseWindowsClose`, every open window's end soonest first, rather than one `excusableUntil`: the page moves the countdown to the next window when one closes without a reload. `excuseOptions` says whether Days ahead is offered (`daysAhead`).

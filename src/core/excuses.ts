@@ -72,22 +72,26 @@ export function excuseOptions(ctx: CoreContext, accountId: AccountId, pactId: st
   if (editWindowClosesAt(pact, now) !== null) return { ok: false, reason: "edit-window-open" };
   return {
     ok: true,
-    options: { today: localDateOf(now, timezone), recentDays: recentDays(ctx, pactId, timezone, now) },
+    options: {
+      today: localDateOf(now, timezone),
+      // An Ended pact has no days ahead.
+      daysAhead: pact.stage === "active",
+      recentDays: recentDays(ctx, pactId, timezone, now),
+    },
   };
 }
 
 /**
- * Until when the pact page offers File excuse with a countdown: the soonest
- * `excusableUntil` among the Missed days `excuseOptions` offers, or null
+ * When the excuse windows of the Missed days `excuseOptions` offers close,
+ * soonest first: what the pact page's File excuse counts down to. Empty
  * when it offers none (or none yet, in the edit window).
  */
-export function pactExcusableUntil(ctx: CoreContext, accountId: AccountId, pactId: string): Date | null {
+export function excuseWindowsClose(ctx: CoreContext, accountId: AccountId, pactId: string): Date[] {
   const offered = excuseOptions(ctx, accountId, pactId);
-  if (!offered.ok) return null;
-  const closing = offered.options.recentDays.flatMap(({ status }) =>
-    status.kind === "missed" ? [status.excusableUntil.getTime()] : [],
-  );
-  return closing.length === 0 ? null : new Date(Math.min(...closing));
+  if (!offered.ok) return [];
+  return offered.options.recentDays
+    .flatMap(({ status }) => (status.kind === "missed" ? [status.excusableUntil] : []))
+    .sort((a, b) => a.getTime() - b.getTime());
 }
 
 /**

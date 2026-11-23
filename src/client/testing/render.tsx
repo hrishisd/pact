@@ -79,7 +79,7 @@ export function cameraPact(editWindowClosesAt: string | null = null): PactPage {
     history: { kind: "fixed-days", days: [] },
     connectionProblem: null,
     ending: null,
-    excusableUntil: null,
+    excuseWindowsClose: [],
     stage: "active",
   };
 }

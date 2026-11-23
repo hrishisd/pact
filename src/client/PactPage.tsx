@@ -92,11 +92,10 @@ export function PactPage({
         // After the edit window, until the pact Ends: File excuse, Request change, End pact and the terms' own Change.
         const changeable = minutes === null && pact.stage === "active";
         const waiting = changeWaiting(pact);
-        // Ended: File excuse, counting down, while the core says a Missed day can still be excused.
-        const endedExcuseLabel =
-          pact.stage === "ended" && pact.excusableUntil !== null
-            ? fileExcuseLabel("File excuse", pact.excusableUntil, now)
-            : null;
+        // Ended: File excuse while a Missed day's excuse window is open, counting down to the soonest still to come.
+        const excuseWindow =
+          pact.stage === "ended" ? pact.excuseWindowsClose.find((closes) => Date.parse(closes) > now) : undefined;
+        const endedExcuseLabel = excuseWindow === undefined ? null : fileExcuseLabel("File excuse", excuseWindow, now);
         return (
           <>
             {pact.connectionProblem &&
@@ -120,10 +119,14 @@ export function PactPage({
                 onRequestChange={onRequestChange}
               />
             )}
-            {endedExcuseLabel && (
-              <div className="row2">
-                <FileExcuse pact={pact} label={endedExcuseLabel} timezone={timezone} onFiled={reload} />
-              </div>
+            {pact.stage === "ended" && (
+              <FileExcuse
+                pact={pact}
+                label={endedExcuseLabel}
+                className="self-start"
+                timezone={timezone}
+                onFiled={reload}
+              />
             )}
             {pact.waiting.length > 0 && (
               <WaitingOn items={pact.waiting} onOpenItem={(item) => openItem(item, openers)} />
@@ -295,15 +298,21 @@ function Actions({
   );
 }
 
-/** The File excuse button, labelled `label`, and the excuse sheet it opens, which asks which day. */
+/**
+ * The File excuse button, labelled `label` (none when null), and the excuse
+ * sheet it opens, which asks which day. An open sheet stays when the button
+ * goes, so what the owner typed isn't lost; sending then says why it's refused.
+ */
 function FileExcuse({
   pact,
   label,
+  className = "",
   timezone,
   onFiled,
 }: {
   pact: Pact;
-  label: string;
+  label: string | null;
+  className?: string;
   timezone: string;
   onFiled: () => void;
 }) {
@@ -311,9 +320,11 @@ function FileExcuse({
   const close = useCallback(() => setFiling(false), []);
   return (
     <>
-      <button className="btn" onClick={() => setFiling(true)}>
-        {label}
-      </button>
+      {label !== null && (
+        <button className={`btn ${className}`.trim()} onClick={() => setFiling(true)}>
+          {label}
+        </button>
+      )}
       {filing && (
         <ExcuseSheet
           pactId={pact.id}

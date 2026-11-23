@@ -120,7 +120,50 @@ describe("ExcuseSheet", () => {
     expect(text).toContain("Gym is 3× per week · $5 per miss. Excusing any day excuses the whole week.");
     expect(text).toContain("Week of Mon Jan 5");
     expect(text).toContain("Due by Sunday");
+    expect(text).toContain("Covers 1 week.");
     expect(text).not.toContain("held");
+  });
+
+  test("on a Weekly count pact, the footer counts weeks", async () => {
+    const week = (date: string, through: string) => ({
+      date,
+      through,
+      status: {
+        kind: "missed" as const,
+        penaltyCents: 500,
+        excusableUntil: "2026-01-06T05:00:00Z",
+        cover: null,
+        phase: "past-due" as const,
+      },
+    });
+    stubApi({
+      pact: pactAnswer({
+        ...cameraPact(),
+        evidenceKind: "camera",
+        dueBy: null,
+        schedule: { kind: "weekly-count", target: 3 },
+        history: { kind: "weekly-count", weeks: [] },
+      }),
+      excusePreview: async () => ({
+        ok: true,
+        preview: { covered: [week("2025-12-29", "2026-01-04")], skipped: [], heldCents: 500 },
+      }),
+    });
+
+    renderWithUser(
+      <ExcuseSheet
+        pactId="gym"
+        pactName="Gym"
+        day="2026-01-01"
+        timezone={TIMEZONE}
+        onClose={() => undefined}
+        onFiled={() => undefined}
+      />,
+    );
+
+    expect(await sheetText()).toContain(
+      "Covers 1 week. You won't owe the $5 for this week unless the excuse is rejected.",
+    );
   });
 
   describe("opened from the page of an Ended pact", () => {
@@ -161,7 +204,10 @@ describe("ExcuseSheet", () => {
     test("with one day to excuse, it opens on that day, with no later days and no Days ahead", async () => {
       const api = stubApi({
         pact: pactAnswer(ended),
-        excuseOptions: async () => ({ ok: true, options: { today: "2026-01-05", recentDays: [sunday] } }),
+        excuseOptions: async () => ({
+          ok: true,
+          options: { today: "2026-01-05", daysAhead: false, recentDays: [sunday] },
+        }),
         excusePreview: async () => covering(sunday),
       });
       openSheet();
@@ -180,7 +226,10 @@ describe("ExcuseSheet", () => {
     test("with several days, it asks which, with no Days ahead", async () => {
       stubApi({
         pact: pactAnswer(ended),
-        excuseOptions: async () => ({ ok: true, options: { today: "2026-01-05", recentDays: [sunday, saturday] } }),
+        excuseOptions: async () => ({
+          ok: true,
+          options: { today: "2026-01-05", daysAhead: false, recentDays: [sunday, saturday] },
+        }),
         excusePreview: async () => covering(sunday),
       });
       openSheet();
@@ -196,7 +245,7 @@ describe("ExcuseSheet", () => {
     test("with no day left to excuse, it says so", async () => {
       stubApi({
         pact: pactAnswer(ended),
-        excuseOptions: async () => ({ ok: true, options: { today: "2026-01-05", recentDays: [] } }),
+        excuseOptions: async () => ({ ok: true, options: { today: "2026-01-05", daysAhead: false, recentDays: [] } }),
       });
       openSheet();
 
@@ -207,7 +256,7 @@ describe("ExcuseSheet", () => {
   test("opened from an Active pact's page, it offers Days ahead, and a footer for several days says these days", async () => {
     const api = stubApi({
       pact: pactAnswer({ ...cameraPact(), schedule: { kind: "fixed-days", days: [...WEEKDAYS] } }),
-      excuseOptions: async () => ({ ok: true, options: { today: "2026-01-05", recentDays: [] } }),
+      excuseOptions: async () => ({ ok: true, options: { today: "2026-01-05", daysAhead: true, recentDays: [] } }),
       excusePreview: async () => ({
         ok: true,
         preview: {
