@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { LedgerResponse, TodayResponse } from "../shared/api.ts";
 import type { CheckNowResult } from "../shared/types.ts";
 import { PullToRefresh } from "./pull-to-refresh.tsx";
-import { answers, onOurSide, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
+import { answers, endSheetSlides, onOurSide, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
 import { Today } from "./Today.tsx";
 
 const NOW = "2026-01-05T15:00:00Z";
@@ -168,6 +168,7 @@ describe("a Today card's own buttons", () => {
     await user.click(within(await card("Spanish")).getByRole("button", { name: "File excuse" }));
     await screen.findByRole("dialog");
     await user.keyboard("{Escape}");
+    endSheetSlides();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(onOpenPact).not.toHaveBeenCalled();
   });
@@ -177,6 +178,7 @@ describe("a Today card's own buttons", () => {
     await user.click(within(await card("Gym")).getByRole("button", { name: /^File excuse/ }));
     await screen.findByRole("dialog", { name: "Excuse Gym, Sun Jan 4" });
     await user.keyboard("{Escape}");
+    endSheetSlides();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -185,6 +187,7 @@ describe("a Today card's own buttons", () => {
     await user.click(within(await card("Pay Sam")).getByRole("button", { name: "Record payment" }));
     await screen.findByRole("dialog", { name: "Record a payment" });
     await user.keyboard("{Escape}");
+    endSheetSlides();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
