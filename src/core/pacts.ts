@@ -29,6 +29,7 @@ import type { CoreContext } from "./context.ts";
 import { moveCovers } from "./covers.ts";
 import { endingOf } from "./ending.ts";
 import { enqueueEvidenceReviewItems } from "./evidence.ts";
+import { excuseWindowsClose } from "./excuses.ts";
 import { pactHistory } from "./history.ts";
 import {
   ankiDueByFits,
@@ -269,6 +270,7 @@ export function pactPage(
     history: pactHistory(ctx, row, timezone, first, now),
     connectionProblem: row.stage === "active" && service !== null ? connectionProblem(ctx, accountId, service) : null,
     ending: endingOf(row),
+    excuseWindowsClose: excuseWindowsClose(ctx, accountId, pactId),
   };
   return { ok: true, pact };
 }

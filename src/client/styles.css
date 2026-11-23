@@ -1579,6 +1579,14 @@ details.folded .kv {
   flex: 1;
   min-width: 0;
 }
+/* Its date stays on one line; a chip too long to fit beside it wraps below. */
+.hmdetail.one > .rt > .spread {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.hmdetail.one > .rt > .spread > b {
+  white-space: nowrap;
+}
 /* A reminder on the Reminders step: its time field and Remove. */
 .remrow {
   display: flex;

@@ -1,7 +1,8 @@
 // A pact's page, pushed on the current tab: its terms, Edit and Delete in
 // its edit window; after it File excuse, Request change and End pact (or,
 // while a change request waits, word of it; while an approved end waits,
-// neither, and word of the end); when new terms start; and
+// neither, and word of the end); once it has Ended, File excuse alone while
+// a Missed day can still be excused; when new terms start; and
 // what's waiting on a reviewer; and its History, a heat map of its days.
 // After the edit window the name, the reminders and added reviewers change
 // right here, with no review, even while a change request waits.
@@ -26,7 +27,16 @@ import { HeatMap } from "./history.tsx";
 import { AT_ONCE_REFUSAL_TEXT, endsWhenText, openOccurrenceText } from "./change-terms.tsx";
 import { formOf } from "./pact-form.ts";
 import { PROBLEMS, ReviewersStep } from "./pact-form-steps.tsx";
-import { clockText, EDIT_WINDOW_TEXT, formatDate, formatDay, listNames, minutesLeft, money } from "./format.ts";
+import {
+  clockText,
+  EDIT_WINDOW_TEXT,
+  fileExcuseLabel,
+  formatDate,
+  formatDay,
+  listNames,
+  minutesLeft,
+  money,
+} from "./format.ts";
 import { openItem, WaitingItemRow, type ItemOpeners } from "./item-page.tsx";
 import { TermsList } from "./terms-list.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
@@ -82,6 +92,10 @@ export function PactPage({
         // After the edit window, until the pact Ends: File excuse, Request change, End pact and the terms' own Change.
         const changeable = minutes === null && pact.stage === "active";
         const waiting = changeWaiting(pact);
+        // Ended: File excuse while a Missed day's excuse window is open, counting down to the soonest still to come.
+        const excuseWindow =
+          pact.stage === "ended" ? pact.excuseWindowsClose.find((closes) => Date.parse(closes) > now) : undefined;
+        const endedExcuseLabel = excuseWindow === undefined ? null : fileExcuseLabel("File excuse", excuseWindow, now);
         return (
           <>
             {pact.connectionProblem &&
@@ -105,6 +119,15 @@ export function PactPage({
                 onRequestChange={onRequestChange}
               />
             )}
+            {pact.stage === "ended" && (
+              <FileExcuse
+                pact={pact}
+                label={endedExcuseLabel}
+                className="self-start"
+                timezone={timezone}
+                onFiled={reload}
+              />
+            )}
             {pact.waiting.length > 0 && (
               <WaitingOn items={pact.waiting} onOpenItem={(item) => openItem(item, openers)} />
             )}
@@ -119,7 +142,10 @@ export function PactPage({
             )}
             {pact.stage === "ended" && (
               <p className="small muted">
-                This pact ended on {formatDay(pact.endedAt, timezone)}. You still owe penalties for days already missed.
+                This pact ended on {formatDay(pact.endedAt, timezone)}.{" "}
+                {endedExcuseLabel
+                  ? "You owe penalties for missed days unless an excuse is approved."
+                  : "You still owe penalties for days already missed."}
               </p>
             )}
           </>
@@ -247,8 +273,6 @@ function Actions({
   onFiled: () => void;
   onRequestChange: () => void;
 }) {
-  const [filing, setFiling] = useState(false);
-  const close = useCallback(() => setFiling(false), []);
   return (
     <div className="stack-sm">
       {waiting && (
@@ -263,15 +287,44 @@ function Actions({
         </p>
       )}
       <div className="row2">
-        <button className="btn" onClick={() => setFiling(true)}>
-          File excuse
-        </button>
+        <FileExcuse pact={pact} label="File excuse" timezone={timezone} onFiled={onFiled} />
         {!waiting && pact.ending === null && (
           <button className="btn" onClick={onRequestChange}>
             Request change
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The File excuse button, labelled `label` (none when null), and the excuse
+ * sheet it opens, which asks which day. An open sheet stays when the button
+ * goes, so what the owner typed isn't lost; sending then says why it's refused.
+ */
+function FileExcuse({
+  pact,
+  label,
+  className = "",
+  timezone,
+  onFiled,
+}: {
+  pact: Pact;
+  label: string | null;
+  className?: string;
+  timezone: string;
+  onFiled: () => void;
+}) {
+  const [filing, setFiling] = useState(false);
+  const close = useCallback(() => setFiling(false), []);
+  return (
+    <>
+      {label !== null && (
+        <button className={`btn ${className}`.trim()} onClick={() => setFiling(true)}>
+          {label}
+        </button>
+      )}
       {filing && (
         <ExcuseSheet
           pactId={pact.id}
@@ -284,7 +337,7 @@ function Actions({
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 

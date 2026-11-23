@@ -1,6 +1,7 @@
-import { screen } from "@testing-library/react";
+import { screen, waitForElementToBeRemoved, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { FriendsResponse } from "../shared/api.ts";
+import type { FriendsResponse, Json } from "../shared/api.ts";
+import type { PactTerms } from "../shared/types.ts";
 import { PactPage } from "./PactPage.tsx";
 import { answers, cameraPact, onOurSide, renderWithUser, stubApi } from "./testing/render.tsx";
 
@@ -118,6 +119,110 @@ test("an Active pact past its edit window offers End pact and Request change", a
 
   expect(await screen.findByRole("button", { name: "End pact" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Request change" })).toBeTruthy();
+});
+
+describe("File excuse on an Ended pact", () => {
+  // Gym Ended on Sun Jan 4; at NOW, Mon 10am, its Missed days' excuse windows close at these times.
+  const ended = (...excuseWindowsClose: string[]): Json<PactTerms> => ({
+    ...cameraPact(),
+    stage: "ended",
+    endedAt: "2026-01-04T05:00:00Z",
+    excuseWindowsClose,
+  });
+  /** Moves the clock to `at`; the page reads it at its next tick, within a second. */
+  const moveClockTo = (at: string) => vi.setSystemTime(new Date(at));
+  const nextTick = { timeout: 2000 };
+
+  test("while a day can be excused, it's offered alone, counting down to the soonest window's end", async () => {
+    stubApi({ pact: answers({ ok: true, pact: ended("2026-01-06T22:30:00Z") }) });
+    renderPactPage();
+
+    expect(await screen.findByRole("button", { name: "File excuse · 31h left" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Request change" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "End pact" })).toBeNull();
+    expect(
+      screen.getByText("This pact ended on Sun Jan 4. You owe penalties for missed days unless an excuse is approved."),
+    ).toBeTruthy();
+  });
+
+  test("once the soonest window closes, it counts down to the next", async () => {
+    stubApi({ pact: answers({ ok: true, pact: ended("2026-01-05T22:30:00Z", "2026-01-06T22:30:00Z") }) });
+    renderPactPage();
+    expect(await screen.findByRole("button", { name: "File excuse · 7h left" })).toBeTruthy();
+
+    moveClockTo("2026-01-05T23:00:00Z");
+
+    expect(await screen.findByRole("button", { name: "File excuse · 23h left" }, nextTick)).toBeTruthy();
+    expect(
+      screen.getByText("This pact ended on Sun Jan 4. You owe penalties for missed days unless an excuse is approved."),
+    ).toBeTruthy();
+  });
+
+  test("opens the excuse sheet", async () => {
+    stubApi({
+      pact: answers({ ok: true, pact: ended("2026-01-06T22:30:00Z") }),
+      excuseOptions: answers({ ok: true, options: { today: "2026-01-05", daysAhead: false, recentDays: [] } }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "File excuse · 31h left" }));
+
+    expect(await screen.findByRole("heading", { name: "Excuse Gym" })).toBeTruthy();
+  });
+
+  test("an open sheet stays open when the last window closes, and sending then says why it's refused", async () => {
+    const sunday = {
+      date: "2026-01-04",
+      status: {
+        kind: "missed" as const,
+        penaltyCents: 500,
+        excusableUntil: "2026-01-05T15:30:00Z",
+        cover: null,
+        phase: "past-due" as const,
+      },
+    };
+    const { fileExcuse } = stubApi({
+      pact: answers({ ok: true, pact: ended("2026-01-05T15:30:00Z") }),
+      excuseOptions: answers({ ok: true, options: { today: "2026-01-05", daysAhead: false, recentDays: [sunday] } }),
+      excusePreview: answers({ ok: true, preview: { covered: [sunday], skipped: [], heldCents: 500 } }),
+      fileExcuse: answers({ ok: false, reason: "nothing-to-excuse" }),
+    });
+    const { user } = renderPactPage();
+    await user.click(await screen.findByRole("button", { name: "File excuse · 30m left" }));
+    const sheet = await screen.findByRole("dialog");
+    await within(sheet).findByText(/^Covers /);
+    await user.type(within(sheet).getByRole("textbox", { name: "Reason" }), "Sick with the flu");
+
+    moveClockTo("2026-01-05T15:31:00Z");
+
+    await waitForElementToBeRemoved(() => screen.queryByRole("button", { name: /^File excuse/ }), nextTick);
+    expect((within(sheet).getByRole("textbox", { name: "Reason" }) as HTMLTextAreaElement).value).toBe(
+      "Sick with the flu",
+    );
+    await user.click(within(sheet).getByRole("button", { name: "Send to Ana" }));
+    expect(fileExcuse).toHaveBeenCalledTimes(1);
+    expect(await within(sheet).findByText("None of these days can be excused now.")).toBeTruthy();
+  });
+
+  test.each([
+    ["no day can be excused", []],
+    ["the last window has just closed", ["2026-01-05T15:00:00Z"]],
+  ])("isn't offered once %s, and the page says penalties are still owed", async (_, windows) => {
+    stubApi({ pact: answers({ ok: true, pact: ended(...windows) }) });
+    renderPactPage();
+
+    expect(
+      await screen.findByText("This pact ended on Sun Jan 4. You still owe penalties for days already missed."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /File excuse/ })).toBeNull();
+  });
+
+  test("an Active pact's File excuse is as before, with no countdown", async () => {
+    stubApi({ pact: answers({ ok: true, pact: { ...cameraPact(), excuseWindowsClose: ["2026-01-06T22:30:00Z"] } }) });
+    renderPactPage();
+
+    expect(await screen.findByRole("button", { name: "File excuse" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Request change" })).toBeTruthy();
+  });
 });
 
 describe("Waiting on", () => {

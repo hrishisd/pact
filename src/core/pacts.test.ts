@@ -41,6 +41,7 @@ describe("creating a pact", () => {
         history: expect.objectContaining({ kind: "fixed-days" }),
         connectionProblem: null,
         ending: null,
+        excuseWindowsClose: [],
       },
     });
   });

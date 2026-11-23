@@ -298,6 +298,14 @@ interface PactPageTerms {
    * judged. Else null.
    */
   ending: { lastDay: LocalDate } | null;
+  /**
+   * When the excuse window of each Missed day of the pact that can still be
+   * excused closes (its 48 hours not over, and not on an excuse or vacation
+   * waiting for approval), soonest first; empty when there is none. An
+   * Ended pact offers File excuse until the last, counting down to the
+   * soonest still to come.
+   */
+  excuseWindowsClose: Date[];
 }
 
 /**
@@ -1450,7 +1458,13 @@ export type ExcusePreviewResult = { ok: true; preview: ExcusePreview } | { ok: f
 export interface ExcuseOptions {
   /** The owner's today: the Days ahead range starts here. */
   today: LocalDate;
-  /** Days dated today or earlier that an excuse would cover now, newest first. */
+  /** Whether Days ahead is offered: an Ended pact has no days ahead. */
+  daysAhead: boolean;
+  /**
+   * Days dated today or earlier that an excuse would cover now, and a Missed
+   * day dated later still within its 48 hours (a One-time occurrence a
+   * rejection judged before its date), newest first.
+   */
   recentDays: ExcuseDay[];
 }
 
