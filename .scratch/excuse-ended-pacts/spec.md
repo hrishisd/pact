@@ -2,9 +2,9 @@
 
 Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
 
-Status: needs-triage
+Status: ready-for-agent
 
-Settled with the owner on 2026-11-23 in a design interview. The prototype (`prototype/excuse-ended-pacts`) is still to be reviewed; update this spec with what it settles before building.
+Settled with the owner on 2026-11-23 in a design interview, then confirmed on a clickable prototype (local branch `prototype/excuse-ended-pacts`, file `prototype/excuse-ended-pacts.html`). Every decision below was confirmed.
 
 ## Problem statement
 
@@ -32,14 +32,22 @@ The pact page offers File excuse for any Missed day still inside its 48-hour exc
 
 ### Pact page
 
-- On an Ended pact the button sits where File excuse sits on an Active pact, alone (no Request change or End pact), labelled like Today's Missed card: "File excuse · 31h left", counting down to the latest excuse deadline among the pact's excusable days. Reason: the same action looks the same in both places.
-- The core decides: the pact page's data gains `excusableUntil`, the latest `excusableUntil` among the pact's excusable days, or null when none is left. The page shows the button on an Ended pact while it is set and not passed. Reason: the core decides every domain rule (`CLAUDE.md`).
+- On an Ended pact the button sits where File excuse sits on an Active pact, alone (no Request change or End pact), labelled like Today's Missed card: "File excuse · 31h left". Reason: the same action looks the same in both places.
+- With several excusable days, the countdown is to the soonest deadline ("8h left", not "32h left"). Reason: that is the deadline that costs money if missed; the sheet shows each day's own time left. Once that day is excused or its window closes, the label moves to the next one.
+- The core decides: the pact page's data gains `excusableUntil`, the soonest `excusableUntil` among the pact's excusable days, or null when none is left. The page shows the button on an Ended pact while it is set and not passed. Reason: the core decides every domain rule (`CLAUDE.md`).
+- While a day can be excused, the Ended line reads "This pact ended on Sun Nov 22. You owe penalties for missed days unless an excuse is approved." Otherwise it stays "This pact ended on Sun Nov 22. You still owe penalties for days already missed." Reason: the old line, under a live File excuse, read as if an excuse couldn't help.
 
 ### Excuse sheet on an Ended pact
 
 - "Days ahead" is hidden: an Ended pact has no days ahead.
 - With exactly one excusable day, the sheet opens the one-day form that Today's Missed card opens, with that day picked, and without "+ Later days too". A missed One-time pact always gets this form.
 - With several, it shows the "Which day?" list without "Days ahead".
+- The footer says "this day" when the excuse covers one day ("You won't owe the $10 for this day unless the excuse is rejected."), "these days" otherwise. This applies to every way into the sheet.
+- Not in this change: the sheet's title and the line under it both repeat the pact name ("Block x and Reddit on tablet is One-time, Sun Nov 22 · $10 per miss"). A separate ticket.
+
+### History block
+
+- On the One-time history block, the date stays on one line and a long chip ("Missed · excuse waiting for approval") wraps below it. Today the date breaks onto three lines at phone width.
 
 ### Core fix
 
@@ -53,5 +61,5 @@ The pact page offers File excuse for any Missed day still inside its 48-hour exc
 ## Testing
 
 - Core: `excusableUntil` on the pact page data for an Active pact, an Ended One-time pact inside and past its window, a day under a waiting excuse, an Ended recurring pact with two Missed days; `excuseOptions` lists an early-missed One-time day dated ahead.
-- Client: `PactPage.test.tsx` shows or hides the button and its label; `ExcuseSheet` hides Days ahead on an Ended pact and opens the one-day form for a single day.
+- Client: `PactPage.test.tsx` shows or hides the button, its label (soonest deadline) and the Ended line; `ExcuseSheet` hides Days ahead on an Ended pact and opens the one-day form for a single day.
 - `docs/behaviour.md`: Excuses and Ending sections state the new rule.
