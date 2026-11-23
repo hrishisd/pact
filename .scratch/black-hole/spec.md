@@ -14,6 +14,8 @@ Give the app a way to move money without the owner's cooperation, so that an unp
 
 The working name is the **black hole**: an organization the owner picks ahead of time, which the app can pay directly. The owner connects a way to pay before the pact starts, so the app can take money later. If a ledger is still unpaid some time after its bill is due, the app pays the black hole on the owner's behalf.
 
+The black hole is a separate organization, not the recipient. It doesn't need to be one the owner dislikes. What makes the owner prefer paying the recipient is the price: **the black hole gets twice what the owner owes** (decided 2026-11-23). Paying the recipient on time always costs half as much.
+
 Two shapes the idea could take:
 
 - **Escrow up front.** The app takes money from the owner when a pact starts (or as penalties arise) and holds it. Paying the recipient on time releases it back to the owner. Missing the deadline sends it to the black hole.
@@ -21,8 +23,8 @@ Two shapes the idea could take:
 
 ## Open questions
 
-- Is the black hole the pact's recipient, or a separate destination that exists only as the penalty for not paying? A separate one could be deliberately unpleasant to the owner (an anti-charity) so that paying the recipient is always the better choice.
-- Does the amount equal what is owed, or more, as a late fee?
+- Which organization is the black hole? It is separate from the recipients, and the main requirement is that the app can send it money easily. Not chosen yet.
+- If the black hole pays 2× what is owed, does the escrow or the saved payment method need to cover 2× from the start? Escrowing 2× of every penalty up front is a lot of money to lock away.
 - How long after a bill is due does the app act? How does this fit the Overdue spell?
 - What happens to excuses and held penalties? The app must not take money for a penalty an excuse may still cover.
 - Does a black hole payment count as an approved payment on the ledger, so the ledger reads $0 owed afterwards?
