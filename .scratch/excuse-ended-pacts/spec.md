@@ -2,7 +2,7 @@
 
 Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
 
-Status: ready-for-agent
+Status: ready-for-human
 
 Settled with the owner on 2026-11-23 in a design interview, then confirmed on a clickable prototype (local branch `prototype/excuse-ended-pacts`, file `prototype/excuse-ended-pacts.html`). Every decision below was confirmed.
 
@@ -63,3 +63,7 @@ The pact page offers File excuse for any Missed day still inside its 48-hour exc
 - Core: `excusableUntil` on the pact page data for an Active pact, an Ended One-time pact inside and past its window, a day under a waiting excuse, an Ended recurring pact with two Missed days; `excuseOptions` lists an early-missed One-time day dated ahead.
 - Client: `PactPage.test.tsx` shows or hides the button, its label (soonest deadline) and the Ended line; `ExcuseSheet` hides Days ahead on an Ended pact and opens the one-day form for a single day.
 - `docs/behaviour.md`: Excuses and Ending sections state the new rule.
+
+## Comments
+
+- Built on branch `claude/vibrant-albattani-lkkw1n`. Checks for the phone: [`manual-checks.md`](manual-checks.md).
