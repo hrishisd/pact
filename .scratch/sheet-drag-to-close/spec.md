@@ -2,7 +2,7 @@
 
 Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
 
-Status: done
+Status: ready-for-human
 
 Settled with the owner on 2026-11-23. Every decision below was confirmed. Built in `useSheetMotion` (`src/client/sheet-motion.ts`), used by `Sheet` (`src/client/ui.tsx`). Checks only a phone can do are in `manual-checks.md`.
 

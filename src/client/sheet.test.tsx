@@ -310,11 +310,13 @@ describe("dragging a sheet", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  test("a few px down is still a tap: the sheet stays and the browser keeps the move", () => {
+  // The move is held from the browser all the same, so iOS doesn't start a bounce
+  // it would then not let a drag stop.
+  test("a few px down is still a tap: the sheet stays and the browser doesn't bounce it", () => {
     const { onClose, sheet } = openOne(true);
     const inside = screen.getByRole("button", { name: "Inside" });
     fingerDown(inside);
-    expect(fingerTo(inside, DRAG_CLAIM_PX - 1)).toBe(true);
+    expect(fingerTo(inside, DRAG_CLAIM_PX - 1)).toBe(false);
     expect(moved(sheet)).toBe(0);
     fingerUp(inside);
     fireEvent.click(inside);

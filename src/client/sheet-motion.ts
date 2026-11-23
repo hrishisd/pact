@@ -121,6 +121,9 @@ export function useSheetMotion(
       if (!dragging) {
         // Up first is a scroll; sideways first is the sheet's own swipe or scroller's.
         if (dy < 0 || Math.abs(dx) > Math.max(dy, DRAG_CLAIM_PX / 2)) return stop();
+        // Down at the top: stop iOS starting its own bounce now, as pull to refresh
+        // does. Once its scroll has begun, it ignores preventDefault.
+        if (e.cancelable) e.preventDefault();
         // Too little yet to tell from a tap.
         if (dy < DRAG_CLAIM_PX) return;
         dragging = true;
