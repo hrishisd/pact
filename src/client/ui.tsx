@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { failureText } from "./api.ts";
 import { lastLoaded, loadAndRemember } from "./last-loaded.ts";
 import { minutesLeft } from "./format.ts";
+import { useSheetMotion } from "./sheet-motion.ts";
 
 /** A full screen with its content centred: sign-in, timezone, invite. */
 export function Centered({ children }: { children: ReactNode }) {
@@ -273,10 +274,31 @@ export function Empty({ title, body, children }: { title: string; body: string; 
   );
 }
 
+/** How many sheets are open now; the page behind them is held still while any is. */
+let openSheets = 0;
+
+/**
+ * Holds the page behind a sheet still (the `sheet-open` class, styles.css) until
+ * the returned function is called and no other sheet is open. iOS WebKit can
+ * send a drag on a sheet to a scroll area under it (bugs.webkit.org 117059),
+ * scrolling the page and leaving the sheet stuck; one with overflow hidden
+ * can't scroll, so the drag stays with the sheet.
+ */
+function holdPageStill(): () => void {
+  openSheets += 1;
+  document.documentElement.classList.add("sheet-open");
+  return () => {
+    openSheets -= 1;
+    if (openSheets === 0) document.documentElement.classList.remove("sheet-open");
+  };
+}
+
 /**
  * A sheet that slides up over the screen: its title, maybe a link that closes
- * it (Done, Cancel), then `children`. Tapping outside it or pressing Escape closes it too.
- * It renders on the document's body, wherever it's used.
+ * it (Done, Cancel), then `children`. Tapping outside it, pressing Escape or
+ * dragging it down closes it too: it slides away, then calls `onClose`, which
+ * must take it away (`useSheetMotion`, sheet-motion.ts). Taken away by its
+ * user instead, it goes at once. It renders on the document's body, wherever it's used.
  */
 export function Sheet({
   title,
@@ -290,16 +312,22 @@ export function Sheet({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const overlay = useRef<HTMLDivElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
+  const close = useSheetMotion(sheet, overlay, onClose);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [close]);
+  // Until it's gone, so the page stays still while it slides away.
+  useEffect(holdPageStill, []);
 
   // On the body, so a sheet opened from inside a card or list isn't inside it.
   return createPortal(
-    <div className="overlay" onClick={onClose}>
+    <div ref={overlay} className="overlay" onClick={close}>
       <div
+        ref={sheet}
         className="sheet gut"
         role="dialog"
         aria-modal="true"
@@ -310,7 +338,7 @@ export function Sheet({
         <div className="spread">
           <h2>{title}</h2>
           {closeLabel && (
-            <button className="link" onClick={onClose}>
+            <button className="link" onClick={close}>
               {closeLabel}
             </button>
           )}

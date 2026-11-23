@@ -757,6 +757,18 @@ p {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  /* A scroll that reaches the sheet's top or bottom stays in the sheet. */
+  overscroll-behavior: contain;
+  /* Fills the gap below the sheet while a drag pulls it up past where it
+     rests (UP_MAX_PX, sheet-motion.ts); off screen otherwise. */
+  box-shadow: 0 16px 0 var(--paper);
+}
+/* While a sheet is open, the page behind it can't scroll: iOS WebKit can send a
+   drag on the sheet to the scroll area under it (bugs.webkit.org 117059), which
+   it can't do to one with overflow hidden. Not touch-action on .overlay: the
+   sheet inside it would stop scrolling too. Hiding keeps the page's scrollTop. */
+.sheet-open .scroll {
+  overflow: hidden;
 }
 /* A tall sheet scrolls; its parts keep their height instead of shrinking to fit. */
 .sheet > * {
@@ -772,13 +784,16 @@ p {
 .sheet h2 {
   font-size: 20px;
 }
+/* The entry slide moves translate, not transform: a running animation of
+   transform would override the transform a drag or the exit writes
+   (sheet-motion.ts), and the two compose instead. */
 @media (prefers-reduced-motion: no-preference) {
   .sheet {
     animation: up 0.22s ease-out;
   }
   @keyframes up {
     from {
-      transform: translateY(24px);
+      translate: 0 24px;
       opacity: 0.6;
     }
   }

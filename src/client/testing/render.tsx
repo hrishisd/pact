@@ -95,6 +95,14 @@ export function pullDown(finger = 2 * PULL_THRESHOLD_PX, scrollArea: HTMLElement
   fireEvent.touchEnd(scrollArea, { touches: [] });
 }
 
+/**
+ * Ends the slide of each sheet sliding away, as the browser says when its
+ * transition ends; jsdom runs none. A closing sheet then goes.
+ */
+export function endSheetSlides(): void {
+  for (const sheet of screen.queryAllByRole("dialog")) fireEvent.transitionEnd(sheet);
+}
+
 /** Renders `ui` on the document, with a user who clicks and types through it. */
 export function renderWithUser(ui: ReactElement): RenderResult & { user: UserEvent } {
   return { user: userEvent.setup(), ...render(ui) };
