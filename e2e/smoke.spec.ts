@@ -24,6 +24,13 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
   const owner = await (await browser.newContext()).newPage();
   const reviewer = await (await browser.newContext()).newPage();
 
+  /** The owner's Today card for Gym showing `chip`: its name opens the pact, its buttons sit beside it. */
+  const gymCard = (chip: string) =>
+    owner
+      .getByRole("article")
+      .filter({ has: owner.getByRole("heading", { name: "Gym" }) })
+      .filter({ hasText: chip });
+
   /** Moves the server's clock `minutes` forward, and both browsers' clocks with it. */
   async function advance(minutes: number): Promise<Date> {
     const response = await owner.request.post(DEV_ADVANCE_PATH, { data: { minutes } satisfies DevAdvanceRequest });
@@ -80,7 +87,7 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
 
   await test.step("the owner submits evidence from the To do card", async () => {
     await owner.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Today" }).click();
-    const toDo = owner.getByRole("link", { name: /^Gym .*To do/ });
+    const toDo = gymCard("To do");
     const chooser = owner.waitForEvent("filechooser");
     await toDo.getByRole("button", { name: "Take photo" }).click();
     await (await chooser).setFiles({ name: "gym.png", mimeType: "image/png", buffer: PNG });
@@ -100,19 +107,18 @@ test("an owner and a reviewer go from friends to a recorded payment", async ({ b
   await test.step("two days on, yesterday is Missed", async () => {
     await advance(2 * 24 * 60);
     await owner.reload();
-    await expect(owner.getByRole("link", { name: /^Gym Missed \$5/ })).toBeVisible();
+    await expect(gymCard("Missed")).toContainText("$5");
   });
 
   await test.step("the owner files an excuse from the Missed card, sees it waiting and opens it", async () => {
-    await owner
-      .getByRole("link", { name: /^Gym Missed/ })
+    await gymCard("Missed")
       .getByRole("button", { name: /^File excuse/ })
       .click();
     const sheet = owner.getByRole("dialog", { name: /^Excuse Gym, / });
     await expect(sheet.getByText("$5 held while Friend decides")).toBeVisible();
     await sheet.getByRole("textbox", { name: "Reason" }).fill("Sick with the flu");
     await sheet.getByRole("button", { name: "Send to Friend" }).click();
-    await expect(owner.getByRole("link", { name: /^Gym Missed/ })).toBeHidden();
+    await expect(gymCard("Missed")).toBeHidden();
     await owner.getByRole("button", { name: /^Gym Excuse/ }).click();
     await expect(owner.getByRole("heading", { name: "Excuse", level: 1 })).toBeVisible();
     await expect(owner.getByText("Waiting for approval", { exact: true })).toBeVisible();

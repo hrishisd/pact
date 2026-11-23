@@ -19,9 +19,8 @@ import {
   type PactTerms,
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
-import { listNames } from "./change-terms.tsx";
 import { Chip, DayChip, SKIP_REASON_TEXT, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
-import { EDIT_WINDOW_TEXT, formatDate, hoursLeft, money, scheduleText } from "./format.ts";
+import { EDIT_WINDOW_TEXT, formatDate, hoursLeft, listNames, money, scheduleText } from "./format.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useNow, useSend } from "./ui.tsx";
 

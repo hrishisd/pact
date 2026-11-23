@@ -8,8 +8,7 @@ import type { VacationOptionsResponse, VacationPreviewRequest, VacationPreviewRe
 import { dayCount } from "../shared/calendar.ts";
 import { MAX_EXCUSE_SPAN_DAYS, MAX_TEXT_CHARS, type FileVacationRefusal } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
-import { listNames } from "./change-terms.tsx";
-import { dateSpan, formatDate, money, scheduleText } from "./format.ts";
+import { dateSpan, formatDate, listNames, money, scheduleText } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { coveredText, firstName, occurrenceNames, pactsText, plural, weekOf } from "./vacation-text.ts";
 import { Loaded, settleUnlessDropped, useLoad, useSend } from "./ui.tsx";

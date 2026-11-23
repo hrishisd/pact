@@ -21,6 +21,12 @@ describe("primitives", () => {
   test("a number keeps its sign at zero", () => {
     expect(Object.is(number(-0), -0)).toBe(true);
   });
+
+  test("a number JSON can't write back out isn't a number: 1e400 parses as Infinity", () => {
+    expect(number(JSON.parse("1e400"))).toBeNull();
+    expect(number(JSON.parse("-1e400"))).toBeNull();
+    expect(number(Number.NaN)).toBeNull();
+  });
 });
 
 describe("oneOf", () => {

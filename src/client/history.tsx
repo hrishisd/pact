@@ -22,8 +22,16 @@ import {
   type PresentOptions,
   type Square,
 } from "./excuse-days.tsx";
-import { listNames } from "./change-terms.tsx";
-import { ankiMissText, clockText, clockTime, dateSpan, formatDate, money, NIGHT_CLOSES_TEXT } from "./format.ts";
+import {
+  ankiMissText,
+  clockText,
+  clockTime,
+  dateSpan,
+  formatDate,
+  listNames,
+  money,
+  NIGHT_CLOSES_TEXT,
+} from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;

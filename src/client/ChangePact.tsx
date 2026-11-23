@@ -21,13 +21,11 @@ import {
   changeValue,
   currentValue,
   effectText,
-  listNames,
   openOccurrenceText,
-  termLabel,
   termsOfKind,
   type Term,
 } from "./change-terms.tsx";
-import { formatDate, money, remindersText } from "./format.ts";
+import { formatDate, listNames, money, remindersText, termLabel } from "./format.ts";
 import { formOf, termsOfForm, type Form } from "./pact-form.ts";
 import { ListsFailed, PactFormStep, PROBLEMS, usePactFormLists, type FormStep } from "./pact-form-steps.tsx";
 import { LoadedFound, Sheet, useLoad, useSend } from "./ui.tsx";

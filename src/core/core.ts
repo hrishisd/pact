@@ -15,7 +15,6 @@
 // bill-math.ts, oura-clock.ts).
 
 import { randomUUID } from "node:crypto";
-import { APP_PATHS } from "../shared/api.ts";
 import type {
   AcceptExcuseRejectionResult,
   AcceptInviteResult,
@@ -138,6 +137,7 @@ import {
   deliverPending,
   enqueue,
   giveUpEmails,
+  pushOperatorAlert,
   releaseEmailClaims,
 } from "./outbox.ts";
 import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
@@ -844,22 +844,13 @@ class Core implements PactCore {
       throw error;
     }
     this.#raiseOperatorAlert({ title, text: `${said}: ${lastTick ?? "none"}` });
-    await this.#command(() => {
-      const operator = this.#ctx.one<{ id: string }>(`SELECT id FROM account WHERE is_operator = 1`);
-      if (operator) {
-        this.#ctx.enqueue({
-          recipient: operator.id,
-          kind: "operator-alert",
-          payload: {
-            alert: "database-restored",
-            lastTick,
-            title: "Operator alert",
-            body: `Database restored from backup. Last tick: ${lastTick ?? "none"}`,
-            url: APP_PATHS.today,
-          },
-        });
-      }
-    });
+    await this.#command(() =>
+      pushOperatorAlert(
+        this.#ctx,
+        { alert: "database-restored", lastTick },
+        `Database restored from backup. Last tick: ${lastTick ?? "none"}`,
+      ),
+    );
     await this.#delivery;
   }
 

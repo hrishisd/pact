@@ -10,7 +10,8 @@ export type Fields<T> = { [K in keyof T]-?: Parser<T[K]> };
 
 export const string: Parser<string> = (value) => (typeof value === "string" ? value : null);
 export const boolean: Parser<boolean> = (value) => (typeof value === "boolean" ? value : null);
-export const number: Parser<number> = (value) => (typeof value === "number" ? value : null);
+/** A finite number: JSON reads 1e400 as Infinity, which no client sends and JSON can't write back out. */
+export const number: Parser<number> = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
 /** One of `list`'s members. */
 export function oneOf<T>(list: readonly T[]): Parser<T> {

@@ -1,18 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ApprovalReason } from "../shared/types.ts";
-import { effectText, listNames } from "./change-terms.tsx";
-
-describe("listNames", () => {
-  test.each([
-    [[], "and", ""],
-    [["alice"], "and", "alice"],
-    [["alice", "Bob"], "and", "alice and Bob"],
-    [["alice", "Bob", "Cy"], "and", "alice, Bob, and Cy"],
-    [["alice", "Bob", "Cy"], "or", "alice, Bob, or Cy"],
-  ])("%j with %s reads %j", (names, last, text) => {
-    expect(listNames(names, last)).toBe(text);
-  });
-});
+import { effectText } from "./change-terms.tsx";
 
 describe("effectText", () => {
   const friends = (...names: string[]) => names.map((name, i) => ({ id: `${name}-${i}`, name }));

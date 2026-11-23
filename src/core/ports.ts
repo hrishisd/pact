@@ -130,16 +130,19 @@ interface NotificationText {
 /** What a reviewer decided, on a "...-decided" notification; a rejection has its reason. */
 type DecisionDetails = { decision: "approved" } | { decision: "rejected"; reason: string };
 
+/** What an operator alert's push is about (`pushOperatorAlert`, outbox.ts). */
+export type OperatorAlertDetails =
+  | { alert: "reminders-dropped"; dropped: number }
+  | { alert: "database-restored"; lastTick: string | null }
+  /** `to`: the address of an email that failed for 24 hours and was given up. */
+  | { alert: "email-given-up"; to: string };
+
 /**
  * By kind, what a notification is about, stored beside its text. Never
  * pushed: they tell notifications apart in the outbox and in tests.
  */
 interface NotificationDetails {
-  "operator-alert":
-    | { alert: "reminders-dropped"; dropped: number }
-    | { alert: "database-restored"; lastTick: string | null }
-    /** `to`: the address of an email that failed for 24 hours and was given up. */
-    | { alert: "email-given-up"; to: string };
+  "operator-alert": OperatorAlertDetails;
   "picked-as-reviewer": { pactId: string };
   "review-item":
     | { itemKind: "evidence" | "excuse" | "change-request"; itemId: string; pactId: string }

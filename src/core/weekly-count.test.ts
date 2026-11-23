@@ -713,6 +713,18 @@ describe("changing the target", () => {
     expect(owed(owner)).toBe(1000 + 2000);
   });
 
+  test("lowering it is a change request whose push names the Target", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const piano = await createPact("Piano", weekly(3));
+    s.setClockTo("Wed+1 09:00");
+
+    await owner.changePact(piano, changed(owner, piano, { schedule: weekly(2) }));
+
+    const request = s.notifier.sentTo(reviewer, "review-item").find((n) => n.payload.itemKind === "change-request");
+    expect(request?.payload).toMatchObject({ title: "owner asked to change Piano", body: "Target" });
+  });
+
   test("a higher penalty this week says the week keeps the old one", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);

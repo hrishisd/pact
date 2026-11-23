@@ -22,6 +22,8 @@ export default defineConfig({
           name: "dom",
           include: ["src/client/**/*.test.tsx"],
           environment: "jsdom",
+          // Cleanup after each test, for every file, not only those that import render.tsx.
+          setupFiles: ["src/client/testing/setup.ts"],
         },
       },
     ],

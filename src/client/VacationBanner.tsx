@@ -5,8 +5,7 @@
 import { useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type { TodayVacation } from "../shared/types.ts";
-import { listNames } from "./change-terms.tsx";
-import { formatDate } from "./format.ts";
+import { formatDate, listNames } from "./format.ts";
 import { coveredText } from "./vacation-text.ts";
 
 export function VacationBanner({ vacation }: { vacation: Json<TodayVacation> }) {

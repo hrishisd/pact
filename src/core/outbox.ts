@@ -15,7 +15,15 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import type { Email, Mailer, Notification, NotificationKind, NotificationOf, Notifier } from "./ports.ts";
+import type {
+  Email,
+  Mailer,
+  Notification,
+  NotificationKind,
+  NotificationOf,
+  Notifier,
+  OperatorAlertDetails,
+} from "./ports.ts";
 
 /**
  * Which setting turns a kind of notification off. Operator alerts can't be,
@@ -135,18 +143,27 @@ export function giveUpEmails(ctx: CoreContext, t: Date): GivenUpEmail[] {
  * what failed.
  */
 export function alertGivenUpEmails(ctx: CoreContext, givenUp: GivenUpEmail[]): string[] {
-  const operator = ctx.one<{ id: AccountId }>(`SELECT id FROM account WHERE is_operator = 1`);
   return givenUp.map((email) => {
     const date = formatDate(localDateOf(email.queuedAt, email.recipient.timezone));
     const text = `The Pact Daily Summary for ${date} to ${email.recipient.name} (${email.to}) failed for 24 hours and was given up.`;
-    if (operator) {
-      ctx.enqueue({
-        recipient: operator.id,
-        kind: "operator-alert",
-        payload: { alert: "email-given-up", to: email.to, title: "Operator alert", body: text, url: APP_PATHS.today },
-      });
-    }
+    pushOperatorAlert(ctx, { alert: "email-given-up", to: email.to }, text);
     return `${text} Last error: ${email.lastError ?? "none"}`;
+  });
+}
+
+/**
+ * Pushes an operator alert about `details`, saying `body`, to the operator's
+ * account, through the outbox in this command's or tick's transaction; with
+ * no operator account, nothing. Only the push: the log line and the email go
+ * through `raiseOperatorAlert` (operator-alerts.ts), apart from the outbox.
+ */
+export function pushOperatorAlert(ctx: CoreContext, details: OperatorAlertDetails, body: string): void {
+  const operator = ctx.one<{ id: AccountId }>(`SELECT id FROM account WHERE is_operator = 1`);
+  if (!operator) return;
+  ctx.enqueue({
+    recipient: operator.id,
+    kind: "operator-alert",
+    payload: { ...details, title: "Operator alert", body, url: APP_PATHS.today },
   });
 }
 

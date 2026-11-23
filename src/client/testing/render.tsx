@@ -1,15 +1,14 @@
 // For the client's component tests (*.test.tsx, run in jsdom): render a
 // screen with a user to drive it, and answer its api calls with typed stubs
-// instead of a server.
+// instead of a server. Cleanup after each test is in setup.ts.
 
-import { cleanup, fireEvent, render, screen, type RenderResult } from "@testing-library/react";
+import { fireEvent, render, screen, type RenderResult } from "@testing-library/react";
 import { userEvent, type UserEvent } from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { afterEach, vi, type MockInstance } from "vitest";
+import { vi, type MockInstance } from "vitest";
 import type { Json } from "../../shared/api.ts";
 import type { PactTerms } from "../../shared/types.ts";
 import { api, ApiError } from "../api.ts";
-import { forgetLoaded, stopReloading } from "../last-loaded.ts";
 import { PULL_THRESHOLD_PX } from "../pull-to-refresh.tsx";
 
 type Api = typeof api;
@@ -100,15 +99,3 @@ export function pullDown(finger = 2 * PULL_THRESHOLD_PX, scrollArea: HTMLElement
 export function renderWithUser(ui: ReactElement): RenderResult & { user: UserEvent } {
   return { user: userEvent.setup(), ...render(ui) };
 }
-
-// jsdom lays nothing out, so it has no scrolling; the wizard scrolls each step into view.
-Element.prototype.scrollIntoView = () => undefined;
-
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.useRealTimers();
-  // Tests in one file share the module, so what one test loaded mustn't show in the next.
-  stopReloading();
-  forgetLoaded();
-});

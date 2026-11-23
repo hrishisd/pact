@@ -142,4 +142,19 @@ describe("R2 photo store", () => {
 
     await expect(store.store(JPEG)).rejects.toThrow(/403/);
   });
+
+  test("a store or a fetch that takes too long is abandoned", async () => {
+    // Answers only by rejecting once the request's signal aborts.
+    const hanging = (request: Request) =>
+      new Promise<Response>((_resolve, reject) =>
+        request.signal.addEventListener("abort", () => reject(request.signal.reason)),
+      );
+    const store = r2PhotoStore(BUCKET, new FakeClock(MONDAY_6PM), hanging, 20);
+
+    // The timeout itself, not some other failure on the way.
+    await expect(store.store(JPEG)).rejects.toMatchObject({ name: "TimeoutError" });
+    await expect(store.fetch("00000000-0000-4000-8000-000000000000")).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+  });
 });

@@ -3,8 +3,7 @@
 
 import type { Json } from "../shared/api.ts";
 import type { EvidenceKind, LocalDate, Schedule, VacationOccurrence, VacationPacts } from "../shared/types.ts";
-import { listNames } from "./change-terms.tsx";
-import { dateSpan, formatDate, monthDay } from "./format.ts";
+import { dateSpan, formatDate, listNames, monthDay } from "./format.ts";
 
 /** "All pacts", "All recurring pacts", or the ticked pacts' names. */
 export function pactsText(pacts: Json<VacationPacts>): string {
