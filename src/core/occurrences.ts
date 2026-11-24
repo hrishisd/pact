@@ -9,6 +9,7 @@ import {
   type DatedReminder,
   type LocalDate,
   type Schedule,
+  type ThisWeek,
 } from "../shared/types.ts";
 import { addDays, dayCount, parseClockTime, parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
 import { isPeriodSchedule, lastDayOf, type OncePerPeriodKind, type PeriodSchedule } from "../shared/schedules.ts";
@@ -105,7 +106,8 @@ export function hasPeriodSchedule<T extends { schedule: Schedule }>(
 export type NewTerms = RecurringTerms | Omit<OneTimeTerms, "createdAt">;
 
 export type NewOccurrenceTermsResult =
-  { ok: true; terms: OccurrenceTerms; first: Occurrence } | { ok: false; reason: "no-days" | "deadline-too-soon" };
+  | { ok: true; terms: OccurrenceTerms; first: Occurrence }
+  | { ok: false; reason: "no-days" | "deadline-too-soon" | "start-not-monday" | "week-too-short" };
 
 /** A pact's first occurrence is due at least this long after it's created. */
 const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
@@ -114,15 +116,21 @@ const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
  * The terms a pact made at `createdAt` with `terms` gets: the schedule as
  * stored, and its first occurrence, the first scheduled day due at least an
  * hour after `createdAt` (by its day clock), and not before `startDate`;
- * for a period schedule, `firstPeriod`'s; for One-time, its one occurrence,
+ * for Weekly count, the week starting on `startDate`, a Monday, which can be
+ * this week's when `thisWeekStart` offers it; with no start date, the default
+ * (`defaultFirstWeek`); for Every 2 weeks and Once a month, `firstPeriod`'s;
+ * for One-time, its one occurrence,
  * which must be due at least an hour after `createdAt` (a start date doesn't
- * apply). Fixed days with no days is refused.
+ * apply). Fixed days with no days is refused. For a `change`, a Weekly count
+ * start date isn't checked: the pact's first occurrence is already stored, and
+ * a change request checks a start date it changes itself.
  */
 export function newOccurrenceTerms(
   terms: NewTerms,
   createdAt: Date,
   timezone: string,
   startDate: LocalDate | null,
+  { change = false }: { change?: boolean } = {},
 ): NewOccurrenceTermsResult {
   const created = localDateOf(createdAt, timezone);
   if (hasSchedule(terms, "one-time")) {
@@ -134,7 +142,20 @@ export function newOccurrenceTerms(
   }
   if (hasPeriodSchedule(terms)) {
     const { schedule, dueBy } = terms;
-    const firstOccurrence = firstPeriod(schedule, createdAt, timezone, startDate);
+    let firstOccurrence: LocalDate;
+    if (schedule.kind === "weekly-count") {
+      const thisWeek = thisWeekStart(schedule.target, dueBy, createdAt, timezone);
+      firstOccurrence = defaultFirstWeek(thisWeek, created);
+      if (startDate !== null && startDate >= thisWeek.monday) {
+        if (!change && weekdayOf(startDate) !== "mon") return { ok: false, reason: "start-not-monday" };
+        if (!change && startDate === thisWeek.monday && !thisWeek.offered)
+          return { ok: false, reason: "week-too-short" };
+        // A start date stored before they had to be Mondays starts the Monday after it.
+        firstOccurrence = startDate === thisWeek.monday ? startDate : firstPeriodFrom(schedule, startDate, null);
+      }
+    } else {
+      firstOccurrence = firstPeriod(schedule, createdAt, timezone, startDate);
+    }
     return {
       ok: true,
       terms: { schedule, dueBy, firstOccurrence, endDate: null },
@@ -156,26 +177,49 @@ export function newOccurrenceTerms(
   throw new Error("unreachable: every scheduled weekday recurs within 8 days");
 }
 
+/** This week as the first of a Weekly count pact with `target` and `dueBy`, made at `createdAt`; see `ThisWeek`. */
+export function thisWeekStart(target: number, dueBy: ClockTime | null, createdAt: Date, timezone: string): ThisWeek {
+  const today = localDateOf(createdAt, timezone);
+  const monday = mondayOf(today);
+  const week = periodOccurrence({ kind: "weekly-count", target }, monday, timezone);
+  let daysLeft = 0;
+  for (let day = today; day < addDays(monday, WEEKDAYS.length); day = addDays(day, 1)) {
+    if (dueOnDay(day, dueBy, timezone).getTime() > createdAt.getTime()) daysLeft++;
+  }
+  if (!dueSoonEnough(week, createdAt)) return { monday, daysLeft, offered: false, reason: "ends-within-an-hour" };
+  if (daysLeft < target) return { monday, daysLeft, offered: false, reason: "too-few-days" };
+  return { monday, daysLeft, offered: true };
+}
+
+/** A Weekly count pact's first week with no start date: made on a Monday, that week if it's offered; else the Monday after. */
+export function defaultFirstWeek(thisWeek: ThisWeek, created: LocalDate): LocalDate {
+  return created === thisWeek.monday && thisWeek.offered ? created : addDays(thisWeek.monday, WEEKDAYS.length);
+}
+
+/** The Monday of the last whole Monday–Sunday week that ends by `endDate`. */
+export function lastWeekBy(endDate: LocalDate): LocalDate {
+  const sunday = weekdayOf(endDate) === "sun" ? endDate : addDays(mondayOf(endDate), -1);
+  return addDays(sunday, 1 - WEEKDAYS.length);
+}
+
 /** Whether `occurrence` is due at least an hour after `at`: a first occurrence, or a One-time deadline once changed. */
 export function dueSoonEnough(occurrence: Occurrence, at: Date): boolean {
   return occurrence.dueAt.getTime() - at.getTime() >= FIRST_OCCURRENCE_LEAD_MS;
 }
 
 /**
- * The first period of a pact on `schedule` made at `createdAt`: with a start
- * date on or after the day it's made, the first period starting on or after it.
- * Otherwise, for Weekly count, the week starting the Monday after; for Every
- * 2 weeks and Once a month, the period that has the day it's made, if it's
- * due at least an hour after, else the next one.
+ * The first period of a pact on Every 2 weeks or Once a month made at
+ * `createdAt`: with a start date on or after the day it's made, the first
+ * period starting on or after it; otherwise the period that has the day it's
+ * made, if it's due at least an hour after, else the next one.
  */
 function firstPeriod(
-  schedule: PeriodSchedule,
+  schedule: PeriodSchedule & { kind: OncePerPeriodKind },
   createdAt: Date,
   timezone: string,
   startDate: LocalDate | null,
 ): LocalDate {
   const created = localDateOf(createdAt, timezone);
-  if (schedule.kind === "weekly-count") return firstPeriodFrom(schedule, addDays(created, 1), startDate);
   if (startDate !== null && startDate >= created) return firstPeriodFrom(schedule, startDate, null);
   const { current, next } = offeredPeriods(schedule, createdAt, timezone);
   return (current ?? next).date;

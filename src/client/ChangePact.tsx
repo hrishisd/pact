@@ -178,6 +178,7 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
           lists={lists}
           onInvite={onInvite}
           kindFixed
+          weekStartsFor={{ changing: pact.id }}
           hints={{
             reviewers:
               "Adding a reviewer applies right away. Removing one needs approval. A pact must keep at least one reviewer.",

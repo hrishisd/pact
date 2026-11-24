@@ -97,6 +97,8 @@ import {
   type WaitingOnReplyResponse,
   type FirstOccurrenceRequest,
   type FirstOccurrenceResponse,
+  type WeekStartsRequestBody,
+  type WeekStartsResponse,
   type FriendsResponse,
   type HealthResponse,
   type InviteLookupResponse,
@@ -558,6 +560,12 @@ export function createApp({
     return c.json<FirstOccurrenceResponse>(json(account(c).firstOccurrence(timing, editing)));
   });
 
+  app.post(API_PATHS.weekStarts, async (c) => {
+    const request = await readJson(c, parseWeekStarts);
+    if (!request) return apiError(c, 400, "invalid-request");
+    return c.json<WeekStartsResponse>(json(account(c).weekStarts(request)));
+  });
+
   app.get(API_PATHS.pact(":id"), (c) => c.json<PactResponse>(json(account(c).pact(c.req.param("id")))));
 
   app.put(API_PATHS.pact(":id"), async (c) => {
@@ -871,6 +879,14 @@ const parseFirstOccurrence = object<FirstOccurrenceRequest>({
   dueBy: optional(string),
   startDate: optional(string),
   editing: optional(string),
+});
+
+const parseWeekStarts = object<WeekStartsRequestBody>({
+  target: number,
+  dueBy: optional(string),
+  endDate: optional(string),
+  editing: optional(string),
+  changing: optional(string),
 });
 
 /** The terms a new pact and a change share. */

@@ -40,6 +40,8 @@ import type {
   ExcuseResult,
   FileExcuseResult,
   FirstOccurrenceResult,
+  WeekStartsRequest,
+  WeekStartsResult,
   Friend,
   Health,
   Invite,
@@ -140,7 +142,16 @@ import {
   pushOperatorAlert,
   releaseEmailClaims,
 } from "./outbox.ts";
-import { closeEditWindows, createPact, deletePact, editPact, firstOccurrence, pactList, pactPage } from "./pacts.ts";
+import {
+  closeEditWindows,
+  createPact,
+  deletePact,
+  editPact,
+  firstOccurrence,
+  pactList,
+  pactPage,
+  weekStarts,
+} from "./pacts.ts";
 import type { RaiseOperatorAlert } from "./operator-alerts.ts";
 import type { AnkiSource, Clock, Mailer, Notifier, OuraSource, Photo, PhotoStore } from "./ports.ts";
 import { droppedText, remind } from "./reminders.ts";
@@ -276,6 +287,8 @@ export interface AccountView {
    * step names. Same rule as `createPact`.
    */
   firstOccurrence(timing: PactTiming, editing?: string): FirstOccurrenceResult;
+  /** The weeks a Weekly count pact's form offers as its first: see `WeekStarts`. Same rule as `createPact`. */
+  weekStarts(request: WeekStartsRequest): WeekStartsResult;
   /**
    * This owner's pacts, for the Pacts tab: Active ones in their edit window
    * first, then the other Active ones by name, then Ended ones by name.
@@ -683,6 +696,7 @@ class Core implements PactCore {
       friends: () => friendList(this.#ctx, accountId),
       recipients: () => recipientList(this.#ctx, accountId),
       firstOccurrence: (timing, editing) => firstOccurrence(this.#ctx, accountId, timing, editing),
+      weekStarts: (request) => weekStarts(this.#ctx, accountId, request),
       pacts: () => pactList(this.#ctx, accountId),
       pact: (pactId) => pactPage(this.#ctx, accountId, pactId, waitingFor),
       changePreview: (pactId, change) => changePreview(this.#ctx, accountId, pactId, change),

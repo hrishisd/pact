@@ -72,7 +72,7 @@ An Anki pact's occurrence. The Anki day of Tue Nov 3 runs from the collection's 
 How a pact on Fixed days reads its days: a Camera pact's day runs from midnight, a night from 6pm, an Anki day from its rollover hour. Its reminders and in-bed-by time are read from that start: a time before it is the morning after. An Anki day's due-by time is read as under Anki day, so the rollover hour itself is the morning after too.
 
 **Start date / End date**:
-Optional days that bound a recurring pact. The start date can only push its first occurrence later. The end date is its last day: once that day's occurrence closes, the pact has no more and is Ended.
+Optional days that bound a recurring pact. The start date can only push its first occurrence later, except on a Weekly count pact, whose start date is a Monday and can be this week's when enough days are left to reach the target. The end date is its last day: once that day's occurrence closes, the pact has no more and is Ended.
 
 **Closed**:
 How Today shows a Camera pact's day once its due-by time has passed: Missed, and no evidence counts for it any more.

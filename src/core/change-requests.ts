@@ -29,7 +29,7 @@ import type {
   TodayWaitingItem,
   WithdrawChangeRequestResult,
 } from "../shared/types.ts";
-import { laterDate, localDateOf } from "./calendar.ts";
+import { laterDate, localDateOf, weekdayOf } from "./calendar.ts";
 import { appliesNow, effectOf, termDiffs, type ChangeableTerms, type TermDiff } from "./changes.ts";
 import type { CoreContext } from "./context.ts";
 import { uncoverRemovedDays } from "./covers.ts";
@@ -469,6 +469,7 @@ export function checkedChange(
     { ...terms, evidenceKind: pact.evidence_kind, ...(ankiDeckId !== undefined && { ankiDeckId }) },
     new Date(pact.created_at),
     pact,
+    true,
   );
   if (!checked.ok) return checked;
   const zone = checked.timezone;
@@ -476,6 +477,15 @@ export function checkedChange(
   // Only a new pact can swap a week's count for its days, or back.
   if (checked.terms.schedule.kind !== before.schedule.kind) return { ok: false, reason: "schedule-kind-fixed" };
   const after = changeableTermsOf(checked, change);
+  // A Weekly count week starts on a Monday. A start date stored before that rule may stay.
+  if (
+    after.schedule.kind === "weekly-count" &&
+    after.startDate !== null &&
+    after.startDate !== before.startDate &&
+    weekdayOf(after.startDate) !== "mon"
+  ) {
+    return { ok: false, reason: "start-not-monday" };
+  }
   // Reminders apply at once, so they go off before the due time in force now as well as the new one.
   if (remindersInTimeNow(ctx, pact, zone, after.reminders) === null) {
     return { ok: false, reason: "reminder-after-due-time" };

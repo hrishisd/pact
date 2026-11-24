@@ -11,7 +11,16 @@
 // every rule; the steps only stop the owner moving on with a field left empty.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { EvidenceKind, FirstOccurrence, Friend, PactTerms, Recipient, Refusal } from "../shared/types.ts";
+import {
+  WEEKDAYS,
+  type EvidenceKind,
+  type FirstOccurrence,
+  type Friend,
+  type PactTerms,
+  type Recipient,
+  type Refusal,
+} from "../shared/types.ts";
+import { addDays } from "../shared/calendar.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
 import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import { ouraResultText, takeOuraResult } from "./oura.tsx";
@@ -22,6 +31,7 @@ import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { EMPTY_FORM, formOf, optionalTimes, scheduleKindOf, scheduleOf, termsOfForm, type Form } from "./pact-form.ts";
 import {
   ListsFailed,
+  daysLeftText,
   PactFormStep,
   PROBLEMS,
   problemText,
@@ -231,7 +241,14 @@ export function CreatePact({
     case "reviewers":
     case "reminders":
       body = (
-        <PactFormStep step={step} form={form} update={update} lists={lists} onInvite={onInvite} editing={editing?.id} />
+        <PactFormStep
+          step={step}
+          form={form}
+          update={update}
+          lists={lists}
+          onInvite={onInvite}
+          weekStartsFor={editing ? { editing: editing.id } : {}}
+        />
       );
       break;
     case "check":
@@ -394,7 +411,7 @@ function ConnectAnkiStep({ login, onChange }: { login: AnkiLogin; onChange: (cha
 
 type FirstState =
   | { kind: "loading" }
-  | { kind: "loaded"; first: Json<FirstOccurrence> }
+  | { kind: "loaded"; first: Json<FirstOccurrence>; daysLeft?: number }
   | { kind: "refused"; reason: Refusal<FirstOccurrenceResponse> }
   | { kind: "failed"; error: unknown };
 
@@ -429,7 +446,9 @@ function CheckStep({
       api.firstOccurrence({ schedule, evidenceKind: form.kind, inBedBy, dueBy, startDate, editing: editing?.id }).then(
         (result) =>
           show(
-            result.ok ? { kind: "loaded", first: result.firstOccurrence } : { kind: "refused", reason: result.reason },
+            result.ok
+              ? { kind: "loaded", first: result.firstOccurrence, daysLeft: result.daysLeft }
+              : { kind: "refused", reason: result.reason },
           ),
         (error: unknown) => show({ kind: "failed", error }),
       );
@@ -487,9 +506,19 @@ function CheckStep({
                   <b>{formatDate(lastDayOf(schedule, first.first.date))}</b>.
                 </>
               ) : schedule.kind === "weekly-count" ? (
-                <>
-                  Your first week starts <b>{formatDate(first.first.date)}</b> and ends on Sunday.
-                </>
+                first.daysLeft !== undefined ? (
+                  <>
+                    Your first week is this week
+                    {first.daysLeft < WEEKDAYS.length && `, with ${daysLeftText(first.daysLeft, first.first.date)}`}.
+                    You need {schedule.target}× by the end of{" "}
+                    <b>{formatDate(addDays(first.first.date, WEEKDAYS.length - 1))}</b>
+                    {first.daysLeft < WEEKDAYS.length && ", the same as a full week"}.
+                  </>
+                ) : (
+                  <>
+                    Your first week starts <b>{formatDate(first.first.date)}</b> and ends on Sunday.
+                  </>
+                )
               ) : schedule.kind === "one-time" ? (
                 <>
                   It's due <b>{oneTimeText(schedule.submitAnytime, first.first.date, dueBy)}</b>.

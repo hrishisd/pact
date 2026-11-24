@@ -75,6 +75,7 @@ import {
   type FileExcuseResponse,
   type DecideResponse,
   type FirstOccurrenceResponse,
+  type WeekStartsResponse,
   type FriendsResponse,
   type HealthResponse,
   type InviteLookupResponse,
@@ -896,6 +897,23 @@ describe("pacts", () => {
         status: 400,
         body: { error: "invalid-request" },
       });
+    }
+  });
+
+  test("the Schedule step's choice of first week is the core's; an unknown pact is its refusal; a malformed one is 400", async () => {
+    const { owner, core } = await ownerWithFriend();
+
+    const request = { target: 3, dueBy: "21:00", endDate: "2026-12-31" };
+    const starts = await owner.post(API_PATHS.weekStarts, request);
+    expect(starts).toEqual({ status: 200, body: serialized(core.weekStarts(request)) });
+    expect(starts.body).toMatchObject({ ok: true });
+    expect(await owner.post(API_PATHS.weekStarts, { target: 3, changing: "no-such-pact" })).toEqual({
+      status: 200,
+      body: { ok: false, reason: "pact-not-found" } satisfies WeekStartsResponse,
+    });
+    for (const sent of [{}, { target: "3" }, { target: 3, dueBy: 9 }, { target: 3, editing: 5 }, null]) {
+      const check = await owner.post(API_PATHS.weekStarts, sent);
+      expect({ sent, ...check }).toEqual({ sent, status: 400, body: { error: "invalid-request" } });
     }
   });
 
