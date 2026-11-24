@@ -993,6 +993,11 @@ textarea.inp {
 .opt.static {
   cursor: default;
 }
+/* An option that can't be picked now, with its reason under it (a Weekly count pact's this week). */
+.opt[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
 .opt[aria-pressed="true"],
 .opt:has(input:checked) {
   border-color: var(--accent);

@@ -943,6 +943,8 @@ describe("what can't be changed", () => {
 describe("ending a pact", () => {
   test("approved end → the week open at approval is judged in full, then the pact is Ended; already-judged penalties stay on the ledger", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", { kind: "weekly-count", target: 3 });
     const read = await createPact("Read", MON_WED_FRI);

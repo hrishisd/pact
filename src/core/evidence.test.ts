@@ -276,6 +276,8 @@ describe("a late approval on an Excused occurrence", () => {
 
   test("a Weekly count week Excused with evidence waiting is Satisfied once a late approval reaches its target", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", { kind: "weekly-count", target: 2 });
     s.setClockTo("Tue+1 10:00");

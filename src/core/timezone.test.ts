@@ -162,6 +162,8 @@ describe("a timezone change and the owner's days", () => {
 
   test("a Weekly count week that is open keeps its end, and its Sunday, after a move east", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", { kind: "weekly-count", target: 2 });
     s.setClockTo("Sun+1 18:00");

@@ -90,13 +90,14 @@ export interface CheckedTerms {
 /**
  * `pact`'s terms checked as a pact made at `createdAt` by an owner in
  * `timezone`, or why they're refused. An Anki pact's day turns at
- * `ankiRollover` (null for other pacts).
+ * `ankiRollover` (null for other pacts). For a `change`, see `newOccurrenceTerms`.
  */
 export function checkedTerms(
   pact: NewPact,
   ankiRollover: number | null,
   timezone: string,
   createdAt: Date,
+  change = false,
 ): CheckedTerms | { ok: false; reason: CreatePactRefusal } {
   const oura = pact.evidenceKind === "oura";
   const anki = pact.evidenceKind === "anki";
@@ -145,7 +146,7 @@ export function checkedTerms(
     dueBy,
   );
   const terms = newTermsOf(pact.schedule, day, dueBy);
-  const timing = newOccurrenceTerms(terms, createdAt, timezone, pact.startDate ?? null);
+  const timing = newOccurrenceTerms(terms, createdAt, timezone, pact.startDate ?? null, { change });
   if (!timing.ok) return timing;
   const reminders = remindersInTime(unique, timing.terms, timing.first.dueAt, timezone);
   if (reminders === null) return { ok: false, reason: "reminder-after-due-time" };

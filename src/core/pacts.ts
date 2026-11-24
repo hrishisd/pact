@@ -23,7 +23,10 @@ import type {
   PactTiming,
   Schedule,
   TermsByKind,
+  WeekStartsRequest,
+  WeekStartsResult,
 } from "../shared/types.ts";
+import { MAX_WEEKLY_TARGET, WEEK_STARTS_OFFERED, WEEKDAYS } from "../shared/types.ts";
 import { laterDate, localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { moveCovers } from "./covers.ts";
@@ -33,9 +36,12 @@ import { excuseWindowsClose } from "./excuses.ts";
 import { pactHistory } from "./history.ts";
 import {
   ankiDueByFits,
+  defaultFirstWeek,
   hasSchedule,
+  lastWeekBy,
   newOccurrenceTerms,
   occurrences,
+  thisWeekStart,
   type DayClock,
   type OccurrenceTerms,
 } from "./occurrences.ts";
@@ -44,6 +50,7 @@ import {
   checkedTerms,
   editWindowClosesAt,
   editWindowEnd,
+  firstDayNotOpen,
   isClockTime,
   isDueBy,
   isLocalDate,
@@ -58,6 +65,7 @@ import {
   areFriends,
   connectionProblem,
   editWindowCutoff,
+  lastDayOpened,
   friendsSortedByName,
   hasConnection,
   occurrencesOf,
@@ -200,14 +208,63 @@ export function firstOccurrence(
     dueBy: validDueBy ? dueBy : null,
     ankiRollover,
   };
+  const createdAt = pact ? new Date(pact.created_at) : ctx.clock.now();
   const timing = newOccurrenceTerms(
     newTermsOf(schedule, formDayClock(times), times.dueBy),
-    pact ? new Date(pact.created_at) : ctx.clock.now(),
+    createdAt,
     timezone,
     startDate !== undefined && isLocalDate(startDate) ? startDate : null,
   );
   if (!timing.ok) return timing;
-  return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
+  const firstOccurrence = { date: timing.first.date, dueAt: timing.first.dueAt };
+  // A first week already under way says how many of its days are left.
+  if (schedule.kind === "weekly-count" && timing.first.date <= localDateOf(createdAt, timezone)) {
+    const { daysLeft } = thisWeekStart(schedule.target, times.dueBy, createdAt, timezone);
+    return { ok: true, firstOccurrence, daysLeft };
+  }
+  return { ok: true, firstOccurrence };
+}
+
+/**
+ * The weeks a Weekly count pact's form offers as its first (`WeekStarts`),
+ * by the same rule as `createPact`: counting from now, or from when the pact
+ * `editing` was made. For a change request, the Mondays start at the first
+ * week not open, as a change applies from there.
+ */
+export function weekStarts(
+  ctx: CoreContext,
+  accountId: AccountId,
+  { target, dueBy, endDate, editing, changing }: WeekStartsRequest,
+): WeekStartsResult {
+  const { timezone } = accountRow(ctx, accountId);
+  const id = changing ?? editing;
+  const pact = id === undefined ? undefined : ownPact(ctx, accountId, id);
+  if (id !== undefined && !pact) return { ok: false, reason: "pact-not-found" };
+  // The form may not have a valid time, date or target yet: those count as not set, or as 1.
+  const validTarget = Number.isSafeInteger(target) ? Math.min(Math.max(target, 1), MAX_WEEKLY_TARGET) : 1;
+  const validDueBy = dueBy !== undefined && isDueBy(dueBy) ? dueBy : null;
+  const lastWeek = endDate !== undefined && isLocalDate(endDate) ? lastWeekBy(endDate) : null;
+  const mondaysFrom = (first: LocalDate) =>
+    Array.from({ length: WEEK_STARTS_OFFERED }, (_, i) => addDays(first, i * WEEKDAYS.length));
+  const now = ctx.clock.now();
+  if (changing !== undefined && pact) {
+    const from = firstDayNotOpen(
+      { kind: "weekly-count", target: validTarget },
+      lastDayOpened(ctx, pact.id, timezone, now),
+    );
+    return { ok: true, weekStarts: { thisWeek: null, mondays: mondaysFrom(from), defaultMonday: from, lastWeek } };
+  }
+  const createdAt = pact ? new Date(pact.created_at) : now;
+  const thisWeek = thisWeekStart(validTarget, validDueBy, createdAt, timezone);
+  return {
+    ok: true,
+    weekStarts: {
+      thisWeek,
+      mondays: mondaysFrom(addDays(thisWeek.monday, WEEKDAYS.length)),
+      defaultMonday: defaultFirstWeek(thisWeek, localDateOf(createdAt, timezone)),
+      lastWeek,
+    },
+  };
 }
 
 export function pactList(ctx: CoreContext, accountId: AccountId): PactSummary[] {
@@ -345,7 +402,9 @@ export function stageOf(
  * `createdAt`, or why it's refused. `existing` is the pact being edited or
  * changed: an Anki pact keeps its rollover hour, and its own deck counts as
  * known even once it's gone from the deck list. The evidence source is
- * checked first, then the terms, then the recipient and reviewers.
+ * checked first, then the terms, then the recipient and reviewers. A
+ * `change` request's terms skip what only applies to a new pact's start
+ * (`newOccurrenceTerms`).
  */
 export function checkedPact(
   ctx: CoreContext,
@@ -354,10 +413,11 @@ export function checkedPact(
   pact: NewPact,
   createdAt: Date,
   existing?: Pick<PactRow, "anki_deck_id" | "anki_rollover_hour">,
+  change = false,
 ): CheckedPact | { ok: false; reason: CreatePactRefusal } {
   const source = evidenceSource(ctx, ownerId, pact, existing);
   if (!source.ok) return source;
-  const terms = checkedTerms(pact, source.ankiRollover, timezone, createdAt);
+  const terms = checkedTerms(pact, source.ankiRollover, timezone, createdAt, change);
   if (!terms.ok) return terms;
   const people = checkedPeople(ctx, ownerId, pact);
   if (!people.ok) return people;

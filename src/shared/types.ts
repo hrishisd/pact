@@ -184,6 +184,10 @@ export type CreatePactRefusal =
   | "invalid-schedule"
   /** A One-time deadline less than an hour after the pact's creation (for a change, after it takes effect). */
   | "deadline-too-soon"
+  /** A Weekly count start date that isn't a Monday. */
+  | "start-not-monday"
+  /** This week as a Weekly count pact's first, when it isn't offered (`ThisWeek`). */
+  | "week-too-short"
   | "invalid-penalty"
   /** Not one of this owner's saved recipients. */
   | "unknown-recipient"
@@ -234,8 +238,50 @@ export interface FirstOccurrence {
 }
 
 export type FirstOccurrenceResult =
-  | { ok: true; firstOccurrence: FirstOccurrence }
-  | { ok: false; reason: "no-days" | "deadline-too-soon" | "pact-not-found" };
+  | {
+      ok: true;
+      firstOccurrence: FirstOccurrence;
+      /** A Weekly count pact whose first week is the one it's made in: the days left for a photo (`ThisWeek`). */
+      daysLeft?: number;
+    }
+  | { ok: false; reason: "no-days" | "deadline-too-soon" | "start-not-monday" | "week-too-short" | "pact-not-found" };
+
+/**
+ * The week a Weekly count pact is made in, as its first: its Monday, and the
+ * days left for a photo, today included while its due time is ahead. Offered
+ * when those days reach the target and the week ends at least an hour away.
+ */
+export type ThisWeek =
+  | { monday: LocalDate; daysLeft: number; offered: true }
+  | { monday: LocalDate; daysLeft: number; offered: false; reason: "too-few-days" | "ends-within-an-hour" };
+
+/** The weeks a Weekly count pact's form offers as its first, before the pact exists or its edit or change is sent. */
+export interface WeekStartsRequest {
+  target: number;
+  dueBy?: ClockTime;
+  /** Gives `WeekStarts.lastWeek`. */
+  endDate?: LocalDate;
+  /** The pact being edited in its window: the weeks count from when it was made. */
+  editing?: string;
+  /** The pact a change request is for: no this week, and the Mondays from the first week not open. */
+  changing?: string;
+}
+
+export interface WeekStarts {
+  /** Null for a change request. */
+  thisWeek: ThisWeek | null;
+  /** The Mondays a later start can be, from next week's (`WEEK_STARTS_OFFERED` of them). */
+  mondays: LocalDate[];
+  /** The first week until the owner picks one: this week, made on a Monday when it's offered; else next week. */
+  defaultMonday: LocalDate;
+  /** The Monday of the last whole week the end date gives, or null without one. */
+  lastWeek: LocalDate | null;
+}
+
+/** How many Mondays a Weekly count pact's form offers. */
+export const WEEK_STARTS_OFFERED = 12;
+
+export type WeekStartsResult = { ok: true; weekStarts: WeekStarts } | { ok: false; reason: "pact-not-found" };
 
 /** A card in the Pacts tab. */
 export interface PactSummary {
