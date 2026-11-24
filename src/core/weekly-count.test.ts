@@ -1,6 +1,6 @@
 // Weekly count: a Camera pact with a target per Mon–Sun week (e.g. 3× per
 // week), the owner choosing which days. The week is one occurrence, from the
-// week starting the Monday after creation. Evidence counts on any day of it,
+// week of creation if made on a Monday, else the week starting the Monday after. Evidence counts on any day of it,
 // at most one day a day; the week is judged at the end of Sunday, with one
 // penalty per day short of the target. A rejected photo just doesn't count:
 // the owner can make it up another day that week. An approved excuse for any
@@ -46,6 +46,8 @@ function reminderDays(s: Scenario, owner: AccountHandle) {
 describe("the spec's examples", () => {
   test("a 3× week with three photos submitted and one rejected adds one penalty; a week with no photos adds three", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(3));
 
@@ -106,6 +108,8 @@ describe("the spec's examples", () => {
 
   test("lowering the target, approved Wednesday, applies from next Monday; this week keeps its target", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(3));
     await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
@@ -180,9 +184,20 @@ describe("the first occurrence", () => {
     expect(weeksOf(owner, piano).map((w) => w.date)).toEqual([s.date("Mon+1")]);
   });
 
-  test("made on a Monday, it's still the week starting the Monday after", async () => {
+  test("made on a Monday, it's that week, even late in the evening", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Mon 21:53");
+
+    const piano = await createPact("Piano", weekly(3));
+
+    expect(pactOf(owner, piano).firstOccurrence.date).toBe(s.date("Mon"));
+  });
+
+  test("made on any other day, it's the week starting the Monday after", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Tue 00:00");
 
     const piano = await createPact("Piano", weekly(1));
 
@@ -236,6 +251,8 @@ describe("making a Weekly count pact", () => {
 
   test("in the edit window, Fixed days can become Weekly count", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, sam, createPact } = await ownerWithReviewers(s);
     const gym = await createPact("Gym", MON_WED_FRI);
 
@@ -315,6 +332,8 @@ describe("evidence", () => {
 
   test("evidence waiting for a decision at the end of Sunday holds the outcome until it's decided", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(2));
     await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
@@ -345,6 +364,8 @@ describe("evidence", () => {
 
   test("approved after Sunday, the late evidence makes the week Satisfied", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(1));
     s.setClockTo("Sun+1 23:00");
@@ -370,6 +391,8 @@ describe("a week judged by a late decision", () => {
 
   test("a 3× week whose third session is approved after Sunday is Satisfied, with no Missed push", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(3), { penaltyCents: 1000 });
     await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
@@ -387,6 +410,8 @@ describe("a week judged by a late decision", () => {
 
   test("with two sessions in all, a late approval of the second leaves the week Missed and says so after the decision", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(3), { penaltyCents: 1000 });
     await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
@@ -409,6 +434,8 @@ describe("a week judged by a late decision", () => {
 
   test("a late rejection that leaves the week short says it's Missed", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(2));
     await sessionAt(s, "Mon+1 10:00", owner, reviewer, piano);
@@ -429,6 +456,8 @@ describe("a week judged by a late decision", () => {
 describe("a rejected photo", () => {
   test("rejected Tuesday: nothing Missed or owed yet, an alert to make it up by Sunday, Take the L clears it, and Wednesday's photo still counts", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(1));
 
@@ -514,6 +543,8 @@ describe("a rejected photo", () => {
 describe("excuses", () => {
   test("an approved excuse for Thursday excuses the whole week, with no penalties", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(3));
     s.setClockTo("Tue+1 10:00");
@@ -579,6 +610,8 @@ describe("excuses", () => {
 
   test("a short week can be excused within 48 hours, which removes all its penalties", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(3));
     await s.advanceTo("Mon+2 00:00");
@@ -693,6 +726,8 @@ describe("reminders", () => {
 describe("changing the target", () => {
   test("raising it is stricter and applies without approval from next Monday", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(2));
     s.setClockTo("Wed+1 09:00");
@@ -796,6 +831,8 @@ describe("changing the due-by time", () => {
 describe("dates, bills and the heat map", () => {
   test("an end date ends the pact after the last whole week before it", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(1), { dates: { endDate: s.date("Wed+3") } });
 
@@ -811,6 +848,8 @@ describe("dates, bills and the heat map", () => {
 
   test("an end date before the end of the first week is refused", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, sam } = await ownerWithReviewers(s);
 
     const created = await owner.createPact({
@@ -829,6 +868,8 @@ describe("dates, bills and the heat map", () => {
 
   test("a short week's penalty goes on the Wednesday bill after it", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, createPact } = await ownerWithReviewers(s);
     await createPact("Piano", weekly(2));
 
@@ -845,6 +886,8 @@ describe("dates, bills and the heat map", () => {
 
   test("the heat map has one square per week through this week, each with the days that counted", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const piano = await createPact("Piano", weekly(2));
     await sessionAt(s, "Tue+1 10:00", owner, reviewer, piano);

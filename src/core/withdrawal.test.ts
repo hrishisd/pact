@@ -42,6 +42,8 @@ function weekStatus(owner: AccountHandle, pactId: string, monday: string) {
  */
 async function excusedWeekWithTwoWaiting(wednesdayApproved: boolean) {
   const s = scenario();
+  // Made on a Tuesday, the pact starts the Monday after.
+  await s.advanceTo("Tue 09:00");
   const { owner, reviewer, createPact } = await ownerWithReviewers(s);
   const piano = await createPact("Piano", { kind: "weekly-count", target: 3 });
   s.setClockTo("Tue+1 10:00");

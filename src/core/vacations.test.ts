@@ -1018,8 +1018,10 @@ describe("once approved, covered occurrences are Excused", () => {
 
     await s.advanceTo("Mon+3 00:00");
 
-    // The week of Mon+1, whose Thursday is outside, is three days short; the week of Mon+2 adds nothing.
+    // The week it was made in, and the week of Mon+1, whose Thursday is outside, are each three days short;
+    // the week of Mon+2 adds nothing.
     expect(penalties(owner).filter((penalty) => penalty.pactName === "Piano")).toEqual([
+      expect.objectContaining({ date: s.date("Mon"), cents: 1500 }),
       expect.objectContaining({ date: s.date("Mon+1"), cents: 1500 }),
     ]);
     const { history } = pactOf(owner, piano);
@@ -1562,6 +1564,8 @@ describe("while a vacation waits after its first day", () => {
 
   test("a Weekly count week short at the end of its Sunday is Missed with each short day's penalty held, shown as its week; approval removes them all", async () => {
     const s = scenario();
+    // Made on a Tuesday, the pact starts the Monday after, as this test expects.
+    await s.advanceTo("Tue 09:00");
     const { owner, second, piano } = await ownerWithThreePacts(s);
     const vacationId = await file(owner, vacation(s.date("Mon+1"), s.date("Sun+1"), [piano], [second]));
     s.setClockTo("Tue+1 10:00");

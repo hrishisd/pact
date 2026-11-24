@@ -107,8 +107,8 @@ const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
  * The terms a pact made at `createdAt` with `terms` gets: the schedule as
  * stored, and its first occurrence, the first scheduled day due at least an
  * hour after `createdAt` (by its day clock), and not before `startDate`;
- * for Weekly count, the week starting the Monday after `createdAt`, or the
- * first starting on or after `startDate`; for One-time, its one occurrence,
+ * for Weekly count, the week starting on the day of `createdAt` if that's a
+ * Monday, else the Monday after, or the first starting on or after `startDate`; for One-time, its one occurrence,
  * which must be due at least an hour after `createdAt` (a start date doesn't
  * apply). Fixed days with no days is refused.
  */
@@ -127,7 +127,7 @@ export function newOccurrenceTerms(
     return { ok: true, terms: { ...oneTime, firstOccurrence: deadline, endDate: null }, first };
   }
   if (hasSchedule(terms, "weekly-count")) {
-    const firstOccurrence = firstWeekFrom(addDays(created, 1), startDate);
+    const firstOccurrence = firstWeekFrom(created, startDate);
     const schedule = { kind: "weekly-count", target: terms.schedule.target } as const;
     return {
       ok: true,

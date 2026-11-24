@@ -552,8 +552,8 @@ function DateRange({ form, update, weekly }: { form: Form; update: (change: Part
       </div>
       {weekly && (
         <small className="muted">
-          The pact starts the Monday after you create it, or on the first Monday on or after the start date. Only full
-          Monday–Sunday weeks up to the end date count.
+          The pact starts this week if you create it on a Monday, else the Monday after, or on the first Monday on or
+          after the start date. Only full Monday–Sunday weeks up to the end date count.
         </small>
       )}
     </>
