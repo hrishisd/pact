@@ -23,8 +23,18 @@ The first 10 minutes after a pact is created, when the owner can edit or delete 
 _Avoid_: Draft, grace period
 
 **Schedule**:
-When a pact's occurrences fall due. There are three kinds: **Fixed days** (e.g. Mon, Wed, Fri, each day its own occurrence), **Weekly count** (e.g. 3× per week, the week being one occurrence), and **One-time** (one occurrence by a deadline).
+When a pact's occurrences fall due. There are five kinds: **Fixed days** (e.g. Mon, Wed, Fri, each day its own occurrence), **Weekly count** (e.g. 3× per week, the week being one occurrence), **Every 2 weeks** (one day in each two Mon–Sun weeks), **Once a month** (one day in each calendar month), and **One-time** (one occurrence by a deadline). Every 2 weeks and Once a month are Camera only.
 _Avoid_: Frequency, recurrence, cadence
+
+**Period**:
+The span of days that is one occurrence on Weekly count, Every 2 weeks or Once a month: a Mon–Sun week, two Mon–Sun weeks counted from the pact's first, or a calendar month. A **period schedule** is one of these three. A period is named by its month ("December"), its dates ("Nov 30 – Dec 13"), or "Week of Mon Dec 14".
+_Avoid_: Cycle
+
+**Reminder window**:
+The days of an Every 2 weeks or Once a month period on which its reminders go off and Today shows it under To do: its last 7 days, or from 7 days before a trip ahead to the period's end, but for the trip's own days. Before it, Today shows the period in a quiet section of its own.
+
+**Trip ahead**:
+A vacation, waiting or approved, that doesn't cover an Every 2 weeks or Once a month period but starts in it and reaches its last 7 days. The owner is told to do it by the day before the trip, and the reminder window moves to the 7 days before it.
 
 **Target**:
 How many days of a Weekly count week need approved evidence for the week to be Satisfied, e.g. 3 for "3× per week". At most one day of evidence counts per calendar day, and a week adds one penalty for each day it falls short.
@@ -37,11 +47,11 @@ A setting on One-time pacts. Off, which is the default, evidence counts only on 
 _Avoid_: Flexible, open window
 
 **Occurrence**:
-One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact. An occurrence **opens** when its period starts (its date, its Mon–Sun week, or for One-time the deadline's date, or the pact's start with Submit anytime). A change to a pact applies only to occurrences that haven't opened yet, except on One-time pacts.
+One dated instance of a pact that gets judged on its own, e.g. "the night of Tue Oct 21" for a bedtime pact. An occurrence **opens** when its period starts (its date, its Mon–Sun week, two weeks or month, or for One-time the deadline's date, or the pact's start with Submit anytime). A change to a pact applies only to occurrences that haven't opened yet, except on One-time pacts.
 _Avoid_: Instance, check-in, day, session
 
 **Due time**:
-When an occurrence is due and judged: on Fixed days, the due-by time or in-bed-by time, or else midnight; for Weekly count, the end of Sunday; for One-time, the deadline.
+When an occurrence is due and judged: on Fixed days, the due-by time or in-bed-by time, or else midnight; for Weekly count, the end of Sunday; for Every 2 weeks and Once a month, the end of the period's last day; for One-time, the deadline.
 
 **In-bed-by time**:
 The time an Oura Ring pact's owner must be in bed by each scheduled night, such as 12:00am. An evening time (from 6pm) is that evening; an earlier one is the morning after. It's the night's due time.
@@ -130,7 +140,7 @@ A change that only makes a pact stricter, such as a higher penalty or more days.
 One device's permission to get an account's notifications, as its browser reports it. An account can have several. Turning notifications on is per device.
 
 **Reminder**:
-A push to a pact's owner at a time of day they set on the pact, before an occurrence's due time, while it's still useful: on a scheduled day with no evidence yet, or every scheduled night for a bedtime pact until Oura has judged it. On a One-time pact each reminder has its own date too, and goes off once. Changing reminders applies at once, with no review. They aren't terms.
+A push to a pact's owner at a time of day they set on the pact, before an occurrence's due time, while it's still useful: on a scheduled day with no evidence yet, on Every 2 weeks and Once a month only in the reminder window, or every scheduled night for a bedtime pact until Oura has judged it. On a One-time pact each reminder has its own date too, and goes off once. Changing reminders applies at once, with no review. They aren't terms.
 
 **Notification setting**:
 An account's on/off for one kind of notification. A push setting covers all its devices and starts on. The daily summary has its own setting, which starts off and doesn't follow the push settings.

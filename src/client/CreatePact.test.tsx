@@ -75,7 +75,7 @@ test("a pact that's created keeps Create pact disabled while the page goes to it
 
 describe("Once a month on the Schedule step", () => {
   const offered = {
-    current: { date: "2026-11-01", dueAt: "2026-12-01T05:00:00Z" },
+    current: { date: "2026-11-01", dueAt: "2026-12-01T05:00:00Z", daysLeft: 7 },
     next: { date: "2026-12-01", dueAt: "2027-01-01T05:00:00Z" },
   };
   /** Create pact at the Schedule step on `now`, with the core offering `periods` for the `preset`. */
@@ -126,7 +126,8 @@ describe("Once a month on the Schedule step", () => {
   });
 
   test("picks next month with fewer than 7 days left, and the Check step names it", async () => {
-    const { user, spies } = await atSchedule("2026-11-25T15:00:00Z", offered);
+    const sixLeft = { ...offered, current: { ...offered.current, daysLeft: 6 } };
+    const { user, spies } = await atSchedule("2026-11-25T15:00:00Z", sixLeft);
     await waitFor(() => expect(radio(/^December/).checked).toBe(true));
     const next = () => user.click(screen.getByRole("button", { name: "Next" }));
     await next();
@@ -175,13 +176,13 @@ describe("Once a month on the Schedule step", () => {
     await user.click(screen.getByRole("radio", { name: /^Once a month/ }));
     await user.click(screen.getByRole("button", { name: "Next" }));
 
-    expect(screen.getByText("Wait for the dates to load, then pick when to start.")).toBeTruthy();
+    expect(screen.getByText("Pick when to start. If the dates didn't load, go Back and try again.")).toBeTruthy();
     expect(screen.queryByLabelText(/^Penalty per miss/)).toBeNull();
   });
 
   test("Every 2 weeks offers this week's 2 or next week's, and the Check step says when they start", async () => {
     const twoWeeks = {
-      current: { date: "2026-11-23", dueAt: "2026-12-07T05:00:00Z" },
+      current: { date: "2026-11-23", dueAt: "2026-12-07T05:00:00Z", daysLeft: 13 },
       next: { date: "2026-11-30", dueAt: "2026-12-14T05:00:00Z" },
     };
     const { user, spies } = await atSchedule("2026-11-24T15:00:00Z", twoWeeks, /^Every 2 weeks/);

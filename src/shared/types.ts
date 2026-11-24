@@ -266,7 +266,8 @@ export interface FirstOccurrence {
  * and the next one. Picking the next one sets its first day as the start date.
  */
 export interface OfferedPeriods {
-  current: FirstOccurrence | null;
+  /** With its days left, counting today, in the owner's timezone: this one is picked to start with at 7 or more. */
+  current: (FirstOccurrence & { daysLeft: number }) | null;
   next: FirstOccurrence;
 }
 

@@ -633,5 +633,3 @@ function Decision({
     </>
   );
 }
-
-/** A held day on a vacation item: "Mon Dec 14", or its period: "Week of Dec 14", "December". */

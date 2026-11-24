@@ -76,7 +76,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "text-too-long": TEXT_TOO_LONG_TEXT,
   "no-days": "Pick at least one day.",
   "no-deadline": "Pick a deadline.",
-  "no-first-period": "Wait for the dates to load, then pick when to start.",
+  "no-first-period": "Pick when to start. If the dates didn't load, go Back and try again.",
   "deadline-too-soon": "The deadline must be at least an hour after you create the pact. Pick a later one.",
   "invalid-schedule": `Pick from 1 to ${MAX_WEEKLY_TARGET} days a week.`,
   "invalid-due-by": "Pick a time before midnight, or turn off Due by a set time.",
@@ -647,8 +647,7 @@ function FirstPeriodChoice({
   const { state } = useLoad(() => api.firstOccurrence({ schedule, evidenceKind: "camera", editing }));
   const result = loadedData(state);
   const offered = result?.ok ? result.offered : undefined;
-  // Counting today: the days until it's due, which the profile's timezone sets, not this device's.
-  const daysLeft = offered?.current ? Math.ceil((Date.parse(offered.current.dueAt) - Date.now()) / 86_400_000) : 0;
+  const daysLeft = offered?.current?.daysLeft ?? 0;
   useEffect(() => {
     if (offered && !form.firstPeriodPicked) {
       update({ startDate: daysLeft >= 7 ? "" : offered.next.date, firstPeriodPicked: true });

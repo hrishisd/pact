@@ -2,9 +2,9 @@
 // and the pact page, and the checks creating and changing a pact share.
 
 import { APP_PATHS } from "../shared/api.ts";
-import { addDays } from "../shared/calendar.ts";
+import { addDays, dayCount } from "../shared/calendar.ts";
 import { money, scheduleText } from "../shared/format.ts";
-import { isOncePerPeriod } from "../shared/schedules.ts";
+import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import type {
   AccountId,
   ClockTime,
@@ -220,7 +220,15 @@ export function firstOccurrence(
   return {
     ok: true,
     firstOccurrence: when(timing.first),
-    ...(offered && { offered: { current: offered.current && when(offered.current), next: when(offered.next) } }),
+    ...(offered && {
+      offered: {
+        current: offered.current && {
+          ...when(offered.current),
+          daysLeft: dayCount(localDateOf(ctx.clock.now(), timezone), lastDayOf(schedule, offered.current.date)),
+        },
+        next: when(offered.next),
+      },
+    }),
   };
 }
 

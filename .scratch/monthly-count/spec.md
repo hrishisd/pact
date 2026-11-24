@@ -47,7 +47,7 @@ Two new schedules for Camera pacts, offered as presets: **Every 2 weeks** and **
 ### The reminder window and trips
 
 - A period's **reminder window** is its last 7 days.
-- A **trip ahead** of a period: a vacation the owner filed with the pact ticked, waiting for approval or approved, that doesn't cover the period, starts after the period's first day, and overlaps its last 7 days. With several, the earliest-starting one counts. The owner should do it by the day before the trip starts ("do it by"), and the reminder window becomes the 7 days up to and including that day. A "do it by" day before today isn't shown, and the window is the normal one (build).
+- A **trip ahead** of a period: a vacation the owner filed with the pact ticked, waiting for approval or approved, that doesn't cover the period, starts after the period's first day, and overlaps its last 7 days. With several, the earliest-starting one counts. The owner should do it by the day before the trip starts ("do it by"), and the reminder window becomes the 7 days up to and including that day. (build) A "do it by" day before today isn't shown. The window keeps its start during the trip, and the reminders skip the trip's own days, so a trip that ends before the period does reminds again on the days after it, to the period's end.
 - "Do it by" is advice: the period still closes at the end of its last day, and a photo during the trip still counts.
 
 ### Today

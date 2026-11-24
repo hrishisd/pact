@@ -65,9 +65,21 @@ describe("the first period", () => {
       ok: true,
       firstOccurrence: { date: "2026-01-01", dueAt: s.at("Sun+3 00:00") },
       offered: {
-        current: { date: "2026-01-01", dueAt: s.at("Sun+3 00:00") },
+        current: { date: "2026-01-01", dueAt: s.at("Sun+3 00:00"), daysLeft: 27 },
         next: { date: "2026-02-01", dueAt: s.at("2026-03-01T05:00:00Z") },
       },
+    });
+  });
+
+  test("the days left count calendar days in the owner's timezone, across the clocks going back too", async () => {
+    const s = scenario();
+    const { owner } = await ownerWithReviewers(s);
+    // 00:30 on Sun Nov 1 in New York, before the clocks go back at 02:00: November has a 25-hour day.
+    s.setClockTo("2026-11-01T04:30:00Z");
+
+    expect(ok(owner.firstOccurrence({ schedule: MONTHLY })).offered?.current).toMatchObject({
+      date: "2026-11-01",
+      daysLeft: 30,
     });
   });
 
@@ -89,7 +101,7 @@ describe("the first period", () => {
     const { owner, createPact } = await ownerWithReviewers(s);
     s.setClockTo("Tue 09:00");
     expect(ok(owner.firstOccurrence({ schedule: FORTNIGHTLY })).offered).toEqual({
-      current: { date: s.date("Mon"), dueAt: s.at("Mon+2 00:00") },
+      current: { date: s.date("Mon"), dueAt: s.at("Mon+2 00:00"), daysLeft: 13 },
       next: { date: s.date("Mon+1"), dueAt: s.at("Mon+3 00:00") },
     });
 

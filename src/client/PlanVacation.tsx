@@ -430,20 +430,21 @@ function CoverRow({ pact, preview, from, to }: { pact: PactOption; preview: Pact
     lines.push(...text.lines);
     if (schedule.kind === "one-time" && covered.length === 0 && preview.skipped.length === 0)
       lines.push("Nothing changes for it.");
+    // A period the trip won't cover says, right after it, to do it before you go.
+    const doItBy = (period: { doItBy?: string }) =>
+      period.doItBy ? [`Do it by ${formatDate(period.doItBy)}. Reminders move to the 7 days before your trip.`] : [];
     // Only a period schedule has periods a vacation touches but doesn't cover.
     for (const period of preview.notCovered) {
       lines.push(
         schedule.kind === "weekly-count"
           ? `${weekOf(period.date)}: not covered, still ${schedule.target} days needed by ${formatDate(period.through ?? period.date)}`
           : `${periodLabel(kind, period.date)} isn't off. ${schedule.kind === "once-a-month" ? "A vacation covers a month only from the 15th to its end." : "A vacation covers 2 weeks only when it covers the whole second week."}`,
+        ...doItBy(period),
       );
     }
     for (const skipped of preview.skipped) {
-      lines.push(`${periodLabel(kind, skipped.date)}: ${SKIP_TEXT[skipped.reason]}`);
+      lines.push(`${periodLabel(kind, skipped.date)}: ${SKIP_TEXT[skipped.reason]}`, ...doItBy(skipped));
     }
-    // A period the trip won't cover: do it before you go.
-    const doItBy = [...preview.notCovered, ...preview.skipped].find((period) => period.doItBy)?.doItBy;
-    if (doItBy) lines.push(`Do it by ${formatDate(doItBy)}. Reminders move to the 7 days before your trip.`);
   }
 
   return (
