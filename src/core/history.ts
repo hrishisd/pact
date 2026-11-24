@@ -90,14 +90,14 @@ export function heatMapPeriods(
   const schedule = scheduleOf(pact.schedule);
   return occurrencesOf(ctx, pact.id, timezone)
     .between(first, last)
-    .map((week) => {
-      const record = occurrenceRecord(ctx, pact, week);
+    .map((period) => {
+      const record = occurrenceRecord(ctx, pact, period);
       const afterEnd =
-        endedOn !== null && lastDayOf(schedule, week.date) >= endedOn && record.status.kind === "not-judged";
+        endedOn !== null && lastDayOf(schedule, period.date) >= endedOn && record.status.kind === "not-judged";
       return {
-        date: week.date,
+        date: period.date,
         occurrence: afterEnd ? null : record,
-        progress: periodProgress(ctx, pact.id, week.date),
+        progress: periodProgress(ctx, pact.id, period.date),
       };
     });
 }

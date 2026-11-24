@@ -4,6 +4,7 @@
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
 import { money, scheduleText } from "../shared/format.ts";
+import { isOncePerPeriod } from "../shared/schedules.ts";
 import type {
   AccountId,
   ClockTime,
@@ -215,10 +216,7 @@ export function firstOccurrence(
   );
   if (!timing.ok) return timing;
   const when = ({ date, dueAt }: Occurrence) => ({ date, dueAt });
-  const offered =
-    schedule.kind === "every-2-weeks" || schedule.kind === "once-a-month"
-      ? offeredPeriods(schedule, createdAt, timezone)
-      : null;
+  const offered = isOncePerPeriod(schedule) ? offeredPeriods(schedule, createdAt, timezone) : null;
   return {
     ok: true,
     firstOccurrence: when(timing.first),

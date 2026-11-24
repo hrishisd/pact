@@ -18,7 +18,7 @@ import {
   type Weekday,
 } from "../shared/types.ts";
 import { dayCount } from "../shared/calendar.ts";
-import { lastDayOf } from "../shared/schedules.ts";
+import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import {
   clockText,
@@ -31,7 +31,7 @@ import {
   NIGHT_CLOSES_TEXT,
   periodName,
 } from "./format.ts";
-import { picksFirstPeriod, remindersAs, scheduleKindOf, termsOfFormKind, type Form } from "./pact-form.ts";
+import { remindersAs, scheduleKindOf, termsOfFormKind, type Form } from "./pact-form.ts";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
 import { plural } from "./vacation-text.ts";
 import { loadFailure, loadedData, useLoad, useSend } from "./ui.tsx";
@@ -372,13 +372,14 @@ function ScheduleStep({
   const scheduleKind = scheduleKindOf(form);
   const weekly = scheduleKind === "weekly-count";
   const oneTime = scheduleKind === "one-time";
-  const periodKind = picksFirstPeriod(scheduleKind) ? scheduleKind : null;
+  const schedule = { kind: scheduleKind };
+  const periodKind = isOncePerPeriod(schedule) ? schedule.kind : null;
   const pick = (kind: Schedule["kind"]) =>
     update({
       scheduleKind: kind,
       reminders: remindersAs(form, kind),
       // A start date on these is the first period's, picked again for the new kind.
-      ...((picksFirstPeriod(kind) || periodKind) && { startDate: "", firstPeriodPicked: false }),
+      ...((isOncePerPeriod({ kind }) || periodKind) && { startDate: "", firstPeriodPicked: false }),
     });
   const everyDay = days.length === WEEKDAYS.length;
   const onDays = (days: Weekday[]) => update({ days });
@@ -590,7 +591,7 @@ function DateRange({
   return (
     <>
       <div className="dates">
-        {picksFirstPeriod(kind) ? (
+        {isOncePerPeriod({ kind }) ? (
           <>
             {end}
             <span />

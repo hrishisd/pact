@@ -1,7 +1,7 @@
 // Where an occurrence stands: judged or not, its evidence and excuses, a
 // period's progress, and which pacts judging reads.
 
-import { isPeriodSchedule, lastDayOf, PERIOD_KINDS, targetOf } from "../shared/schedules.ts";
+import { isPeriodSchedule, lastDayOf, targetOf } from "../shared/schedules.ts";
 import type {
   AccountId,
   EvidenceKind,
@@ -12,6 +12,7 @@ import type {
   OccurrenceStatus,
   PeriodProgress,
 } from "../shared/types.ts";
+import { PERIOD_KINDS } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { coverOn, excusableUntil, excuseWindowOpensSql, keepsToDo } from "./covers.ts";
 import type { Occurrence } from "./occurrences.ts";
@@ -76,6 +77,7 @@ export function evidenceDecision(
 /** How far the pact's period starting `date` has got: see `PeriodProgress`. */
 export function periodProgress(ctx: CoreContext, pactId: string, date: LocalDate): PeriodProgress {
   const schedule = scheduleOf(termsOn(ctx, pactId, date).schedule);
+  if (!isPeriodSchedule(schedule)) throw new Error(`pact ${pactId} isn't on a period schedule`);
   const counts = ctx.db
     .prepare(
       `SELECT COUNT(DISTINCT CASE WHEN decision = 'approved' THEN day END) AS sessions,
@@ -83,7 +85,6 @@ export function periodProgress(ctx: CoreContext, pactId: string, date: LocalDate
        FROM evidence WHERE pact_id = ? AND occurrence_date = ?`,
     )
     .get(pactId, date) as { sessions: number; waiting: number };
-  if (!isPeriodSchedule(schedule)) throw new Error(`pact ${pactId} isn't on a period schedule`);
   return { scheduleKind: schedule.kind, ...counts, target: targetOf(schedule) };
 }
 

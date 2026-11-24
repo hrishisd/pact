@@ -5,7 +5,7 @@
 
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
-import { PERIOD_KINDS } from "../shared/schedules.ts";
+import { periodKindOfSchedule } from "../shared/schedules.ts";
 import type {
   ApprovalReason,
   AtOnceChangeRefusal,
@@ -52,7 +52,7 @@ export function endsWhenText(
   ending: EndTiming,
 ): string {
   if (ending.kind === "at-once") return "now";
-  const kind = PERIOD_KINDS.find((k) => k === terms.schedule.kind);
+  const kind = periodKindOfSchedule(terms.schedule);
   const open = kind ? thisPeriod(kind) : terms.evidenceKind === "oura" ? "that night" : "that day";
   return `after ${formatDate(ending.lastDay)}, once ${open} ${kind === "every-2-weeks" ? "have" : "has"} been judged`;
 }
@@ -274,7 +274,7 @@ export function startsText(request: Json<TermsChangeRequestView>, lead: string):
   const { schedule } = request.current;
   // A One-time pact's one occurrence takes a change even once it's open.
   if (schedule.kind === "one-time") return `${lead} right away, even if the deadline day has started.`;
-  const kind = PERIOD_KINDS.find((k) => k === schedule.kind);
+  const kind = periodKindOfSchedule(schedule);
   const unit = request.current.evidenceKind === "oura" ? "night" : kind ? periodWord(kind) : "day";
   const today =
     start.todayKeepsCents === null

@@ -11,7 +11,7 @@ import {
   type Schedule,
 } from "../shared/types.ts";
 import { addDays, dayCount, parseClockTime, parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
-import { isPeriodSchedule, lastDayOf, type PeriodSchedule } from "../shared/schedules.ts";
+import { isPeriodSchedule, lastDayOf, type OncePerPeriodKind, type PeriodSchedule } from "../shared/schedules.ts";
 import { laterDate, localDateOf, mondayOf, startOfDay, wallTime, weekdayOf } from "./calendar.ts";
 
 /** One occurrence's timing. */
@@ -168,7 +168,7 @@ export function dueSoonEnough(occurrence: Occurrence, at: Date): boolean {
  * 2 weeks and Once a month, the period that has the day it's made, if it's
  * due at least an hour after, else the next one.
  */
-export function firstPeriod(
+function firstPeriod(
   schedule: PeriodSchedule,
   createdAt: Date,
   timezone: string,
@@ -183,19 +183,21 @@ export function firstPeriod(
 
 /**
  * The first periods a pact on Every 2 weeks or Once a month made at
- * `createdAt` can have with no start date: the one that has the day it's
- * made, unless that's due less than an hour after (then null), and the next.
+ * `createdAt` can have: the one that has the day it's made, unless that's due
+ * less than an hour after (then null), and the next month, or the two weeks
+ * from next Monday.
  */
 export function offeredPeriods(
-  schedule: Extract<PeriodSchedule, { kind: "every-2-weeks" | "once-a-month" }>,
+  schedule: PeriodSchedule & { kind: OncePerPeriodKind },
   createdAt: Date,
   timezone: string,
 ): { current: Occurrence | null; next: Occurrence } {
   const created = localDateOf(createdAt, timezone);
-  // Two weeks are counted from the first, so the current two start this Monday.
+  // Two weeks are counted from the first, so the current two start this Monday, the next two next Monday.
   const date = schedule.kind === "once-a-month" ? firstOfMonth(created) : mondayOf(created);
   const current = periodOccurrence(schedule, date, timezone);
-  const next = periodOccurrence(schedule, addDays(lastDayOf(schedule, date), 1), timezone);
+  const nextDate = schedule.kind === "once-a-month" ? addDays(lastDayOf(schedule, date), 1) : addDays(date, 7);
+  const next = periodOccurrence(schedule, nextDate, timezone);
   return { current: dueSoonEnough(current, createdAt) ? current : null, next };
 }
 

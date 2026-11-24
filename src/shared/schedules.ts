@@ -1,7 +1,7 @@
 // What a pact's schedule says about its periods: pure day arithmetic, no timezone.
 
 import { addDays, dayCount, parseLocalDate } from "./calendar.ts";
-import type { LocalDate, PeriodKind, Schedule } from "./types.ts";
+import { PERIOD_KINDS, type LocalDate, type PeriodKind, type Schedule } from "./types.ts";
 
 /**
  * A period schedule: each occurrence is a period of days, any of which can
@@ -10,12 +10,23 @@ import type { LocalDate, PeriodKind, Schedule } from "./types.ts";
  */
 export type PeriodSchedule = Extract<Schedule, { kind: PeriodKind }>;
 
-/** The kinds of the period schedules. */
-export const PERIOD_KINDS: readonly PeriodKind[] = ["weekly-count", "every-2-weeks", "once-a-month"];
-
 /** Whether each occurrence of `schedule` is a period of days (`PeriodSchedule`) rather than one day. */
 export function isPeriodSchedule(schedule: Schedule): schedule is PeriodSchedule {
   return (PERIOD_KINDS as readonly string[]).includes(schedule.kind);
+}
+
+/**
+ * Every 2 weeks and Once a month: the period schedules with one day to do,
+ * whose first period the owner picks, and whose periods have a reminder
+ * window and can have a trip ahead.
+ */
+export type OncePerPeriodKind = "every-2-weeks" | "once-a-month";
+
+/** Whether `schedule` is Every 2 weeks or Once a month (`OncePerPeriodKind`). */
+export function isOncePerPeriod<S extends Pick<Schedule, "kind">>(
+  schedule: S,
+): schedule is S & { kind: OncePerPeriodKind } {
+  return schedule.kind === "every-2-weeks" || schedule.kind === "once-a-month";
 }
 
 /** How many days of an occurrence need approved evidence to Satisfy it: Weekly count's target, else 1. */
@@ -47,8 +58,8 @@ export function lastDayOf(schedule: Schedule, date: LocalDate): LocalDate {
 }
 
 /** The kind of period each occurrence of `schedule` is, or undefined when each is one day. */
-export function periodKindOfSchedule(schedule: Schedule): PeriodKind | undefined {
-  return isPeriodSchedule(schedule) ? schedule.kind : undefined;
+export function periodKindOfSchedule(schedule: Pick<Schedule, "kind">): PeriodKind | undefined {
+  return PERIOD_KINDS.find((kind) => kind === schedule.kind);
 }
 
 /**

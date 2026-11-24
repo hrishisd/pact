@@ -4,7 +4,7 @@
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
 import { clockText, formatDate } from "../shared/format.ts";
-import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
+import { isOncePerPeriod, isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import type { AccountId, LocalDate } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
@@ -21,7 +21,7 @@ import {
   type PactClock,
   type PactRow,
 } from "./rows.ts";
-import { inReminderWindow, tripAhead } from "./trips.ts";
+import { reminderWindow, tripAhead } from "./trips.ts";
 
 /** A reminder the scheduler reaches later than this after its time, as after downtime, is dropped, not sent. */
 const REMINDER_LATE_MS = 15 * 60 * 1000;
@@ -169,7 +169,8 @@ function worthReminding(
   if (occurrence === null || !occurrenceView(ctx, pact.id, occurrence).remind) return false;
   const schedule = scheduleOf(pact.schedule);
   if (!isPeriodSchedule(schedule)) return true;
-  if (!inReminderWindow(ctx, pact.id, schedule, occurrence.date, day)) return false;
+  const window = reminderWindow(ctx, pact.id, schedule, occurrence.date);
+  if (day < window.first || day > window.last) return false;
   return ctx.db.prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND day = ?`).get(pact.id, day) === undefined;
 }
 
@@ -197,7 +198,7 @@ function enqueueReminder(
     const { sessions, target } = periodProgress(ctx, pact.id, occurrence);
     body = `${sessions} of ${target} days done this week. Today's photo is due at ${due}.`;
   }
-  if (schedule.kind === "every-2-weeks" || schedule.kind === "once-a-month") {
+  if (isOncePerPeriod(schedule)) {
     const trip = tripAhead(ctx, pact.id, schedule, occurrence, date);
     const lastDay = lastDayOf(schedule, occurrence);
     const left = dayCount(date, lastDay);

@@ -70,8 +70,11 @@ export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as con
 /** A day of the week: "mon" … "sun". */
 export type Weekday = (typeof WEEKDAYS)[number];
 
-/** The kind of a period schedule (`PeriodSchedule`, schedules.ts). */
-export type PeriodKind = "weekly-count" | "every-2-weeks" | "once-a-month";
+/** The kinds of the period schedules (`PeriodSchedule`, schedules.ts). */
+export const PERIOD_KINDS = ["weekly-count", "every-2-weeks", "once-a-month"] as const;
+
+/** The kind of a period schedule. */
+export type PeriodKind = (typeof PERIOD_KINDS)[number];
 
 /**
  * A trip ahead of a period of Every 2 weeks or Once a month: a vacation the
@@ -1580,7 +1583,7 @@ export interface NewVacation extends VacationRequest {
   reviewerIds: AccountId[];
 }
 
-/** An occurrence a vacation covers or skips: a Weekly count week by its Monday, with its Sunday. */
+/** An occurrence a vacation covers or skips: a day, or a period by its first day, with its last. */
 export interface VacationOccurrence {
   date: LocalDate;
   /** Period schedules only: the period's last day. */

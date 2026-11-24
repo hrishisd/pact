@@ -181,9 +181,10 @@ function todaySections(
   }
   toDo.push(...billCards);
   // Rows come sorted by name, and the sorts are stable.
-  toDo.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
-  later.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
-  automatic.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+  const byDueAt = (a: { dueAt: Date }, b: { dueAt: Date }) => a.dueAt.getTime() - b.dueAt.getTime();
+  toDo.sort(byDueAt);
+  later.sort(byDueAt);
+  automatic.sort(byDueAt);
   noOuraData.sort((a, b) => a.closesAt.getTime() - b.closesAt.getTime());
   comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn, "en-US"));
   const sections: TodaySection[] = [];
@@ -319,7 +320,7 @@ function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: 
     const period = periodToDo(ctx, pact.id, open, today, dayDueAt(today)!, now);
     if (!period) return null;
     const trip = tripAhead(ctx, pact.id, schedule, open.date, today);
-    const window = reminderWindow(schedule, open.date, trip);
+    const window = reminderWindow(ctx, pact.id, schedule, open.date);
     const card: TodayToDoCard = {
       kind: "evidence",
       ...cardOn(ctx, pact, open.date),

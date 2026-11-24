@@ -119,7 +119,7 @@ const STEP_ORDER: Record<Step["kind"], number> = {
  * - A Camera day is judged at its due time, or when a decision after that
  *   decides it. A rejection is final: with no approved cover it judges the day
  *   Missed at once, open or not. Rejected evidence on a period
- *   just doesn't count; a week is short by its target less its approved days.
+ *   just doesn't count; a period is short by its target less its approved days.
  * - An Anki day is Satisfied when a check finds its deck finished before its
  *   due time; at its due time it's judged as a Camera day with no evidence,
  *   unless a check that started before then is still running.

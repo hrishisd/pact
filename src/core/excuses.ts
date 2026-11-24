@@ -368,16 +368,12 @@ export function excusePact(ctx: CoreContext, excuseId: string): (PactRow & { tim
 
 /** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days; on a period schedule, its periods' name (`periodName`). */
 export function excuseDatesText(ctx: CoreContext, excuseId: string): string {
-  const {
-    first,
-    last,
-    pact_id: pactId,
-  } = ctx.db
-    .prepare(`SELECT MIN(date) AS first, MAX(date) AS last, pact_id FROM excuse_day WHERE excuse_id = ?`)
-    .get(excuseId) as { first: LocalDate; last: LocalDate; pact_id: string };
-  const schedule = scheduleOf(
-    ctx.one<{ schedule: string }>(`SELECT schedule FROM pact WHERE id = ?`, pactId)!.schedule,
-  );
+  const { first, last, ...pact } = ctx.one<{ first: LocalDate; last: LocalDate; schedule: string }>(
+    `SELECT MIN(excuse_day.date) AS first, MAX(excuse_day.date) AS last, pact.schedule
+       FROM excuse_day JOIN pact ON pact.id = excuse_day.pact_id WHERE excuse_day.excuse_id = ?`,
+    excuseId,
+  )!;
+  const schedule = scheduleOf(pact.schedule);
   if (isPeriodSchedule(schedule)) return periodName(schedule.kind, first, last);
   return first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
 }

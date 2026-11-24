@@ -88,6 +88,10 @@ describe("the first period", () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
     s.setClockTo("Tue 09:00");
+    expect(ok(owner.firstOccurrence({ schedule: FORTNIGHTLY })).offered).toEqual({
+      current: { date: s.date("Mon"), dueAt: s.at("Mon+2 00:00") },
+      next: { date: s.date("Mon+1"), dueAt: s.at("Mon+3 00:00") },
+    });
 
     const fridge = await createPact("Fridge", FORTNIGHTLY);
     const later = await createPact("Car", FORTNIGHTLY, { dates: { startDate: s.date("Wed+1") } });
@@ -191,6 +195,21 @@ describe("vacations", () => {
     });
   });
 
+  test("an approved vacation that covers February Excuses it, with no penalty", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const call = await createPact("Call Grandma", MONTHLY, { dates: { startDate: "2026-02-01" } });
+    s.setClockTo("Mon 10:00");
+    const { vacationId } = ok(
+      await owner.fileVacation({ from: "2026-02-15", to: "2026-03-01", pactIds: [call], reviewerIds: [reviewer.id] }),
+    );
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    await s.advanceTo("Mon+8 09:00");
+    expect(statusOf(owner, call, "2026-02-01")).toBe("excused");
+    expect(owed(owner)).toBe(0);
+  });
+
   test("a vacation covers two weeks only if it covers their whole second week", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
@@ -249,17 +268,51 @@ describe("the reminder window", () => {
     expect(cards(owner, "to-do")).toEqual([]);
   });
 
-  /** Call Grandma, monthly with an 18:00 reminder, and a trip from Wed Jan 28 to Thu Feb 5 that doesn't cover January. */
-  async function withTrip(s: Scenario) {
+  test("a photo in before the last 7 days takes the month off Today", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    const call = await createPact("Call Grandma", MONTHLY);
+
+    s.setClockTo("Tue 10:00");
+    await submit(owner, call);
+    expect(cards(owner, "later")).toEqual([]);
+    s.setClockTo("Sun+2 10:00");
+    expect(cards(owner, "to-do")).toEqual([]);
+  });
+
+  /**
+   * Call Grandma, monthly with an 18:00 reminder, and a waiting trip that
+   * doesn't cover January, by default from Wed Jan 28 to Thu Feb 5.
+   */
+  async function withTrip(s: Scenario, from = "Wed+3", to = "Thu+4") {
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
     const call = await createPact("Call Grandma", MONTHLY, { reminders: ["18:00"] });
     // A trip that covers none of the pacts ticked can't be filed.
     const gym = await createPact("Gym", MON_WED_FRI);
-    const vacation = { from: s.date("Wed+3"), to: s.date("Thu+4"), pactIds: [call, gym], reviewerIds: [reviewer.id] };
+    const vacation = { from: s.date(from), to: s.date(to), pactIds: [call, gym], reviewerIds: [reviewer.id] };
     s.setClockTo("Mon 10:00");
-    ok(await owner.fileVacation(vacation));
-    return { owner, call };
+    const { vacationId } = ok(await owner.fileVacation(vacation));
+    return { owner, reviewer, call, vacationId };
   }
+
+  const LAST_7_DAYS = [
+    "2026-01-25",
+    "2026-01-26",
+    "2026-01-27",
+    "2026-01-28",
+    "2026-01-29",
+    "2026-01-30",
+    "2026-01-31",
+  ];
+  const BEFORE_TRIP = [
+    "2026-01-21",
+    "2026-01-22",
+    "2026-01-23",
+    "2026-01-24",
+    "2026-01-25",
+    "2026-01-26",
+    "2026-01-27",
+  ];
 
   test("a trip ahead that doesn't cover the month moves the To do card to the 7 days before it", async () => {
     const s = scenario();
@@ -282,25 +335,40 @@ describe("the reminder window", () => {
     expect(card).not.toHaveProperty("tripAhead");
   });
 
-  test("a trip ahead moves the reminders to the 7 days before it; once it starts, the month's last days remind as usual", async () => {
+  test("a trip ahead moves the reminders to the 7 days before it, and none go off once it starts", async () => {
     const s = scenario();
     const { owner } = await withTrip(s);
 
     await throughDays(s, 26);
-    expect(reminderDays(s, owner)).toEqual([
-      "2026-01-21",
-      "2026-01-22",
-      "2026-01-23",
-      "2026-01-24",
-      "2026-01-25",
-      "2026-01-26",
-      "2026-01-27",
-      "2026-01-28",
-      "2026-01-29",
-      "2026-01-30",
-      "2026-01-31",
-    ]);
+    expect(reminderDays(s, owner)).toEqual(BEFORE_TRIP);
     expect(s.notifier.sentTo(owner, "reminder")[0]?.payload.body).toBe("Do it before your trip: by Tue Jan 27.");
+  });
+
+  test("an approved trip moves them too", async () => {
+    const s = scenario();
+    const { owner, reviewer, call, vacationId } = await withTrip(s);
+    ok(await reviewer.decide(vacationId, { kind: "approve" }));
+
+    expect(pactOf(owner, call).tripAhead).toMatchObject({ doItBy: s.date("Tue+3") });
+    await throughDays(s, 26);
+    expect(reminderDays(s, owner)).toEqual(BEFORE_TRIP);
+  });
+
+  test("a withdrawn trip, a rejected one, and one that misses the month's last 7 days leave them where they were", async () => {
+    for (const [how, from, to] of [
+      ["withdrawn", "Wed+3", "Thu+4"],
+      ["rejected", "Wed+3", "Thu+4"],
+      ["waiting", "Mon+1", "Fri+1"],
+    ] as const) {
+      const s = scenario();
+      const { owner, reviewer, call, vacationId } = await withTrip(s, from, to);
+      if (how === "withdrawn") ok(await owner.withdrawVacation(vacationId));
+      if (how === "rejected") ok(await reviewer.decide(vacationId, { kind: "reject", reason: "No" }));
+
+      expect(pactOf(owner, call).tripAhead, how).toBeNull();
+      await throughDays(s, 26);
+      expect(reminderDays(s, owner), how).toEqual(LAST_7_DAYS);
+    }
   });
 
   test("Every 2 weeks reminds through the whole second week", async () => {
@@ -348,6 +416,41 @@ describe("changing and ending", () => {
     expect(pactOf(owner, call)).toMatchObject({ stage: "active", endDate: "2026-01-31" });
     await s.advanceTo("Sun+3 00:05");
     expect(pactOf(owner, call).stage).toBe("ended");
+  });
+
+  test("an end request ends the pact once the month closes, after the owner moves east too", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const call = await createPact("Call Grandma", MONTHLY);
+    s.setClockTo("Wed+1 09:00");
+    ok(await owner.requestEnd(call));
+    await reviewer.decide(reviewer.reviewQueue()[0]!.id, { kind: "approve" });
+    s.setClockTo("Thu+1 09:00");
+    await owner.setTimezone("Europe/London");
+
+    // 01:00 on Feb 1 in London, but January was worked out in New York, where it's still open.
+    await s.advanceTo("Sat+3 20:00");
+    expect(pactOf(owner, call).stage).toBe("active");
+    await s.advanceTo("Sun+3 00:05");
+    expect(pactOf(owner, call).stage).toBe("ended");
+    expect(penalties(owner).map((penalty) => penalty.date)).toEqual(["2026-01-01"]);
+  });
+
+  test("on Every 2 weeks, a change applies from the next two weeks, and an end request ends the pact when these close", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const fridge = await createPact("Fridge", FORTNIGHTLY);
+
+    s.setClockTo("Wed+1 09:00");
+    ok(await owner.changePact(fridge, changed(owner, fridge, { penaltyCents: 200 })));
+    await reviewer.decide(reviewer.reviewQueue()[0]!.id, { kind: "approve" });
+    expect(pactOf(owner, fridge).newTerms).toMatchObject({ appliesFrom: s.date("Mon+2") });
+
+    ok(await owner.requestEnd(fridge));
+    await reviewer.decide(reviewer.reviewQueue()[0]!.id, { kind: "approve" });
+    expect(pactOf(owner, fridge)).toMatchObject({ stage: "active", endDate: s.date("Sun+1") });
+    await s.advanceTo("Mon+2 00:05");
+    expect(pactOf(owner, fridge).stage).toBe("ended");
   });
 
   test("an end date counts only whole months", async () => {

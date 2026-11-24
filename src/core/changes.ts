@@ -3,7 +3,7 @@
 // (applies without approval to occurrences not open yet), or doesn't change
 // what counts (applies at once), like the name and the reminders.
 
-import { isPeriodSchedule } from "../shared/schedules.ts";
+import { isOncePerPeriod, isPeriodSchedule } from "../shared/schedules.ts";
 import type {
   AccountId,
   AppliesNow,
@@ -145,7 +145,7 @@ function scheduleEffect(before: Schedule, after: Schedule): TermEffect | null {
     return after.target < before.target ? needs("lower-target") : STRICTER;
   }
   // Every 2 weeks and Once a month have nothing else to change.
-  if ((before.kind === "every-2-weeks" || before.kind === "once-a-month") && after.kind === before.kind) return null;
+  if (isOncePerPeriod(before) && after.kind === before.kind) return null;
   if (before.kind === "one-time" && after.kind === "one-time") {
     const moved = after.deadline !== before.deadline;
     if (!moved && after.submitAnytime === before.submitAnytime) return null;

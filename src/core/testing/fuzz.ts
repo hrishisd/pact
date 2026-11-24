@@ -889,7 +889,8 @@ function names(people: AccountHandle[]): string {
 function describeSchedule(schedule: Schedule): string {
   if (schedule.kind === "fixed-days") return schedule.days.join("/") || "no days";
   if (schedule.kind === "weekly-count") return `${schedule.target} a week`;
-  if (schedule.kind !== "one-time") return schedule.kind;
+  if (schedule.kind === "every-2-weeks") return "every 2 weeks";
+  if (schedule.kind === "once-a-month") return "once a month";
   return `once by ${schedule.deadline}${schedule.submitAnytime ? " anytime" : ""}`;
 }
 

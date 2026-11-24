@@ -58,11 +58,6 @@ export interface Form {
   reminders: string[];
 }
 
-/** The kinds of schedule whose first period the Schedule step picks, in place of a start date. */
-export function picksFirstPeriod(kind: Schedule["kind"]): kind is "every-2-weeks" | "once-a-month" {
-  return kind === "every-2-weeks" || kind === "once-a-month";
-}
-
 /** The kind of schedule the form makes: only Camera has the others, so Oura and Anki make Fixed days. */
 export function scheduleKindOf(form: Pick<Form, "kind" | "scheduleKind">): Schedule["kind"] {
   return form.kind === "camera" ? form.scheduleKind : "fixed-days";

@@ -2,7 +2,7 @@
 // 2 weeks or Once a month period goes from quiet to the owner's to do.
 
 import { addDays } from "../shared/calendar.ts";
-import { lastDayOf, type PeriodSchedule } from "../shared/schedules.ts";
+import { isOncePerPeriod, lastDayOf, type PeriodSchedule } from "../shared/schedules.ts";
 import type { LocalDate, Schedule, TripAhead } from "../shared/types.ts";
 import { laterDate } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
@@ -12,8 +12,8 @@ import { coveredSql } from "./covers.ts";
 const REMINDER_WINDOW_DAYS = 7;
 
 /**
- * The trip ahead of the pact's period dated `period` on `schedule`, as of
- * `today` (see `TripAhead`). Null with none, and on any other schedule.
+ * The trip ahead of the pact's period dated `period` on `schedule`, while
+ * its day to do it by is `today` or later (see `TripAhead`). Null with none.
  */
 export function tripAhead(
   ctx: CoreContext,
@@ -22,6 +22,19 @@ export function tripAhead(
   period: LocalDate,
   today: LocalDate,
 ): TripAhead | null {
+  const trip = periodTrip(ctx, pactId, schedule, period);
+  return trip && trip.doItBy >= today ? trip : null;
+}
+
+/**
+ * The trip that moves the reminder window of the pact's period dated
+ * `period` on `schedule`, whether or not it has started: the earliest-
+ * starting vacation filed for the pact, waiting or approved, that doesn't
+ * cover the period and is a trip ahead of it from its first day. Null with
+ * none, and on any other schedule.
+ */
+function periodTrip(ctx: CoreContext, pactId: string, schedule: Schedule, period: LocalDate): TripAhead | null {
+  if (!isOncePerPeriod(schedule)) return null;
   const trips = ctx.all<{ first_day: LocalDate; last_day: LocalDate }>(
     `SELECT vacation.first_day, vacation.last_day FROM vacation
        JOIN vacation_pact ON vacation_pact.vacation_id = vacation.id AND vacation_pact.pact_id = ?
@@ -32,7 +45,7 @@ export function tripAhead(
     period,
   );
   for (const trip of trips) {
-    const ahead = tripAheadOf(schedule, period, trip.first_day, trip.last_day, today);
+    const ahead = tripAheadOf(schedule, period, trip.first_day, trip.last_day, period);
     if (ahead) return ahead;
   }
   return null;
@@ -52,7 +65,7 @@ export function tripAheadOf(
   lastDay: LocalDate,
   today: LocalDate,
 ): TripAhead | null {
-  if (schedule.kind !== "every-2-weeks" && schedule.kind !== "once-a-month") return null;
+  if (!isOncePerPeriod(schedule)) return null;
   const last = lastDayOf(schedule, period);
   const ahead =
     firstDay > laterDate(period, today) && firstDay <= last && lastDay > addDays(last, -REMINDER_WINDOW_DAYS);
@@ -60,29 +73,19 @@ export function tripAheadOf(
 }
 
 /**
- * The days of the period on `schedule` dated `period` that its reminders go
- * off on and its To do card shows: every day of a Weekly count week. On Every
- * 2 weeks and Once a month, its reminder window: the 7 days up to and
- * including `trip`'s do-it-by day with a trip ahead, else its last 7 days.
+ * Whether `day` is in the reminder window of the pact's period dated
+ * `period` on `schedule`: the days its reminders go off on, and from the
+ * first of which Today shows it under To do. Every day of a Weekly count
+ * week; on Every 2 weeks and Once a month, the 7 days up to and including
+ * the day to do it by of the period's trip, before and during the trip, else
+ * the period's last 7 days. `day` before the window is Today's Later.
  */
 export function reminderWindow(
-  schedule: PeriodSchedule,
-  period: LocalDate,
-  trip: TripAhead | null,
-): { first: LocalDate; last: LocalDate } {
-  if (schedule.kind === "weekly-count") return { first: period, last: lastDayOf(schedule, period) };
-  const last = trip?.doItBy ?? lastDayOf(schedule, period);
-  return { first: addDays(last, 1 - REMINDER_WINDOW_DAYS), last };
-}
-
-/** Whether `day`, a day of the pact's period dated `period` on `schedule`, is in its reminder window. */
-export function inReminderWindow(
   ctx: CoreContext,
   pactId: string,
   schedule: PeriodSchedule,
   period: LocalDate,
-  day: LocalDate,
-): boolean {
-  const { first, last } = reminderWindow(schedule, period, tripAhead(ctx, pactId, schedule, period, day));
-  return first <= day && day <= last;
+): { first: LocalDate; last: LocalDate } {
+  const last = periodTrip(ctx, pactId, schedule, period)?.doItBy ?? lastDayOf(schedule, period);
+  return { first: addDays(last, 1 - REMINDER_WINDOW_DAYS), last };
 }
