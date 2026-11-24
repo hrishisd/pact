@@ -270,7 +270,10 @@ export interface FirstOccurrence {
  * and the next one. Picking the next one sets its first day as the start date.
  */
 export interface OfferedPeriods {
-  /** With its days left, counting today, in the owner's timezone: this one is picked to start with at 7 or more. */
+  /**
+   * With its days left from now, today always counted, in the owner's
+   * timezone: this one is picked to start with at 7 or more.
+   */
   current: (FirstOccurrence & { daysLeft: number }) | null;
   next: FirstOccurrence;
 }
@@ -281,7 +284,10 @@ export type FirstOccurrenceResult =
       firstOccurrence: FirstOccurrence;
       /** Every 2 weeks and Once a month only: see `OfferedPeriods`. */
       offered?: OfferedPeriods;
-      /** A Weekly count pact whose first week is the one it's made in: the days left for a photo (`ThisWeek`). */
+      /**
+       * A Weekly count pact whose first week is the one it's made in: the days
+       * left for a photo from creation, today only while its due time is ahead (`ThisWeek`).
+       */
       daysLeft?: number;
     }
   | { ok: false; reason: "no-days" | "deadline-too-soon" | "start-not-monday" | "week-too-short" | "pact-not-found" };

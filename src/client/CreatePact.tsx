@@ -20,7 +20,6 @@ import {
   type Recipient,
   type Refusal,
 } from "../shared/types.ts";
-import { addDays } from "../shared/calendar.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
 import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import { ouraResultText, takeOuraResult } from "./oura.tsx";
@@ -510,8 +509,7 @@ function CheckStep({
                   <>
                     Your first week is this week
                     {first.daysLeft < WEEKDAYS.length && `, with ${daysLeftText(first.daysLeft, first.first.date)}`}.
-                    You need {schedule.target}× by the end of{" "}
-                    <b>{formatDate(addDays(first.first.date, WEEKDAYS.length - 1))}</b>
+                    You need {schedule.target}× by the end of <b>{formatDate(lastDayOf(schedule, first.first.date))}</b>
                     {first.daysLeft < WEEKDAYS.length && ", the same as a full week"}.
                   </>
                 ) : (

@@ -21,13 +21,14 @@ import {
   type WeekStartsRequest,
 } from "../shared/types.ts";
 import { addDays } from "../shared/calendar.ts";
-import { dateSpan, formatDate } from "../shared/format.ts";
 import { isOncePerPeriod, lastDayOf, type OncePerPeriodKind } from "../shared/schedules.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import {
   clockText,
   dateIn,
+  dateSpan,
   EDIT_WINDOW_TEXT,
+  formatDate,
   inBedByName,
   initial,
   monthDay,
@@ -582,7 +583,10 @@ function OneTimeWindow({ form, update }: { form: Form; update: (change: Partial<
   );
 }
 
-/** Which pact a Weekly count pact's week choice is for: a new one, one `editing` in its window, or one a change request is `changing`. */
+/**
+ * Which pact the Schedule step's first week or period choice is for: a new
+ * one, one `editing` in its window, or one a change request is `changing`.
+ */
 export type WeekStartsFor = Pick<WeekStartsRequest, "editing" | "changing">;
 
 /**
@@ -648,14 +652,14 @@ function DateRange({
 export function daysLeftText(daysLeft: number, monday: string): string {
   if (daysLeft === WEEKDAYS.length) return "the whole week";
   const first = formatDate(addDays(monday, WEEKDAYS.length - daysLeft)).slice(0, 3);
-  return `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left (${daysLeft === 1 ? first : `${first}–Sun`})`;
+  return `${plural(daysLeft, "day", "days")} left (${daysLeft === 1 ? first : `${first}–Sun`})`;
 }
 
 /** Why this week can't be a Weekly count pact's first: "Only 2 days left, fewer than 3×." */
 function notOfferedText(thisWeek: Extract<ThisWeek, { offered: false }>, target: number): string {
   if (thisWeek.reason === "ends-within-an-hour") return "The week ends in less than an hour.";
   const { daysLeft } = thisWeek;
-  return `Only ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left, fewer than ${target}×.`;
+  return `Only ${plural(daysLeft, "day", "days")} left, fewer than ${target}×.`;
 }
 
 /** A week as its option names it: "Nov 23 – 29". */

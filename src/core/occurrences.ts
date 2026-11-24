@@ -119,9 +119,8 @@ const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
  * for Weekly count, the week starting on `startDate`, a Monday, which can be
  * this week's when `thisWeekStart` offers it; with no start date, the default
  * (`defaultFirstWeek`); for Every 2 weeks and Once a month, `firstPeriod`'s;
- * for One-time, its one occurrence,
- * which must be due at least an hour after `createdAt` (a start date doesn't
- * apply). Fixed days with no days is refused. For a `change`, a Weekly count
+ * for One-time, its one occurrence, which must be due at least an hour after
+ * `createdAt` (a start date doesn't apply). Fixed days with no days is refused. For a `change`, a Weekly count
  * start date isn't checked: the pact's first occurrence is already stored, and
  * a change request checks a start date it changes itself.
  */

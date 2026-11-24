@@ -75,7 +75,7 @@ Known bugs are marked **Known bug** and link to the ticket that fixes them. A ti
 - A Camera day runs from midnight in the account's timezone to the due time (`fixedDaysOccurrence`, `occurrences.ts`; `dayClockOf`, `pact-rules.ts`).
 - An Oura Ring night opens at the start of its date and is due at the in-bed-by time. A time before 18:00 means the next day. The night closes at 18:00 the next day. All of it is read on Oura's clock (`nightStartsAt`, `occurrences.ts`; `ouraClockOf`, `rows.ts`). Test: `oura.test.ts`.
 - An Anki day opens at its rollover hour. Due-by is allowed from noon on day D, after the rollover hour, up to the rollover hour on D+1. Other times are refused (`ankiDueByDayAfter`, `occurrences.ts`). Anki days use the account's timezone, not the collection's (deviation from the anki spec, noted in anki ticket 03).
-- A Weekly count week runs Monday to Sunday and is due at the end of Sunday (`weekOccurrence`, `occurrences.ts`).
+- A Weekly count week runs Monday to Sunday and is due at the end of Sunday (`periodOccurrence`, `occurrences.ts`).
 - A One-time occurrence with Submit anytime opens at creation. Otherwise it opens at the start of the deadline's date (`oneTimeOccurrence`, `occurrences.ts`).
 
 ### Judging
