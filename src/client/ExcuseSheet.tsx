@@ -34,7 +34,7 @@ import {
   periodWord,
   scheduleText,
 } from "./format.ts";
-import { plural } from "./vacation-text.ts";
+import { periodsText, plural } from "./vacation-text.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useNow, useSend } from "./ui.tsx";
 
@@ -253,7 +253,7 @@ function ExcuseForm({
   // On a period schedule the core covers whole periods.
   const unit = period ? periodWord(period) : "day";
   // Two weeks are counted in weeks: "Covers 4 weeks".
-  const span = (n: number) => (period === "every-2-weeks" ? `${2 * n} weeks` : plural(n, unit, `${unit}s`));
+  const span = (n: number) => (period ? periodsText(period, n) : plural(n, "day", "days"));
   const these = (n: number) =>
     period === "every-2-weeks" ? `these ${span(n)}` : n === 1 ? `this ${unit}` : `these ${unit}s`;
   return (

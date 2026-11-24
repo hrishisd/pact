@@ -30,7 +30,7 @@ describe("a rejection is final straight away", () => {
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Wed 15:00"),
-          period: false,
+          period: null,
         },
       ],
       sections: [],
@@ -64,7 +64,7 @@ describe("a rejection is final straight away", () => {
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: s.at("Thu 08:00"),
-          period: false,
+          period: null,
         },
       ],
       sections: [],
@@ -139,9 +139,9 @@ describe("the rejected-evidence alert", () => {
       );
     expect(alerts).toEqual(
       expect.arrayContaining([
-        ["Gym", s.at("Thu+1 11:00"), false],
-        ["Essay", s.at("Thu+1 11:00"), false],
-        ["Piano", null, true],
+        ["Gym", s.at("Thu+1 11:00"), null],
+        ["Essay", s.at("Thu+1 11:00"), null],
+        ["Piano", null, { kind: "weekly-count", lastDay: s.date("Sun+1") }],
       ]),
     );
     expect(alerts).toHaveLength(3);

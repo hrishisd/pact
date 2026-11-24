@@ -449,7 +449,7 @@ describe("a rejected photo", () => {
         penaltyCents: 500,
         recipientName: "Sam",
         excusableUntil: null,
-        period: true,
+        period: { kind: "weekly-count", lastDay: s.date("Sun+1") },
       },
     ]);
     expect(today.sections.find((section) => section.kind === "missed")).toBeUndefined();

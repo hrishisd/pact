@@ -588,6 +588,50 @@ describe("a Once a month or Every 2 weeks pact on Today", () => {
     expect(await screen.findByText("Due later")).toBeTruthy();
   });
 
+  test("before its last 7 days, with a trip ahead, its small card says to do it by the day before", async () => {
+    const tripAhead = { period: "2026-01-01", firstDay: "2026-01-28", lastDay: "2026-02-05", doItBy: "2026-01-27" };
+    stubApi({ today: answers(today({ kind: "later", cards: [periodCard({ tripAhead })] })) });
+    renderToday();
+    const later = (await screen.findByRole("heading", { name: "Call Grandma" })).closest("article")!;
+    expect(later.textContent).toContain("0 of 1 · do it by Tue Jan 27");
+  });
+
+  test("a small card still in its edit window shows how long is left to edit", async () => {
+    vi.setSystemTime(new Date("2026-01-06T15:00:00Z"));
+    const card = periodCard({ editWindowClosesAt: "2026-01-06T15:10:00Z" });
+    stubApi({ today: answers(today({ kind: "later", cards: [card] })) });
+    renderToday();
+    const later = (await screen.findByRole("heading", { name: "Call Grandma" })).closest("article")!;
+    expect(later.className).toContain("fresh");
+    expect(later.textContent).toContain("10 min");
+  });
+
+  test("a rejected photo says to make it up by the month's last day", async () => {
+    stubApi({
+      today: answers({
+        ...today(),
+        alerts: [
+          {
+            kind: "evidence-rejected",
+            pactId: "call",
+            name: "Call Grandma",
+            reviewerName: "Sam",
+            reason: "Blurry",
+            occurrenceDate: "2026-01-08",
+            penaltyCents: 2000,
+            recipientName: "AMF",
+            excusableUntil: null,
+            period: { kind: "once-a-month", lastDay: "2026-01-31" },
+          },
+        ],
+      }),
+    });
+    renderToday();
+    expect(
+      await screen.findByText("This day doesn't count toward this month. Make it up on another day by Sat Jan 31."),
+    ).toBeTruthy();
+  });
+
   test("in its last 7 days, it's a To do card with the days left", async () => {
     vi.setSystemTime(new Date("2026-01-27T15:00:00Z"));
     stubApi({ today: answers(today({ kind: "to-do", cards: [periodCard()] })) });

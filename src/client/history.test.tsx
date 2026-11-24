@@ -169,6 +169,49 @@ test("a Once a month pact has a square per month, labelled by its month", async 
   expect(within(detail).getByText("This month").className).toBe("chip c-todo");
 });
 
+test("an Every 2 weeks pact's squares are labelled by their first Monday, and a missed one says no photo was approved", async () => {
+  const periods: Json<HeatMapPeriod>[] = [
+    {
+      date: "2025-12-22",
+      occurrence: {
+        status: {
+          kind: "missed",
+          penaltyCents: 2000,
+          excusableUntil: "2026-01-07T05:00:00Z",
+          cover: null,
+          phase: "past-due",
+          recipientName: "AMF",
+          rejection: null,
+        },
+        detail: null,
+      },
+      progress: { scheduleKind: "every-2-weeks", sessions: 0, waiting: 0, target: 1 },
+    },
+    {
+      date: "2026-01-05",
+      occurrence: null,
+      progress: { scheduleKind: "every-2-weeks", sessions: 0, waiting: 0, target: 1 },
+    },
+  ];
+  const { user } = renderWithUser(
+    <HeatMap
+      pact={{
+        ...cameraPact(),
+        evidenceKind: "camera",
+        dueBy: null,
+        schedule: { kind: "every-2-weeks" },
+        history: { kind: "periods", periods },
+      }}
+      timezone="America/New_York"
+      now={NOW}
+    />,
+  );
+
+  expect([...document.querySelectorAll(".hm-lbl")].map((label) => label.textContent)).toEqual(["Dec 22", "Jan 5"]);
+  await user.click(screen.getByRole("button", { name: /^Dec 22 – Jan 4: Missed/ }));
+  expect(within(screen.getByRole("status")).getByText("No photo approved. $20 to AMF.")).toBeTruthy();
+});
+
 test("a day with an excuse waiting for approval has a square and a chip that say the same", async () => {
   const waiting: Json<OccurrenceRecord> = {
     status: {

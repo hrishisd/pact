@@ -98,6 +98,9 @@ describe("the first period", () => {
 
     expect(pactOf(owner, fridge).firstOccurrence).toEqual({ date: s.date("Mon"), dueAt: s.at("Mon+2 00:00") });
     expect(pactOf(owner, later).firstOccurrence).toEqual({ date: s.date("Mon+2"), dueAt: s.at("Mon+4 00:00") });
+    // A start date of today that isn't a Monday is the first Monday after it.
+    const today = await createPact("Bins", FORTNIGHTLY, { dates: { startDate: s.date("Tue") } });
+    expect(pactOf(owner, today).firstOccurrence.date).toBe(s.date("Mon+1"));
     await s.advanceTo("Tue+4 09:00");
     expect(periodsOf(owner, fridge).map((period) => period.date)).toEqual([
       s.date("Mon"),
@@ -342,6 +345,27 @@ describe("the reminder window", () => {
     await throughDays(s, 26);
     expect(reminderDays(s, owner)).toEqual(BEFORE_TRIP);
     expect(s.notifier.sentTo(owner, "reminder")[0]?.payload.body).toBe("Do it before your trip: by Tue Jan 27.");
+  });
+
+  test("a trip that ends before the month does: reminders before it, and again once the owner is back", async () => {
+    const s = scenario();
+    const { owner } = await withTrip(s, "Tue+2", "Mon+3");
+
+    await throughDays(s, 26);
+    expect(reminderDays(s, owner)).toEqual([
+      "2026-01-13",
+      "2026-01-14",
+      "2026-01-15",
+      "2026-01-16",
+      "2026-01-17",
+      "2026-01-18",
+      "2026-01-19",
+      "2026-01-27",
+      "2026-01-28",
+      "2026-01-29",
+      "2026-01-30",
+      "2026-01-31",
+    ]);
   });
 
   test("an approved trip moves them too", async () => {

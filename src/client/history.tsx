@@ -31,6 +31,7 @@ import {
   dateSpan,
   formatDate,
   listNames,
+  monthDay,
   money,
   NIGHT_CLOSES_TEXT,
   periodName,
@@ -330,11 +331,12 @@ function Legend() {
  * A period schedule pact's History: one square per period since the first,
  * each with the number of days that counted, scrolled to now. Tapping one
  * shows the period below the legend. A month's square is labelled by its
- * month; a week's or 2 weeks', by the month that starts in it.
+ * month, 2 weeks' by their first Monday ("Nov 30"), and a week's by the
+ * month that starts in it.
  */
 function PeriodHeatMap({
   kind,
-  periods: weeks,
+  periods,
   timezone,
   now,
 }: {
@@ -344,9 +346,8 @@ function PeriodHeatMap({
   now: number;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const scroller = useScrolledToEnd(weeks.length);
-  const picked = weeks.find((week) => week.date === selected && week.occurrence !== null);
-  const length = kind === "every-2-weeks" ? 14 : 7;
+  const scroller = useScrolledToEnd(periods.length);
+  const picked = periods.find((week) => week.date === selected && week.occurrence !== null);
   const noun = kind === "once-a-month" ? "month" : kind === "weekly-count" ? "week" : "square";
 
   return (
@@ -354,10 +355,15 @@ function PeriodHeatMap({
       <h3>History</h3>
       <div className="hm-scroll" ref={scroller}>
         <div className="hm-weeks">
-          {weeks.map((week, i) => {
+          {periods.map((week, i) => {
             const presented = present(week.occurrence, now, { timezone, period: kind });
             const { month: number, day } = parseLocalDate(week.date);
-            const month = kind === "once-a-month" || day <= length || i === 0 ? MONTHS[number - 1] : "";
+            const month =
+              kind === "every-2-weeks"
+                ? monthDay(week.date)
+                : kind === "once-a-month" || day <= 7 || i === 0
+                  ? MONTHS[number - 1]
+                  : "";
             return (
               <div key={week.date} className="hm-wcol">
                 <span className="hm-lbl">{month}</span>
@@ -412,6 +418,8 @@ function weekLine(week: Week, timezone: string): string {
   const { status } = record;
   if (status.kind === "missed") {
     const short = week.progress.target - week.progress.sessions;
+    // A month or 2 weeks have one day to do: no photo approved is the whole story.
+    if (week.progress.target === 1 && week.progress.sessions === 0) return `No photo approved. ${missedCost(status)}`;
     return `${weekText(week)}. ${short} short: ${missedCost(status)}`;
   }
   const excused = occurrenceLine(record, timezone);

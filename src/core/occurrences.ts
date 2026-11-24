@@ -163,7 +163,7 @@ export function dueSoonEnough(occurrence: Occurrence, at: Date): boolean {
 
 /**
  * The first period of a pact on `schedule` made at `createdAt`: with a start
- * date after the day it's made, the first period starting on or after it.
+ * date on or after the day it's made, the first period starting on or after it.
  * Otherwise, for Weekly count, the week starting the Monday after; for Every
  * 2 weeks and Once a month, the period that has the day it's made, if it's
  * due at least an hour after, else the next one.
@@ -176,7 +176,7 @@ function firstPeriod(
 ): LocalDate {
   const created = localDateOf(createdAt, timezone);
   if (schedule.kind === "weekly-count") return firstPeriodFrom(schedule, addDays(created, 1), startDate);
-  if (startDate !== null && startDate > created) return firstPeriodFrom(schedule, startDate, null);
+  if (startDate !== null && startDate >= created) return firstPeriodFrom(schedule, startDate, null);
   const { current, next } = offeredPeriods(schedule, createdAt, timezone);
   return (current ?? next).date;
 }

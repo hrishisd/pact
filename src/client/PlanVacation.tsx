@@ -412,7 +412,6 @@ function CoverRow({ pact, preview, from, to }: { pact: PactOption; preview: Pact
   const { schedule } = pact;
   const kind = periodKindOfSchedule(schedule);
   const covered = preview.covered;
-  const dayText = (date: string) => (kind ? periodLabel(kind, date) : formatDate(date));
 
   let head: string;
   const lines: string[] = [];
@@ -436,11 +435,11 @@ function CoverRow({ pact, preview, from, to }: { pact: PactOption; preview: Pact
       lines.push(
         schedule.kind === "weekly-count"
           ? `${weekOf(period.date)}: not covered, still ${schedule.target} days needed by ${formatDate(period.through ?? period.date)}`
-          : `${dayText(period.date)} isn't off. ${schedule.kind === "once-a-month" ? "A vacation covers a month only from the 15th to its end." : "A vacation covers 2 weeks only when it covers the whole second week."}`,
+          : `${periodLabel(kind, period.date)} isn't off. ${schedule.kind === "once-a-month" ? "A vacation covers a month only from the 15th to its end." : "A vacation covers 2 weeks only when it covers the whole second week."}`,
       );
     }
     for (const skipped of preview.skipped) {
-      lines.push(`${dayText(skipped.date)}: ${SKIP_TEXT[skipped.reason]}`);
+      lines.push(`${periodLabel(kind, skipped.date)}: ${SKIP_TEXT[skipped.reason]}`);
     }
     // A period the trip won't cover: do it before you go.
     const doItBy = [...preview.notCovered, ...preview.skipped].find((period) => period.doItBy)?.doItBy;

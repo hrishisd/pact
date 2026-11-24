@@ -512,7 +512,8 @@ function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
                   ))}
                   {cover.held?.map((day) => (
                     <small key={day.date}>
-                      {heldDayText(day)} · Missed · {money(day.penaltyCents)} held
+                      {periodLabel(periodKindOfSpan(day.date, day.through), day.date)} · Missed ·{" "}
+                      {money(day.penaltyCents)} held
                     </small>
                   ))}
                 </span>
@@ -634,7 +635,3 @@ function Decision({
 }
 
 /** A held day on a vacation item: "Mon Dec 14", or its period: "Week of Dec 14", "December". */
-function heldDayText(day: { date: string; through?: string }): string {
-  const kind = periodKindOfSpan(day.date, day.through);
-  return kind ? periodLabel(kind, day.date) : formatDate(day.date);
-}

@@ -89,8 +89,12 @@ export function weekOf(date: LocalDate): string {
   return `Week of ${monthDay(date)}`;
 }
 
-/** A period on a vacation's lines: "Week of Dec 14", "Nov 30 – Dec 13" or "December". */
-export function periodLabel(kind: PeriodKind, date: LocalDate): string {
+/**
+ * An occurrence on a vacation's or a review's lines: "Week of Dec 14",
+ * "Nov 30 – Dec 13" or "December" for a period of `kind`, else the day.
+ */
+export function periodLabel(kind: PeriodKind | undefined, date: LocalDate): string {
+  if (kind === undefined) return formatDate(date);
   return kind === "weekly-count" ? weekOf(date) : periodName(kind, date);
 }
 

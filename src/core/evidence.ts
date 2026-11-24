@@ -3,7 +3,7 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { formatDate } from "../shared/format.ts";
-import { isPeriodSchedule } from "../shared/schedules.ts";
+import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptMissResult,
@@ -457,7 +457,7 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
         penaltyCents: row.amount_cents,
         recipientName: row.recipient_name,
         excusableUntil: excusableUntil(row.excuse_window_opens),
-        period: false,
+        period: null,
       },
     };
   });
@@ -501,6 +501,8 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
   );
   return rows.map((row) => {
     const terms = termsOn(ctx, row.id, row.occurrence_date);
+    const schedule = scheduleOf(terms.schedule);
+    if (!isPeriodSchedule(schedule)) throw new Error(`pact ${row.id} isn't on a period schedule`);
     return {
       at: new Date(row.decided_at),
       alert: {
@@ -513,7 +515,7 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
         penaltyCents: terms.penalty_cents,
         recipientName: recipientName(ctx, terms.recipient_id),
         excusableUntil: null,
-        period: true,
+        period: { kind: schedule.kind, lastDay: lastDayOf(schedule, row.occurrence_date) },
       },
     };
   });

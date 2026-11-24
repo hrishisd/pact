@@ -45,6 +45,7 @@ import {
   clockText,
   clockTime,
   dateIn,
+  dueDayOf,
   dateSpan,
   dateUnlessToday,
   excusableText,
@@ -450,6 +451,7 @@ function Section({
               key={card.pactId}
               card={card}
               timezone={timezone}
+              now={now}
               onOpen={() => onOpenPact(card.pactId, card.name)}
               onSubmitted={onChanged}
             />
@@ -509,6 +511,8 @@ function PeriodToDo({
 }) {
   const { sessions, waiting, target, scheduleKind } = period;
   const trip = card.tripAhead;
+  const last = dueDayOf(card.dueAt, timezone);
+  const by = trip?.doItBy ?? last;
   return (
     <>
       <div className="spread">
@@ -523,18 +527,13 @@ function PeriodToDo({
       </div>
       <div className="meta due">
         {scheduleKind === "weekly-count"
-          ? `Due by ${formatDate(lastDayOf(card, timezone))}`
-          : `${trip ? `Do it by ${formatDate(trip.doItBy)}` : `Due by ${formatDate(lastDayOf(card, timezone))}`} · ${daysLeft(trip?.doItBy ?? lastDayOf(card, timezone), now, timezone)}`}
+          ? `Due by ${formatDate(last)}`
+          : `${trip ? "Do it by" : "Due by"} ${formatDate(by)} · ${daysLeft(by, now, timezone)}`}
         {card.dueBy !== null && ` · today's photo by ${clockText(card.dueBy)}`}
       </div>
       {trip && <div className="meta">You're away {datesText(trip.firstDay, trip.lastDay)}</div>}
     </>
   );
-}
-
-/** A period card's last day in the owner's timezone: it's due at the midnight that ends it. */
-function lastDayOf(card: Pick<Json<TodayToDoCard>, "dueAt">, timezone: string): LocalDate {
-  return dateIn(Date.parse(card.dueAt) - 1, timezone);
 }
 
 /** "5 days left", counting today, until the end of `last`. */
@@ -560,27 +559,32 @@ function laterTitle(cards: Json<TodayToDoCard>[]): string {
 function LaterCard({
   card,
   timezone,
+  now,
   onOpen,
   onSubmitted,
 }: {
   card: Json<TodayToDoCard>;
   timezone: string;
+  now: number;
   onOpen: () => void;
   onSubmitted: () => void;
 }) {
   const progress = card.period ? `${card.period.sessions} of ${card.period.target} · ` : "";
-  const due = card.tripAhead
-    ? `do it by ${formatDate(card.tripAhead.doItBy)}`
-    : `due ${formatDate(lastDayOf(card, timezone))}`;
+  const { tripAhead: trip } = card;
+  const due = `${trip ? "do it by" : "due"} ${formatDate(trip?.doItBy ?? dueDayOf(card.dueAt, timezone))}`;
+  const fresh = minutesLeft(card.editWindowClosesAt, now) !== null;
   return (
-    <article className="card tcard slim">
+    <article className={fresh ? "card tcard slim fresh" : "card tcard slim"}>
       <div className="spread">
         <span className="rt">
-          <h3>
-            <button className="tcard-open" onClick={onOpen}>
-              {card.name}
-            </button>
-          </h3>
+          <span className="namerow">
+            <h3>
+              <button className="tcard-open" onClick={onOpen}>
+                {card.name}
+              </button>
+            </h3>
+            <EditWindowChip closesAt={card.editWindowClosesAt} now={now} />
+          </span>
           <span className="meta">
             {progress}
             {due}
@@ -1029,7 +1033,10 @@ function RejectedEvidenceAlert({
       </b>
       <span>“{alert.reason}”</span>
       {alert.period ? (
-        <span className="small">This day doesn't count toward the week. Make it up on another day by Sunday.</span>
+        <span className="small">
+          This day doesn't count toward {thisPeriod(alert.period.kind)}. Make it up on another day by{" "}
+          {alert.period.kind === "weekly-count" ? "Sunday" : formatDate(alert.period.lastDay)}.
+        </span>
       ) : (
         <span className="small">
           {formatDate(alert.occurrenceDate)} is Missed ·{" "}

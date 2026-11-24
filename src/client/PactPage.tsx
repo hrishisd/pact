@@ -263,7 +263,7 @@ function TripAheadLine({ pact }: { pact: Pact }) {
       <p>
         You're away {datesText(trip.firstDay, trip.lastDay)}, so{" "}
         <b>
-          {periodName(kind, trip.period)} {kind === "every-2-weeks" ? "are" : "is"} due by {formatDate(trip.doItBy)}
+          {periodName(kind, trip.period)} is due by {formatDate(trip.doItBy)}
         </b>
         .
       </p>

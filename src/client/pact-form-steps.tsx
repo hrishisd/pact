@@ -17,8 +17,7 @@ import {
   type Schedule,
   type Weekday,
 } from "../shared/types.ts";
-import { dayCount } from "../shared/calendar.ts";
-import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
+import { isOncePerPeriod, lastDayOf, type OncePerPeriodKind } from "../shared/schedules.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import {
   clockText,
@@ -63,7 +62,8 @@ const DAY_BUTTONS: Record<Weekday, { short: string; full: string }> = {
  * What's wrong, in the owner's words: the core's refusals at Create or Save,
  * and the steps' own checks that a field is filled in.
  */
-export type Problem = EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "anki-due-by";
+export type Problem =
+  EditPactRefusal | "no-deadline" | "no-first-period" | "no-amount" | "no-recipient" | "anki-due-by";
 
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
@@ -76,6 +76,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "text-too-long": TEXT_TOO_LONG_TEXT,
   "no-days": "Pick at least one day.",
   "no-deadline": "Pick a deadline.",
+  "no-first-period": "Wait for the dates to load, then pick when to start.",
   "deadline-too-soon": "The deadline must be at least an hour after you create the pact. Pick a later one.",
   "invalid-schedule": `Pick from 1 to ${MAX_WEEKLY_TARGET} days a week.`,
   "invalid-due-by": "Pick a time before midnight, or turn off Due by a set time.",
@@ -145,6 +146,8 @@ export function ListsFailed({ failed }: { failed: { error: unknown } }) {
  * One of the steps that fill in the pact's terms, as Create pact shows it in
  * turn and Request change in a sheet. `kindFixed`: the kind of schedule
  * can't change. `hints` say what changing the reviewers or reminders does.
+ * `editing`: the pact being edited in its edit window, whose first period is
+ * worked out from when it was made.
  */
 export function PactFormStep({
   step,
@@ -154,6 +157,7 @@ export function PactFormStep({
   onInvite,
   kindFixed,
   hints = {},
+  editing,
 }: {
   step: FormStep;
   form: Form;
@@ -162,12 +166,13 @@ export function PactFormStep({
   onInvite: () => void;
   kindFixed?: boolean;
   hints?: { reviewers?: string; reminders?: string };
+  editing?: string;
 }) {
   switch (step) {
     case "goal":
       return <GoalStep form={form} update={update} />;
     case "schedule":
-      return <ScheduleStep form={form} update={update} kindFixed={kindFixed} />;
+      return <ScheduleStep form={form} update={update} kindFixed={kindFixed} editing={editing} />;
     case "penalty":
       return (
         <PenaltyStep
@@ -360,11 +365,13 @@ function ScheduleStep({
   form,
   update,
   kindFixed = false,
+  editing,
 }: {
   form: Form;
   update: (change: Partial<Form>) => void;
   /** After the edit window, the kind of schedule can't change: only the chosen one shows. */
   kindFixed?: boolean;
+  editing?: string;
 }) {
   const { days } = form;
   const oura = form.kind === "oura";
@@ -417,7 +424,9 @@ function ScheduleStep({
           />
         </label>
       ) : periodKind ? (
-        !kindFixed && <FirstPeriodChoice key={periodKind} kind={periodKind} form={form} update={update} />
+        !kindFixed && (
+          <FirstPeriodChoice key={periodKind} kind={periodKind} form={form} update={update} editing={editing} />
+        )
       ) : weekly ? (
         <>
           <div className="field">
@@ -576,41 +585,31 @@ function DateRange({
 }) {
   // A start date before today would change nothing. On this device's clock: the form has no profile timezone.
   const today = dateIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const end = (
-    <label className="field">
-      <span>End (optional)</span>
-      <input
-        className="inp"
-        type="date"
-        value={form.endDate}
-        min={form.startDate || today}
-        onChange={(e) => update({ endDate: e.target.value })}
-      />
-    </label>
-  );
   return (
     <>
       <div className="dates">
-        {isOncePerPeriod({ kind }) ? (
-          <>
-            {end}
-            <span />
-          </>
-        ) : (
-          <>
-            <label className="field">
-              <span>Start (optional)</span>
-              <input
-                className="inp"
-                type="date"
-                value={form.startDate}
-                min={today}
-                onChange={(e) => update({ startDate: e.target.value })}
-              />
-            </label>
-            {end}
-          </>
+        {!isOncePerPeriod({ kind }) && (
+          <label className="field">
+            <span>Start (optional)</span>
+            <input
+              className="inp"
+              type="date"
+              value={form.startDate}
+              min={today}
+              onChange={(e) => update({ startDate: e.target.value })}
+            />
+          </label>
         )}
+        <label className="field">
+          <span>End (optional)</span>
+          <input
+            className="inp"
+            type="date"
+            value={form.endDate}
+            min={form.startDate || today}
+            onChange={(e) => update({ endDate: e.target.value })}
+          />
+        </label>
       </div>
       {kind === "weekly-count" && (
         <small className="muted">
@@ -618,8 +617,11 @@ function DateRange({
           Monday–Sunday weeks up to the end date count.
         </small>
       )}
-      {kind === "once-a-month" && <small className="muted">Only whole months up to the end date count.</small>}
-      {kind === "every-2-weeks" && <small className="muted">Only whole 2 weeks up to the end date count.</small>}
+      {isOncePerPeriod({ kind }) && (
+        <small className="muted">
+          Only whole {kind === "once-a-month" ? "months" : "2 weeks"} up to the end date count.
+        </small>
+      )}
     </>
   );
 }
@@ -634,18 +636,19 @@ function FirstPeriodChoice({
   kind,
   form,
   update,
+  editing,
 }: {
-  kind: "every-2-weeks" | "once-a-month";
+  kind: OncePerPeriodKind;
   form: Form;
   update: (change: Partial<Form>) => void;
+  editing?: string;
 }) {
   const schedule = { kind };
-  const { state } = useLoad(() => api.firstOccurrence({ schedule, evidenceKind: "camera" }));
+  const { state } = useLoad(() => api.firstOccurrence({ schedule, evidenceKind: "camera", editing }));
   const result = loadedData(state);
   const offered = result?.ok ? result.offered : undefined;
-  // On this device's clock, as the date fields are.
-  const today = dateIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const daysLeft = offered?.current ? dayCount(today, lastDayOf(schedule, offered.current.date)) : 0;
+  // Counting today: the days until it's due, which the profile's timezone sets, not this device's.
+  const daysLeft = offered?.current ? Math.ceil((Date.parse(offered.current.dueAt) - Date.now()) / 86_400_000) : 0;
   useEffect(() => {
     if (offered && !form.firstPeriodPicked) {
       update({ startDate: daysLeft >= 7 ? "" : offered.next.date, firstPeriodPicked: true });
@@ -673,7 +676,7 @@ function FirstPeriodChoice({
         onChange={() => pickNext(next)}
       />
       <span className="rt">
-        <b>{periodName(kind, date)}</b>
+        <b>{kind === "every-2-weeks" ? (next ? "Next week" : "This week") : periodName(kind, date)}</b>
         <small>{note}</small>
       </span>
     </label>

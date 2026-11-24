@@ -195,10 +195,16 @@ export const TERM_LABELS: Record<TermChange["term"], string> = {
   reminders: "Reminders",
 };
 
-/** A term's label on a pact with `schedule`: a Weekly count pact's schedule is its Target, a One-time pact's its Deadline. */
+/**
+ * A term's label on a pact with `schedule`: a Weekly count pact's schedule is
+ * its Target, a One-time pact's its Deadline, an Every 2 weeks or Once a
+ * month pact's its Schedule.
+ */
 export function termLabel(term: TermChange["term"], schedule: Pick<Schedule, "kind">): string {
-  if (term === "schedule" && schedule.kind === "weekly-count") return "Target";
-  return term === "schedule" && schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term];
+  if (term !== "schedule") return TERM_LABELS[term];
+  if (schedule.kind === "weekly-count") return "Target";
+  if (schedule.kind === "one-time") return "Deadline";
+  return schedule.kind === "fixed-days" ? TERM_LABELS[term] : "Schedule";
 }
 
 /** A clock time as "12:00am" or "11:30pm". */

@@ -88,7 +88,7 @@ export function RemindersStep({
             : dated
               ? `Each reminder goes off once, at the date and time you set, if you haven't submitted a photo yet. Set it before ${due} on the deadline date.`
               : isOncePerPeriod({ kind: scheduleKind })
-                ? `Reminders go off before ${due} on each of the last 7 days of ${scheduleKind === "once-a-month" ? "each month" : "every 2 weeks"}, until you've submitted a photo. A trip ahead moves them to the 7 days before it.`
+                ? `Reminders go off before ${due} on each of the last 7 days of each ${scheduleKind === "once-a-month" ? "month" : "2 weeks"}, until you've submitted a photo. A trip ahead moves them to the 7 days before it.`
                 : scheduleKind === "weekly-count"
                   ? `Reminders go off before ${due} on each day you haven't submitted a photo, until you've submitted enough photos for the week.`
                   : `Reminders go off on scheduled days before ${due}, if you haven't submitted a photo yet.`}

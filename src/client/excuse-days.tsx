@@ -7,10 +7,10 @@ import { periodKindOfSpan } from "../shared/schedules.ts";
 import type { ExcuseDay, ExcuseSkipReason, LocalDate, OccurrenceStatus, PeriodKind } from "../shared/types.ts";
 import {
   dateIn,
+  dueDayOf,
   dueClockText,
   EXCUSE_WINDOW_TEXT,
   formatDate,
-  formatDay,
   money,
   periodName,
   thisPeriod,
@@ -94,7 +94,7 @@ export function presentOccurrence(status: Status, now: number, options: PresentO
             ? period === "weekly-count"
               ? "Due by Sunday"
               : period
-                ? `Due by ${formatDay(new Date(Date.parse(status.dueAt) - 1).toISOString(), timezone)}`
+                ? `Due by ${formatDate(dueDayOf(status.dueAt, timezone))}`
                 : `Due at ${dueClockText(status.dueAt, timezone)}`
             : oura
               ? "No Oura data"

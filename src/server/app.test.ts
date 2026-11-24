@@ -1271,7 +1271,7 @@ describe("evidence", () => {
           penaltyCents: 500,
           recipientName: "Sam",
           excusableUntil: expect.any(String),
-          period: false,
+          period: null,
         },
       ] satisfies TodayResponse["alerts"]);
       expect(today.body.sections).toEqual([]);

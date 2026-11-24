@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import type { Json } from "../shared/api.ts";
+import { isOncePerPeriod } from "../shared/schedules.ts";
 import {
   MAX_TEXT_CHARS,
   type AppliesNow,
@@ -197,30 +198,33 @@ function ChangeForm({ pact, onDone, onInvite }: { pact: Pact; onDone: () => void
         {listNames(reviewerNames)}.
       </p>
       <dl className="list term-list">
-        {termsOfKind(pact).map((term) => {
-          const changed = changes.find((c) => c.term === term);
-          return (
-            <div key={term} className={changed ? `termrow changed ${changed.effect}` : "termrow"}>
-              <dt>{termLabel(term, pact.schedule)}</dt>
-              <dd>
-                {changed ? (
-                  <>
-                    <s>{changeValue(changed, "before")}</s>
-                    {changeValue(changed, "after")}
-                    <span className={`tagline t-${changed.effect}`}>{effectText(changed)}</span>
-                  </>
-                ) : term === "reminders" ? (
-                  remindersText(pact.reminders)
-                ) : (
-                  currentValue(term, pact)
-                )}
-              </dd>
-              <button className="btn sm" onClick={() => setStep(STEP_OF[term])}>
-                Change
-              </button>
-            </div>
-          );
-        })}
+        {termsOfKind(pact)
+          // Every 2 weeks and Once a month have nothing in their schedule to change, and their first period has opened.
+          .filter((term) => !(isOncePerPeriod(pact.schedule) && (term === "schedule" || term === "start-date")))
+          .map((term) => {
+            const changed = changes.find((c) => c.term === term);
+            return (
+              <div key={term} className={changed ? `termrow changed ${changed.effect}` : "termrow"}>
+                <dt>{termLabel(term, pact.schedule)}</dt>
+                <dd>
+                  {changed ? (
+                    <>
+                      <s>{changeValue(changed, "before")}</s>
+                      {changeValue(changed, "after")}
+                      <span className={`tagline t-${changed.effect}`}>{effectText(changed)}</span>
+                    </>
+                  ) : term === "reminders" ? (
+                    remindersText(pact.reminders)
+                  ) : (
+                    currentValue(term, pact)
+                  )}
+                </dd>
+                <button className="btn sm" onClick={() => setStep(STEP_OF[term])}>
+                  Change
+                </button>
+              </div>
+            );
+          })}
       </dl>
       <VerdictBox
         verdict={verdict}

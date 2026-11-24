@@ -2,17 +2,17 @@
 // period's progress, and which pacts judging reads.
 
 import { isPeriodSchedule, lastDayOf, targetOf } from "../shared/schedules.ts";
-import type {
-  AccountId,
-  EvidenceKind,
-  EvidenceRejection,
-  ExcuseSkipReason,
-  LocalDate,
-  OccurrenceStanding,
-  OccurrenceStatus,
-  PeriodProgress,
+import {
+  PERIOD_KINDS,
+  type AccountId,
+  type EvidenceKind,
+  type EvidenceRejection,
+  type ExcuseSkipReason,
+  type LocalDate,
+  type OccurrenceStanding,
+  type OccurrenceStatus,
+  type PeriodProgress,
 } from "../shared/types.ts";
-import { PERIOD_KINDS } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { coverOn, excusableUntil, excuseWindowOpensSql, keepsToDo } from "./covers.ts";
 import type { Occurrence } from "./occurrences.ts";

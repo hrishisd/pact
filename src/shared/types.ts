@@ -969,8 +969,8 @@ export type TodayAlert =
        * hours are running.
        */
       excusableUntil: Date | null;
-      /** Whether it's a Weekly count day. */
-      period: boolean;
+      /** On a period schedule, the period's kind and last day, the day to make it up by. Null for a day's occurrence. */
+      period: { kind: PeriodKind; lastDay: LocalDate } | null;
     }
   /**
    * A reviewer rejected an excuse: its held penalties are owed again, and its

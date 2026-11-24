@@ -73,19 +73,19 @@ export function tripAheadOf(
 }
 
 /**
- * Whether `day` is in the reminder window of the pact's period dated
- * `period` on `schedule`: the days its reminders go off on, and from the
- * first of which Today shows it under To do. Every day of a Weekly count
- * week; on Every 2 weeks and Once a month, the 7 days up to and including
- * the day to do it by of the period's trip, before and during the trip, else
- * the period's last 7 days. `day` before the window is Today's Later.
+ * The reminder window of the pact's period dated `period` on `schedule`: the
+ * days from `first` to the period's last day, but for those of its trip
+ * (`away`), that its reminders go off on. From `first` on, Today shows it
+ * under To do. Every day of a Weekly count week; on Every 2 weeks and Once a
+ * month, from 7 days before the period's trip, else the period's last 7 days.
  */
 export function reminderWindow(
   ctx: CoreContext,
   pactId: string,
   schedule: PeriodSchedule,
   period: LocalDate,
-): { first: LocalDate; last: LocalDate } {
-  const last = periodTrip(ctx, pactId, schedule, period)?.doItBy ?? lastDayOf(schedule, period);
-  return { first: addDays(last, 1 - REMINDER_WINDOW_DAYS), last };
+): { first: LocalDate; last: LocalDate; away: TripAhead | null } {
+  const away = periodTrip(ctx, pactId, schedule, period);
+  const last = lastDayOf(schedule, period);
+  return { first: addDays(away?.doItBy ?? last, 1 - REMINDER_WINDOW_DAYS), last, away };
 }

@@ -171,6 +171,7 @@ function worthReminding(
   if (!isPeriodSchedule(schedule)) return true;
   const window = reminderWindow(ctx, pact.id, schedule, occurrence.date);
   if (day < window.first || day > window.last) return false;
+  if (window.away && day >= window.away.firstDay && day <= window.away.lastDay) return false;
   return ctx.db.prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND day = ?`).get(pact.id, day) === undefined;
 }
 

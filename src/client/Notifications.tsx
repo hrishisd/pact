@@ -22,7 +22,7 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
     label: "Questions and replies",
     hint: "A reviewer asked you about something, or a friend replied to your question",
   },
-  "missed-occurrence": { label: "Missed", hint: "A day or week of one of your pacts was judged missed" },
+  "missed-occurrence": { label: "Missed", hint: "A day, week or month of one of your pacts was judged missed" },
   "new-bill": { label: "New bill", hint: "Your Wednesday bill to a recipient is ready" },
   "overdue-bill": { label: "Overdue bill", hint: "A bill of yours is overdue, or one of a friend's you review" },
   "connection-problem": {

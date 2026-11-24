@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { EvidenceKind, FirstOccurrence, Friend, PactTerms, Recipient, Refusal } from "../shared/types.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
-import { lastDayOf } from "../shared/schedules.ts";
+import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import { ouraResultText, takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
 import { api, failureText } from "./api.ts";
@@ -51,6 +51,7 @@ function stepProblem(step: Step, form: Form): Problem | null {
       const scheduleKind = scheduleKindOf(form);
       if (scheduleKind === "one-time" && form.deadline === "") return "no-deadline";
       if (scheduleKind === "fixed-days" && form.days.length === 0) return "no-days";
+      if (isOncePerPeriod({ kind: scheduleKind }) && !form.firstPeriodPicked) return "no-first-period";
       return form.kind !== "oura" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
     }
     case "penalty": {
@@ -229,7 +230,9 @@ export function CreatePact({
     case "penalty":
     case "reviewers":
     case "reminders":
-      body = <PactFormStep step={step} form={form} update={update} lists={lists} onInvite={onInvite} />;
+      body = (
+        <PactFormStep step={step} form={form} update={update} lists={lists} onInvite={onInvite} editing={editing?.id} />
+      );
       break;
     case "check":
       body = (

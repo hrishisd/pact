@@ -1808,6 +1808,10 @@ details.folded .kv {
   white-space: nowrap;
   flex: none;
 }
+.tcard.slim .evidence:not(.full) {
+  border-top: 0;
+  padding-top: 0;
+}
 .tcard.slim .evidence.full {
   flex-basis: 100%;
 }

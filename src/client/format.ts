@@ -96,6 +96,11 @@ function wallClockIn(instant: string, timeZone: string): ClockTime {
   return `${part("hour")}:${part("minute")}`;
 }
 
+/** A period's last day in `timeZone` (the profile's), from its due time: the midnight that ends it. */
+export function dueDayOf(dueAt: string, timeZone: string): LocalDate {
+  return dateIn(Date.parse(dueAt) - 1, timeZone);
+}
+
 /** `now` (ms) as its date in `timeZone` (the profile's), not this device's. */
 export function dateIn(now: number, timeZone: string): LocalDate {
   const part = partsIn(now, timeZone, { year: "numeric", month: "2-digit", day: "2-digit" });
