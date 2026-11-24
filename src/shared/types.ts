@@ -286,7 +286,8 @@ export type FirstOccurrenceResult =
       offered?: OfferedPeriods;
       /**
        * A Weekly count pact whose first week is the one it's made in: the days
-       * left for a photo from creation, today only while its due time is ahead (`ThisWeek`).
+       * left for a photo from creation, today only while its due time is
+       * ahead (`ThisWeek`).
        */
       daysLeft?: number;
     }
