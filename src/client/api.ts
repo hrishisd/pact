@@ -72,6 +72,8 @@ import {
   type DecideResponse,
   type FirstOccurrenceRequest,
   type FirstOccurrenceResponse,
+  type WeekStartsRequestBody,
+  type WeekStartsResponse,
   type FriendsResponse,
   type InviteLookupResponse,
   type LedgerResponse,
@@ -247,6 +249,7 @@ export const api = {
     post<DeletePactResponse>(API_PATHS.pact(encodeURIComponent(pactId)), undefined, "DELETE"),
   firstOccurrence: (request: FirstOccurrenceRequest) =>
     postQuietly<FirstOccurrenceResponse>(API_PATHS.firstOccurrence, request),
+  weekStarts: (request: WeekStartsRequestBody) => postQuietly<WeekStartsResponse>(API_PATHS.weekStarts, request),
   pact: (pactId: string) => call<PactResponse>(API_PATHS.pact(encodeURIComponent(pactId))),
   changePreview: (pactId: string, change: ChangePactRequest) =>
     postQuietly<ChangePreviewResponse>(API_PATHS.changePreview(encodeURIComponent(pactId)), change),

@@ -204,13 +204,192 @@ describe("the first occurrence", () => {
     expect(pactOf(owner, piano).firstOccurrence.date).toBe(s.date("Mon+1"));
   });
 
-  test("a start date pushes it to the first week starting on or after it", async () => {
+  test("a start date on a later Monday starts it that week", async () => {
     const s = scenario();
     const { owner, createPact } = await ownerWithReviewers(s);
 
-    const piano = await createPact("Piano", weekly(2), { dates: { startDate: s.date("Wed+1") } });
+    const piano = await createPact("Piano", weekly(2), { dates: { startDate: s.date("Mon+2") } });
 
     expect(pactOf(owner, piano).firstOccurrence.date).toBe(s.date("Mon+2"));
+  });
+});
+
+describe("choosing the first week", () => {
+  const mondaysFrom = (s: Scenario, week: number) =>
+    Array.from({ length: 12 }, (_, i) => s.date(`Mon+${week + i}` as "Mon+1"));
+
+  test("made Thursday with 3×: this week is offered with 4 days left, and next week is the default", async () => {
+    const s = scenario();
+    const { owner } = await ownerWithReviewers(s);
+    s.setClockTo("Thu 10:00");
+
+    expect(owner.weekStarts({ target: 3 })).toEqual({
+      ok: true,
+      weekStarts: {
+        thisWeek: { monday: s.date("Mon"), daysLeft: 4, offered: true },
+        mondays: mondaysFrom(s, 1),
+        defaultMonday: s.date("Mon+1"),
+        lastWeek: null,
+      },
+    });
+  });
+
+  test("chosen, the first week is this week: a photo counts today, and the week needs the full target by Sunday", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Thu 10:00");
+
+    expect(owner.firstOccurrence({ schedule: weekly(3), startDate: s.date("Mon") })).toEqual({
+      ok: true,
+      firstOccurrence: { date: s.date("Mon"), dueAt: s.at("Mon+1 00:00") },
+      daysLeft: 4,
+    });
+    const piano = await createPact("Piano", weekly(3), { dates: { startDate: s.date("Mon") } });
+
+    expect(pactOf(owner, piano).firstOccurrence).toEqual({ date: s.date("Mon"), dueAt: s.at("Mon+1 00:00") });
+    await sessionAt(s, "Thu 11:00", owner, reviewer, piano);
+    await sessionAt(s, "Fri 11:00", owner, reviewer, piano);
+    await s.advanceTo("Mon+1 00:00");
+    expect(weekOf(owner, piano, s.date("Mon"))).toMatchObject({
+      progress: { sessions: 2, target: 3 },
+      occurrence: { status: { kind: "missed" } },
+    });
+    expect(owed(owner)).toBe(500);
+  });
+
+  test("made Saturday with 3×: this week isn't offered, and choosing it is refused", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await ownerWithReviewers(s);
+    s.setClockTo("Sat 10:00");
+
+    expect(ok(owner.weekStarts({ target: 3 })).weekStarts.thisWeek).toEqual({
+      monday: s.date("Mon"),
+      daysLeft: 2,
+      offered: false,
+      reason: "too-few-days",
+    });
+    const chosen = cameraPact("Piano", weekly(3), {
+      reviewers: [reviewer],
+      recipientId: sam.id,
+      dates: { startDate: s.date("Mon") },
+    });
+    expect(owner.firstOccurrence({ schedule: weekly(3), startDate: s.date("Mon") })).toEqual({
+      ok: false,
+      reason: "week-too-short",
+    });
+    expect(await owner.createPact(chosen)).toEqual({ ok: false, reason: "week-too-short" });
+  });
+
+  test("a due-by time already past leaves today out of the days left", async () => {
+    const s = scenario();
+    const { owner } = await ownerWithReviewers(s);
+    s.setClockTo("Thu 22:00");
+
+    expect(ok(owner.weekStarts({ target: 4, dueBy: "21:00" })).weekStarts.thisWeek).toEqual({
+      monday: s.date("Mon"),
+      daysLeft: 3,
+      offered: false,
+      reason: "too-few-days",
+    });
+    expect(ok(owner.weekStarts({ target: 3, dueBy: "21:00" })).weekStarts.thisWeek).toMatchObject({ offered: true });
+  });
+
+  test("a week that ends within the hour isn't offered", async () => {
+    const s = scenario();
+    const { owner } = await ownerWithReviewers(s);
+    s.setClockTo("Sun 23:30");
+
+    expect(ok(owner.weekStarts({ target: 1 })).weekStarts.thisWeek).toEqual({
+      monday: s.date("Mon"),
+      daysLeft: 1,
+      offered: false,
+      reason: "ends-within-an-hour",
+    });
+  });
+
+  test("made on a Monday it starts that week by default, unless too few days are left", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Mon 21:53");
+
+    expect(ok(owner.weekStarts({ target: 3 })).weekStarts).toMatchObject({
+      thisWeek: { daysLeft: 7, offered: true },
+      defaultMonday: s.date("Mon"),
+    });
+    expect(ok(owner.weekStarts({ target: 7, dueBy: "21:00" })).weekStarts).toMatchObject({
+      thisWeek: { daysLeft: 6, offered: false },
+      defaultMonday: s.date("Mon+1"),
+    });
+    const strict = await createPact("Strict", weekly(7), { dates: { dueBy: "21:00" } });
+    expect(pactOf(owner, strict).firstOccurrence.date).toBe(s.date("Mon+1"));
+  });
+
+  test("a start date that isn't a Monday is refused", async () => {
+    const s = scenario();
+    const { owner, reviewer, sam } = await ownerWithReviewers(s);
+
+    const pact = cameraPact("Piano", weekly(2), {
+      reviewers: [reviewer],
+      recipientId: sam.id,
+      dates: { startDate: s.date("Wed+1") },
+    });
+    expect(await owner.createPact(pact)).toEqual({ ok: false, reason: "start-not-monday" });
+    expect(owner.firstOccurrence({ schedule: weekly(2), startDate: s.date("Wed+1") })).toEqual({
+      ok: false,
+      reason: "start-not-monday",
+    });
+  });
+
+  test("an end date gives its last whole week", async () => {
+    const s = scenario();
+    const { owner } = await ownerWithReviewers(s);
+
+    expect(ok(owner.weekStarts({ target: 3, endDate: s.date("Wed+3") })).weekStarts.lastWeek).toBe(s.date("Mon+2"));
+    expect(ok(owner.weekStarts({ target: 3, endDate: s.date("Sun+3") })).weekStarts.lastWeek).toBe(s.date("Mon+3"));
+  });
+
+  test("in its edit window, a pact that started this week keeps counting from when it was made", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Sun 22:00");
+    const piano = await createPact("Piano", weekly(1), { dates: { startDate: s.date("Mon") } });
+    s.setClockTo("Sun 23:05");
+
+    expect(ok(owner.weekStarts({ target: 1, editing: piano })).weekStarts.thisWeek).toMatchObject({ offered: true });
+  });
+
+  test("a change request offers no this week, and starts its Mondays at the first week not open", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Tue 10:00");
+    const piano = await createPact("Piano", weekly(3), { dates: { startDate: s.date("Mon+2") } });
+    s.setClockTo("Thu 10:00");
+
+    expect(owner.weekStarts({ target: 3, changing: piano })).toEqual({
+      ok: true,
+      weekStarts: { thisWeek: null, mondays: mondaysFrom(s, 1), defaultMonday: s.date("Mon+1"), lastWeek: null },
+    });
+    expect(owner.changePreview(piano, changed(owner, piano, { startDate: s.date("Thu+2") }))).toEqual({
+      ok: false,
+      reason: "start-not-monday",
+    });
+    expect(owner.changePreview(piano, changed(owner, piano, { startDate: s.date("Mon+1") }))).toMatchObject({
+      ok: true,
+    });
+  });
+
+  test("a pact that started this week midweek can still raise its target", async () => {
+    const s = scenario();
+    const { owner, createPact } = await ownerWithReviewers(s);
+    s.setClockTo("Thu 10:00");
+    const piano = await createPact("Piano", weekly(3), { dates: { startDate: s.date("Mon") } });
+    s.setClockTo("Fri 10:00");
+
+    ok(await owner.changePact(piano, changed(owner, piano, { schedule: weekly(6) })));
+
+    await s.advanceTo("Mon+2 00:00");
+    expect(weekOf(owner, piano, s.date("Mon")).progress.target).toBe(3);
+    expect(weekOf(owner, piano, s.date("Mon+1")).progress.target).toBe(6);
   });
 });
 

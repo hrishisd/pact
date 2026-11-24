@@ -36,6 +36,8 @@ import type {
   FileExcuseResult,
   DecideResult,
   FirstOccurrenceResult,
+  WeekStartsRequest,
+  WeekStartsResult,
   Friend,
   Invite,
   InviteLookup,
@@ -193,6 +195,7 @@ export const API_PATHS = {
   recipients: "/api/recipients",
   pacts: "/api/pacts",
   firstOccurrence: "/api/pacts/first-occurrence",
+  weekStarts: "/api/pacts/week-starts",
   pact: <T extends string>(pactId: T) => `/api/pacts/${pactId}` as const,
   evidence: <T extends string>(pactId: T) => `/api/pacts/${pactId}/evidence` as const,
   /** `date` is the occurrence's day, "YYYY-MM-DD". */
@@ -335,6 +338,10 @@ export type FirstOccurrenceRequest = PactTiming & {
   editing?: string;
 };
 export type FirstOccurrenceResponse = Json<FirstOccurrenceResult>;
+
+/** POST /api/pacts/week-starts: the weeks a Weekly count pact's Schedule step offers as its first. */
+export type WeekStartsRequestBody = WeekStartsRequest;
+export type WeekStartsResponse = Json<WeekStartsResult>;
 
 /**
  * POST /api/pacts/:id/change/preview and POST /api/pacts/:id/change: every
