@@ -1,6 +1,6 @@
 # 04 Presets on the Schedule step, Today's later section, the trip line
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec: `../spec.md`, all screens. The screens follow the prototype on `prototype/monthly-count`: option C (presets) and T2 (quiet until the last week).
@@ -15,5 +15,5 @@ Spec: `../spec.md`, all screens. The screens follow the prototype on `prototype/
 
 ## Acceptance criteria
 
-- [ ] Component tests for each screen above.
-- [ ] Screenshots of the real app next to the prototype, sent to the owner.
+- [x] Component tests for each screen above.
+- [x] Screenshots of the real app next to the prototype, sent to the owner.

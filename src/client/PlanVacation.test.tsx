@@ -115,7 +115,7 @@ test("ticking every offered pact by hand says All pacts on the confirm step", as
   });
 });
 
-test("a month the vacation doesn't cover says why, and to do it before the trip", async () => {
+test("a month the vacation doesn't cover says why, and to do it before the trip, under that month", async () => {
   const call = { ...pact("call", "Call Grandma", [SAM]), schedule: { kind: "once-a-month" as const } };
   stubApi({
     vacationOptions: answers(options([call])),
@@ -129,7 +129,10 @@ test("a month the vacation doesn't cover says why, and to do it before the trip"
             ticked: pactIds.includes("call"),
             covered: [],
             skipped: [],
-            notCovered: [{ date: "2026-12-01", through: "2026-12-31", doItBy: "2026-12-19" }],
+            notCovered: [
+              { date: "2026-12-01", through: "2026-12-31", doItBy: "2026-12-19" },
+              { date: "2027-01-01", through: "2027-01-31" },
+            ],
           },
         ],
         summary: { kind: "all" },
@@ -144,6 +147,11 @@ test("a month the vacation doesn't cover says why, and to do it before the trip"
   await user.click(screen.getByRole("button", { name: "Next" }));
 
   expect(await screen.findByText("No whole months off")).toBeTruthy();
-  expect(screen.getByText("December isn't off. A vacation covers a month only from the 15th to its end.")).toBeTruthy();
-  expect(screen.getByText("Do it by Sat Dec 19. Reminders move to the 7 days before your trip.")).toBeTruthy();
+  const lines = [
+    screen.getByText("December isn't off. A vacation covers a month only from the 15th to its end."),
+    screen.getByText("Do it by Sat Dec 19. Reminders move to the 7 days before your trip."),
+    screen.getByText("January isn't off. A vacation covers a month only from the 15th to its end."),
+  ];
+  expect(lines[0]!.compareDocumentPosition(lines[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(lines[1]!.compareDocumentPosition(lines[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

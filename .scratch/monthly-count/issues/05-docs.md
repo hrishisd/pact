@@ -1,6 +1,6 @@
 # 05 Glossary and behaviour page
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 ## What to build
@@ -10,4 +10,4 @@ Blocked by: 04
 
 ## Acceptance criteria
 
-- [ ] `npm run check` passes (the glossary lint included).
+- [x] `npm run check` passes (the glossary lint included).

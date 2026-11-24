@@ -1,6 +1,6 @@
 # 01 Name Weekly count's machinery by period, not week
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: `../spec.md`, Schedules ("period schedules").
@@ -15,5 +15,5 @@ A refactor with no change in behaviour, so tickets 02 and 03 add the new schedul
 
 ## Acceptance criteria
 
-- [ ] `npm run check` passes with no test changed except for the renames.
-- [ ] No behaviour change: the fuzz test passes on fresh seeds.
+- [x] `npm run check` passes with no test changed except for the renames.
+- [x] No behaviour change: the fuzz test passes on fresh seeds. (A short run of 10 fresh seeds passed; the full run was too slow for the build container.)

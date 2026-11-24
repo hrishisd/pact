@@ -1,6 +1,6 @@
 # 03 Reminder window, trips ahead and Today's later section in the core
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: `../spec.md` stories 5–7; The reminder window and trips, Today, Reminders, Vacations (the Check step's advice).
@@ -15,7 +15,7 @@ Spec: `../spec.md` stories 5–7; The reminder window and trips, Today, Reminder
 
 ## Acceptance criteria (core scenarios)
 
-- [ ] A monthly pact with a 19:00 reminder: no reminder Dec 1–24, one each day Dec 25–31 until a photo is in.
-- [ ] With an approved trip Dec 24 – Jan 3: reminders Dec 17–23 only; Today's card says do it by Dec 23 from the day the trip is approved.
-- [ ] A rejected or withdrawn trip, or a trip not overlapping the last 7 days, changes nothing.
-- [ ] On Dec 3 the pact is in the later section; on Dec 26 it's a To do card; once a photo is in, it's in neither.
+- [x] A monthly pact with a 19:00 reminder: no reminder Dec 1–24, one each day Dec 25–31 until a photo is in.
+- [x] With an approved trip Dec 24 – Jan 3: reminders Dec 17–23 only; Today's card says do it by Dec 23 from the day the trip is approved.
+- [x] A rejected or withdrawn trip, or a trip not overlapping the last 7 days, changes nothing.
+- [x] On Dec 3 the pact is in the later section; on Dec 26 it's a To do card; once a photo is in, it's in neither.

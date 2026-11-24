@@ -31,10 +31,10 @@ The span of days that is one occurrence on Weekly count, Every 2 weeks or Once a
 _Avoid_: Cycle
 
 **Reminder window**:
-The days of an Every 2 weeks or Once a month period on which its reminders go off and Today shows it under To do: its last 7 days, or from 7 days before a trip ahead to the period's end, but for the trip's own days. Before it, Today shows the period in a quiet section of its own.
+The days of an Every 2 weeks or Once a month period on which Today shows it under To do and its reminders go off: its last 7 days, or from 7 days before a trip ahead to the period's end. Reminders skip the trip's own days. Before it, Today shows the period in a quiet section of its own.
 
 **Trip ahead**:
-A vacation, waiting or approved, that doesn't cover an Every 2 weeks or Once a month period but starts in it and reaches its last 7 days. The owner is told to do it by the day before the trip, and the reminder window moves to the 7 days before it.
+A vacation, waiting or approved, that doesn't cover an Every 2 weeks or Once a month period but starts after its first day and reaches its last 7 days. The owner is told to do it by the day before the trip, and the reminder window starts 7 days before it.
 
 **Target**:
 How many days of a Weekly count week need approved evidence for the week to be Satisfied, e.g. 3 for "3× per week". At most one day of evidence counts per calendar day, and a week adds one penalty for each day it falls short.
