@@ -1023,8 +1023,8 @@ describe("once approved, covered occurrences are Excused", () => {
       expect.objectContaining({ date: s.date("Mon+1"), cents: 1500 }),
     ]);
     const { history } = pactOf(owner, piano);
-    if (history.kind !== "weekly-count") throw new Error("not a week heat map");
-    expect(history.weeks.find((week) => week.date === s.date("Mon+2"))?.occurrence?.status.kind).toBe("excused");
+    if (history.kind !== "periods") throw new Error("not a week heat map");
+    expect(history.periods.find((week) => week.date === s.date("Mon+2"))?.occurrence?.status.kind).toBe("excused");
   });
 
   test("a covered One-time deadline is Excused at the deadline and the pact Ends", async () => {
@@ -1851,8 +1851,8 @@ describe("the heat map after an approved vacation", () => {
     await s.advanceTo("Mon+2 12:00");
 
     const { history } = pactOf(owner, piano);
-    if (history.kind !== "weekly-count") throw new Error("not a week heat map");
-    expect(history.weeks.find((week) => week.date === s.date("Mon+1"))?.occurrence?.status).toEqual({
+    if (history.kind !== "periods") throw new Error("not a week heat map");
+    expect(history.periods.find((week) => week.date === s.date("Mon+1"))?.occurrence?.status).toEqual({
       kind: "excused",
       cover: { kind: "vacation", state: "approved" },
       phase: "past-due",

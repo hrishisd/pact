@@ -18,6 +18,7 @@ import type { Occurrence, Occurrences } from "./occurrences.ts";
 import { deadlineWallClock, wallClock } from "./oura-clock.ts";
 import type { ReviewOutcome } from "./requests.ts";
 import { ankiDeckOn, occurrencesOf, scheduleOf, termsOn } from "./rows.ts";
+import { isPeriodSchedule, targetOf } from "../shared/schedules.ts";
 
 /** One submission of evidence for the occurrence (a Weekly count week: for one of its days). */
 export interface EvidenceFact {
@@ -132,8 +133,8 @@ const STEP_ORDER: Record<Step["kind"], number> = {
  */
 export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
   const { occurrence, terms, pactEndedAt, automatic, cover } = facts;
-  const weekly = terms.schedule.kind === "weekly-count";
-  const target = terms.schedule.kind === "weekly-count" ? terms.schedule.target : 1;
+  const weekly = isPeriodSchedule(terms.schedule);
+  const target = targetOf(terms.schedule);
   const evidence = facts.evidence.filter((e) => e.submittedAt.getTime() <= now.getTime());
   const decidedBy = (e: EvidenceFact, t: Date) => e.decidedAt !== null && e.decidedAt.getTime() <= t.getTime();
   const approvedDays = (t: Date) =>

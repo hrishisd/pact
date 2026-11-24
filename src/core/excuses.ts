@@ -40,7 +40,7 @@ import {
   accountName,
   accountRow,
   friendsSortedByName,
-  isWeekly,
+  isPeriodPact,
   occurrencesOf,
   ownPact,
   pactName,
@@ -375,7 +375,7 @@ export function excuseDatesText(ctx: CoreContext, excuseId: string): string {
     .prepare(`SELECT MIN(date) AS first, MAX(date) AS last, pact_id FROM excuse_day WHERE excuse_id = ?`)
     .get(excuseId) as { first: LocalDate; last: LocalDate; pact_id: string };
   const text = first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
-  return isWeekly(ctx, pactId) ? `Week of ${text}` : text;
+  return isPeriodPact(ctx, pactId) ? `Week of ${text}` : text;
 }
 
 /**

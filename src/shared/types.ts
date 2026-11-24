@@ -413,9 +413,9 @@ export type PactHistory =
       days: HeatMapDay[];
     }
   | {
-      kind: "weekly-count";
-      /** Every week from the first occurrence through this week (or the week it Ended, or the first while it's coming up), oldest first. */
-      weeks: HeatMapWeek[];
+      kind: "periods";
+      /** Every period from the first occurrence through the open one (or the one it Ended in, or the first while it's coming up), oldest first. */
+      periods: HeatMapPeriod[];
     }
   | {
       kind: "one-time";
@@ -424,13 +424,13 @@ export type PactHistory =
     };
 
 /** One week on a Weekly count pact's heat map. */
-export interface HeatMapWeek {
+export interface HeatMapPeriod {
   /** Its Monday, in the owner's timezone. */
   date: LocalDate;
   /** How its occurrence went, or null for a week from the one the pact Ended that was never judged. */
   occurrence: OccurrenceRecord | null;
-  /** How far it got: see `WeekProgress`. */
-  progress: WeekProgress;
+  /** How far it got: see `PeriodProgress`. */
+  progress: PeriodProgress;
 }
 
 /**
@@ -438,7 +438,7 @@ export interface HeatMapWeek {
  * (at most one counts per day), `waiting` more with evidence waiting for a
  * reviewer, toward the `target` its terms set.
  */
-export interface WeekProgress {
+export interface PeriodProgress {
   sessions: number;
   waiting: number;
   target: number;
@@ -561,7 +561,7 @@ export type ReviewItem =
       penaltyCents: number;
       recipientName: string;
       /** Weekly count only: its week so far. Rejecting costs nothing then: the day just doesn't count. */
-      week?: WeekProgress;
+      period?: PeriodProgress;
       thread: QuestionThread;
     } & EvidenceView)
   /**
@@ -902,7 +902,7 @@ export type TodayAlert =
    * rejection first. It stays until the owner accepts the miss (Take the L,
    * `acceptMiss`), which changes nothing else, or files an excuse for the day.
    *
-   * On Weekly count (`week`) the day just doesn't count: nothing is Missed
+   * On Weekly count (`period`) the day just doesn't count: nothing is Missed
    * or owed yet, and the owner can make it up another day before the week is
    * due. The alert goes once the week is judged too.
    */
@@ -924,7 +924,7 @@ export type TodayAlert =
        */
       excusableUntil: Date | null;
       /** Whether it's a Weekly count day. */
-      week: boolean;
+      period: boolean;
     }
   /**
    * A reviewer rejected an excuse: its held penalties are owed again, and its
@@ -1022,7 +1022,7 @@ interface TodayPactCard {
 
 /**
  * A Camera pact whose occurrence is open today and still takes evidence
- * today. A Weekly count week (`week` set) shows while today has none and the
+ * today. A Weekly count week (`period` set) shows while today has none and the
  * week's target isn't met or waiting for approval.
  */
 export interface TodayToDoCard extends TodayPactCard {
@@ -1039,7 +1039,7 @@ export interface TodayToDoCard extends TodayPactCard {
   /** Its due-by time, or null when it's due at midnight. On Weekly count it limits each day's evidence. */
   dueBy: ClockTime | null;
   /** Weekly count only: the week so far. */
-  week?: WeekProgress;
+  period?: PeriodProgress;
 }
 
 /**
@@ -1108,7 +1108,7 @@ export type MissedDetail =
    */
   | { kind: "closed"; dueBy: ClockTime }
   /** Weekly count only: how far the week got. `penaltyCents` is one penalty per day short. */
-  | { kind: "week"; progress: WeekProgress };
+  | { kind: "period"; progress: PeriodProgress };
 
 /**
  * A bedtime night past its in-bed-by time that Oura hasn't reported yet and
@@ -1295,7 +1295,7 @@ export interface LedgerPenalty {
   /** When it was added: when the occurrence was judged Missed. */
   addedAt: Date;
   /** Weekly count only: how far its week got. `amountCents` is one penalty per day short of the target. */
-  week?: WeekProgress;
+  period?: PeriodProgress;
   /**
    * How much of it approved payments have paid: none, part or all of
    * `amountCents`. Approved payments to the recipient pay off its penalties

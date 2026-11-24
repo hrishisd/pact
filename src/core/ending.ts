@@ -6,6 +6,7 @@ import type { EndTiming, LocalDate } from "../shared/types.ts";
 import { localDateOf, startOfDay } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { isJudged } from "./occurrence-state.ts";
+import { lastDayOf } from "./occurrences.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
 import { ankiCheckHolds } from "./verdict.ts";
 
@@ -60,8 +61,7 @@ export function endTiming(ctx: CoreContext, pactId: string, now: Date): EndTimin
     )
     .at(-1);
   if (open === undefined) return { kind: "at-once" };
-  const weekly = scheduleOf(schedule).kind === "weekly-count";
-  return { kind: "after", lastDay: weekly ? addDays(open.date, 6) : open.date };
+  return { kind: "after", lastDay: lastDayOf(scheduleOf(schedule), open.date) };
 }
 
 /**

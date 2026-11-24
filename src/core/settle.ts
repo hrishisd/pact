@@ -12,6 +12,7 @@ import { enqueueMissed, noteAnkiMiss } from "./judging.ts";
 import { isJudged, pactsToJudge, type PactToJudge } from "./occurrence-state.ts";
 import { occurrencesOf } from "./rows.ts";
 import { ankiCheckHolds, occurrenceFacts, verdictOf, type Verdict } from "./verdict.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 
 /** What settling changed: the occurrence's stored outcome before, and its verdict now. */
 export interface Transition {
@@ -63,7 +64,7 @@ export function settle(ctx: CoreContext, pactId: string, date: LocalDate, now: D
        ON CONFLICT (pact_id, date) DO UPDATE SET outcome = excluded.outcome, judged_at = excluded.judged_at`,
     )
     .run(pactId, date, verdict.kind, verdict.at.toISOString());
-  const weekly = facts.terms.schedule.kind === "weekly-count";
+  const weekly = isPeriodSchedule(facts.terms.schedule);
   // A One-time pact has no occurrence left once its one is judged.
   if (facts.terms.schedule.kind === "one-time") endPact(ctx, pactId, "one-time-judged", verdict.at);
   if (verdict.kind === "missed") {

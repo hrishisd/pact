@@ -36,6 +36,7 @@ import {
 } from "./occurrences.ts";
 import { utcOffsetOf } from "./oura-clock.ts";
 import { dayClockOf, EDIT_WINDOW_MS } from "./pact-rules.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 
 export interface PactRow {
   id: string;
@@ -415,10 +416,10 @@ export function ankiTerms(
   };
 }
 
-/** Whether the pact's schedule is Weekly count. It keeps its kind once its edit window has closed. */
-export function isWeekly(ctx: CoreContext, pactId: string): boolean {
+/** Whether the pact's schedule is a period schedule. It keeps its kind once its edit window has closed. */
+export function isPeriodPact(ctx: CoreContext, pactId: string): boolean {
   const row = ctx.db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
-  return scheduleOf(row.schedule).kind === "weekly-count";
+  return isPeriodSchedule(scheduleOf(row.schedule));
 }
 
 /** Pacts created by this time, as an ISO string, are past their edit window: for comparing in SQL. */

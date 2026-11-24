@@ -99,7 +99,7 @@ describe("ExcuseSheet", () => {
         evidenceKind: "camera",
         dueBy: null,
         schedule: { kind: "weekly-count", target: 3 },
-        history: { kind: "weekly-count", weeks: [] },
+        history: { kind: "periods", periods: [] },
       }),
       excusePreview: async () => preview,
     });
@@ -142,7 +142,7 @@ describe("ExcuseSheet", () => {
         evidenceKind: "camera",
         dueBy: null,
         schedule: { kind: "weekly-count", target: 3 },
-        history: { kind: "weekly-count", weeks: [] },
+        history: { kind: "periods", periods: [] },
       }),
       excusePreview: async () => ({
         ok: true,

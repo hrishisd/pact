@@ -219,8 +219,8 @@ describe("a late approval on an Excused occurrence", () => {
   /** How the Weekly count week starting `monday` stands on its heat map. */
   const weekStatus = (owner: AccountHandle, pactId: string, monday: string) => {
     const { history } = pactOf(owner, pactId);
-    if (history.kind !== "weekly-count") throw new Error(`a ${history.kind} heat map`);
-    return history.weeks.find((week) => week.date === monday)?.occurrence?.status.kind;
+    if (history.kind !== "periods") throw new Error(`a ${history.kind} heat map`);
+    return history.periods.find((week) => week.date === monday)?.occurrence?.status.kind;
   };
   /** How a One-time pact's occurrence stands on its heat map. */
   const oneTimeStatus = (owner: AccountHandle, pactId: string) => {

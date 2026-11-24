@@ -28,7 +28,7 @@ import { rejectedDayAlerts, rejectedEvidenceAlerts } from "./evidence.ts";
 import { rejectedExcuseAlertStandsSql, rejectedExcuseAlerts } from "./excuses.ts";
 import { ankiCheckOf, yesterdayEntries } from "./history.ts";
 import { billsForToday } from "./money.ts";
-import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, weekProgress } from "./occurrence-state.ts";
+import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
@@ -48,6 +48,7 @@ import {
 } from "./rows.ts";
 import { thread } from "./requests.ts";
 import { waitingFor } from "./waiting.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 
 export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
   const { timezone } = accountRow(ctx, accountId);
@@ -305,7 +306,7 @@ function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: 
   if (pact.terms.schedule.kind === "weekly-count") {
     // The day it is where the week opened, which a move since leaves as it was.
     const today = localDateOf(now, timezoneOn(open.date));
-    const week = weekToDo(ctx, pact.id, open, today, dayDueAt(today)!, now);
+    const week = periodToDo(ctx, pact.id, open, today, dayDueAt(today)!, now);
     if (!week) return null;
     return {
       section: "to-do",
@@ -364,19 +365,19 @@ function ankiCard(ctx: CoreContext, pact: ActivePact, ownerId: AccountId, open: 
  * `now`, when `today` still takes evidence (before `todayDueAt`) and has
  * none; else null.
  */
-function weekToDo(
+function periodToDo(
   ctx: CoreContext,
   pactId: string,
   week: Occurrence,
   today: LocalDate,
   todayDueAt: Date,
   now: Date,
-): Pick<TodayToDoCard, "occurrenceDate" | "dueAt" | "dueBy" | "week"> | null {
+): Pick<TodayToDoCard, "occurrenceDate" | "dueAt" | "dueBy" | "period"> | null {
   if (now.getTime() >= todayDueAt.getTime()) return null;
   if (evidenceDecision(ctx, pactId, today, "day") !== "none") return null;
-  const progress = weekProgress(ctx, pactId, week.date);
+  const progress = periodProgress(ctx, pactId, week.date);
   const { due_by: dueBy } = termsOn(ctx, pactId, week.date);
-  return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, week: progress };
+  return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, period: progress };
 }
 
 /**
@@ -430,7 +431,7 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
     since.toISOString(),
   );
   return rows.map((row) => {
-    const weekly = scheduleOf(row.schedule).kind === "weekly-count";
+    const weekly = isPeriodSchedule(scheduleOf(row.schedule));
     const dueBy = row.date === today && !weekly ? termsOn(ctx, row.id, row.date).due_by : null;
     return {
       pactId: row.id,
@@ -463,7 +464,7 @@ function missedDetail(
   weekly: boolean,
 ): MissedDetail | null {
   if (dueBy !== null && row.evidence_kind !== "anki") return { kind: "closed", dueBy };
-  if (weekly) return { kind: "week", progress: weekProgress(ctx, row.id, row.date) };
+  if (weekly) return { kind: "period", progress: periodProgress(ctx, row.id, row.date) };
   if (row.evidence_kind === "anki") return { kind: "anki", lastCheck: ankiCheckOf(row) };
   if (row.evidence_kind === "oura") {
     return { kind: "night", inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) };

@@ -298,9 +298,9 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
           <h3>{item.pactName}</h3>
           <span className="meta">{formatDate(item.occurrenceDate)}</span>
         </div>
-        {item.week && (
+        {item.period && (
           <span className="meta">
-            Counts toward this week · {item.week.sessions} of {item.week.target} so far
+            Counts toward this week · {item.period.sessions} of {item.period.target} so far
           </span>
         )}
         <div className="stack-sm">
@@ -315,10 +315,10 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
         onAsk={onAsk}
         placeholder="e.g. This looks like it's from last week"
         cost={
-          item.week ? (
+          item.period ? (
             <p className="small">
               If you reject it, {weekdayName(item.occurrenceDate)} won't count toward {item.ownerName}'s{" "}
-              {item.week.target} days this week. {item.ownerName} can make it up on another day.
+              {item.period.target} days this week. {item.ownerName} can make it up on another day.
             </p>
           ) : (
             <p className="small">

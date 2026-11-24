@@ -6,7 +6,7 @@ import {
   type AccountId,
   type AnkiCheck,
   type HeatMapDay,
-  type HeatMapWeek,
+  type HeatMapPeriod,
   type LocalDate,
   type OccurrenceDetail,
   type OccurrenceRecord,
@@ -18,10 +18,11 @@ import {
 import { laterDate, localDateOf, mondayOf, weekdayOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { onApprovedVacation } from "./covers.ts";
-import { occurrenceStatus, rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
+import { occurrenceStatus, rejection, PERIOD_PACT, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 
 /** The day an Ended pact Ended, in `timezone`; null while it's Active. */
 export function endedOnOf(pact: Pick<PactRow, "ended_at">, timezone: string): LocalDate | null {
@@ -46,7 +47,7 @@ export function pactHistory(
     case "one-time":
       return { kind: "one-time", day: { date: first.date, occurrence: occurrenceRecord(ctx, row, first) } };
     case "weekly-count":
-      return { kind: "weekly-count", weeks: heatMapWeeks(ctx, row, timezone, first.date, now) };
+      return { kind: "periods", periods: heatMapPeriods(ctx, row, timezone, first.date, now) };
     case "fixed-days":
       return { kind: "fixed-days", days: heatMapDays(ctx, row, timezone, first.date, now) };
   }
@@ -75,13 +76,13 @@ export function heatMapDays(
  * through this one, or the one it Ended, or its first while that's ahead;
  * none from the week it Ended that was never judged.
  */
-export function heatMapWeeks(
+export function heatMapPeriods(
   ctx: CoreContext,
   pact: PactRow,
   timezone: string,
   first: LocalDate,
   now: Date,
-): HeatMapWeek[] {
+): HeatMapPeriod[] {
   const endedOn = endedOnOf(pact, timezone);
   const last = laterDate(first, endedOn ?? localDateOf(now, timezone));
   return occurrencesOf(ctx, pact.id, timezone)
@@ -92,7 +93,7 @@ export function heatMapWeeks(
       return {
         date: week.date,
         occurrence: afterEnd ? null : record,
-        progress: weekProgress(ctx, pact.id, week.date),
+        progress: periodProgress(ctx, pact.id, week.date),
       };
     });
 }
@@ -105,7 +106,7 @@ export function yesterdayEntries(ctx: CoreContext, ownerId: AccountId, timezone:
   const yesterday = addDays(localDateOf(ctx.clock.now(), timezone), -1);
   // A Weekly count week isn't due on any one day.
   const pacts = ctx.all<PactRow>(
-    `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${WEEKLY_COUNT_PACT} ORDER BY name, created_at, id`,
+    `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${PERIOD_PACT} ORDER BY name, created_at, id`,
     ownerId,
   );
   return pacts.flatMap((pact) =>
@@ -193,7 +194,7 @@ export function recordedStatus(
 ): RecordedStatus {
   const pactId = pact.id;
   // A Weekly count week is Satisfied or Missed by its days, not by any one decision.
-  const weekly = scheduleOf(pact.schedule).kind === "weekly-count";
+  const weekly = isPeriodSchedule(scheduleOf(pact.schedule));
   switch (status.kind) {
     case "satisfied": {
       const row = weekly

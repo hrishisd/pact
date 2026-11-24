@@ -167,8 +167,8 @@ function PenaltyRow({
           {penalty.pactName}
         </button>
         <small>
-          {penalty.week
-            ? `Week of ${formatDate(penalty.occurrenceDate)}: ${penalty.week.sessions} of ${penalty.week.target} days done`
+          {penalty.period
+            ? `Week of ${formatDate(penalty.occurrenceDate)}: ${penalty.period.sessions} of ${penalty.period.target} days done`
             : `Missed ${formatDate(penalty.occurrenceDate)}`}
           {` · ${billText(penalty.bill)}`}
           {penalty.held ? null : penalty.paidCents === penalty.amountCents ? (

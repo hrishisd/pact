@@ -35,7 +35,7 @@ import {
 import { localDateOf } from "./calendar.ts";
 import type { Command, CoreContext } from "./context.ts";
 import { coveredSql, excuseWindowOpensSql } from "./covers.ts";
-import { rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
+import { rejection, PERIOD_PACT, periodProgress } from "./occurrence-state.ts";
 import { settingIsOff, tellAll } from "./outbox.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import type { Photo, PhotoStore } from "./ports.ts";
@@ -198,7 +198,7 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
     `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
               penalty.amount_cents, penalty.added_at, ${PENALTY_WINDOW_OPENS} AS excuse_window_opens,
               penalty.bill_id, ${PENALTY_HELD} AS held,
-              ${PENALTY_HELD_BY_VACATION} AS held_by_vacation, ${WEEKLY_COUNT_PACT} AS weekly
+              ${PENALTY_HELD_BY_VACATION} AS held_by_vacation, ${PERIOD_PACT} AS weekly
        FROM penalty JOIN pact ON pact.id = penalty.pact_id
        WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
        ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
@@ -220,7 +220,7 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
       pactName: row.pact_name,
       occurrenceDate: row.occurrence_date,
       amountCents: row.amount_cents,
-      ...(row.weekly === 1 && { week: weekProgress(ctx, row.pact_id, row.occurrence_date) }),
+      ...(row.weekly === 1 && { period: periodProgress(ctx, row.pact_id, row.occurrence_date) }),
       addedAt: new Date(row.added_at),
       paidCents: allocation.get(row.id)?.paidCents ?? 0,
       ...(rejected && { rejection: rejected }),

@@ -78,15 +78,15 @@ function occurrencesOf(pact: PactTerms): { date: string; occurrence: OccurrenceR
   const days: (HeatMapDay | { date: string; occurrence: OccurrenceRecord | null })[] =
     pact.history.kind === "fixed-days"
       ? pact.history.days
-      : pact.history.kind === "weekly-count"
-        ? pact.history.weeks
+      : pact.history.kind === "periods"
+        ? pact.history.periods
         : [pact.history.day];
   return days.flatMap((day) => (day.occurrence ? [{ date: day.date, occurrence: day.occurrence }] : []));
 }
 
 /** The occurrence a pact's heat map shows for `date`: on Weekly count, the week it falls in. */
 function occurrenceOn(pact: PactTerms, date: string): OccurrenceRecord | undefined {
-  const weekly = pact.history.kind === "weekly-count";
+  const weekly = pact.history.kind === "periods";
   return occurrencesOf(pact).find((entry) =>
     weekly ? entry.date <= date && date < addDays(entry.date, 7) : entry.date === date,
   )?.occurrence;

@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import type { Json } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
-import type { HeatMapDay, HeatMapWeek, OccurrenceRecord } from "../shared/types.ts";
+import type { HeatMapDay, HeatMapPeriod, OccurrenceRecord } from "../shared/types.ts";
 import { HeatMap, monthLabels, weeksOf } from "./history.tsx";
 import { cameraPact, renderWithUser } from "./testing/render.tsx";
 
@@ -85,7 +85,7 @@ test("tapping an ordinary excused day still shows the excuse", async () => {
 });
 
 test("a Weekly count week a vacation covers is drawn and tapped the same way", async () => {
-  const weeks: Json<HeatMapWeek>[] = [
+  const weeks: Json<HeatMapPeriod>[] = [
     {
       date: "2025-12-29",
       occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" } },
@@ -100,7 +100,7 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
         evidenceKind: "camera",
         dueBy: null,
         schedule: { kind: "weekly-count", target: 3 },
-        history: { kind: "weekly-count", weeks },
+        history: { kind: "periods", periods: weeks },
       }}
       timezone="America/New_York"
       now={NOW}

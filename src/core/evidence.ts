@@ -23,8 +23,8 @@ import {
   isJudged,
   MISSED_THROUGH_REJECTION,
   rejection,
-  WEEKLY_COUNT_PACT,
-  weekProgress,
+  PERIOD_PACT,
+  periodProgress,
 } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
@@ -61,6 +61,7 @@ import {
   type ReviewStateRow,
 } from "./requests.ts";
 import { settle } from "./settle.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 
 export async function submitEvidence(
   ctx: CoreContext,
@@ -207,7 +208,7 @@ export function evidenceView(
 function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
   const rows = ctx.all<EvidenceViewRow & { owner_name: string; weekly: 0 | 1 }>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
-              evidence.submitted_at, evidence.occurrence_date, evidence.day, ${WEEKLY_COUNT_PACT} AS weekly
+              evidence.submitted_at, evidence.occurrence_date, evidence.day, ${PERIOD_PACT} AS weekly
        FROM evidence
        JOIN pact ON pact.id = evidence.pact_id
        JOIN account AS owner ON owner.id = pact.owner_account_id
@@ -227,7 +228,7 @@ function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[]
         ownerName: row.owner_name,
         penaltyCents: terms.penalty_cents,
         recipientName: recipientName(ctx, terms.recipient_id),
-        ...(row.weekly === 1 && { week: weekProgress(ctx, row.pact_id, row.occurrence_date) }),
+        ...(row.weekly === 1 && { period: periodProgress(ctx, row.pact_id, row.occurrence_date) }),
         thread: thread(ctx, row.id, true),
       },
       since: new Date(row.submitted_at),
@@ -356,20 +357,20 @@ export function evidenceAcceptance(
   if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
   if (photoCount === 0) return { ok: false, reason: "no-photos" };
   if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
-  const { kind } = scheduleOf(row.schedule);
+  const schedule = scheduleOf(row.schedule);
   const occurrences = occurrencesOf(ctx, pactId, timezone);
   const occurrence = occurrences.openAt(at);
   if (!occurrence) return { ok: false, reason: "not-open" };
   // The day it is where the occurrence opened, which a move since leaves as it was.
   const today = localDateOf(at, occurrences.timezoneOn(occurrence.date));
   // One-time evidence is for its one occurrence, whichever day it comes.
-  const day = kind === "one-time" ? occurrence.date : today;
+  const day = schedule.kind === "one-time" ? occurrence.date : today;
   // Past its due-by time, the day takes no more evidence.
   if (at.getTime() >= occurrences.dayDueAt(today)!.getTime()) return { ok: false, reason: "not-open" };
   const decision = evidenceDecision(ctx, pactId, day, "day");
   if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
   if (decision === "approved") return { ok: false, reason: "already-approved" };
-  if ((kind === "weekly-count" && decision === "rejected") || isJudged(ctx, pactId, occurrence.date)) {
+  if ((isPeriodSchedule(schedule) && decision === "rejected") || isJudged(ctx, pactId, occurrence.date)) {
     return { ok: false, reason: "already-judged" };
   }
   // An Ended pact has no day open any more.
@@ -456,7 +457,7 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
         penaltyCents: row.amount_cents,
         recipientName: row.recipient_name,
         excusableUntil: excusableUntil(row.excuse_window_opens),
-        week: false,
+        period: false,
       },
     };
   });
@@ -484,7 +485,7 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
        FROM evidence
        JOIN pact ON pact.id = evidence.pact_id
        JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
-       WHERE pact.owner_account_id = ? AND ${WEEKLY_COUNT_PACT}
+       WHERE pact.owner_account_id = ? AND ${PERIOD_PACT}
          AND evidence.decision = 'rejected' AND evidence.rejection_accepted_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM occurrence
                          WHERE occurrence.pact_id = evidence.pact_id AND occurrence.date = evidence.occurrence_date
@@ -512,7 +513,7 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
         penaltyCents: terms.penalty_cents,
         recipientName: recipientName(ctx, terms.recipient_id),
         excusableUntil: null,
-        week: true,
+        period: true,
       },
     };
   });

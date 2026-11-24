@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Json } from "../shared/api.ts";
 import type {
   HeatMapDay,
-  HeatMapWeek,
+  HeatMapPeriod,
   LocalDate,
   OccurrenceRecord,
   PactTerms,
@@ -35,7 +35,7 @@ import {
 
 type Occurrence = Json<OccurrenceRecord>;
 type Day = Json<HeatMapDay>;
-type Week = Json<HeatMapWeek>;
+type Week = Json<HeatMapPeriod>;
 
 /** A week's square shows no count when nothing was counted toward it: Excused, Vacation or not open yet. */
 const UNCOUNTED: Square[] = ["excused", "vac", "ahead"];
@@ -141,8 +141,8 @@ export function monthLabels(weeks: HeatMapColumn[]): string[] {
 export function HeatMap({ pact, timezone, now }: { pact: Json<PactTerms>; timezone: string; now: number }) {
   const { history } = pact;
   switch (history.kind) {
-    case "weekly-count":
-      return <WeeklyHeatMap weeks={history.weeks} timezone={timezone} now={now} />;
+    case "periods":
+      return <WeeklyHeatMap weeks={history.periods} timezone={timezone} now={now} />;
     case "one-time":
       return <OneTimeHistory pact={pact} day={history.day} timezone={timezone} now={now} />;
     case "fixed-days":

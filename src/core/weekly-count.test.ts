@@ -23,8 +23,8 @@ const weekly = (target: number): Schedule => ({ kind: "weekly-count", target });
 
 function weeksOf(owner: AccountHandle, pactId: string) {
   const { history } = pactOf(owner, pactId);
-  if (history.kind !== "weekly-count") throw new Error(`a ${history.kind} heat map`);
-  return history.weeks;
+  if (history.kind !== "periods") throw new Error(`a ${history.kind} heat map`);
+  return history.periods;
 }
 
 function weekOf(owner: AccountHandle, pactId: string, monday: string) {
@@ -92,12 +92,12 @@ describe("the spec's examples", () => {
       expect.objectContaining({
         occurrenceDate: s.date("Mon+2"),
         amountCents: 1500,
-        week: { sessions: 0, waiting: 0, target: 3 },
+        period: { sessions: 0, waiting: 0, target: 3 },
       }),
       expect.objectContaining({
         occurrenceDate: s.date("Mon+1"),
         amountCents: 500,
-        week: { sessions: 2, waiting: 0, target: 3 },
+        period: { sessions: 2, waiting: 0, target: 3 },
       }),
     ]);
     // A short week isn't Missed through its rejected photo: it's the week's own miss.
@@ -285,7 +285,7 @@ describe("evidence", () => {
         kind: "evidence",
         id: evidenceId,
         occurrenceDate: s.date("Thu+1"),
-        week: { sessions: 0, waiting: 1, target: 2 },
+        period: { sessions: 0, waiting: 1, target: 2 },
       }),
     ]);
     expect(owner.evidence(evidenceId)).toMatchObject({ ok: true, evidence: { occurrenceDate: s.date("Thu+1") } });
@@ -449,7 +449,7 @@ describe("a rejected photo", () => {
         penaltyCents: 500,
         recipientName: "Sam",
         excusableUntil: null,
-        week: true,
+        period: true,
       },
     ]);
     expect(today.sections.find((section) => section.kind === "missed")).toBeUndefined();
@@ -491,7 +491,7 @@ describe("a rejected photo", () => {
           occurrenceDate: s.date("Mon+1"),
           missedAt: s.at("Mon+2 00:00"),
           excusableUntil: new Date(s.at("Mon+2 00:00").getTime() + 2 * DAY_MS),
-          detail: { kind: "week", progress: { sessions: 0, waiting: 0, target: 1 } },
+          detail: { kind: "period", progress: { sessions: 0, waiting: 0, target: 1 } },
         },
       ],
     });
@@ -506,7 +506,7 @@ describe("a rejected photo", () => {
     await submit(owner, piano);
 
     expect(reviewer.reviewQueue()).toEqual([
-      expect.objectContaining({ kind: "evidence", week: { sessions: 1, waiting: 1, target: 3 } }),
+      expect.objectContaining({ kind: "evidence", period: { sessions: 1, waiting: 1, target: 3 } }),
     ]);
   });
 });
@@ -623,7 +623,7 @@ describe("Today", () => {
         occurrenceDate: s.date("Mon+1"),
         dueAt: s.at("Mon+2 00:00"),
         dueBy: null,
-        week: { sessions: 1, waiting: 1, target: 3 },
+        period: { sessions: 1, waiting: 1, target: 3 },
       } satisfies TodayToDoCard,
     ]);
   });
@@ -637,7 +637,7 @@ describe("Today", () => {
     const monday = await submit(owner, piano);
     expect(cards(owner, "to-do")).toEqual([]);
     s.setClockTo("Tue+1 10:00");
-    expect(cards(owner, "to-do").map((card) => card.kind === "evidence" && card.week)).toEqual([
+    expect(cards(owner, "to-do").map((card) => card.kind === "evidence" && card.period)).toEqual([
       { sessions: 0, waiting: 1, target: 2 },
     ]);
     await submit(owner, piano);

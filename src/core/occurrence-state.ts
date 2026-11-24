@@ -9,13 +9,14 @@ import type {
   LocalDate,
   OccurrenceStanding,
   OccurrenceStatus,
-  WeekProgress,
+  PeriodProgress,
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { coverOn, excusableUntil, excuseWindowOpensSql, keepsToDo } from "./covers.ts";
 import { lastDayOf, type Occurrence } from "./occurrences.ts";
 import type { ReviewOutcome } from "./requests.ts";
 import { occurrencesOf, scheduleOf, termsOn, type PactRow } from "./rows.ts";
+import { isPeriodSchedule, targetOf } from "../shared/schedules.ts";
 
 /** SQL: what judging reads of a `pact` row and its owner's `account` row (PactToJudge). */
 const PACT_TO_JUDGE_COLUMNS = `pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
@@ -39,7 +40,7 @@ export function occurrenceSpan(
   const schedule = scheduleOf(termsOn(ctx, pactId, occurrence.date).schedule);
   return {
     date: occurrence.date,
-    ...(schedule.kind === "weekly-count" && { through: lastDayOf(schedule, occurrence.date) }),
+    ...(isPeriodSchedule(schedule) && { through: lastDayOf(schedule, occurrence.date) }),
   };
 }
 
@@ -72,8 +73,8 @@ export function evidenceDecision(
   return decisions.length > 0 ? "rejected" : "none";
 }
 
-/** How far the pact's Weekly count week starting `monday` has got: see `WeekProgress`. */
-export function weekProgress(ctx: CoreContext, pactId: string, monday: LocalDate): WeekProgress {
+/** How far the pact's Weekly count week starting `monday` has got: see `PeriodProgress`. */
+export function periodProgress(ctx: CoreContext, pactId: string, monday: LocalDate): PeriodProgress {
   const schedule = scheduleOf(termsOn(ctx, pactId, monday).schedule);
   const counts = ctx.db
     .prepare(
@@ -82,7 +83,7 @@ export function weekProgress(ctx: CoreContext, pactId: string, monday: LocalDate
        FROM evidence WHERE pact_id = ? AND occurrence_date = ?`,
     )
     .get(pactId, monday) as { sessions: number; waiting: number };
-  return { ...counts, target: schedule.kind === "weekly-count" ? schedule.target : 1 };
+  return { ...counts, target: targetOf(schedule) };
 }
 
 /**
@@ -180,8 +181,8 @@ function evidenceStillNeeded(
   evidence: ReturnType<typeof evidenceDecision>,
 ): boolean {
   if (kind !== "camera") return true;
-  if (scheduleOf(termsOn(ctx, pactId, date).schedule).kind !== "weekly-count") return evidence === "none";
-  const { sessions, waiting, target } = weekProgress(ctx, pactId, date);
+  if (!isPeriodSchedule(scheduleOf(termsOn(ctx, pactId, date).schedule))) return evidence === "none";
+  const { sessions, waiting, target } = periodProgress(ctx, pactId, date);
   return sessions + waiting < target;
 }
 
@@ -255,7 +256,7 @@ export function skipReason(status: OccurrenceStatus, now: Date): ExcuseSkipReaso
 }
 
 /** SQL: the `pact` row's schedule is Weekly count. */
-export const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
+export const PERIOD_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
 
 /**
  * SQL: the Missed `occurrence` row (of the `pact` row) was judged through a
@@ -263,6 +264,6 @@ export const WEEKLY_COUNT_PACT = `json_extract(pact.schedule, '$.kind') = 'weekl
  * rejection judges the occurrence at once. A Weekly count week's rejected
  * evidence just doesn't count, so a short week is never Missed through it.
  */
-export const MISSED_THROUGH_REJECTION = `(NOT ${WEEKLY_COUNT_PACT} AND EXISTS (SELECT 1 FROM evidence
+export const MISSED_THROUGH_REJECTION = `(NOT ${PERIOD_PACT} AND EXISTS (SELECT 1 FROM evidence
   WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date
     AND evidence.decision = 'rejected'))`;

@@ -31,8 +31,8 @@ function waiting(owner: AccountHandle): string[] {
 /** How the Weekly count week starting `monday` stands on its heat map. */
 function weekStatus(owner: AccountHandle, pactId: string, monday: string) {
   const { history } = pactOf(owner, pactId);
-  if (history.kind !== "weekly-count") throw new Error(`a ${history.kind} heat map`);
-  return history.weeks.find((week) => week.date === monday)?.occurrence?.status.kind;
+  if (history.kind !== "periods") throw new Error(`a ${history.kind} heat map`);
+  return history.periods.find((week) => week.date === monday)?.occurrence?.status.kind;
 }
 
 /**
@@ -202,7 +202,7 @@ describe("moot items are withdrawn with their reason, silently", () => {
     await s.advanceTo("Mon+2 00:00");
 
     expect(pactOf(owner, piano).history).toMatchObject({
-      weeks: expect.arrayContaining([
+      periods: expect.arrayContaining([
         expect.objectContaining({
           date: s.date("Mon+1"),
           occurrence: expect.objectContaining({ status: expect.objectContaining({ kind: "satisfied" }) }),

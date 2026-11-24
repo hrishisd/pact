@@ -33,7 +33,7 @@ import {
   type TodaySection,
   type TodayToDoCard,
   type TodayWaitingItem,
-  type WeekProgress,
+  type PeriodProgress,
 } from "../shared/types.ts";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
@@ -381,8 +381,8 @@ function Section({
                 chip={<span className="chip c-todo">To do</span>}
                 onOpen={() => onOpenPact(card.pactId, card.name)}
               >
-                {card.week ? (
-                  <WeekToDo card={card} week={card.week} timezone={timezone} />
+                {card.period ? (
+                  <PeriodToDo card={card} week={card.period} timezone={timezone} />
                 ) : (
                   <div className="meta due">
                     Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
@@ -391,7 +391,7 @@ function Section({
                 )}
                 <EvidenceForm
                   pactId={card.pactId}
-                  weekly={card.week !== undefined}
+                  weekly={card.period !== undefined}
                   onSubmitted={onChanged}
                   onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
                 />
@@ -473,7 +473,15 @@ function dueDayText(card: Json<TodayToDoCard>, timezone: string, now: number): s
  * once a day counts (or shaded while it waits for approval), "1 of 3 this
  * week", and when the week is due; with a due-by time, when today's photo is.
  */
-function WeekToDo({ card, week, timezone }: { card: Json<TodayToDoCard>; week: Json<WeekProgress>; timezone: string }) {
+function PeriodToDo({
+  card,
+  week,
+  timezone,
+}: {
+  card: Json<TodayToDoCard>;
+  week: Json<PeriodProgress>;
+  timezone: string;
+}) {
   const { sessions, waiting, target } = week;
   // The week is due at the midnight ending its Sunday: name the Sunday.
   const sunday = new Date(Date.parse(card.dueAt) - 1).toISOString();
@@ -631,7 +639,7 @@ function missedLine({ detail, occurrenceDate }: Json<TodayMissedCard>, timezone:
   switch (detail?.kind) {
     case "closed":
       return `Your photo was due by ${clockText(detail.dueBy)}.`;
-    case "week": {
+    case "period": {
       const { sessions, target } = detail.progress;
       return `Week of ${formatDate(occurrenceDate)} · ${sessions} of ${target} days, ${target - sessions} short`;
     }
@@ -931,7 +939,7 @@ function RejectedEvidenceAlert({
         {alert.reviewerName} rejected your evidence for {alert.name}
       </b>
       <span>“{alert.reason}”</span>
-      {alert.week ? (
+      {alert.period ? (
         <span className="small">This day doesn't count toward the week. Make it up on another day by Sunday.</span>
       ) : (
         <span className="small">

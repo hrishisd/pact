@@ -7,7 +7,7 @@ import { clockText, formatDate } from "../shared/format.ts";
 import type { AccountId, LocalDate } from "../shared/types.ts";
 import { localDateOf, mondayOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { occurrenceView, weekProgress } from "./occurrence-state.ts";
+import { occurrenceView, periodProgress } from "./occurrence-state.ts";
 import { hasSchedule, oneTimeReminderAt, reminderAt, type Occurrences } from "./occurrences.ts";
 import { pushOperatorAlert } from "./outbox.ts";
 import {
@@ -20,6 +20,7 @@ import {
   type PactClock,
   type PactRow,
 } from "./rows.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 
 /** A reminder the scheduler reaches later than this after its time, as after downtime, is dropped, not sent. */
 const REMINDER_LATE_MS = 15 * 60 * 1000;
@@ -165,7 +166,7 @@ function worthReminding(
 ): boolean {
   const occurrence = occurrences.covering(day);
   if (occurrence === null || !occurrenceView(ctx, pact.id, occurrence).remind) return false;
-  if (scheduleOf(pact.schedule).kind !== "weekly-count") return true;
+  if (!isPeriodSchedule(scheduleOf(pact.schedule))) return true;
   return ctx.db.prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND day = ?`).get(pact.id, day) === undefined;
 }
 
@@ -190,7 +191,7 @@ function enqueueReminder(
   }
   if (kind === "one-time") body = `No photo yet. Due ${formatDate(date)} at ${due}.`;
   if (weekly) {
-    const { sessions, target } = weekProgress(ctx, pact.id, mondayOf(date));
+    const { sessions, target } = periodProgress(ctx, pact.id, mondayOf(date));
     body = `${sessions} of ${target} days done this week. Today's photo is due at ${due}.`;
   }
   ctx.enqueue({
