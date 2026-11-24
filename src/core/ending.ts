@@ -2,6 +2,7 @@
 // approved end request, which waits for the occurrence open at approval.
 
 import { addDays } from "../shared/calendar.ts";
+import { lastDayOf } from "../shared/schedules.ts";
 import type { EndTiming, LocalDate } from "../shared/types.ts";
 import { localDateOf, startOfDay } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
@@ -60,8 +61,7 @@ export function endTiming(ctx: CoreContext, pactId: string, now: Date): EndTimin
     )
     .at(-1);
   if (open === undefined) return { kind: "at-once" };
-  const weekly = scheduleOf(schedule).kind === "weekly-count";
-  return { kind: "after", lastDay: weekly ? addDays(open.date, 6) : open.date };
+  return { kind: "after", lastDay: lastDayOf(scheduleOf(schedule), open.date) };
 }
 
 /**
@@ -120,7 +120,8 @@ export function endPastEndDate(ctx: CoreContext, t: Date): void {
   for (const row of rows) {
     const { id, end_date: endDate, evidence_kind: kind, timezone } = row;
     const dayAfter = startOfDay(addDays(endDate, 1), timezone);
-    const last = occurrencesOf(ctx, id, timezone).between(addDays(endDate, -7), endDate).at(-1);
+    // The last occurrence in the week up to the end date, or on a period schedule the period it ends.
+    const last = occurrencesOf(ctx, id, timezone).overlapping(addDays(endDate, -7), endDate).at(-1);
     const endsAt = last && last.closesAt.getTime() > dayAfter.getTime() ? last.closesAt : dayAfter;
     if (endsAt.getTime() > t.getTime()) continue;
     if (kind === "anki" && last && !isJudged(ctx, id, last.date) && ankiCheckHolds(ctx, id, last.date, t)) continue;

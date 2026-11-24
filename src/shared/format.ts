@@ -2,7 +2,16 @@
 // the client and in notifications.
 
 import { parseClockTime, parseLocalDate } from "./calendar.ts";
-import { WEEKDAYS, type ClockTime, type LocalDate, type Schedule, type TermChange, type Weekday } from "./types.ts";
+import { lastDayOf } from "./schedules.ts";
+import {
+  WEEKDAYS,
+  type ClockTime,
+  type LocalDate,
+  type PeriodKind,
+  type Schedule,
+  type TermChange,
+  type Weekday,
+} from "./types.ts";
 
 /** US cents as dollars: "$5" for whole dollars, "$5.50" otherwise. */
 export function money(cents: number): string {
@@ -27,6 +36,50 @@ export function formatDate(date: LocalDate): string {
 /** "Dec 20", from `formatDate`'s "Sun Dec 20". */
 export function monthDay(date: LocalDate): string {
   return formatDate(date).slice(4);
+}
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+/**
+ * The periods of `kind` from the one dated `first` through the one dated
+ * `last`, by name: a week by its Monday ("Week of Mon Nov 30"), two
+ * weeks by their days ("Nov 30 – Dec 13"), a month by its name ("December",
+ * or "December – January" for two).
+ */
+export function periodName(kind: PeriodKind, first: LocalDate, last: LocalDate = first): string {
+  switch (kind) {
+    case "weekly-count":
+      return `Week of ${first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`}`;
+    case "every-2-weeks":
+      return dateSpan(first, lastDayOf({ kind }, last));
+    case "once-a-month": {
+      const name = (date: LocalDate) => MONTH_NAMES[parseLocalDate(date).month - 1]!;
+      return first === last ? name(first) : `${name(first)} – ${name(last)}`;
+    }
+  }
+}
+
+/** A period's length, as copy says it: "week", "2 weeks", "month". */
+export function periodWord(kind: PeriodKind): string {
+  return { "weekly-count": "week", "every-2-weeks": "2 weeks", "once-a-month": "month" }[kind];
+}
+
+/** The period now, as copy says it: "this week", "these 2 weeks", "this month". */
+export function thisPeriod(kind: PeriodKind): string {
+  return kind === "every-2-weeks" ? "these 2 weeks" : `this ${periodWord(kind)}`;
 }
 
 /** A vacation's dates: "Dec 20 – Jan 2", "Dec 20 – 26" within one month, or "Dec 20" for one day. */
@@ -111,11 +164,13 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
 
 /**
  * "Every day", the days in order ("Mon, Wed, Fri"), a Weekly count's target
- * ("3× per week"), or a One-time deadline's date ("One-time, Thu Nov 12", or
+ * ("3× per week"), "Every 2 weeks", "Once a month", or a One-time deadline's date ("One-time, Thu Nov 12", or
  * "Anytime until Thu Nov 12" with Submit anytime).
  */
 export function scheduleText(schedule: Schedule): string {
   if (schedule.kind === "weekly-count") return `${schedule.target}× per week`;
+  if (schedule.kind === "every-2-weeks") return "Every 2 weeks";
+  if (schedule.kind === "once-a-month") return "Once a month";
   if (schedule.kind === "one-time") {
     const date = formatDate(schedule.deadline);
     return schedule.submitAnytime ? `Anytime until ${date}` : `One-time, ${date}`;
@@ -140,10 +195,16 @@ export const TERM_LABELS: Record<TermChange["term"], string> = {
   reminders: "Reminders",
 };
 
-/** A term's label on a pact with `schedule`: a Weekly count pact's schedule is its Target, a One-time pact's its Deadline. */
+/**
+ * A term's label on a pact with `schedule`: a Weekly count pact's schedule is
+ * its Target, a One-time pact's its Deadline, an Every 2 weeks or Once a
+ * month pact's its Schedule.
+ */
 export function termLabel(term: TermChange["term"], schedule: Pick<Schedule, "kind">): string {
-  if (term === "schedule" && schedule.kind === "weekly-count") return "Target";
-  return term === "schedule" && schedule.kind === "one-time" ? "Deadline" : TERM_LABELS[term];
+  if (term !== "schedule") return TERM_LABELS[term];
+  if (schedule.kind === "weekly-count") return "Target";
+  if (schedule.kind === "one-time") return "Deadline";
+  return schedule.kind === "fixed-days" ? TERM_LABELS[term] : "Schedule";
 }
 
 /** A clock time as "12:00am" or "11:30pm". */

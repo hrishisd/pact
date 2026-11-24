@@ -2,6 +2,7 @@
 // occurrence follows, accounts, names, friends, reviewers and recipients, each
 // pact's occurrences, connections and Anki decks.
 
+import { isPeriodSchedule } from "../shared/schedules.ts";
 import type {
   AccountId,
   AnkiCheck,
@@ -92,6 +93,8 @@ export function scheduleTermsOf(
     case "fixed-days":
       return { schedule, day: dayClockOf(pact, inBedBy, dueBy) };
     case "weekly-count":
+    case "every-2-weeks":
+    case "once-a-month":
       return { schedule, dueBy };
     case "one-time":
       return { schedule, dueBy, createdAt: new Date(pact.created_at) };
@@ -413,12 +416,6 @@ export function ankiTerms(
     deckMissing: ankiDeckMissing(ctx, pact.owner_account_id, pact.anki_deck_id),
     rolloverHour: pact.anki_rollover_hour,
   };
-}
-
-/** Whether the pact's schedule is Weekly count. It keeps its kind once its edit window has closed. */
-export function isWeekly(ctx: CoreContext, pactId: string): boolean {
-  const row = ctx.db.prepare(`SELECT schedule FROM pact WHERE id = ?`).get(pactId) as { schedule: string };
-  return scheduleOf(row.schedule).kind === "weekly-count";
 }
 
 /** Pacts created by this time, as an ISO string, are past their edit window: for comparing in SQL. */

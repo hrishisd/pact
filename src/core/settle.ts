@@ -5,6 +5,7 @@
 // through `endPact` (ending.ts).
 
 import { addDays } from "../shared/calendar.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 import type { AccountId, EvidenceKind, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { endPact } from "./ending.ts";
@@ -63,7 +64,7 @@ export function settle(ctx: CoreContext, pactId: string, date: LocalDate, now: D
        ON CONFLICT (pact_id, date) DO UPDATE SET outcome = excluded.outcome, judged_at = excluded.judged_at`,
     )
     .run(pactId, date, verdict.kind, verdict.at.toISOString());
-  const weekly = facts.terms.schedule.kind === "weekly-count";
+  const onPeriods = isPeriodSchedule(facts.terms.schedule);
   // A One-time pact has no occurrence left once its one is judged.
   if (facts.terms.schedule.kind === "one-time") endPact(ctx, pactId, "one-time-judged", verdict.at);
   if (verdict.kind === "missed") {
@@ -81,7 +82,7 @@ export function settle(ctx: CoreContext, pactId: string, date: LocalDate, now: D
         verdict.penaltyCents,
         verdict.at.toISOString(),
       );
-    const toldByRejection = !weekly && facts.evidence.some((e) => e.decision === "rejected");
+    const toldByRejection = !onPeriods && facts.evidence.some((e) => e.decision === "rejected");
     if (!toldByRejection && facts.cover === null) enqueueMissed(ctx, pactId, date);
   }
   return { from, to: verdict };

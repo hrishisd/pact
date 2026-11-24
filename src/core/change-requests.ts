@@ -2,6 +2,7 @@
 // what a change would do, and deciding one. The rules for each term are in
 // `changes.ts`.
 
+import { lastDayOf } from "../shared/schedules.ts";
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
 import { formatDate, listNames, termLabel } from "../shared/format.ts";
@@ -36,7 +37,6 @@ import { endAfter, endPact, endTiming } from "./ending.ts";
 import {
   dueSoonEnough,
   hasSchedule,
-  lastDayOf,
   occurrencesOverTime,
   type Occurrence,
   type Occurrences,
@@ -394,7 +394,7 @@ export function openOccurrencesRefusal(
   after: ChangeableTerms,
   today: LocalDate,
 ): "pact-started" | "end-date-too-early" | null {
-  const from = firstDayNotOpen(before.schedule, today);
+  const from = firstDayNotOpen(before.schedule, today, firstOccurrence);
   if (after.startDate !== before.startDate && firstOccurrence < from) return "pact-started";
   const firstFrom = firstOccurrenceAfterChange(firstOccurrence, after.schedule, from, after.startDate);
   if (after.endDate !== null && after.endDate !== before.endDate) {
@@ -560,7 +560,7 @@ export function startOfNewTerms(
   // One-time: the change applies to its one occurrence, open or not.
   if (after.schedule.kind === "one-time") return { appliesFrom: after.schedule.deadline, todayKeepsCents: null };
   const today = lastDayOpened(ctx, pact.id, timezone, at);
-  const from = firstDayNotOpen(after.schedule, today);
+  const from = firstDayNotOpen(after.schedule, today, pact.first_occurrence);
   const current = occurrenceTermsOf(pact);
   const earlier = earlierTermsOf(ctx, pact);
   const zones = earlierTimezonesOf(ctx, pact);
@@ -595,7 +595,7 @@ export function startOfNewTerms(
  */
 export function applyTerms(ctx: CoreContext, pact: PactRow, after: ChangeableTerms, at: Date, timezone: string): void {
   if (after.schedule.kind === "one-time") return applyOneTimeTerms(ctx, pact, after);
-  const from = firstDayNotOpen(after.schedule, lastDayOpened(ctx, pact.id, timezone, at));
+  const from = firstDayNotOpen(after.schedule, lastDayOpened(ctx, pact.id, timezone, at), pact.first_occurrence);
   // A change already made today put the terms today keeps there first.
   ctx.db
     .prepare(

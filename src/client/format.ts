@@ -26,7 +26,10 @@ export {
   listNames,
   monthDay,
   money,
+  periodName,
+  periodWord,
   scheduleText,
+  thisPeriod,
   TERM_LABELS,
   termLabel,
 } from "../shared/format.ts";
@@ -91,6 +94,11 @@ export function dueClockText(instant: string, timeZone: string): string {
 function wallClockIn(instant: string, timeZone: string): ClockTime {
   const part = partsIn(instant, timeZone, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   return `${part("hour")}:${part("minute")}`;
+}
+
+/** A period's last day in `timeZone` (the profile's), from its due time: the midnight that ends it. */
+export function dueDayOf(dueAt: string, timeZone: string): LocalDate {
+  return dateIn(Date.parse(dueAt) - 1, timeZone);
 }
 
 /** `now` (ms) as its date in `timeZone` (the profile's), not this device's. */

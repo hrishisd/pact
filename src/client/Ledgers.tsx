@@ -9,7 +9,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
 import type { LedgerPayment, LedgerPenalty, LedgerSummary } from "../shared/types.ts";
 import { api } from "./api.ts";
-import { formatDate, formatDay, money } from "./format.ts";
+import { formatDate, formatDay, money, periodName } from "./format.ts";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
 import { useRefreshOnPull } from "./pull-to-refresh.tsx";
 import { Empty, Loaded, LoadedFound, loadedData, useLoad } from "./ui.tsx";
@@ -167,8 +167,10 @@ function PenaltyRow({
           {penalty.pactName}
         </button>
         <small>
-          {penalty.week
-            ? `Week of ${formatDate(penalty.occurrenceDate)}: ${penalty.week.sessions} of ${penalty.week.target} days done`
+          {penalty.period
+            ? penalty.period.scheduleKind === "weekly-count"
+              ? `Week of ${formatDate(penalty.occurrenceDate)}: ${penalty.period.sessions} of ${penalty.period.target} days done`
+              : `${periodName(penalty.period.scheduleKind, penalty.occurrenceDate)}: no photo approved`
             : `Missed ${formatDate(penalty.occurrenceDate)}`}
           {` · ${billText(penalty.bill)}`}
           {penalty.held ? null : penalty.paidCents === penalty.amountCents ? (

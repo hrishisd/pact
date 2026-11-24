@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ApprovalReason } from "../shared/types.ts";
-import { effectText } from "./change-terms.tsx";
+import { effectText, endsWhenText, openOccurrenceText } from "./change-terms.tsx";
 
 describe("effectText", () => {
   const friends = (...names: string[]) => names.map((name, i) => ({ id: `${name}-${i}`, name }));
@@ -50,5 +50,22 @@ describe("effectText", () => {
     expect(effectText({ ...reviewers(["Cy", "Di"], ["Ann"]), ...removing })).toBe(
       "Needs approval: removing Ann. Cy and Di join now",
     );
+  });
+});
+
+describe("Every 2 weeks and Once a month wording", () => {
+  test("an end waits for the month, or the 2 weeks, to be judged", () => {
+    const after = { kind: "after", lastDay: "2026-01-31" } as const;
+    expect(endsWhenText({ evidenceKind: "camera", schedule: { kind: "once-a-month" } }, after)).toBe(
+      "after Sat Jan 31, once this month has been judged",
+    );
+    expect(endsWhenText({ evidenceKind: "camera", schedule: { kind: "every-2-weeks" } }, after)).toBe(
+      "after Sat Jan 31, once these 2 weeks have been judged",
+    );
+  });
+
+  test("the open period's penalty is named by the period", () => {
+    expect(openOccurrenceText({ kind: "once-a-month" })).toBe("This month's");
+    expect(openOccurrenceText({ kind: "every-2-weeks" })).toBe("These 2 weeks'");
   });
 });

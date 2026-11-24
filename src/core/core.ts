@@ -452,7 +452,8 @@ export interface AccountView {
    * The owner asks the reviewers in `vacation` for its dates off from its
    * ticked pacts. It covers the occurrences in its dates that haven't opened
    * yet, fixed at filing: each scheduled day, a Weekly count week whose
-   * Thursday is inside, a One-time deadline inside. It skips those already
+   * Thursday is inside, two weeks whose second week is inside, a month whose
+   * 15th to last day are inside, a One-time deadline inside. It skips those already
    * Excused, on an excuse waiting for approval or on another vacation. Refused
    * when no pact is ticked or none is left to cover, no reviewer is picked or
    * one reviews no ticked pact, a ticked pact isn't offered, or the dates are

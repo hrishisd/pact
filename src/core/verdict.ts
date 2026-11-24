@@ -10,6 +10,7 @@
 // approved evidence (Excused to Satisfied, vacation spec "Judging and money")
 // moves it after that.
 
+import { isPeriodSchedule, targetOf } from "../shared/schedules.ts";
 import type { AccountId, ClockTime, LocalDate, Schedule } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { coverOn, type Cover } from "./covers.ts";
@@ -19,7 +20,7 @@ import { deadlineWallClock, wallClock } from "./oura-clock.ts";
 import type { ReviewOutcome } from "./requests.ts";
 import { ankiDeckOn, occurrencesOf, scheduleOf, termsOn } from "./rows.ts";
 
-/** One submission of evidence for the occurrence (a Weekly count week: for one of its days). */
+/** One submission of evidence for the occurrence (a period: for one of its days). */
 export interface EvidenceFact {
   day: LocalDate;
   submittedAt: Date;
@@ -117,8 +118,8 @@ const STEP_ORDER: Record<Step["kind"], number> = {
  *   Satisfied.
  * - A Camera day is judged at its due time, or when a decision after that
  *   decides it. A rejection is final: with no approved cover it judges the day
- *   Missed at once, open or not. Rejected evidence on a Weekly count week
- *   just doesn't count; a week is short by its target less its approved days.
+ *   Missed at once, open or not. Rejected evidence on a period
+ *   just doesn't count; a period is short by its target less its approved days.
  * - An Anki day is Satisfied when a check finds its deck finished before its
  *   due time; at its due time it's judged as a Camera day with no evidence,
  *   unless a check that started before then is still running.
@@ -132,8 +133,8 @@ const STEP_ORDER: Record<Step["kind"], number> = {
  */
 export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
   const { occurrence, terms, pactEndedAt, automatic, cover } = facts;
-  const weekly = terms.schedule.kind === "weekly-count";
-  const target = terms.schedule.kind === "weekly-count" ? terms.schedule.target : 1;
+  const onPeriods = isPeriodSchedule(terms.schedule);
+  const target = targetOf(terms.schedule);
   const evidence = facts.evidence.filter((e) => e.submittedAt.getTime() <= now.getTime());
   const decidedBy = (e: EvidenceFact, t: Date) => e.decidedAt !== null && e.decidedAt.getTime() <= t.getTime();
   const approvedDays = (t: Date) =>
@@ -147,11 +148,11 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
   const missed = (at: Date): FinalVerdict => ({
     kind: "missed",
     at,
-    penaltyCents: terms.penaltyCents * (target - (weekly ? approvedDays(at) : 0)),
+    penaltyCents: terms.penaltyCents * (target - (onPeriods ? approvedDays(at) : 0)),
     recipientId: terms.recipientId,
   });
-  /** A Weekly count week as judged at `t`, or null while its waiting evidence could still change it. */
-  const judgeWeek = (t: Date): FinalVerdict | null => {
+  /** A period as judged at `t`, or null while its waiting evidence could still change it. */
+  const judgePeriod = (t: Date): FinalVerdict | null => {
     if (approvedDays(t) >= target) return satisfied(t);
     if (coverApprovedBy(t)) return excused(t);
     if (waitingAt(t)) return null;
@@ -197,7 +198,7 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
     switch (step.kind) {
       case "due":
         if (outcome !== null) break;
-        if (weekly) outcome = judgeWeek(step.at);
+        if (onPeriods) outcome = judgePeriod(step.at);
         else if (approvedDays(step.at) > 0) outcome = satisfied(step.at);
         else if (coverApprovedBy(step.at)) outcome = excused(step.at);
         else if (!waitingAt(step.at)) outcome = missed(step.at);
@@ -206,8 +207,8 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
         if (outcome?.kind === "excused") {
           // Approved evidence still makes an occurrence under a cover Satisfied (vacation spec, "Judging and money").
           if (approvedDays(step.at) >= target) outcome = satisfied(step.at);
-        } else if (outcome === null && weekly) {
-          if (past) outcome = judgeWeek(step.at);
+        } else if (outcome === null && onPeriods) {
+          if (past) outcome = judgePeriod(step.at);
         } else if (outcome === null && step.decision === "approved") {
           if (past) outcome = satisfied(step.at);
         } else if (outcome === null) {
@@ -219,7 +220,7 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
         if (outcome?.kind === "missed") outcome = excused(step.at);
         else if (outcome === null && past && automatic?.kind !== "oura") {
           // Judged as the due time would: approved evidence still beats the cover at the due instant itself.
-          if (weekly) outcome = judgeWeek(step.at);
+          if (onPeriods) outcome = judgePeriod(step.at);
           else outcome = approvedDays(step.at) > 0 ? satisfied(step.at) : excused(step.at);
         }
         break;
@@ -410,7 +411,7 @@ export interface SupposedDecision {
  * verdict that isn't final yet; else `not-the-pacts` when it's due after the
  * pact Ended, and `settled` otherwise. `gone` when the pact has no occurrence
  * that day any more. Evidence is supposed approved together with the
- * occurrence's other waiting evidence, since on a Weekly count week pieces
+ * occurrence's other waiting evidence, since on a period pieces
  * can reach the target only together (design review ticket 32).
  */
 export function decisionEffect(

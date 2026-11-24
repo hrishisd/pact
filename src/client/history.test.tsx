@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import type { Json } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
-import type { HeatMapDay, HeatMapWeek, OccurrenceRecord } from "../shared/types.ts";
+import type { HeatMapDay, HeatMapPeriod, OccurrenceRecord } from "../shared/types.ts";
 import { HeatMap, monthLabels, weeksOf } from "./history.tsx";
 import { cameraPact, renderWithUser } from "./testing/render.tsx";
 
@@ -85,13 +85,17 @@ test("tapping an ordinary excused day still shows the excuse", async () => {
 });
 
 test("a Weekly count week a vacation covers is drawn and tapped the same way", async () => {
-  const weeks: Json<HeatMapWeek>[] = [
+  const weeks: Json<HeatMapPeriod>[] = [
     {
       date: "2025-12-29",
       occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" } },
-      progress: { sessions: 3, waiting: 0, target: 3 },
+      progress: { scheduleKind: "weekly-count", sessions: 3, waiting: 0, target: 3 },
     },
-    { date: "2026-01-05", occurrence: onVacation, progress: { sessions: 0, waiting: 0, target: 3 } },
+    {
+      date: "2026-01-05",
+      occurrence: onVacation,
+      progress: { scheduleKind: "weekly-count", sessions: 0, waiting: 0, target: 3 },
+    },
   ];
   const { user } = renderWithUser(
     <HeatMap
@@ -100,7 +104,7 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
         evidenceKind: "camera",
         dueBy: null,
         schedule: { kind: "weekly-count", target: 3 },
-        history: { kind: "weekly-count", weeks },
+        history: { kind: "periods", periods: weeks },
       }}
       timezone="America/New_York"
       now={NOW}
@@ -115,6 +119,97 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
   const detail = screen.getByRole("status");
   expect(within(detail).getByText("Vacation").className).toBe("chip c-vac");
   expect(within(detail).getByText("Excused for your vacation, Jan 7 – 10. No penalty.")).toBeTruthy();
+});
+
+test("a Once a month pact has a square per month, labelled by its month", async () => {
+  const months: Json<HeatMapPeriod>[] = [
+    {
+      date: "2025-12-01",
+      occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" } },
+      progress: { scheduleKind: "once-a-month", sessions: 1, waiting: 0, target: 1 },
+    },
+    {
+      date: "2026-01-01",
+      occurrence: {
+        status: {
+          kind: "not-judged",
+          opensAt: "2026-01-01T05:00:00Z",
+          dueAt: "2026-02-01T05:00:00Z",
+          evidenceWaiting: false,
+          cover: null,
+          phase: "open",
+          excuseApproval: null,
+        },
+        detail: null,
+      },
+      progress: { scheduleKind: "once-a-month", sessions: 0, waiting: 0, target: 1 },
+    },
+  ];
+  const { user } = renderWithUser(
+    <HeatMap
+      pact={{
+        ...cameraPact(),
+        evidenceKind: "camera",
+        dueBy: null,
+        schedule: { kind: "once-a-month" },
+        history: { kind: "periods", periods: months },
+      }}
+      timezone="America/New_York"
+      now={NOW}
+    />,
+  );
+
+  expect(screen.getByText("One square per month, with how many days counted.")).toBeTruthy();
+  expect([...document.querySelectorAll(".hm-lbl")].map((label) => label.textContent)).toEqual(["Dec", "Jan"]);
+  expect(screen.getByRole("button", { name: "December: Satisfied, 1 of 1" }).textContent).toBe("1");
+  await user.click(screen.getByRole("button", { name: "January: This month, 0 of 1 so far" }));
+
+  const detail = screen.getByRole("status");
+  expect(within(detail).getByText("January")).toBeTruthy();
+  expect(within(detail).getByText("This month").className).toBe("chip c-todo");
+});
+
+test("an Every 2 weeks pact's squares are labelled by their first Monday, and a missed one says no photo was approved", async () => {
+  const periods: Json<HeatMapPeriod>[] = [
+    {
+      date: "2025-12-22",
+      occurrence: {
+        status: {
+          kind: "missed",
+          penaltyCents: 2000,
+          excusableUntil: "2026-01-07T05:00:00Z",
+          cover: null,
+          phase: "past-due",
+          recipientName: "AMF",
+          rejection: null,
+        },
+        detail: null,
+      },
+      progress: { scheduleKind: "every-2-weeks", sessions: 0, waiting: 0, target: 1 },
+    },
+    {
+      date: "2026-01-05",
+      occurrence: null,
+      progress: { scheduleKind: "every-2-weeks", sessions: 0, waiting: 0, target: 1 },
+    },
+  ];
+  const { user } = renderWithUser(
+    <HeatMap
+      pact={{
+        ...cameraPact(),
+        evidenceKind: "camera",
+        dueBy: null,
+        schedule: { kind: "every-2-weeks" },
+        history: { kind: "periods", periods },
+      }}
+      timezone="America/New_York"
+      now={NOW}
+    />,
+  );
+
+  expect([...document.querySelectorAll(".hm-lbl")].map((label) => label.textContent)).toEqual(["Dec 22", "Jan 5"]);
+  await user.click(screen.getByRole("button", { name: /^Dec 22 – Jan 4: Missed/ }));
+  expect(within(screen.getByRole("status")).getByText("No photo approved. $20 to AMF.")).toBeTruthy();
 });
 
 test("a day with an excuse waiting for approval has a square and a chip that say the same", async () => {

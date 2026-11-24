@@ -3,6 +3,7 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { formatDate } from "../shared/format.ts";
+import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptMissResult,
@@ -23,8 +24,8 @@ import {
   isJudged,
   MISSED_THROUGH_REJECTION,
   rejection,
-  WEEKLY_COUNT_PACT,
-  weekProgress,
+  PERIOD_PACT,
+  periodProgress,
 } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { tellAll } from "./outbox.ts";
@@ -119,14 +120,14 @@ export function acceptMiss(
     )
     .run(now, pactId, occurrenceDate);
   if (accepted.changes === 1) return { ok: true };
-  // On Weekly count, a rejected day isn't a miss, but its alert goes the same way.
+  // On a period schedule, a rejected day isn't a miss, but its alert goes the same way.
   const rejected = ctx.db
     .prepare(
       `UPDATE evidence SET rejection_accepted_at = ?
        WHERE pact_id = ? AND day = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL
-         AND (SELECT json_extract(schedule, '$.kind') FROM pact WHERE id = ?) = 'weekly-count'`,
+         AND EXISTS (SELECT 1 FROM pact WHERE pact.id = evidence.pact_id AND ${PERIOD_PACT})`,
     )
-    .run(now, pactId, occurrenceDate, pactId);
+    .run(now, pactId, occurrenceDate);
   return rejected.changes > 0 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
 }
 
@@ -178,7 +179,7 @@ export interface EvidenceToDecide {
   /** When the pact was created: its reviewers may decide its evidence once its edit window has closed. */
   created_at: string;
   occurrence_date: LocalDate;
-  /** The day it counts for: on Weekly count, the day of the week. */
+  /** The day it counts for: on a period schedule, a day of the period. */
   day: LocalDate;
   /** The owner's: every pact's owner has one, as creating a pact needs it. */
   timezone: string;
@@ -205,9 +206,9 @@ export function evidenceView(
 
 /** Evidence waiting for approval that `reviewerId` may decide: for pacts they review, past the edit window. */
 function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
-  const rows = ctx.all<EvidenceViewRow & { owner_name: string; weekly: 0 | 1 }>(
+  const rows = ctx.all<EvidenceViewRow & { owner_name: string; on_periods: 0 | 1 }>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
-              evidence.submitted_at, evidence.occurrence_date, evidence.day, ${WEEKLY_COUNT_PACT} AS weekly
+              evidence.submitted_at, evidence.occurrence_date, evidence.day, ${PERIOD_PACT} AS on_periods
        FROM evidence
        JOIN pact ON pact.id = evidence.pact_id
        JOIN account AS owner ON owner.id = pact.owner_account_id
@@ -227,7 +228,7 @@ function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[]
         ownerName: row.owner_name,
         penaltyCents: terms.penalty_cents,
         recipientName: recipientName(ctx, terms.recipient_id),
-        ...(row.weekly === 1 && { week: weekProgress(ctx, row.pact_id, row.occurrence_date) }),
+        ...(row.on_periods === 1 && { period: periodProgress(ctx, row.pact_id, row.occurrence_date) }),
         thread: thread(ctx, row.id, true),
       },
       since: new Date(row.submitted_at),
@@ -334,7 +335,7 @@ export function evidencePhotoIds(ctx: CoreContext, evidenceId: string): string[]
  * Whether `ownerId` may submit evidence with `photoCount` photos for
  * `pactId` at `at`, and if so for which occurrence and day: the one open at
  * `at`, unless evidence for it is already waiting or approved, or it's
- * already judged (a rejection judges it Missed at once). On Weekly count
+ * already judged (a rejection judges it Missed at once). On a period schedule
  * that's for the day: one day of evidence counts per day, and a day whose
  * evidence was rejected is made up on another.
  */
@@ -356,20 +357,20 @@ export function evidenceAcceptance(
   if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
   if (photoCount === 0) return { ok: false, reason: "no-photos" };
   if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
-  const { kind } = scheduleOf(row.schedule);
+  const schedule = scheduleOf(row.schedule);
   const occurrences = occurrencesOf(ctx, pactId, timezone);
   const occurrence = occurrences.openAt(at);
   if (!occurrence) return { ok: false, reason: "not-open" };
   // The day it is where the occurrence opened, which a move since leaves as it was.
   const today = localDateOf(at, occurrences.timezoneOn(occurrence.date));
   // One-time evidence is for its one occurrence, whichever day it comes.
-  const day = kind === "one-time" ? occurrence.date : today;
+  const day = schedule.kind === "one-time" ? occurrence.date : today;
   // Past its due-by time, the day takes no more evidence.
   if (at.getTime() >= occurrences.dayDueAt(today)!.getTime()) return { ok: false, reason: "not-open" };
   const decision = evidenceDecision(ctx, pactId, day, "day");
   if (decision === "waiting") return { ok: false, reason: "evidence-waiting" };
   if (decision === "approved") return { ok: false, reason: "already-approved" };
-  if ((kind === "weekly-count" && decision === "rejected") || isJudged(ctx, pactId, occurrence.date)) {
+  if ((isPeriodSchedule(schedule) && decision === "rejected") || isJudged(ctx, pactId, occurrence.date)) {
     return { ok: false, reason: "already-judged" };
   }
   // An Ended pact has no day open any more.
@@ -456,18 +457,18 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
         penaltyCents: row.amount_cents,
         recipientName: row.recipient_name,
         excusableUntil: excusableUntil(row.excuse_window_opens),
-        week: false,
+        period: null,
       },
     };
   });
 }
 
 /**
- * One alert per Weekly count day of the owner's whose evidence was
+ * One alert per period schedule day of the owner's whose evidence was
  * rejected, newest rejection first, with when it was rejected: nothing is
  * Missed, and the day can be made up another day. It goes once the owner
- * takes the L on it, an excuse or a vacation covers the week (one rejected after the
- * rejection has its own alert), or the week is judged.
+ * takes the L on it, an excuse or a vacation covers the period (one rejected after the
+ * rejection has its own alert), or the period is judged.
  */
 export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
   const rows = ctx.all<{
@@ -484,7 +485,7 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
        FROM evidence
        JOIN pact ON pact.id = evidence.pact_id
        JOIN account AS reviewer ON reviewer.id = evidence.decided_by_account_id
-       WHERE pact.owner_account_id = ? AND ${WEEKLY_COUNT_PACT}
+       WHERE pact.owner_account_id = ? AND ${PERIOD_PACT}
          AND evidence.decision = 'rejected' AND evidence.rejection_accepted_at IS NULL
          AND NOT EXISTS (SELECT 1 FROM occurrence
                          WHERE occurrence.pact_id = evidence.pact_id AND occurrence.date = evidence.occurrence_date
@@ -500,6 +501,8 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
   );
   return rows.map((row) => {
     const terms = termsOn(ctx, row.id, row.occurrence_date);
+    const schedule = scheduleOf(terms.schedule);
+    if (!isPeriodSchedule(schedule)) throw new Error(`pact ${row.id} isn't on a period schedule`);
     return {
       at: new Date(row.decided_at),
       alert: {
@@ -512,7 +515,7 @@ export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: D
         penaltyCents: terms.penalty_cents,
         recipientName: recipientName(ctx, terms.recipient_id),
         excusableUntil: null,
-        week: true,
+        period: { kind: schedule.kind, lastDay: lastDayOf(schedule, row.occurrence_date) },
       },
     };
   });

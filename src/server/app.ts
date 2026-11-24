@@ -862,6 +862,8 @@ function json<T>(value: T): Json<T> {
 const schedule = union<Schedule>({
   "fixed-days": object({ days: arrayOf(oneOf(WEEKDAYS)) }),
   "weekly-count": object({ target: number }),
+  "every-2-weeks": object({}),
+  "once-a-month": object({}),
   "one-time": object({ deadline: string, submitAnytime: boolean }),
 });
 

@@ -1,12 +1,13 @@
 // History: the pact page's heat map of past occurrences, and Today's Yesterday.
 
 import { addDays } from "../shared/calendar.ts";
+import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import {
   WEEKDAYS,
   type AccountId,
   type AnkiCheck,
   type HeatMapDay,
-  type HeatMapWeek,
+  type HeatMapPeriod,
   type LocalDate,
   type OccurrenceDetail,
   type OccurrenceRecord,
@@ -15,10 +16,10 @@ import {
   type RecordedStatus,
   type TodayYesterdayEntry,
 } from "../shared/types.ts";
-import { laterDate, localDateOf, mondayOf, weekdayOf } from "./calendar.ts";
+import { laterDate, localDateOf, weekdayOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { onApprovedVacation } from "./covers.ts";
-import { occurrenceStatus, rejection, WEEKLY_COUNT_PACT, weekProgress } from "./occurrence-state.ts";
+import { occurrenceStatus, rejection, PERIOD_PACT, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { wallClock } from "./oura-clock.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
@@ -34,7 +35,7 @@ export function ankiCheckOf(row: { anki_cards_left: number | null; anki_checked_
   return { cardsLeft: row.anki_cards_left, checkedAt: new Date(row.anki_checked_at) };
 }
 
-/** The pact page's history: its one occurrence, its weeks, or its days, from the first occurrence `first`. */
+/** The pact page's history: its one occurrence, its periods, or its days, from the first occurrence `first`. */
 export function pactHistory(
   ctx: CoreContext,
   row: PactRow,
@@ -46,7 +47,9 @@ export function pactHistory(
     case "one-time":
       return { kind: "one-time", day: { date: first.date, occurrence: occurrenceRecord(ctx, row, first) } };
     case "weekly-count":
-      return { kind: "weekly-count", weeks: heatMapWeeks(ctx, row, timezone, first.date, now) };
+    case "every-2-weeks":
+    case "once-a-month":
+      return { kind: "periods", periods: heatMapPeriods(ctx, row, timezone, first.date, now) };
     case "fixed-days":
       return { kind: "fixed-days", days: heatMapDays(ctx, row, timezone, first.date, now) };
   }
@@ -71,28 +74,30 @@ export function heatMapDays(
 }
 
 /**
- * A Weekly count pact's heat map as of `now`: every week from its first
+ * A period schedule pact's heat map as of `now`: every period from its first
  * through this one, or the one it Ended, or its first while that's ahead;
- * none from the week it Ended that was never judged.
+ * none from the period it Ended in that was never judged.
  */
-export function heatMapWeeks(
+export function heatMapPeriods(
   ctx: CoreContext,
   pact: PactRow,
   timezone: string,
   first: LocalDate,
   now: Date,
-): HeatMapWeek[] {
+): HeatMapPeriod[] {
   const endedOn = endedOnOf(pact, timezone);
   const last = laterDate(first, endedOn ?? localDateOf(now, timezone));
+  const schedule = scheduleOf(pact.schedule);
   return occurrencesOf(ctx, pact.id, timezone)
     .between(first, last)
-    .map((week) => {
-      const record = occurrenceRecord(ctx, pact, week);
-      const afterEnd = endedOn !== null && week.date >= mondayOf(endedOn) && record.status.kind === "not-judged";
+    .map((period) => {
+      const record = occurrenceRecord(ctx, pact, period);
+      const afterEnd =
+        endedOn !== null && lastDayOf(schedule, period.date) >= endedOn && record.status.kind === "not-judged";
       return {
-        date: week.date,
+        date: period.date,
         occurrence: afterEnd ? null : record,
-        progress: weekProgress(ctx, pact.id, week.date),
+        progress: periodProgress(ctx, pact.id, period.date),
       };
     });
 }
@@ -103,9 +108,9 @@ export function heatMapWeeks(
  */
 export function yesterdayEntries(ctx: CoreContext, ownerId: AccountId, timezone: string): TodayYesterdayEntry[] {
   const yesterday = addDays(localDateOf(ctx.clock.now(), timezone), -1);
-  // A Weekly count week isn't due on any one day.
+  // A period isn't due on any one day.
   const pacts = ctx.all<PactRow>(
-    `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${WEEKLY_COUNT_PACT} ORDER BY name, created_at, id`,
+    `SELECT * FROM pact WHERE owner_account_id = ? AND NOT ${PERIOD_PACT} ORDER BY name, created_at, id`,
     ownerId,
   );
   return pacts.flatMap((pact) =>
@@ -192,11 +197,11 @@ export function recordedStatus(
   recipientName: string | null,
 ): RecordedStatus {
   const pactId = pact.id;
-  // A Weekly count week is Satisfied or Missed by its days, not by any one decision.
-  const weekly = scheduleOf(pact.schedule).kind === "weekly-count";
+  // A period is Satisfied or Missed by its days, not by any one decision.
+  const onPeriods = isPeriodSchedule(scheduleOf(pact.schedule));
   switch (status.kind) {
     case "satisfied": {
-      const row = weekly
+      const row = onPeriods
         ? undefined
         : ctx.one<{ name: string }>(
             `SELECT account.name FROM evidence JOIN account ON account.id = evidence.decided_by_account_id
@@ -207,7 +212,7 @@ export function recordedStatus(
       return { ...status, approvedBy: row?.name ?? null };
     }
     case "missed":
-      return { ...status, recipientName, rejection: weekly ? null : rejection(ctx, pactId, date) };
+      return { ...status, recipientName, rejection: onPeriods ? null : rejection(ctx, pactId, date) };
     case "excused":
     case "not-judged": {
       const covered = status.kind === "excused" || status.cover?.state === "approved";

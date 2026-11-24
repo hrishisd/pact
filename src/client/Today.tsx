@@ -33,14 +33,19 @@ import {
   type TodaySection,
   type TodayToDoCard,
   type TodayWaitingItem,
-  type WeekProgress,
+  type LocalDate,
+  type PeriodKind,
+  type PeriodProgress,
 } from "../shared/types.ts";
+import { dayCount } from "../shared/calendar.ts";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
 import {
   ankiMissText,
   clockText,
   clockTime,
+  dateIn,
+  dueDayOf,
   dateSpan,
   dateUnlessToday,
   excusableText,
@@ -52,10 +57,12 @@ import {
   minutesLeft,
   money,
   NIGHT_CLOSES_TEXT,
+  periodName,
+  thisPeriod,
   timeLeft,
 } from "./format.ts";
 import { datesText } from "./excuse-days.tsx";
-import { firstName } from "./vacation-text.ts";
+import { firstName, plural } from "./vacation-text.ts";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { Yesterday } from "./history.tsx";
 import { CameraIcon } from "./icons.tsx";
@@ -381,8 +388,8 @@ function Section({
                 chip={<span className="chip c-todo">To do</span>}
                 onOpen={() => onOpenPact(card.pactId, card.name)}
               >
-                {card.week ? (
-                  <WeekToDo card={card} week={card.week} timezone={timezone} />
+                {card.period ? (
+                  <PeriodToDo card={card} period={card.period} timezone={timezone} now={now} />
                 ) : (
                   <div className="meta due">
                     Due {dueDayText(card, timezone, now)}at {card.dueBy === null ? "midnight" : clockText(card.dueBy)} ·{" "}
@@ -391,7 +398,7 @@ function Section({
                 )}
                 <EvidenceForm
                   pactId={card.pactId}
-                  weekly={card.week !== undefined}
+                  period={card.period?.scheduleKind ?? null}
                   onSubmitted={onChanged}
                   onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
                 />
@@ -435,6 +442,22 @@ function Section({
           </div>
         </PactCard>
       ));
+    case "later":
+      return (
+        <section className="stack">
+          <div className="label">{laterTitle(section.cards)}</div>
+          {section.cards.map((card) => (
+            <LaterCard
+              key={card.pactId}
+              card={card}
+              timezone={timezone}
+              now={now}
+              onOpen={() => onOpenPact(card.pactId, card.name)}
+              onSubmitted={onChanged}
+            />
+          ))}
+        </section>
+      );
     case "coming-up":
       return (
         <section className="stack">
@@ -469,14 +492,27 @@ function dueDayText(card: Json<TodayToDoCard>, timezone: string, now: number): s
 }
 
 /**
- * A Weekly count week on its To do card: a dot per day of the target, filled
- * once a day counts (or shaded while it waits for approval), "1 of 3 this
- * week", and when the week is due; with a due-by time, when today's photo is.
+ * A period on its To do card: a dot per day of the target, filled once a day
+ * counts (or shaded while it waits for approval), "1 of 3 this week", and
+ * when the period is due; with a due-by time, when today's photo is. A month
+ * or 2 weeks also say how many days are left, and with a trip ahead, the day
+ * to do it by and the trip.
  */
-function WeekToDo({ card, week, timezone }: { card: Json<TodayToDoCard>; week: Json<WeekProgress>; timezone: string }) {
-  const { sessions, waiting, target } = week;
-  // The week is due at the midnight ending its Sunday: name the Sunday.
-  const sunday = new Date(Date.parse(card.dueAt) - 1).toISOString();
+function PeriodToDo({
+  card,
+  period,
+  timezone,
+  now,
+}: {
+  card: Json<TodayToDoCard>;
+  period: Json<PeriodProgress>;
+  timezone: string;
+  now: number;
+}) {
+  const { sessions, waiting, target, scheduleKind } = period;
+  const trip = card.tripAhead;
+  const last = dueDayOf(card.dueAt, timezone);
+  const by = trip?.doItBy ?? last;
   return (
     <>
       <div className="spread">
@@ -486,14 +522,77 @@ function WeekToDo({ card, week, timezone }: { card: Json<TodayToDoCard>; week: J
           ))}
         </div>
         <span className="num meta">
-          {sessions} of {target} this week
+          {sessions} of {target} {thisPeriod(scheduleKind)}
         </span>
       </div>
       <div className="meta due">
-        Due by {formatDay(sunday, timezone)}
+        {scheduleKind === "weekly-count"
+          ? `Due by ${formatDate(last)}`
+          : `${trip ? "Do it by" : "Due by"} ${formatDate(by)} · ${daysLeft(by, now, timezone)}`}
         {card.dueBy !== null && ` · today's photo by ${clockText(card.dueBy)}`}
       </div>
+      {trip && <div className="meta">You're away {datesText(trip.firstDay, trip.lastDay)}</div>}
     </>
+  );
+}
+
+/** "5 days left", counting today, until the end of `last`. */
+function daysLeft(last: LocalDate, now: number, timezone: string): string {
+  return `${plural(dayCount(dateIn(now, timezone), last), "day", "days")} left`;
+}
+
+/**
+ * The later section's title: "This month" when every card in it is monthly,
+ * "These 2 weeks" when every one is, else "Due later".
+ */
+function laterTitle(cards: Json<TodayToDoCard>[]): string {
+  const kinds = new Set(cards.map((card) => card.period?.scheduleKind));
+  if (kinds.size === 1 && kinds.has("once-a-month")) return "This month";
+  if (kinds.size === 1 && kinds.has("every-2-weeks")) return "These 2 weeks";
+  return "Due later";
+}
+
+/**
+ * A period's card in the later section, before its reminder window: the
+ * pact's name, how far the period got and when it's due, and Take photo.
+ */
+function LaterCard({
+  card,
+  timezone,
+  now,
+  onOpen,
+  onSubmitted,
+}: {
+  card: Json<TodayToDoCard>;
+  timezone: string;
+  now: number;
+  onOpen: () => void;
+  onSubmitted: () => void;
+}) {
+  const progress = card.period ? `${card.period.sessions} of ${card.period.target} · ` : "";
+  const { tripAhead: trip } = card;
+  const due = `${trip ? "do it by" : "due"} ${formatDate(trip?.doItBy ?? dueDayOf(card.dueAt, timezone))}`;
+  const fresh = minutesLeft(card.editWindowClosesAt, now) !== null;
+  return (
+    <article className={fresh ? "card tcard slim fresh" : "card tcard slim"}>
+      <div className="spread">
+        <span className="rt">
+          <span className="namerow">
+            <h3>
+              <button className="tcard-open" onClick={onOpen}>
+                {card.name}
+              </button>
+            </h3>
+            <EditWindowChip closesAt={card.editWindowClosesAt} now={now} />
+          </span>
+          <span className="meta">
+            {progress}
+            {due}
+          </span>
+        </span>
+        <EvidenceForm pactId={card.pactId} period={card.period?.scheduleKind ?? null} onSubmitted={onSubmitted} />
+      </div>
+    </article>
   );
 }
 
@@ -631,9 +730,11 @@ function missedLine({ detail, occurrenceDate }: Json<TodayMissedCard>, timezone:
   switch (detail?.kind) {
     case "closed":
       return `Your photo was due by ${clockText(detail.dueBy)}.`;
-    case "week": {
-      const { sessions, target } = detail.progress;
-      return `Week of ${formatDate(occurrenceDate)} · ${sessions} of ${target} days, ${target - sessions} short`;
+    case "period": {
+      const { sessions, target, scheduleKind } = detail.progress;
+      return scheduleKind === "weekly-count"
+        ? `Week of ${formatDate(occurrenceDate)} · ${sessions} of ${target} days, ${target - sessions} short`
+        : `${periodName(scheduleKind, occurrenceDate)} · no photo approved`;
     }
     case "anki":
       return `${formatDate(occurrenceDate)} · ${ankiMissText(detail.lastCheck, timezone)}`;
@@ -931,8 +1032,11 @@ function RejectedEvidenceAlert({
         {alert.reviewerName} rejected your evidence for {alert.name}
       </b>
       <span>“{alert.reason}”</span>
-      {alert.week ? (
-        <span className="small">This day doesn't count toward the week. Make it up on another day by Sunday.</span>
+      {alert.period ? (
+        <span className="small">
+          This day doesn't count toward {thisPeriod(alert.period.kind)}. Make it up on another day by{" "}
+          {alert.period.kind === "weekly-count" ? "Sunday" : formatDate(alert.period.lastDay)}.
+        </span>
       ) : (
         <span className="small">
           {formatDate(alert.occurrenceDate)} is Missed ·{" "}
@@ -1099,15 +1203,16 @@ function Waiting({
  */
 function EvidenceForm({
   pactId,
-  weekly,
+  period,
   onSubmitted,
   onFileExcuse,
 }: {
   pactId: string;
-  /** A Weekly count week: a refused day can be made up on another. */
-  weekly: boolean;
+  /** A period schedule's kind: a refused day can be made up on another. */
+  period: PeriodKind | null;
   onSubmitted: () => void;
-  onFileExcuse: () => void;
+  /** File excuse beside Take photo; a later section card has neither, just a small Take photo. */
+  onFileExcuse?: () => void;
 }) {
   const {
     busy,
@@ -1118,8 +1223,8 @@ function EvidenceForm({
     async (photoBlobs: Blob[]) => {
       const result = await api.submitEvidence(pactId, photoBlobs);
       if (!result.ok) {
-        return weekly && result.reason === "already-judged"
-          ? WEEKLY_ALREADY_REJECTED_TEXT
+        return period && result.reason === "already-judged"
+          ? `Today's photo was rejected. Make it up another day ${period === "every-2-weeks" ? "in these 2 weeks" : thisPeriod(period)}.`
           : REFUSAL_TEXT[result.reason];
       }
       onSubmitted();
@@ -1138,9 +1243,14 @@ function EvidenceForm({
   });
   const { photos } = picks;
   return (
-    <CardActions className="evidence stack">
+    <CardActions className={photos.length === 0 ? "evidence stack" : "evidence stack full"}>
       <input ref={picks.input} type="file" accept="image/*" capture="environment" hidden onChange={picks.onChange} />
-      {photos.length === 0 ? (
+      {photos.length === 0 && !onFileExcuse ? (
+        <button className="btn sm" onClick={picks.choose}>
+          <CameraIcon />
+          Take photo
+        </button>
+      ) : photos.length === 0 ? (
         <div className="row2">
           <button className="btn primary" onClick={picks.choose}>
             <CameraIcon />
@@ -1176,8 +1286,6 @@ function EvidenceForm({
     </CardActions>
   );
 }
-
-const WEEKLY_ALREADY_REJECTED_TEXT = "Today's photo was rejected. Make it up another day this week.";
 
 const REFUSAL_TEXT: Record<SubmitEvidenceRefusal, string> = {
   "pact-not-found": "This pact wasn't found.",

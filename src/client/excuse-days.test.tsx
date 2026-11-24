@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
-import { DayChip, presentOccurrence } from "./excuse-days.tsx";
+import { DayChip, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
 
 const missed = {
   kind: "missed",
@@ -105,7 +105,15 @@ describe("a covered day's note while it's open", () => {
 
   test("a Weekly count week is due by Sunday", () => {
     expect(
-      presentOccurrence(open("2026-01-26T05:00:00.000Z"), now, { timezone: "America/New_York", week: true }).note,
+      presentOccurrence(open("2026-01-26T05:00:00.000Z"), now, { timezone: "America/New_York", period: "weekly-count" })
+        .note,
     ).toBe("Due by Sunday");
   });
+});
+
+test("an excuse's period is named by its kind, which its length tells", () => {
+  expect(excuseDayText({ date: "2026-12-07", through: "2026-12-13" })).toBe("Week of Mon Dec 7");
+  expect(excuseDayText({ date: "2026-11-30", through: "2026-12-13" })).toBe("Nov 30 – Dec 13");
+  expect(excuseDayText({ date: "2026-02-01", through: "2026-02-28" })).toBe("February");
+  expect(excuseDayText({ date: "2026-12-07" })).toBe("Mon Dec 7");
 });

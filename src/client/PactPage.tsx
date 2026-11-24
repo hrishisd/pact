@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
+import { periodKindOfSchedule } from "../shared/schedules.ts";
 import {
   MAX_NAME_CHARS,
   MAX_TEXT_CHARS,
@@ -36,7 +37,9 @@ import {
   listNames,
   minutesLeft,
   money,
+  periodName,
 } from "./format.ts";
+import { datesText } from "./excuse-days.tsx";
 import { openItem, WaitingItemRow, type ItemOpeners } from "./item-page.tsx";
 import { TermsList } from "./terms-list.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
@@ -110,6 +113,7 @@ export function PactPage({
             <EditWindowBar pact={pact} minutes={minutes} onEdit={onEdit} onDeleted={onDeleted} />
             <StageLine pact={pact} />
             <NewTerms pact={pact} />
+            <TripAheadLine pact={pact} />
             {changeable && (
               <Actions
                 pact={pact}
@@ -244,6 +248,24 @@ function NewTerms({ pact }: { pact: Pact }) {
       <p>
         <b>The new terms start {formatDate(appliesFrom)}.</b>
         {todayKeepsCents !== null && ` ${openOccurrenceText(pact.schedule)} penalty stays ${money(todayKeepsCents)}.`}
+      </p>
+    </div>
+  );
+}
+
+/** "You're away Thu Dec 24 – Sun Jan 3, so December is due by Wed Dec 23.", while a trip ahead won't cover the open period. */
+function TripAheadLine({ pact }: { pact: Pact }) {
+  const trip = pact.tripAhead;
+  const kind = periodKindOfSchedule(pact.schedule);
+  if (trip === null || kind === undefined) return null;
+  return (
+    <div className="alert info" role="status">
+      <p>
+        You're away {datesText(trip.firstDay, trip.lastDay)}, so{" "}
+        <b>
+          {periodName(kind, trip.period)} is due by {formatDate(trip.doItBy)}
+        </b>
+        .
       </p>
     </div>
   );

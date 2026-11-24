@@ -3,7 +3,8 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
-import { formatDate } from "../shared/format.ts";
+import { formatDate, periodName } from "../shared/format.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
@@ -40,7 +41,7 @@ import {
   accountName,
   accountRow,
   friendsSortedByName,
-  isWeekly,
+  scheduleOf,
   occurrencesOf,
   ownPact,
   pactName,
@@ -297,7 +298,7 @@ function excusePreview(
   if (!isLocalDate(from) || !isLocalDate(to) || to < from) return { ok: false, reason: "invalid-dates" };
   if (to > addDays(from, MAX_EXCUSE_SPAN_DAYS - 1)) return { ok: false, reason: "too-many-days" };
   const preview: ExcusePreview = { covered: [], skipped: [], heldCents: 0 };
-  // On Weekly count, a day of a week covers the whole week. An Ended pact has no days after its end.
+  // On a period schedule, a day of a period covers the whole period. An Ended pact has no days after its end.
   for (const occurrence of occurrencesOf(ctx, pactId, timezone).overlapping(from, to)) {
     if (dueAfterEnd(ctx, pactId, occurrence)) continue;
     const day = excuseDay(ctx, pactId, occurrence);
@@ -340,7 +341,7 @@ export function excuseDays(ctx: CoreContext, excuseId: string, pactId: string, t
   });
 }
 
-/** The pact's `occurrence` as an excuse's day: a Weekly count week runs through its Sunday. */
+/** The pact's `occurrence` as an excuse's day: a period runs `through` its last day. */
 export function excuseDay(ctx: CoreContext, pactId: string, occurrence: Occurrence): ExcuseDay {
   return { ...occurrenceSpan(ctx, pactId, occurrence), status: occurrenceStatus(ctx, pactId, occurrence) };
 }
@@ -365,17 +366,16 @@ export function excusePact(ctx: CoreContext, excuseId: string): (PactRow & { tim
   );
 }
 
-/** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days; "Week of Mon Jan 5" for a Weekly count week. */
+/** "Mon Jan 5", or "Mon Jan 5 – Fri Jan 9" for several days; on a period schedule, its periods' name (`periodName`). */
 export function excuseDatesText(ctx: CoreContext, excuseId: string): string {
-  const {
-    first,
-    last,
-    pact_id: pactId,
-  } = ctx.db
-    .prepare(`SELECT MIN(date) AS first, MAX(date) AS last, pact_id FROM excuse_day WHERE excuse_id = ?`)
-    .get(excuseId) as { first: LocalDate; last: LocalDate; pact_id: string };
-  const text = first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
-  return isWeekly(ctx, pactId) ? `Week of ${text}` : text;
+  const { first, last, ...pact } = ctx.one<{ first: LocalDate; last: LocalDate; schedule: string }>(
+    `SELECT MIN(excuse_day.date) AS first, MAX(excuse_day.date) AS last, pact.schedule
+       FROM excuse_day JOIN pact ON pact.id = excuse_day.pact_id WHERE excuse_day.excuse_id = ?`,
+    excuseId,
+  )!;
+  const schedule = scheduleOf(pact.schedule);
+  if (isPeriodSchedule(schedule)) return periodName(schedule.kind, first, last);
+  return first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
 }
 
 /**

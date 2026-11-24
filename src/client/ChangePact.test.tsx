@@ -103,3 +103,28 @@ test("an Anki pact with AnkiWeb disconnected loads and sends its own deck, witho
   expect(spies.changePact).toHaveBeenCalledWith("gym", expect.objectContaining({ ankiDeckId: "spanish" }));
   expect(onDone).toHaveBeenCalledTimes(1);
 });
+
+test("a Once a month pact has no Schedule or Starts row to change", async () => {
+  stubApi({
+    pact: answers({
+      ok: true,
+      pact: { ...cameraPact(), evidenceKind: "camera", dueBy: null, schedule: { kind: "once-a-month" } },
+    }),
+    friends: answers([]),
+    recipients: answers([]),
+    changePreview: answers(APPLIES_NOW),
+  });
+  renderChangePact();
+  const terms = await screen.findAllByRole("term");
+
+  expect(terms.map((term) => term.textContent)).toEqual([
+    "Name",
+    "Photo shows",
+    "Due by",
+    "Ends",
+    "Penalty",
+    "Recipient",
+    "Reviewers",
+    "Reminders",
+  ]);
+});

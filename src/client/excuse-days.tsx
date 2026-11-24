@@ -3,8 +3,18 @@
 // "pending".
 
 import type { Json } from "../shared/api.ts";
-import type { ExcuseDay, ExcuseSkipReason, LocalDate, OccurrenceStatus } from "../shared/types.ts";
-import { dateIn, dueClockText, EXCUSE_WINDOW_TEXT, formatDate, money } from "./format.ts";
+import { periodKindOfSpan } from "../shared/schedules.ts";
+import type { ExcuseDay, ExcuseSkipReason, LocalDate, OccurrenceStatus, PeriodKind } from "../shared/types.ts";
+import {
+  dateIn,
+  dueDayOf,
+  dueClockText,
+  EXCUSE_WINDOW_TEXT,
+  formatDate,
+  money,
+  periodName,
+  thisPeriod,
+} from "./format.ts";
 
 type Status = Json<OccurrenceStatus>;
 
@@ -34,8 +44,8 @@ export interface PresentOptions {
   timezone: string;
   /** Compact, as in a review item's rows, where the line under the day says what's held: drops the cover wording, and the chip of a day not judged yet. */
   compact?: boolean;
-  /** A Weekly count week. */
-  week?: boolean;
+  /** A period schedule's period, of this kind. */
+  period?: PeriodKind;
   /** A bedtime pact's night: one past its in-bed-by time is waiting on Oura. */
   oura?: boolean;
   /** A One-time pact's date: open on another day (Submit anytime), it's due on that date, not today. */
@@ -51,7 +61,7 @@ export interface PresentOptions {
  * yet from Coming up to Due today to Not judged yet while the screen is open.
  */
 export function presentOccurrence(status: Status, now: number, options: PresentOptions): OccurrencePresentation {
-  const { timezone, compact = false, week = false, oura = false, dueOn } = options;
+  const { timezone, compact = false, period, oura = false, dueOn } = options;
   const { cover } = status;
   const chip = (text: string, tone: Tone) => ({ text, tone });
   const coveredSquare: Square = cover?.kind === "vacation" ? "vac" : "excused";
@@ -81,9 +91,11 @@ export function presentOccurrence(status: Status, now: number, options: PresentO
         phase === "ahead"
           ? "Not open yet"
           : phase === "open"
-            ? week
+            ? period === "weekly-count"
               ? "Due by Sunday"
-              : `Due at ${dueClockText(status.dueAt, timezone)}`
+              : period
+                ? `Due by ${formatDate(dueDayOf(status.dueAt, timezone))}`
+                : `Due at ${dueClockText(status.dueAt, timezone)}`
             : oura
               ? "No Oura data"
               : "Not judged yet";
@@ -101,11 +113,16 @@ export function presentOccurrence(status: Status, now: number, options: PresentO
       if (phase === "open") {
         if (dueOn !== undefined && dateIn(now, timezone) !== dueOn)
           return shown(chip(`Due ${formatDate(dueOn)}`, "todo"));
-        return shown(chip(week ? "This week" : "Due today", "todo"));
+        return shown(chip(period ? capitalized(thisPeriod(period)) : "Due today", "todo"));
       }
       return shown(chip(oura ? "No Oura data" : "Not judged yet", "soon"));
     }
   }
+}
+
+/** "This month", from "this month". */
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** A day not judged yet's phases, in the order time moves it through them. */
@@ -137,13 +154,15 @@ export function datesText(first: string, last: string): string {
 
 /** "Mon Nov 2" or "Mon Nov 2 – Wed Nov 4", for an excuse's days, oldest first; "Week of Mon Nov 2" for weeks. */
 export function excuseDatesText(days: Json<ExcuseDay>[]): string {
-  const first = days[0]?.date;
-  const last = days.at(-1)?.date;
+  const first = days[0];
+  const last = days.at(-1);
   if (first === undefined || last === undefined) return "";
-  return days[0]?.through === undefined ? datesText(first, last) : `Week of ${datesText(first, last)}`;
+  const kind = periodKindOfSpan(first.date, first.through);
+  return kind ? periodName(kind, first.date, last.date) : datesText(first.date, last.date);
 }
 
-/** One of an excuse's days: "Mon Nov 2", or for a Weekly count week, "Week of Mon Nov 2". */
+/** One of an excuse's days: "Mon Nov 2", or for a period, its name: "Week of Mon Nov 2", "December". */
 export function excuseDayText(day: Pick<Json<ExcuseDay>, "date" | "through">): string {
-  return day.through === undefined ? formatDate(day.date) : `Week of ${formatDate(day.date)}`;
+  const kind = periodKindOfSpan(day.date, day.through);
+  return kind ? periodName(kind, day.date) : formatDate(day.date);
 }

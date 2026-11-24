@@ -21,12 +21,33 @@ import {
   type WeekStartsRequest,
 } from "../shared/types.ts";
 import { addDays } from "../shared/calendar.ts";
-import { dateSpan, formatDate } from "../shared/format.ts";
+import { isOncePerPeriod, lastDayOf, type OncePerPeriodKind } from "../shared/schedules.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
-import { clockText, dateIn, EDIT_WINDOW_TEXT, inBedByName, initial, NIGHT_CLOSES_TEXT } from "./format.ts";
+import {
+  clockText,
+  dateIn,
+  dateSpan,
+  EDIT_WINDOW_TEXT,
+  formatDate,
+  inBedByName,
+  initial,
+  monthDay,
+  NIGHT_CLOSES_TEXT,
+  periodName,
+} from "./format.ts";
 import { optionalTimes, remindersAs, scheduleKindOf, termsOfFormKind, type Form } from "./pact-form.ts";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
+import { plural } from "./vacation-text.ts";
 import { loadFailure, loadedData, useLoad, useSend } from "./ui.tsx";
+
+/** The Schedule step's "How often?" list: each kind of schedule in plain words, with an example. */
+const PRESETS: { kind: Schedule["kind"]; name: string; example: string }[] = [
+  { kind: "fixed-days", name: "Set days of the week", example: "e.g. Mon, Wed, Fri" },
+  { kind: "weekly-count", name: "Some days each week", example: "e.g. 3× a week, any days" },
+  { kind: "every-2-weeks", name: "Every 2 weeks", example: "Any day in the 2 weeks" },
+  { kind: "once-a-month", name: "Once a month", example: "Any day in the month" },
+  { kind: "one-time", name: "Once, by a deadline", example: "One photo, one date" },
+];
 
 /** The steps that fill in the pact's terms: Request change opens each of them on its own. */
 export type FormStep = "goal" | "schedule" | "penalty" | "reviewers" | "reminders";
@@ -46,7 +67,8 @@ const DAY_BUTTONS: Record<Weekday, { short: string; full: string }> = {
  * What's wrong, in the owner's words: the core's refusals at Create or Save,
  * and the steps' own checks that a field is filled in.
  */
-export type Problem = EditPactRefusal | "no-deadline" | "no-amount" | "no-recipient" | "anki-due-by";
+export type Problem =
+  EditPactRefusal | "no-deadline" | "no-first-period" | "no-amount" | "no-recipient" | "anki-due-by";
 
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
@@ -59,6 +81,7 @@ export const PROBLEMS: Record<Problem, string> = {
   "text-too-long": TEXT_TOO_LONG_TEXT,
   "no-days": "Pick at least one day.",
   "no-deadline": "Pick a deadline.",
+  "no-first-period": "Pick when to start. If the dates didn't load, go Back and try again.",
   "deadline-too-soon": "The deadline must be at least an hour after you create the pact. Pick a later one.",
   "invalid-schedule": `Pick from 1 to ${MAX_WEEKLY_TARGET} days a week.`,
   "invalid-due-by": "Pick a time before midnight, or turn off Due by a set time.",
@@ -130,6 +153,8 @@ export function ListsFailed({ failed }: { failed: { error: unknown } }) {
  * One of the steps that fill in the pact's terms, as Create pact shows it in
  * turn and Request change in a sheet. `kindFixed`: the kind of schedule
  * can't change. `hints` say what changing the reviewers or reminders does.
+ * `weekStartsFor`: the pact being edited or changed, if any, whose first week
+ * or period is worked out from when it was made.
  */
 export function PactFormStep({
   step,
@@ -361,7 +386,15 @@ function ScheduleStep({
   const scheduleKind = scheduleKindOf(form);
   const weekly = scheduleKind === "weekly-count";
   const oneTime = scheduleKind === "one-time";
-  const pick = (kind: Schedule["kind"]) => update({ scheduleKind: kind, reminders: remindersAs(form, kind) });
+  const schedule = { kind: scheduleKind };
+  const periodKind = isOncePerPeriod(schedule) ? schedule.kind : null;
+  const pick = (kind: Schedule["kind"]) =>
+    update({
+      scheduleKind: kind,
+      reminders: remindersAs(form, kind),
+      // A start date on these is the first period's, picked again for the new kind.
+      ...((isOncePerPeriod({ kind }) || periodKind) && { startDate: "", firstPeriodPicked: false }),
+    });
   const everyDay = days.length === WEEKDAYS.length;
   const onDays = (days: Weekday[]) => update({ days });
   // Kept in week order, Monday first.
@@ -372,16 +405,19 @@ function ScheduleStep({
     <>
       <h2>Schedule</h2>
       {form.kind === "camera" && !kindFixed && (
-        <div className="seg" role="group" aria-label="Schedule type">
-          <button aria-pressed={scheduleKind === "fixed-days"} onClick={() => pick("fixed-days")}>
-            Fixed days
-          </button>
-          <button aria-pressed={weekly} onClick={() => pick("weekly-count")}>
-            Weekly count
-          </button>
-          <button aria-pressed={oneTime} onClick={() => pick("one-time")}>
-            One-time
-          </button>
+        <div className="field">
+          <span>How often?</span>
+          <div className="stack" role="radiogroup" aria-label="How often?">
+            {PRESETS.map(({ kind, name, example }) => (
+              <label key={kind} className="opt">
+                <input type="radio" name="how-often" checked={scheduleKind === kind} onChange={() => pick(kind)} />
+                <span className="rt">
+                  <b>{name}</b>
+                  <small>{example}</small>
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
       )}
       {oneTime ? (
@@ -394,6 +430,16 @@ function ScheduleStep({
             onChange={(e) => update({ deadline: e.target.value })}
           />
         </label>
+      ) : periodKind ? (
+        !kindFixed && (
+          <FirstPeriodChoice
+            key={periodKind}
+            kind={periodKind}
+            form={form}
+            update={update}
+            editing={weekStartsFor.editing}
+          />
+        )
       ) : weekly ? (
         <>
           <div className="field">
@@ -458,9 +504,13 @@ function ScheduleStep({
               ? form.submitAnytime
                 ? `You can submit your photo any day until ${until} on the deadline date.`
                 : `You can submit your photo only on the deadline date, until ${until}.`
-              : weekly
-                ? `You can submit a photo on any day of the week, until ${until} that day.`
-                : `You can submit a photo only on the days you picked, until ${until}.`}
+              : periodKind === "once-a-month"
+                ? `Take one photo on any day of the month, until ${until} that day. If the month ends without one, you pay the penalty.`
+                : periodKind === "every-2-weeks"
+                  ? `Take one photo on any day of the 2 weeks, until ${until} that day. If they end without one, you pay the penalty.`
+                  : weekly
+                    ? `You can submit a photo on any day of the week, until ${until} that day.`
+                    : `You can submit a photo only on the days you picked, until ${until}.`}
       </small>
       {termsOfFormKind(form).includes("due-by") && (
         <>
@@ -501,7 +551,7 @@ function ScheduleStep({
       {oneTime ? (
         <OneTimeWindow form={form} update={update} />
       ) : (
-        <DateRange form={form} update={update} weekly={weekly} weekStartsFor={weekStartsFor} />
+        <DateRange form={form} update={update} kind={scheduleKind} weekStartsFor={weekStartsFor} />
       )}
     </>
   );
@@ -533,19 +583,25 @@ function OneTimeWindow({ form, update }: { form: Form; update: (change: Partial<
   );
 }
 
-/** Which pact a Weekly count pact's week choice is for: a new one, one `editing` in its window, or one a change request is `changing`. */
+/**
+ * Which pact the Schedule step's first week or period choice is for: a new
+ * one, one `editing` in its window, or one a change request is `changing`.
+ */
 export type WeekStartsFor = Pick<WeekStartsRequest, "editing" | "changing">;
 
-/** A recurring pact's optional start and end dates; a Weekly count pact picks its first week instead. */
+/**
+ * A recurring pact's optional start and end dates. A Weekly count pact picks
+ * its first week instead, and Every 2 weeks and Once a month their first period.
+ */
 function DateRange({
   form,
   update,
-  weekly,
+  kind,
   weekStartsFor,
 }: {
   form: Form;
   update: (change: Partial<Form>) => void;
-  weekly: boolean;
+  kind: Schedule["kind"];
   weekStartsFor: WeekStartsFor;
 }) {
   // A start date before today would change nothing. On this device's clock: the form has no profile timezone.
@@ -562,7 +618,19 @@ function DateRange({
       />
     </label>
   );
-  if (weekly) return <WeekStartField form={form} update={update} weekStartsFor={weekStartsFor} endField={endField} />;
+  if (kind === "weekly-count") {
+    return <WeekStartField form={form} update={update} weekStartsFor={weekStartsFor} endField={endField} />;
+  }
+  if (isOncePerPeriod({ kind })) {
+    return (
+      <>
+        <div className="dates">{endField}</div>
+        <small className="muted">
+          Only whole {kind === "once-a-month" ? "months" : "2 weeks"} up to the end date count.
+        </small>
+      </>
+    );
+  }
   return (
     <div className="dates">
       <label className="field">
@@ -584,14 +652,14 @@ function DateRange({
 export function daysLeftText(daysLeft: number, monday: string): string {
   if (daysLeft === WEEKDAYS.length) return "the whole week";
   const first = formatDate(addDays(monday, WEEKDAYS.length - daysLeft)).slice(0, 3);
-  return `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left (${daysLeft === 1 ? first : `${first}–Sun`})`;
+  return `${plural(daysLeft, "day", "days")} left (${daysLeft === 1 ? first : `${first}–Sun`})`;
 }
 
 /** Why this week can't be a Weekly count pact's first: "Only 2 days left, fewer than 3×." */
 function notOfferedText(thisWeek: Extract<ThisWeek, { offered: false }>, target: number): string {
   if (thisWeek.reason === "ends-within-an-hour") return "The week ends in less than an hour.";
   const { daysLeft } = thisWeek;
-  return `Only ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left, fewer than ${target}×.`;
+  return `Only ${plural(daysLeft, "day", "days")} left, fewer than ${target}×.`;
 }
 
 /** A week as its option names it: "Nov 23 – 29". */
@@ -719,6 +787,77 @@ function WeekStartField({
         </select>
       )}
     </div>,
+  );
+}
+
+/**
+ * Every 2 weeks and Once a month: whether the first period is this one or
+ * the next, as the core offers them. This one is picked to start with when
+ * it has 7 days left, counting today, and isn't offered when it's due within
+ * the hour.
+ */
+function FirstPeriodChoice({
+  kind,
+  form,
+  update,
+  editing,
+}: {
+  kind: OncePerPeriodKind;
+  form: Form;
+  update: (change: Partial<Form>) => void;
+  editing?: string;
+}) {
+  const schedule = { kind };
+  const { state } = useLoad(() => api.firstOccurrence({ schedule, evidenceKind: "camera", editing }));
+  const result = loadedData(state);
+  const offered = result?.ok ? result.offered : undefined;
+  const daysLeft = offered?.current?.daysLeft ?? 0;
+  useEffect(() => {
+    if (offered && !form.firstPeriodPicked) {
+      update({ startDate: daysLeft >= 7 ? "" : offered.next.date, firstPeriodPicked: true });
+    }
+  }, [offered]);
+  const failed = loadFailure(state);
+  const label = kind === "once-a-month" ? "First month" : "First 2 weeks";
+  if (!offered) {
+    return (
+      <div className="field">
+        <span>{label}</span>
+        <small className="muted">
+          {failed ? `Couldn't load the dates. ${failureText(failed.error, "Check your connection.")}` : "Loading…"}
+        </small>
+      </div>
+    );
+  }
+  const pickNext = (next: boolean) => update({ startDate: next ? offered.next.date : "", firstPeriodPicked: true });
+  const option = (next: boolean, date: string, note: string) => (
+    <label className="opt">
+      <input
+        type="radio"
+        name="first-period"
+        checked={(form.startDate !== "") === next}
+        onChange={() => pickNext(next)}
+      />
+      <span className="rt">
+        <b>{kind === "every-2-weeks" ? (next ? "Next week" : "This week") : periodName(kind, date)}</b>
+        <small>{note}</small>
+      </span>
+    </label>
+  );
+  const { current, next } = offered;
+  return (
+    <div className="field">
+      <span>{label}</span>
+      <div className="stack" role="radiogroup" aria-label={label}>
+        {current &&
+          option(
+            false,
+            current.date,
+            `Due by ${formatDate(lastDayOf(schedule, current.date))} · ${plural(daysLeft, "day", "days")}, counting today`,
+          )}
+        {option(true, next.date, `${monthDay(next.date)} to ${formatDate(lastDayOf(schedule, next.date))}`)}
+      </div>
+    </div>
   );
 }
 

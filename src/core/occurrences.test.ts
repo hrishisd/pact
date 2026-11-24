@@ -471,3 +471,66 @@ describe("terms that changed over time", () => {
     expect(ended.between("2026-01-01", "2026-01-31").map((o) => o.date)).toEqual(["2026-01-05", "2026-01-12"]);
   });
 });
+
+describe("Every 2 weeks and Once a month", () => {
+  const monthly = (firstOccurrence: string): OccurrenceTerms => ({
+    schedule: { kind: "once-a-month" },
+    dueBy: null,
+    firstOccurrence,
+    endDate: null,
+  });
+
+  test("a month runs from its 1st to its last day, whatever its length, February in a leap year too", () => {
+    const months = occurrences(monthly("2028-01-01"), NEW_YORK).between("2028-01-01", "2028-04-30");
+
+    expect(months.map((month) => [month.date, month.opensAt.toISOString(), month.dueAt.toISOString()])).toEqual([
+      ["2028-01-01", "2028-01-01T05:00:00.000Z", "2028-02-01T05:00:00.000Z"],
+      ["2028-02-01", "2028-02-01T05:00:00.000Z", "2028-03-01T05:00:00.000Z"],
+      // Daylight saving time starts on Mar 12: April 1 is on EDT.
+      ["2028-03-01", "2028-03-01T05:00:00.000Z", "2028-04-01T04:00:00.000Z"],
+      ["2028-04-01", "2028-04-01T04:00:00.000Z", "2028-05-01T04:00:00.000Z"],
+    ]);
+    expect(occurrences(monthly("2028-01-01"), NEW_YORK).covering("2028-02-29")?.date).toBe("2028-02-01");
+  });
+
+  test("two weeks are counted from the first occurrence, across a daylight saving change, with no gap", () => {
+    const terms: OccurrenceTerms = {
+      schedule: { kind: "every-2-weeks" },
+      dueBy: "20:00",
+      firstOccurrence: "2026-02-16",
+      endDate: null,
+    };
+    const fortnights = occurrences(terms, NEW_YORK);
+
+    expect(fortnights.between("2026-02-01", "2026-03-31").map((period) => period.date)).toEqual([
+      "2026-02-16",
+      "2026-03-02",
+      "2026-03-16",
+      "2026-03-30",
+    ]);
+    // Mar 8 is 23 hours long in New York; the period still ends at the midnight ending Sun Mar 15.
+    expect(fortnights.covering("2026-03-15")).toEqual({
+      date: "2026-03-02",
+      opensAt: new Date("2026-03-02T05:00:00Z"),
+      dueAt: new Date("2026-03-16T04:00:00Z"),
+      closesAt: new Date("2026-03-16T04:00:00Z"),
+    });
+    // The due-by time limits each day's evidence.
+    expect(fortnights.dayDueAt("2026-03-09")).toEqual(new Date("2026-03-10T00:00:00Z"));
+    expect(fortnights.covering("2026-02-15")).toBeNull();
+  });
+
+  test("the first month is this one unless it's due within the hour", () => {
+    const terms = { schedule: { kind: "once-a-month" } as const, dueBy: null };
+
+    expect(ok(newOccurrenceTerms(terms, new Date("2026-01-31T22:00:00Z"), NEW_YORK, null)).first.date).toBe(
+      "2026-01-01",
+    );
+    expect(ok(newOccurrenceTerms(terms, new Date("2026-02-01T04:30:00Z"), NEW_YORK, null)).first.date).toBe(
+      "2026-02-01",
+    );
+    expect(ok(newOccurrenceTerms(terms, new Date("2026-01-10T15:00:00Z"), NEW_YORK, "2026-03-01")).first.date).toBe(
+      "2026-03-01",
+    );
+  });
+});

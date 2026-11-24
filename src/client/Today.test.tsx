@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { LedgerResponse, TodayResponse } from "../shared/api.ts";
-import type { CheckNowResult } from "../shared/types.ts";
+import type { Json, LedgerResponse, TodayResponse } from "../shared/api.ts";
+import type { CheckNowResult, TodayToDoCard } from "../shared/types.ts";
 import { PullToRefresh } from "./pull-to-refresh.tsx";
 import { answers, endSheetSlides, onOurSide, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
 import { Today } from "./Today.tsx";
@@ -541,5 +541,114 @@ describe("Waiting for approval", () => {
     expect(await screen.findByText("Sam asked about your vacation, Mon Jan 12 – Sun Jan 18")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Reply" }));
     expect(openers.vacation).toHaveBeenCalledWith("trip");
+  });
+});
+
+describe("a Once a month or Every 2 weeks pact on Today", () => {
+  /** A period card: January 2026 (due at midnight ending Sat Jan 31), or with `over` another. */
+  const periodCard = (over: Partial<Json<TodayToDoCard>> = {}): Json<TodayToDoCard> => ({
+    kind: "evidence",
+    pactId: "call",
+    name: "Call Grandma",
+    penaltyCents: 2000,
+    editWindowClosesAt: null,
+    occurrenceDate: "2026-01-01",
+    dueAt: "2026-02-01T05:00:00Z",
+    dueBy: null,
+    period: { scheduleKind: "once-a-month", sessions: 0, waiting: 0, target: 1 },
+    ...over,
+  });
+  const today = (...sections: TodayResponse["sections"]): TodayResponse => ({ ...TODAY, sections });
+
+  test("before its last 7 days, it's a small card under This month, with Take photo", async () => {
+    stubApi({ today: answers(today({ kind: "later", cards: [periodCard()] })) });
+    renderToday();
+    const section = (await screen.findByText("This month")).closest("section")!;
+    const later = within(section).getByRole("heading", { name: "Call Grandma" }).closest("article")!;
+    expect(later.textContent).toContain("0 of 1 · due Sat Jan 31");
+    expect(within(later).getByRole("button", { name: "Take photo" })).toBeTruthy();
+    expect(within(later).queryByRole("button", { name: "File excuse" })).toBeNull();
+  });
+
+  test("the section is These 2 weeks for 2 weeks only, and Due later for both", async () => {
+    const fortnight = periodCard({
+      pactId: "clean",
+      name: "Clean the flat",
+      occurrenceDate: "2026-01-05",
+      dueAt: "2026-01-19T05:00:00Z",
+      period: { scheduleKind: "every-2-weeks", sessions: 0, waiting: 0, target: 1 },
+    });
+    stubApi({ today: answers(today({ kind: "later", cards: [fortnight] })) });
+    const { unmount } = renderToday();
+    expect(await screen.findByText("These 2 weeks")).toBeTruthy();
+    unmount();
+
+    stubApi({ today: answers(today({ kind: "later", cards: [fortnight, periodCard()] })) });
+    renderToday();
+    expect(await screen.findByText("Due later")).toBeTruthy();
+  });
+
+  test("before its last 7 days, with a trip ahead, its small card says to do it by the day before", async () => {
+    const tripAhead = { period: "2026-01-01", firstDay: "2026-01-28", lastDay: "2026-02-05", doItBy: "2026-01-27" };
+    stubApi({ today: answers(today({ kind: "later", cards: [periodCard({ tripAhead })] })) });
+    renderToday();
+    const later = (await screen.findByRole("heading", { name: "Call Grandma" })).closest("article")!;
+    expect(later.textContent).toContain("0 of 1 · do it by Tue Jan 27");
+  });
+
+  test("a small card still in its edit window shows how long is left to edit", async () => {
+    vi.setSystemTime(new Date("2026-01-06T15:00:00Z"));
+    const card = periodCard({ editWindowClosesAt: "2026-01-06T15:10:00Z" });
+    stubApi({ today: answers(today({ kind: "later", cards: [card] })) });
+    renderToday();
+    const later = (await screen.findByRole("heading", { name: "Call Grandma" })).closest("article")!;
+    expect(later.className).toContain("fresh");
+    expect(later.textContent).toContain("10 min");
+  });
+
+  test("a rejected photo says to make it up by the month's last day", async () => {
+    stubApi({
+      today: answers({
+        ...today(),
+        alerts: [
+          {
+            kind: "evidence-rejected",
+            pactId: "call",
+            name: "Call Grandma",
+            reviewerName: "Sam",
+            reason: "Blurry",
+            occurrenceDate: "2026-01-08",
+            penaltyCents: 2000,
+            recipientName: "AMF",
+            excusableUntil: null,
+            period: { kind: "once-a-month", lastDay: "2026-01-31" },
+          },
+        ],
+      }),
+    });
+    renderToday();
+    expect(
+      await screen.findByText("This day doesn't count toward this month. Make it up on another day by Sat Jan 31."),
+    ).toBeTruthy();
+  });
+
+  test("in its last 7 days, it's a To do card with the days left", async () => {
+    vi.setSystemTime(new Date("2026-01-27T15:00:00Z"));
+    stubApi({ today: answers(today({ kind: "to-do", cards: [periodCard()] })) });
+    renderToday();
+    const todo = await card("Call Grandma");
+    expect(todo.textContent).toContain("0 of 1 this month");
+    expect(todo.textContent).toContain("Due by Sat Jan 31 · 5 days left");
+    expect(within(todo).getByRole("button", { name: "File excuse" })).toBeTruthy();
+  });
+
+  test("with a trip ahead, the To do card says to do it before the trip", async () => {
+    vi.setSystemTime(new Date("2026-01-21T15:00:00Z"));
+    const tripAhead = { period: "2026-01-01", firstDay: "2026-01-28", lastDay: "2026-02-05", doItBy: "2026-01-27" };
+    stubApi({ today: answers(today({ kind: "to-do", cards: [periodCard({ tripAhead })] })) });
+    renderToday();
+    const todo = await card("Call Grandma");
+    expect(todo.textContent).toContain("Do it by Tue Jan 27 · 7 days left");
+    expect(todo.textContent).toContain("You're away Wed Jan 28 – Thu Feb 5");
   });
 });

@@ -2,8 +2,9 @@
 // and the pact page, and the checks creating and changing a pact share.
 
 import { APP_PATHS } from "../shared/api.ts";
-import { addDays } from "../shared/calendar.ts";
+import { addDays, dayCount } from "../shared/calendar.ts";
 import { money, scheduleText } from "../shared/format.ts";
+import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import type {
   AccountId,
   ClockTime,
@@ -23,6 +24,7 @@ import type {
   PactTiming,
   Schedule,
   TermsByKind,
+  TripAhead,
   WeekStartsRequest,
   WeekStartsResult,
 } from "../shared/types.ts";
@@ -41,10 +43,14 @@ import {
   lastWeekBy,
   newOccurrenceTerms,
   occurrences,
+  offeredPeriods,
   thisWeekStart,
   type DayClock,
+  type Occurrence,
+  type Occurrences,
   type OccurrenceTerms,
 } from "./occurrences.ts";
+import { occurrenceView } from "./occurrence-state.ts";
 import { tellAll } from "./outbox.ts";
 import {
   checkedTerms,
@@ -78,6 +84,7 @@ import {
   type PactRow,
 } from "./rows.ts";
 import { todayKeeps } from "./change-requests.ts";
+import { tripAhead } from "./trips.ts";
 import type { waitingFor } from "./waiting.ts";
 
 export function createPact(ctx: CoreContext, accountId: AccountId, pact: NewPact): CreatePactResult {
@@ -216,13 +223,26 @@ export function firstOccurrence(
     startDate !== undefined && isLocalDate(startDate) ? startDate : null,
   );
   if (!timing.ok) return timing;
-  const firstOccurrence = { date: timing.first.date, dueAt: timing.first.dueAt };
+  const when = ({ date, dueAt }: Occurrence) => ({ date, dueAt });
+  const offered = isOncePerPeriod(schedule) ? offeredPeriods(schedule, createdAt, timezone) : null;
   // A first week already under way says how many of its days are left.
   if (schedule.kind === "weekly-count" && timing.first.date <= localDateOf(createdAt, timezone)) {
     const { daysLeft } = thisWeekStart(schedule.target, times.dueBy, createdAt, timezone);
-    return { ok: true, firstOccurrence, daysLeft };
+    return { ok: true, firstOccurrence: when(timing.first), daysLeft };
   }
-  return { ok: true, firstOccurrence };
+  return {
+    ok: true,
+    firstOccurrence: when(timing.first),
+    ...(offered && {
+      offered: {
+        current: offered.current && {
+          ...when(offered.current),
+          daysLeft: dayCount(localDateOf(ctx.clock.now(), timezone), lastDayOf(schedule, offered.current.date)),
+        },
+        next: when(offered.next),
+      },
+    }),
+  };
 }
 
 /**
@@ -251,6 +271,7 @@ export function weekStarts(
     const from = firstDayNotOpen(
       { kind: "weekly-count", target: validTarget },
       lastDayOpened(ctx, pact.id, timezone, now),
+      pact.first_occurrence,
     );
     return { ok: true, weekStarts: { thisWeek: null, mondays: mondaysFrom(from), defaultMonday: from, lastWeek } };
   }
@@ -314,7 +335,8 @@ export function pactPage(
   const row = ownPact(ctx, accountId, pactId);
   if (!row) return { ok: false, reason: "pact-not-found" };
   const now = ctx.clock.now();
-  const { first } = occurrencesOf(ctx, pactId, timezone);
+  const occurrences = occurrencesOf(ctx, pactId, timezone);
+  const { first } = occurrences;
   const service = SERVICE_OF_KIND[row.evidence_kind];
   const pact: PactTerms = {
     id: row.id,
@@ -325,11 +347,20 @@ export function pactPage(
     newTerms: newTerms(ctx, row, timezone, now),
     waiting: waiting(ctx, accountId, { pactId }),
     history: pactHistory(ctx, row, timezone, first, now),
+    tripAhead: openTripAhead(ctx, row, occurrences, now),
     connectionProblem: row.stage === "active" && service !== null ? connectionProblem(ctx, accountId, service) : null,
     ending: endingOf(row),
     excuseWindowsClose: excuseWindowsClose(ctx, accountId, pactId),
   };
   return { ok: true, pact };
+}
+
+/** The trip ahead of the Active pact's period open at `now`, while that still needs evidence; else null. */
+function openTripAhead(ctx: CoreContext, row: PactRow, occurrences: Occurrences, now: Date): TripAhead | null {
+  const open = occurrences.openAt(now);
+  if (row.stage !== "active" || open === null || !occurrenceView(ctx, row.id, open).toDo) return null;
+  const today = localDateOf(now, occurrences.timezoneOn(open.date));
+  return tripAhead(ctx, row.id, scheduleOf(row.schedule), open.date, today);
 }
 
 /** The service a pact of each evidence kind is judged from; Camera has none. */

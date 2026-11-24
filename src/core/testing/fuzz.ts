@@ -752,11 +752,15 @@ export class World {
     const fixedDays: Schedule = { kind: "fixed-days", days: days.length > 0 || d % 17 === 0 ? days : ["mon", "thu"] };
     const shape = (a >>> 4) % 10;
     const schedule: Schedule =
-      evidenceKind !== "camera" || shape < 5
+      evidenceKind !== "camera" || shape < 4
         ? fixedDays
-        : shape < 8
+        : shape < 6
           ? { kind: "weekly-count", target: 1 + ((b >>> 12) % 4) }
-          : { kind: "one-time", deadline: addDays(today, (b >>> 12) % 9), submitAnytime: (b >>> 16) % 2 === 0 };
+          : shape === 6
+            ? { kind: "every-2-weeks" }
+            : shape === 7
+              ? { kind: "once-a-month" }
+              : { kind: "one-time", deadline: addDays(today, (b >>> 12) % 9), submitAnytime: (b >>> 16) % 2 === 0 };
     const recurring = schedule.kind !== "one-time";
     const startDate = recurring && (c >>> 4) % 4 === 0 ? addDays(today, (c >>> 6) % 10) : undefined;
     const endDate = recurring && (c >>> 10) % 4 === 0 ? addDays(startDate ?? today, ((c >>> 12) % 25) - 1) : undefined;
@@ -803,7 +807,7 @@ export class World {
             change.schedule = { kind: "fixed-days", days };
           } else if (change.schedule.kind === "weekly-count") {
             change.schedule = { kind: "weekly-count", target: 1 + (n % 7) };
-          } else {
+          } else if (change.schedule.kind === "one-time") {
             change.schedule = {
               kind: "one-time",
               deadline: addDays(today, n % 6),
@@ -885,6 +889,8 @@ function names(people: AccountHandle[]): string {
 function describeSchedule(schedule: Schedule): string {
   if (schedule.kind === "fixed-days") return schedule.days.join("/") || "no days";
   if (schedule.kind === "weekly-count") return `${schedule.target} a week`;
+  if (schedule.kind === "every-2-weeks") return "every 2 weeks";
+  if (schedule.kind === "once-a-month") return "once a month";
   return `once by ${schedule.deadline}${schedule.submitAnytime ? " anytime" : ""}`;
 }
 

@@ -2,13 +2,14 @@
 // dropping those the scheduler reaches too late.
 
 import { APP_PATHS } from "../shared/api.ts";
-import { addDays } from "../shared/calendar.ts";
+import { addDays, dayCount } from "../shared/calendar.ts";
 import { clockText, formatDate } from "../shared/format.ts";
+import { isOncePerPeriod, isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import type { AccountId, LocalDate } from "../shared/types.ts";
-import { localDateOf, mondayOf } from "./calendar.ts";
+import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import { occurrenceView, weekProgress } from "./occurrence-state.ts";
-import { hasSchedule, oneTimeReminderAt, reminderAt, type Occurrences } from "./occurrences.ts";
+import { occurrenceView, periodProgress } from "./occurrence-state.ts";
+import { hasPeriodSchedule, hasSchedule, oneTimeReminderAt, reminderAt, type Occurrences } from "./occurrences.ts";
 import { pushOperatorAlert } from "./outbox.ts";
 import {
   lastAnkiCheck,
@@ -20,6 +21,7 @@ import {
   type PactClock,
   type PactRow,
 } from "./rows.ts";
+import { reminderWindow, tripAhead } from "./trips.ts";
 
 /** A reminder the scheduler reaches later than this after its time, as after downtime, is dropped, not sent. */
 const REMINDER_LATE_MS = 15 * 60 * 1000;
@@ -57,7 +59,7 @@ export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
       const sent = ctx.db
         .prepare(`INSERT INTO reminder_sent (pact_id, date, time) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`)
         .run(pact.id, date, time);
-      if (sent.changes === 1) enqueueReminder(ctx, pact, date);
+      if (sent.changes === 1) enqueueReminder(ctx, pact, date, occurrences.covering(date)!.date);
     }
   }
   if (dropped.length > 0) {
@@ -154,8 +156,8 @@ function remindersBetween(
 
 /**
  * Whether the day `day` still needs a nudge: its occurrence's `remind`, the
- * same rule Today's To do card follows (R7), and on Weekly count a day with
- * nothing submitted yet.
+ * same rule Today's To do card follows (R7), and on a period schedule a day
+ * with nothing submitted yet in the period's reminder window (`reminderWindow`).
  */
 function worthReminding(
   ctx: CoreContext,
@@ -165,19 +167,23 @@ function worthReminding(
 ): boolean {
   const occurrence = occurrences.covering(day);
   if (occurrence === null || !occurrenceView(ctx, pact.id, occurrence).remind) return false;
-  if (scheduleOf(pact.schedule).kind !== "weekly-count") return true;
+  const schedule = scheduleOf(pact.schedule);
+  if (!isPeriodSchedule(schedule)) return true;
+  const window = reminderWindow(ctx, pact.id, schedule, occurrence.date);
+  if (day < window.first || day > window.last) return false;
+  if (window.away && day >= window.away.firstDay && day <= window.away.lastDay) return false;
   return ctx.db.prepare(`SELECT 1 FROM evidence WHERE pact_id = ? AND day = ?`).get(pact.id, day) === undefined;
 }
 
-/** A reminder about the day `date` (on Weekly count, a day of the week). */
+/** A reminder about the day `date` (on a period schedule, a day of the period dated `occurrence`). */
 function enqueueReminder(
   ctx: CoreContext,
   pact: Pick<PactRow, "id" | "name" | "evidence_kind" | "schedule"> & { owner_account_id: AccountId },
   date: LocalDate,
+  occurrence: LocalDate,
 ): void {
-  const { kind } = scheduleOf(pact.schedule);
-  const weekly = kind === "weekly-count";
-  const terms = termsOn(ctx, pact.id, weekly ? mondayOf(date) : date);
+  const schedule = scheduleOf(pact.schedule);
+  const terms = termsOn(ctx, pact.id, occurrence);
   const due = terms.due_by === null ? "midnight" : clockText(terms.due_by);
   let body = `No photo yet today. Due at ${due}.`;
   if (pact.evidence_kind === "oura") body = `In bed by ${clockText(terms.in_bed_by!)} tonight.`;
@@ -188,10 +194,18 @@ function enqueueReminder(
         ? `Due at ${due}. Pact hasn't checked your deck yet.`
         : `${cardsText(check.cardsLeft)} left, due at ${due}`;
   }
-  if (kind === "one-time") body = `No photo yet. Due ${formatDate(date)} at ${due}.`;
-  if (weekly) {
-    const { sessions, target } = weekProgress(ctx, pact.id, mondayOf(date));
+  if (schedule.kind === "one-time") body = `No photo yet. Due ${formatDate(date)} at ${due}.`;
+  if (schedule.kind === "weekly-count") {
+    const { sessions, target } = periodProgress(ctx, pact.id, occurrence);
     body = `${sessions} of ${target} days done this week. Today's photo is due at ${due}.`;
+  }
+  if (isOncePerPeriod(schedule)) {
+    const trip = tripAhead(ctx, pact.id, schedule, occurrence, date);
+    const lastDay = lastDayOf(schedule, occurrence);
+    const left = dayCount(date, lastDay);
+    body = trip
+      ? `Do it before your trip: by ${formatDate(trip.doItBy)}.`
+      : `Due ${formatDate(lastDay)}. ${left} ${left === 1 ? "day" : "days"} left.`;
   }
   ctx.enqueue({
     recipient: pact.owner_account_id,
@@ -227,7 +241,7 @@ function capitalized(text: string): string {
 /**
  * Each of `times` that could go off for `pact` from `fromDate` through
  * `toDate`, with the day it's about and when that day's evidence is due: on
- * Weekly count, every day of an open week. On One-time each reminder has its
+ * a period schedule, every day of an open period. On One-time each reminder has its
  * own date, and they're all about the one occurrence.
  */
 function remindersDue(
@@ -244,7 +258,7 @@ function remindersDue(
     return times.map((time) => ({ date, dueAt, time, at: oneTimeReminderAt(time, timezone) }));
   }
   const days: { date: LocalDate; dueAt: Date }[] = [];
-  if (hasSchedule(terms, "weekly-count")) {
+  if (hasPeriodSchedule(terms)) {
     for (let date = fromDate; date <= toDate; date = addDays(date, 1)) {
       const dueAt = occurrences.dayDueAt(date);
       if (dueAt) days.push({ date, dueAt });

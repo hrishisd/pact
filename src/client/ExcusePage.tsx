@@ -5,6 +5,7 @@
 // approved excuse's push and a reviewer's question.
 
 import { API_PATHS, type Json } from "../shared/api.ts";
+import { periodKindOfSpan } from "../shared/schedules.ts";
 import type { ExcuseDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
@@ -74,7 +75,12 @@ function ExcuseView({
                 <span className="rt">
                   <b>{excuseDayText(day)}</b>
                 </span>
-                <DayChip status={day.status} now={now} timezone={timezone} week={day.through !== undefined} />
+                <DayChip
+                  status={day.status}
+                  now={now}
+                  timezone={timezone}
+                  period={periodKindOfSpan(day.date, day.through)}
+                />
               </div>
             ))}
           </div>

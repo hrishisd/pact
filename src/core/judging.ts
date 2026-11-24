@@ -3,10 +3,11 @@
 // `ending.ts`.
 
 import { APP_PATHS } from "../shared/api.ts";
-import { formatDate, money } from "../shared/format.ts";
+import { formatDate, money, periodName } from "../shared/format.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 import type { AccountId, AnkiCheck, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
-import { weekProgress, type PactToJudge } from "./occurrence-state.ts";
+import { periodProgress, type PactToJudge } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { lastAnkiCheck, recipientName, scheduleOf, termsOn } from "./rows.ts";
 
@@ -35,9 +36,9 @@ export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate)
   };
   const schedule = scheduleOf(pact.schedule);
   const recipient = recipientName(ctx, pact.recipient_id);
-  let body = `${formatDate(date)} · ${money(pact.penalty_cents)} penalty to ${recipient}`;
+  let body = `${isPeriodSchedule(schedule) ? periodName(schedule.kind, date) : formatDate(date)} · ${money(pact.penalty_cents)} penalty to ${recipient}`;
   if (schedule.kind === "weekly-count") {
-    const { sessions, target } = weekProgress(ctx, pactId, date);
+    const { sessions, target } = periodProgress(ctx, pactId, date);
     const short = target - sessions;
     body = `Week of ${formatDate(date)} · ${short} ${short === 1 ? "day" : "days"} short · ${money(short * pact.penalty_cents)} penalty to ${recipient}`;
   }

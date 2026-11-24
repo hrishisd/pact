@@ -6,14 +6,15 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { API_PATHS, type DecideResponse, type Json, type ReviewQueueResponse } from "../shared/api.ts";
+import { periodKindOfSpan } from "../shared/schedules.ts";
 import { MAX_TEXT_CHARS, type DecideRefusal, type ReviewDecision, type ReviewItem } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
-import { dateSpan, formatDate, formatDayTime, listNames, money, weekdayName } from "./format.ts";
+import { dateSpan, formatDate, formatDayTime, listNames, money, thisPeriod, weekdayName } from "./format.ts";
 import { Chip, excuseDatesText, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
 import { DiffList, endsWhenText, EverythingElse, startsText } from "./change-terms.tsx";
 import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-page.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
-import { coveredText, firstName, pactsText, plural, weekOf } from "./vacation-text.ts";
+import { coveredText, firstName, pactsText, periodLabel, plural } from "./vacation-text.ts";
 import { useRefreshOnPull } from "./pull-to-refresh.tsx";
 import { Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
@@ -298,9 +299,9 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
           <h3>{item.pactName}</h3>
           <span className="meta">{formatDate(item.occurrenceDate)}</span>
         </div>
-        {item.week && (
+        {item.period && (
           <span className="meta">
-            Counts toward this week · {item.week.sessions} of {item.week.target} so far
+            Counts toward {thisPeriod(item.period.scheduleKind)} · {item.period.sessions} of {item.period.target} so far
           </span>
         )}
         <div className="stack-sm">
@@ -315,10 +316,15 @@ function EvidenceItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
         onAsk={onAsk}
         placeholder="e.g. This looks like it's from last week"
         cost={
-          item.week ? (
+          item.period?.scheduleKind === "weekly-count" ? (
             <p className="small">
               If you reject it, {weekdayName(item.occurrenceDate)} won't count toward {item.ownerName}'s{" "}
-              {item.week.target} days this week. {item.ownerName} can make it up on another day.
+              {item.period.target} days this week. {item.ownerName} can make it up on another day.
+            </p>
+          ) : item.period ? (
+            <p className="small">
+              If you reject it, {weekdayName(item.occurrenceDate)} won't count toward{" "}
+              {thisPeriod(item.period.scheduleKind)}. {item.ownerName} can make it up on another day.
             </p>
           ) : (
             <p className="small">
@@ -366,7 +372,7 @@ function ExcuseItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: Ex
             const { date, status } = day;
             const { chip, note } = presentOccurrence(status, now, {
               timezone,
-              week: day.through !== undefined,
+              period: periodKindOfSpan(day.date, day.through),
               compact: true,
             });
             return (
@@ -506,7 +512,7 @@ function VacationItem({ item, timezone, onDecided, onAsk }: ItemProps & { item: 
                   ))}
                   {cover.held?.map((day) => (
                     <small key={day.date}>
-                      {day.through === undefined ? formatDate(day.date) : weekOf(day.date)} · Missed ·{" "}
+                      {periodLabel(periodKindOfSpan(day.date, day.through), day.date)} · Missed ·{" "}
                       {money(day.penaltyCents)} held
                     </small>
                   ))}

@@ -39,8 +39,16 @@ export interface Form {
   dueByOn: boolean;
   /** "HH:MM" as the time field gives it, or "" until picked. */
   dueBy: string;
-  /** "YYYY-MM-DD" as the date field gives it, or "" for none. */
+  /**
+   * "YYYY-MM-DD" as the date field gives it, or "" for none. Every 2 weeks
+   * and Once a month: "" for this period, or the next one's first day.
+   */
   startDate: string;
+  /**
+   * Every 2 weeks and Once a month: whether the first period is picked, by
+   * the owner or by the step's default. Until then the step picks it.
+   */
+  firstPeriodPicked: boolean;
   endDate: string;
   /** As typed, in dollars: "5" or "2.50". */
   penalty: string;
@@ -50,7 +58,7 @@ export interface Form {
   reminders: string[];
 }
 
-/** The kind of schedule the form makes: Weekly count and One-time are Camera only, so the others make Fixed days. */
+/** The kind of schedule the form makes: only Camera has the others, so Oura and Anki make Fixed days. */
 export function scheduleKindOf(form: Pick<Form, "kind" | "scheduleKind">): Schedule["kind"] {
   return form.kind === "camera" ? form.scheduleKind : "fixed-days";
 }
@@ -71,6 +79,7 @@ export const EMPTY_FORM: Form = {
   dueByOn: false,
   dueBy: "",
   startDate: "",
+  firstPeriodPicked: false,
   endDate: "",
   penalty: "",
   recipientId: null,
@@ -94,6 +103,7 @@ export function formOf(pact: Pact): Form {
     deadline: pact.schedule.kind === "one-time" ? pact.schedule.deadline : "",
     submitAnytime: pact.schedule.kind === "one-time" && pact.schedule.submitAnytime,
     startDate: pact.startDate ?? "",
+    firstPeriodPicked: true,
     endDate: pact.endDate ?? "",
     penalty: centsInputText(pact.penaltyCents),
     recipientId: pact.recipient.id,
@@ -115,6 +125,10 @@ export function scheduleOf(form: Form): Schedule {
       return { kind: "fixed-days", days: form.days };
     case "weekly-count":
       return { kind: "weekly-count", target: form.target };
+    case "every-2-weeks":
+      return { kind: "every-2-weeks" };
+    case "once-a-month":
+      return { kind: "once-a-month" };
     case "one-time":
       return { kind: "one-time", deadline: form.deadline, submitAnytime: form.submitAnytime };
   }

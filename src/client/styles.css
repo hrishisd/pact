@@ -1798,3 +1798,29 @@ details.folded .kv {
   color: var(--due);
   font-weight: 600;
 }
+
+/* Today's later section: a slim card, its name and line beside a small Take photo. */
+.tcard.slim .spread {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.tcard.slim h3 {
+  margin: 0;
+}
+.tcard.slim .rt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tcard.slim .btn {
+  white-space: nowrap;
+  flex: none;
+}
+.tcard.slim .evidence:not(.full) {
+  border-top: 0;
+  padding-top: 0;
+}
+.tcard.slim .evidence.full {
+  flex-basis: 100%;
+}
