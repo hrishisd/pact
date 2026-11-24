@@ -2,6 +2,7 @@
 // Waiting for approval, and yesterday.
 
 import { addDays } from "../shared/calendar.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 import type {
   AccountId,
   ConnectionService,
@@ -47,8 +48,8 @@ import {
   termsOn,
 } from "./rows.ts";
 import { thread } from "./requests.ts";
+import { reminderWindow, tripAhead } from "./trips.ts";
 import { waitingFor } from "./waiting.ts";
-import { isPeriodSchedule } from "../shared/schedules.ts";
 
 export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
   const { timezone } = accountRow(ctx, accountId);
@@ -137,7 +138,8 @@ function todayAlerts(ctx: CoreContext, ownerId: AccountId, now: Date, billAlerts
 /**
  * Today's sections. No Oura data: bedtime nights past their deadline that
  * Oura hasn't reported. To do: pacts with an occurrence open now that still
- * needs evidence, and `billCards`. Missed: other occurrences judged Missed
+ * needs evidence, and `billCards`. Later: Every 2 weeks and Once a month
+ * periods that still need evidence before their reminder window. Missed: other occurrences judged Missed
  * in the last 48 hours and not accepted. Automatic: bedtime nights open
  * now. Coming up: pacts whose first occurrence hasn't opened yet. A pact on
  * a day it isn't due appears in neither To do nor Coming up. Empty sections
@@ -151,6 +153,7 @@ function todaySections(
   billCards: TodayBillCard[],
 ): TodaySection[] {
   const toDo: (TodayToDoCard | TodayAnkiCard | TodayBillCard)[] = [];
+  const later: TodayToDoCard[] = [];
   const automatic: TodayAutomaticCard[] = [];
   const noOuraData: TodayNoOuraDataCard[] = [];
   const comingUp: TodayComingUpCard[] = [];
@@ -160,6 +163,9 @@ function todaySections(
     switch (placed.section) {
       case "to-do":
         toDo.push(placed.card);
+        break;
+      case "later":
+        later.push(placed.card);
         break;
       case "automatic":
         automatic.push(placed.card);
@@ -176,12 +182,14 @@ function todaySections(
   toDo.push(...billCards);
   // Rows come sorted by name, and the sorts are stable.
   toDo.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
+  later.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
   automatic.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime());
   noOuraData.sort((a, b) => a.closesAt.getTime() - b.closesAt.getTime());
   comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn, "en-US"));
   const sections: TodaySection[] = [];
   if (noOuraData.length > 0) sections.push({ kind: "no-oura-data", cards: noOuraData });
   if (toDo.length > 0) sections.push({ kind: "to-do", cards: toDo });
+  if (later.length > 0) sections.push({ kind: "later", cards: later });
   const missed = recentlyMissed(ctx, ownerId, timezone, now);
   if (missed.length > 0) sections.push({ kind: "missed", cards: missed });
   if (automatic.length > 0) sections.push({ kind: "automatic", cards: automatic });
@@ -289,7 +297,8 @@ function ankiToday(
 
 /**
  * A Camera pact on Today: its occurrence open now under To do while it
- * still needs evidence; Coming up before its first occurrence opens.
+ * still needs evidence, or an Every 2 weeks or Once a month period under
+ * Later until its reminder window; Coming up before its first occurrence opens.
  */
 function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: Date): TodayPlacement | null {
   const { first, openAt, dayDueAt, timezoneOn } = occurrencesOf(ctx, pact.id, timezone);
@@ -303,15 +312,22 @@ function cameraToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: 
   // past its due-by time (Missed, or the next tick judges it), its evidence in, or an excuse filed.
   if (!occurrenceView(ctx, pact.id, open).toDo) return null;
   const { editWindowClosesAt } = pact;
-  if (pact.terms.schedule.kind === "weekly-count") {
-    // The day it is where the week opened, which a move since leaves as it was.
+  const { schedule } = pact.terms;
+  if (isPeriodSchedule(schedule)) {
+    // The day it is where the period opened, which a move since leaves as it was.
     const today = localDateOf(now, timezoneOn(open.date));
-    const week = periodToDo(ctx, pact.id, open, today, dayDueAt(today)!, now);
-    if (!week) return null;
-    return {
-      section: "to-do",
-      card: { kind: "evidence", ...cardOn(ctx, pact, open.date), editWindowClosesAt, ...week },
+    const period = periodToDo(ctx, pact.id, open, today, dayDueAt(today)!, now);
+    if (!period) return null;
+    const trip = tripAhead(ctx, pact.id, schedule, open.date, today);
+    const window = reminderWindow(schedule, open.date, trip);
+    const card: TodayToDoCard = {
+      kind: "evidence",
+      ...cardOn(ctx, pact, open.date),
+      editWindowClosesAt,
+      ...period,
+      ...(trip && { tripAhead: trip }),
     };
+    return { section: today < window.first ? "later" : "to-do", card };
   }
   return {
     section: "to-do",
@@ -361,23 +377,22 @@ function ankiCard(ctx: CoreContext, pact: ActivePact, ownerId: AccountId, open: 
 }
 
 /**
- * The To do card of a Weekly count week that is the owner's to do, as of
- * `now`, when `today` still takes evidence (before `todayDueAt`) and has
- * none; else null.
+ * The To do card of a period that is the owner's to do, as of `now`, when
+ * `today` still takes evidence (before `todayDueAt`) and has none; else null.
  */
 function periodToDo(
   ctx: CoreContext,
   pactId: string,
-  week: Occurrence,
+  period: Occurrence,
   today: LocalDate,
   todayDueAt: Date,
   now: Date,
 ): Pick<TodayToDoCard, "occurrenceDate" | "dueAt" | "dueBy" | "period"> | null {
   if (now.getTime() >= todayDueAt.getTime()) return null;
   if (evidenceDecision(ctx, pactId, today, "day") !== "none") return null;
-  const progress = periodProgress(ctx, pactId, week.date);
-  const { due_by: dueBy } = termsOn(ctx, pactId, week.date);
-  return { occurrenceDate: week.date, dueAt: week.dueAt, dueBy, period: progress };
+  const progress = periodProgress(ctx, pactId, period.date);
+  const { due_by: dueBy } = termsOn(ctx, pactId, period.date);
+  return { occurrenceDate: period.date, dueAt: period.dueAt, dueBy, period: progress };
 }
 
 /**
@@ -431,8 +446,8 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
     since.toISOString(),
   );
   return rows.map((row) => {
-    const weekly = isPeriodSchedule(scheduleOf(row.schedule));
-    const dueBy = row.date === today && !weekly ? termsOn(ctx, row.id, row.date).due_by : null;
+    const onPeriods = isPeriodSchedule(scheduleOf(row.schedule));
+    const dueBy = row.date === today && !onPeriods ? termsOn(ctx, row.id, row.date).due_by : null;
     return {
       pactId: row.id,
       name: row.name,
@@ -440,14 +455,14 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
       occurrenceDate: row.date,
       missedAt: new Date(row.judged_at),
       excusableUntil: excusableUntil(row.excuse_window_opens),
-      detail: missedDetail(ctx, row, dueBy, weekly),
+      detail: missedDetail(ctx, row, dueBy, onPeriods),
     };
   });
 }
 
 /**
  * What a Missed card's line says beyond its day: Closed at today's due-by
- * time, how far a Weekly count week got, the Anki check that decided it, or
+ * time, how far a period got, the Anki check that decided it, or
  * when Oura saw the owner get into bed.
  */
 function missedDetail(
@@ -461,10 +476,10 @@ function missedDetail(
     anki_checked_at: string | null;
   },
   dueBy: string | null,
-  weekly: boolean,
+  onPeriods: boolean,
 ): MissedDetail | null {
   if (dueBy !== null && row.evidence_kind !== "anki") return { kind: "closed", dueBy };
-  if (weekly) return { kind: "period", progress: periodProgress(ctx, row.id, row.date) };
+  if (onPeriods) return { kind: "period", progress: periodProgress(ctx, row.id, row.date) };
   if (row.evidence_kind === "anki") return { kind: "anki", lastCheck: ankiCheckOf(row) };
   if (row.evidence_kind === "oura") {
     return { kind: "night", inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) };
@@ -475,6 +490,7 @@ function missedDetail(
 /** A pact's card on Today and the section it goes in. */
 type TodayPlacement =
   | { section: "to-do"; card: TodayToDoCard | TodayAnkiCard }
+  | { section: "later"; card: TodayToDoCard }
   | { section: "automatic"; card: TodayAutomaticCard }
   | { section: "no-oura-data"; card: TodayNoOuraDataCard }
   | { section: "coming-up"; card: TodayComingUpCard };

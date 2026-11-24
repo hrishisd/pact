@@ -4,6 +4,7 @@
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
 import { dateSpan, daysText, formatDayTime, pactNamesText } from "../shared/format.ts";
+import { lastDayOf } from "../shared/schedules.ts";
 import {
   MAX_EXCUSE_SPAN_DAYS,
   type AcceptVacationRejectionResult,
@@ -29,6 +30,7 @@ import {
   type VacationPreviewResult,
   type VacationRequest,
   type VacationSkipReason,
+  type Schedule,
   type WithdrawnReason,
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
@@ -41,6 +43,7 @@ import { isLocalDate } from "./pact-rules.ts";
 import { assertHoldsNoPenalty, mootReason, type TouchedOccurrence } from "./moot.ts";
 import { settleCoverDays } from "./settle.ts";
 import { textTooLong } from "./text-limits.ts";
+import { tripAheadOf } from "./trips.ts";
 import {
   accountName,
   accountRow,
@@ -49,6 +52,7 @@ import {
   occurrencesOf,
   reviewersOf,
   scheduleOf,
+  termsOn,
   type PactRow,
 } from "./rows.ts";
 import {
@@ -152,9 +156,10 @@ function vacationPreview(
 
 /**
  * The pact's occurrences from `from` to `to` that a vacation filed at `now`
- * would cover or skip: each one dated inside, or a Weekly count week whose
- * Thursday is inside (the weeks it touches with the Thursday outside are
- * `notCovered`). An Ended pact has no occurrences after its end.
+ * would cover or skip: each one whose `coveringDays` are inside (the periods
+ * it touches with them outside are `notCovered`). A period it doesn't cover,
+ * or skips as already open, that it would be a trip ahead of has the day to
+ * do it by. An Ended pact has no occurrences after its end.
  */
 function pactPreview(
   ctx: CoreContext,
@@ -169,21 +174,44 @@ function pactPreview(
     skipped: [],
     notCovered: [],
   };
+  const today = localDateOf(now, timezone);
   for (const occurrence of occurrencesOf(ctx, pactId, timezone).overlapping(from, to)) {
     if (dueAfterEnd(ctx, pactId, occurrence)) continue;
-    const entry: VacationOccurrence = occurrenceSpan(ctx, pactId, occurrence);
-    const weekly = entry.through !== undefined;
-    // A week is covered by its Thursday, the middle of its Mon–Sun, so a vacation starting on a Sunday doesn't take the week before.
-    const coveringDay = weekly ? addDays(occurrence.date, 3) : occurrence.date;
-    if (coveringDay < from || coveringDay > to) {
-      if (weekly) result.notCovered.push(entry);
+    const schedule = scheduleOf(termsOn(ctx, pactId, occurrence.date).schedule);
+    const span: VacationOccurrence = occurrenceSpan(ctx, pactId, occurrence);
+    // A period it would leave to do is due before it starts.
+    const doItBy = tripAheadOf(schedule, occurrence.date, from, to, today)?.doItBy;
+    const entry = doItBy === undefined ? span : { ...span, doItBy };
+    const covering = coveringDays(schedule, occurrence.date);
+    if (covering.first < from || covering.last > to) {
+      if (entry.through !== undefined) result.notCovered.push(entry);
       continue;
     }
     const reason = vacationSkipReason(ctx, pactId, occurrence, now);
-    if (reason === null) result.covered.push(entry);
-    else result.skipped.push({ ...entry, reason });
+    if (reason === null) result.covered.push(span);
+    else result.skipped.push({ ...(reason === "already-open" ? entry : span), reason });
   }
   return result;
+}
+
+/**
+ * The days a vacation must take in to cover the occurrence on `schedule`
+ * dated `date`: a day's own day; a week's Thursday, the middle of its
+ * Mon–Sun, so a vacation starting on a Sunday doesn't take the week before;
+ * the whole second week of two; the 15th of a month to its last day.
+ */
+function coveringDays(schedule: Schedule, date: LocalDate): { first: LocalDate; last: LocalDate } {
+  switch (schedule.kind) {
+    case "weekly-count":
+      return { first: addDays(date, 3), last: addDays(date, 3) };
+    case "every-2-weeks":
+      return { first: addDays(date, 7), last: lastDayOf(schedule, date) };
+    case "once-a-month":
+      return { first: addDays(date, 14), last: lastDayOf(schedule, date) };
+    case "fixed-days":
+    case "one-time":
+      return { first: date, last: date };
+  }
 }
 
 /** Why a vacation filed at `now` can't cover the pact's `occurrence`, or null if it can. */

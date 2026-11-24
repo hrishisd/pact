@@ -3,6 +3,7 @@
 // (applies without approval to occurrences not open yet), or doesn't change
 // what counts (applies at once), like the name and the reminders.
 
+import { isPeriodSchedule } from "../shared/schedules.ts";
 import type {
   AccountId,
   AppliesNow,
@@ -143,6 +144,8 @@ function scheduleEffect(before: Schedule, after: Schedule): TermEffect | null {
     if (after.target === before.target) return null;
     return after.target < before.target ? needs("lower-target") : STRICTER;
   }
+  // Every 2 weeks and Once a month have nothing else to change.
+  if ((before.kind === "every-2-weeks" || before.kind === "once-a-month") && after.kind === before.kind) return null;
   if (before.kind === "one-time" && after.kind === "one-time") {
     const moved = after.deadline !== before.deadline;
     if (!moved && after.submitAnytime === before.submitAnytime) return null;
@@ -154,8 +157,8 @@ function scheduleEffect(before: Schedule, after: Schedule): TermEffect | null {
   }
   // Swapping one kind for the other is refused before this, after the edit
   // window; a reviewer would have to judge it. Should one get here, it reads
-  // as a lower target from Weekly count, and as fewer days otherwise.
-  return needs(before.kind === "weekly-count" ? "lower-target" : "fewer-days");
+  // as a lower target from a period schedule, and as fewer days otherwise.
+  return needs(isPeriodSchedule(before) ? "lower-target" : "fewer-days");
 }
 
 /**

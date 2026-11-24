@@ -89,9 +89,13 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
     {
       date: "2025-12-29",
       occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" } },
-      progress: { sessions: 3, waiting: 0, target: 3 },
+      progress: { scheduleKind: "weekly-count", sessions: 3, waiting: 0, target: 3 },
     },
-    { date: "2026-01-05", occurrence: onVacation, progress: { sessions: 0, waiting: 0, target: 3 } },
+    {
+      date: "2026-01-05",
+      occurrence: onVacation,
+      progress: { scheduleKind: "weekly-count", sessions: 0, waiting: 0, target: 3 },
+    },
   ];
   const { user } = renderWithUser(
     <HeatMap

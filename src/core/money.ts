@@ -193,12 +193,12 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
     bill_id: string | null;
     held: 0 | 1;
     held_by_vacation: 0 | 1;
-    weekly: 0 | 1;
+    on_periods: 0 | 1;
   }>(
     `SELECT penalty.id, penalty.pact_id, pact.name AS pact_name, penalty.occurrence_date,
               penalty.amount_cents, penalty.added_at, ${PENALTY_WINDOW_OPENS} AS excuse_window_opens,
               penalty.bill_id, ${PENALTY_HELD} AS held,
-              ${PENALTY_HELD_BY_VACATION} AS held_by_vacation, ${PERIOD_PACT} AS weekly
+              ${PENALTY_HELD_BY_VACATION} AS held_by_vacation, ${PERIOD_PACT} AS on_periods
        FROM penalty JOIN pact ON pact.id = penalty.pact_id
        WHERE penalty.owner_account_id = ? AND penalty.recipient_id = ?
        ORDER BY penalty.added_at DESC, penalty.occurrence_date DESC, pact.name, penalty.id`,
@@ -210,8 +210,8 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
   const now = ctx.clock.now();
   return penaltyRows.map((row): LedgerPenalty => {
     const held = row.held === 1;
-    // Missed with evidence means all of it was rejected, on Fixed days; a short week is its own miss.
-    const rejected = row.weekly === 1 ? null : rejection(ctx, row.pact_id, row.occurrence_date);
+    // Missed with evidence means all of it was rejected, on Fixed days; a short period is its own miss.
+    const rejected = row.on_periods === 1 ? null : rejection(ctx, row.pact_id, row.occurrence_date);
     const bill = bills.find((b) => b.id === row.bill_id);
     return {
       kind: "penalty",
@@ -220,7 +220,7 @@ function ledgerPenalties(ctx: CoreContext, ownerId: AccountId, recipientId: stri
       pactName: row.pact_name,
       occurrenceDate: row.occurrence_date,
       amountCents: row.amount_cents,
-      ...(row.weekly === 1 && { period: periodProgress(ctx, row.pact_id, row.occurrence_date) }),
+      ...(row.on_periods === 1 && { period: periodProgress(ctx, row.pact_id, row.occurrence_date) }),
       addedAt: new Date(row.added_at),
       paidCents: allocation.get(row.id)?.paidCents ?? 0,
       ...(rejected && { rejection: rejected }),

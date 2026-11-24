@@ -57,7 +57,7 @@ describe("the spec's examples", () => {
 
     expect(weekOf(owner, piano, s.date("Mon+1"))).toEqual({
       date: s.date("Mon+1"),
-      progress: { sessions: 2, waiting: 0, target: 3 },
+      progress: { scheduleKind: "weekly-count", sessions: 2, waiting: 0, target: 3 },
       occurrence: {
         status: {
           kind: "missed",
@@ -84,7 +84,7 @@ describe("the spec's examples", () => {
     await s.advanceTo("Mon+3 00:00");
 
     expect(weekOf(owner, piano, s.date("Mon+2"))).toMatchObject({
-      progress: { sessions: 0, waiting: 0, target: 3 },
+      progress: { scheduleKind: "weekly-count", sessions: 0, waiting: 0, target: 3 },
       occurrence: { status: { kind: "missed", penaltyCents: 1500 } },
     });
     expect(owed(owner)).toBe(2000);
@@ -92,12 +92,12 @@ describe("the spec's examples", () => {
       expect.objectContaining({
         occurrenceDate: s.date("Mon+2"),
         amountCents: 1500,
-        period: { sessions: 0, waiting: 0, target: 3 },
+        period: { scheduleKind: "weekly-count", sessions: 0, waiting: 0, target: 3 },
       }),
       expect.objectContaining({
         occurrenceDate: s.date("Mon+1"),
         amountCents: 500,
-        period: { sessions: 2, waiting: 0, target: 3 },
+        period: { scheduleKind: "weekly-count", sessions: 2, waiting: 0, target: 3 },
       }),
     ]);
     // A short week isn't Missed through its rejected photo: it's the week's own miss.
@@ -264,7 +264,7 @@ describe("evidence", () => {
     await s.advanceTo("Mon+2 00:00");
 
     expect(weekOf(owner, piano, s.date("Mon+1"))).toMatchObject({
-      progress: { sessions: 1, waiting: 0, target: 2 },
+      progress: { scheduleKind: "weekly-count", sessions: 1, waiting: 0, target: 2 },
       occurrence: { status: { kind: "missed", penaltyCents: 500 } },
     });
   });
@@ -285,7 +285,7 @@ describe("evidence", () => {
         kind: "evidence",
         id: evidenceId,
         occurrenceDate: s.date("Thu+1"),
-        period: { sessions: 0, waiting: 1, target: 2 },
+        period: { scheduleKind: "weekly-count", sessions: 0, waiting: 1, target: 2 },
       }),
     ]);
     expect(owner.evidence(evidenceId)).toMatchObject({ ok: true, evidence: { occurrenceDate: s.date("Thu+1") } });
@@ -323,7 +323,7 @@ describe("evidence", () => {
 
     await s.advanceTo("Tue+2 10:00");
     expect(weekOf(owner, piano, s.date("Mon+1"))).toMatchObject({
-      progress: { sessions: 1, waiting: 1, target: 2 },
+      progress: { scheduleKind: "weekly-count", sessions: 1, waiting: 1, target: 2 },
       occurrence: { status: { kind: "not-judged", evidenceWaiting: true } },
     });
     expect(owed(owner)).toBe(0);
@@ -491,7 +491,7 @@ describe("a rejected photo", () => {
           occurrenceDate: s.date("Mon+1"),
           missedAt: s.at("Mon+2 00:00"),
           excusableUntil: new Date(s.at("Mon+2 00:00").getTime() + 2 * DAY_MS),
-          detail: { kind: "period", progress: { sessions: 0, waiting: 0, target: 1 } },
+          detail: { kind: "period", progress: { scheduleKind: "weekly-count", sessions: 0, waiting: 0, target: 1 } },
         },
       ],
     });
@@ -506,7 +506,10 @@ describe("a rejected photo", () => {
     await submit(owner, piano);
 
     expect(reviewer.reviewQueue()).toEqual([
-      expect.objectContaining({ kind: "evidence", period: { sessions: 1, waiting: 1, target: 3 } }),
+      expect.objectContaining({
+        kind: "evidence",
+        period: { scheduleKind: "weekly-count", sessions: 1, waiting: 1, target: 3 },
+      }),
     ]);
   });
 });
@@ -623,7 +626,7 @@ describe("Today", () => {
         occurrenceDate: s.date("Mon+1"),
         dueAt: s.at("Mon+2 00:00"),
         dueBy: null,
-        period: { sessions: 1, waiting: 1, target: 3 },
+        period: { scheduleKind: "weekly-count", sessions: 1, waiting: 1, target: 3 },
       } satisfies TodayToDoCard,
     ]);
   });
@@ -638,7 +641,7 @@ describe("Today", () => {
     expect(cards(owner, "to-do")).toEqual([]);
     s.setClockTo("Tue+1 10:00");
     expect(cards(owner, "to-do").map((card) => card.kind === "evidence" && card.period)).toEqual([
-      { sessions: 0, waiting: 1, target: 2 },
+      { scheduleKind: "weekly-count", sessions: 0, waiting: 1, target: 2 },
     ]);
     await submit(owner, piano);
     await reviewer.decide(monday, { kind: "approve" });
@@ -856,12 +859,12 @@ describe("dates, bills and the heat map", () => {
     expect(weeksOf(owner, piano)).toEqual([
       {
         date: s.date("Mon+1"),
-        progress: { sessions: 2, waiting: 0, target: 2 },
+        progress: { scheduleKind: "weekly-count", sessions: 2, waiting: 0, target: 2 },
         occurrence: { status: { kind: "satisfied", cover: null, phase: "past-due", approvedBy: null }, detail: null },
       },
       {
         date: s.date("Mon+2"),
-        progress: { sessions: 1, waiting: 0, target: 2 },
+        progress: { scheduleKind: "weekly-count", sessions: 1, waiting: 0, target: 2 },
         occurrence: {
           status: {
             kind: "not-judged",

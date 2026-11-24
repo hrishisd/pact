@@ -16,19 +16,21 @@ import {
   type NewPact,
   type Schedule,
 } from "../shared/types.ts";
-import { laterDate, mondayOf, weekdayOf } from "./calendar.ts";
+import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
+import { laterDate, weekdayOf } from "./calendar.ts";
 import type { ChangeableTerms } from "./changes.ts";
 import {
   ankiDueByFits,
   ankiDueByOrder,
   dayStartHour,
-  firstWeekFrom,
+  firstPeriodFrom,
+  hasPeriodSchedule,
   hasSchedule,
-  lastDayOf,
   minutesFrom,
   newOccurrenceTerms,
   NIGHT_STARTS_HOUR,
   oneTimeReminderAt,
+  periodStart,
   type DayClock,
   type NewTerms,
   type OccurrenceTerms,
@@ -104,9 +106,10 @@ export function checkedTerms(
     return { ok: false, reason: "invalid-in-bed-by" };
   }
   // A ring's nights are Fixed days only, and at most one day of evidence counts a day.
+  if (isPeriodSchedule(pact.schedule) && (oura || anki)) return { ok: false, reason: "invalid-schedule" };
   if (pact.schedule.kind === "weekly-count") {
     const { target } = pact.schedule;
-    if (oura || anki || !Number.isSafeInteger(target) || target < 1 || target > MAX_WEEKLY_TARGET) {
+    if (!Number.isSafeInteger(target) || target < 1 || target > MAX_WEEKLY_TARGET) {
       return { ok: false, reason: "invalid-schedule" };
     }
   }
@@ -230,6 +233,8 @@ export function newTermsOf(schedule: Schedule, day: DayClock, dueBy: ClockTime |
     case "fixed-days":
       return { schedule, day };
     case "weekly-count":
+    case "every-2-weeks":
+    case "once-a-month":
       return { schedule, dueBy };
     case "one-time":
       return { schedule, dueBy };
@@ -264,7 +269,7 @@ export function remindersGoOffInTime(
 ): boolean {
   return reminders.every((time) => {
     if (hasSchedule(terms, "one-time")) return oneTimeReminderAt(time, timezone).getTime() < dueAt.getTime();
-    if (hasSchedule(terms, "weekly-count")) return terms.dueBy === null || time < terms.dueBy;
+    if (hasPeriodSchedule(terms)) return terms.dueBy === null || time < terms.dueBy;
     const { day } = terms;
     switch (day.kind) {
       case "day":
@@ -292,7 +297,7 @@ export function firstOccurrenceAfterChange(
 ): LocalDate {
   if (schedule.kind === "one-time") return schedule.deadline;
   if (firstOccurrence < from) return firstOccurrence;
-  if (schedule.kind === "weekly-count") return firstWeekFrom(from, startDate);
+  if (isPeriodSchedule(schedule)) return firstPeriodFrom(schedule, from, startDate);
   const start = startDate === null ? from : laterDate(startDate, from);
   for (let date = start, i = 0; i < 7; date = addDays(date, 1), i++) {
     if (schedule.days.includes(weekdayOf(date))) return date;
@@ -301,12 +306,14 @@ export function firstOccurrenceAfterChange(
 }
 
 /**
- * The first day not open on `today` for a pact with `schedule`, from which a
- * change applies: tomorrow, or for Weekly count, whose week is open until its
- * Sunday, next Monday.
+ * The first day not open on `today` for a pact with `schedule` and first
+ * occurrence `firstOccurrence`, from which a change applies: tomorrow, or on
+ * a period schedule, whose period is open until its last day, the day after
+ * that (two weeks are counted from the first occurrence).
  */
-export function firstDayNotOpen(schedule: Schedule, today: LocalDate): LocalDate {
-  return schedule.kind === "weekly-count" ? addDays(mondayOf(today), WEEKDAYS.length) : addDays(today, 1);
+export function firstDayNotOpen(schedule: Schedule, today: LocalDate, firstOccurrence: LocalDate): LocalDate {
+  if (!isPeriodSchedule(schedule)) return addDays(today, 1);
+  return addDays(lastDayOf(schedule, periodStart(schedule, firstOccurrence, today)), 1);
 }
 
 /**

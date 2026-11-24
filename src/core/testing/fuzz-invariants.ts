@@ -10,7 +10,7 @@
 // A violation that is a bug with a ticket goes in KNOWN below, so the run
 // carries on past it. Remove the entry with the fix.
 
-import { addDays } from "../../shared/calendar.ts";
+import { lastDayOf } from "../../shared/schedules.ts";
 import { termsOf } from "../../shared/terms.ts";
 import type {
   ChangePactResult,
@@ -84,12 +84,10 @@ function occurrencesOf(pact: PactTerms): { date: string; occurrence: OccurrenceR
   return days.flatMap((day) => (day.occurrence ? [{ date: day.date, occurrence: day.occurrence }] : []));
 }
 
-/** The occurrence a pact's heat map shows for `date`: on Weekly count, the week it falls in. */
+/** The occurrence a pact's heat map shows for `date`: on a period schedule, the period it falls in. */
 function occurrenceOn(pact: PactTerms, date: string): OccurrenceRecord | undefined {
-  const weekly = pact.history.kind === "periods";
-  return occurrencesOf(pact).find((entry) =>
-    weekly ? entry.date <= date && date < addDays(entry.date, 7) : entry.date === date,
-  )?.occurrence;
+  return occurrencesOf(pact).find((entry) => entry.date <= date && date <= lastDayOf(pact.schedule, entry.date))
+    ?.occurrence;
 }
 
 /** What one person's queries showed at one moment. */

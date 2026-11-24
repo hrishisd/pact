@@ -398,6 +398,40 @@ describe("a Weekly count week of 3", () => {
   });
 });
 
+describe("a Once a month month", () => {
+  // January 2026, due at the midnight ending 31 Jan.
+  const due = new Date("2026-02-01T00:00:00-05:00");
+  const month = (over: Partial<OccurrenceFacts> = {}): OccurrenceFacts =>
+    cameraDay({
+      occurrence: { date: "2026-01-01", opensAt: new Date("2026-01-01T00:00:00-05:00"), dueAt: due, closesAt: due },
+      terms: { schedule: { kind: "once-a-month" }, penaltyCents: PENALTY, recipientId: RECIPIENT },
+      ...over,
+    });
+  const after = new Date("2026-02-01T09:00:00-05:00");
+  test.each<{ name: string; facts: OccurrenceFacts; now: Date; verdict: Verdict }>([
+    {
+      name: "one approved day: Satisfied at its due time",
+      facts: month({ evidence: [evidence("Mon 10:00", "approved", "Mon 11:00")] }),
+      now: after,
+      verdict: { kind: "satisfied", at: due },
+    },
+    {
+      name: "a rejected day before its due time: still open",
+      facts: month({ evidence: [evidence("Mon 10:00", "rejected", "Mon 11:00")] }),
+      now: at("Tue 09:00"),
+      verdict: { kind: "open" },
+    },
+    {
+      name: "no evidence by its due time: one penalty",
+      facts: month(),
+      now: after,
+      verdict: { kind: "missed", at: due, penaltyCents: PENALTY, recipientId: RECIPIENT },
+    },
+  ])("$name", ({ facts, now, verdict }) => {
+    expect(verdictOf(facts, now)).toEqual(verdict);
+  });
+});
+
 describe("a bedtime night, in bed by 23:00", () => {
   const onTime = { start: "2026-01-05T22:30:00-05:00", arrived: "Tue 08:00" };
   const late = { start: "2026-01-05T23:40:00-05:00", arrived: "Tue 08:00" };

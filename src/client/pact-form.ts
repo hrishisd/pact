@@ -115,6 +115,10 @@ export function scheduleOf(form: Form): Schedule {
       return { kind: "fixed-days", days: form.days };
     case "weekly-count":
       return { kind: "weekly-count", target: form.target };
+    case "every-2-weeks":
+      return { kind: "every-2-weeks" };
+    case "once-a-month":
+      return { kind: "once-a-month" };
     case "one-time":
       return { kind: "one-time", deadline: form.deadline, submitAnytime: form.submitAnytime };
   }

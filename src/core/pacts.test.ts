@@ -39,6 +39,7 @@ describe("creating a pact", () => {
         newTerms: null,
         waiting: [],
         history: expect.objectContaining({ kind: "fixed-days" }),
+        tripAhead: null,
         connectionProblem: null,
         ending: null,
         excuseWindowsClose: [],

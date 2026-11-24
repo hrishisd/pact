@@ -2,6 +2,7 @@
 // the client and in notifications.
 
 import { parseClockTime, parseLocalDate } from "./calendar.ts";
+import { lastDayOf, type PeriodSchedule } from "./schedules.ts";
 import { WEEKDAYS, type ClockTime, type LocalDate, type Schedule, type TermChange, type Weekday } from "./types.ts";
 
 /** US cents as dollars: "$5" for whole dollars, "$5.50" otherwise. */
@@ -27,6 +28,40 @@ export function formatDate(date: LocalDate): string {
 /** "Dec 20", from `formatDate`'s "Sun Dec 20". */
 export function monthDay(date: LocalDate): string {
   return formatDate(date).slice(4);
+}
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+/**
+ * The periods of a pact on `schedule` from the one dated `first` through the
+ * one dated `last`, by name: a week by its Monday ("Week of Mon Nov 30"), two
+ * weeks by their days ("Nov 30 – Dec 13"), a month by its name ("December",
+ * or "December – January" for two).
+ */
+export function periodName(schedule: PeriodSchedule, first: LocalDate, last: LocalDate = first): string {
+  switch (schedule.kind) {
+    case "weekly-count":
+      return `Week of ${first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`}`;
+    case "every-2-weeks":
+      return dateSpan(first, lastDayOf(schedule, last));
+    case "once-a-month": {
+      const name = (date: LocalDate) => MONTH_NAMES[parseLocalDate(date).month - 1]!;
+      return first === last ? name(first) : `${name(first)} – ${name(last)}`;
+    }
+  }
 }
 
 /** A vacation's dates: "Dec 20 – Jan 2", "Dec 20 – 26" within one month, or "Dec 20" for one day. */
@@ -111,11 +146,13 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
 
 /**
  * "Every day", the days in order ("Mon, Wed, Fri"), a Weekly count's target
- * ("3× per week"), or a One-time deadline's date ("One-time, Thu Nov 12", or
+ * ("3× per week"), "Every 2 weeks", "Once a month", or a One-time deadline's date ("One-time, Thu Nov 12", or
  * "Anytime until Thu Nov 12" with Submit anytime).
  */
 export function scheduleText(schedule: Schedule): string {
   if (schedule.kind === "weekly-count") return `${schedule.target}× per week`;
+  if (schedule.kind === "every-2-weeks") return "Every 2 weeks";
+  if (schedule.kind === "once-a-month") return "Once a month";
   if (schedule.kind === "one-time") {
     const date = formatDate(schedule.deadline);
     return schedule.submitAnytime ? `Anytime until ${date}` : `One-time, ${date}`;

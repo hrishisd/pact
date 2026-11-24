@@ -23,6 +23,7 @@ import type {
   PactTiming,
   Schedule,
   TermsByKind,
+  TripAhead,
 } from "../shared/types.ts";
 import { laterDate, localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
@@ -36,9 +37,13 @@ import {
   hasSchedule,
   newOccurrenceTerms,
   occurrences,
+  offeredPeriods,
   type DayClock,
+  type Occurrence,
+  type Occurrences,
   type OccurrenceTerms,
 } from "./occurrences.ts";
+import { occurrenceView } from "./occurrence-state.ts";
 import { tellAll } from "./outbox.ts";
 import {
   checkedTerms,
@@ -70,6 +75,7 @@ import {
   type PactRow,
 } from "./rows.ts";
 import { todayKeeps } from "./change-requests.ts";
+import { tripAhead } from "./trips.ts";
 import type { waitingFor } from "./waiting.ts";
 
 export function createPact(ctx: CoreContext, accountId: AccountId, pact: NewPact): CreatePactResult {
@@ -200,14 +206,24 @@ export function firstOccurrence(
     dueBy: validDueBy ? dueBy : null,
     ankiRollover,
   };
+  const createdAt = pact ? new Date(pact.created_at) : ctx.clock.now();
   const timing = newOccurrenceTerms(
     newTermsOf(schedule, formDayClock(times), times.dueBy),
-    pact ? new Date(pact.created_at) : ctx.clock.now(),
+    createdAt,
     timezone,
     startDate !== undefined && isLocalDate(startDate) ? startDate : null,
   );
   if (!timing.ok) return timing;
-  return { ok: true, firstOccurrence: { date: timing.first.date, dueAt: timing.first.dueAt } };
+  const when = ({ date, dueAt }: Occurrence) => ({ date, dueAt });
+  const offered =
+    schedule.kind === "every-2-weeks" || schedule.kind === "once-a-month"
+      ? offeredPeriods(schedule, createdAt, timezone)
+      : null;
+  return {
+    ok: true,
+    firstOccurrence: when(timing.first),
+    ...(offered && { offered: { current: offered.current && when(offered.current), next: when(offered.next) } }),
+  };
 }
 
 export function pactList(ctx: CoreContext, accountId: AccountId): PactSummary[] {
@@ -257,7 +273,8 @@ export function pactPage(
   const row = ownPact(ctx, accountId, pactId);
   if (!row) return { ok: false, reason: "pact-not-found" };
   const now = ctx.clock.now();
-  const { first } = occurrencesOf(ctx, pactId, timezone);
+  const occurrences = occurrencesOf(ctx, pactId, timezone);
+  const { first } = occurrences;
   const service = SERVICE_OF_KIND[row.evidence_kind];
   const pact: PactTerms = {
     id: row.id,
@@ -268,11 +285,20 @@ export function pactPage(
     newTerms: newTerms(ctx, row, timezone, now),
     waiting: waiting(ctx, accountId, { pactId }),
     history: pactHistory(ctx, row, timezone, first, now),
+    tripAhead: openTripAhead(ctx, row, occurrences, now),
     connectionProblem: row.stage === "active" && service !== null ? connectionProblem(ctx, accountId, service) : null,
     ending: endingOf(row),
     excuseWindowsClose: excuseWindowsClose(ctx, accountId, pactId),
   };
   return { ok: true, pact };
+}
+
+/** The trip ahead of the Active pact's period open at `now`, while that still needs evidence; else null. */
+function openTripAhead(ctx: CoreContext, row: PactRow, occurrences: Occurrences, now: Date): TripAhead | null {
+  const open = occurrences.openAt(now);
+  if (row.stage !== "active" || open === null || !occurrenceView(ctx, row.id, open).toDo) return null;
+  const today = localDateOf(now, occurrences.timezoneOn(open.date));
+  return tripAhead(ctx, row.id, scheduleOf(row.schedule), open.date, today);
 }
 
 /** The service a pact of each evidence kind is judged from; Camera has none. */

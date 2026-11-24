@@ -1,6 +1,7 @@
 // Where an occurrence stands: judged or not, its evidence and excuses, a
-// Weekly count week's progress, and which pacts judging reads.
+// period's progress, and which pacts judging reads.
 
+import { isPeriodSchedule, lastDayOf, PERIOD_KINDS, targetOf } from "../shared/schedules.ts";
 import type {
   AccountId,
   EvidenceKind,
@@ -13,10 +14,9 @@ import type {
 } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { coverOn, excusableUntil, excuseWindowOpensSql, keepsToDo } from "./covers.ts";
-import { lastDayOf, type Occurrence } from "./occurrences.ts";
+import type { Occurrence } from "./occurrences.ts";
 import type { ReviewOutcome } from "./requests.ts";
 import { occurrencesOf, scheduleOf, termsOn, type PactRow } from "./rows.ts";
-import { isPeriodSchedule, targetOf } from "../shared/schedules.ts";
 
 /** SQL: what judging reads of a `pact` row and its owner's `account` row (PactToJudge). */
 const PACT_TO_JUDGE_COLUMNS = `pact.id, pact.schedule, pact.first_occurrence, pact.evidence_kind, pact.in_bed_by,
@@ -31,7 +31,7 @@ export type PactToJudge = Pick<PactRow, "id" | "schedule" | "first_occurrence" |
   owner_account_id: AccountId;
 };
 
-/** The pact's `occurrence` by its dates: a Weekly count week runs `through` its Sunday. */
+/** The pact's `occurrence` by its dates: a period runs `through` its last day. */
 export function occurrenceSpan(
   ctx: CoreContext,
   pactId: string,
@@ -73,17 +73,18 @@ export function evidenceDecision(
   return decisions.length > 0 ? "rejected" : "none";
 }
 
-/** How far the pact's Weekly count week starting `monday` has got: see `PeriodProgress`. */
-export function periodProgress(ctx: CoreContext, pactId: string, monday: LocalDate): PeriodProgress {
-  const schedule = scheduleOf(termsOn(ctx, pactId, monday).schedule);
+/** How far the pact's period starting `date` has got: see `PeriodProgress`. */
+export function periodProgress(ctx: CoreContext, pactId: string, date: LocalDate): PeriodProgress {
+  const schedule = scheduleOf(termsOn(ctx, pactId, date).schedule);
   const counts = ctx.db
     .prepare(
       `SELECT COUNT(DISTINCT CASE WHEN decision = 'approved' THEN day END) AS sessions,
               COUNT(DISTINCT CASE WHEN decision IS NULL AND withdrawn_at IS NULL THEN day END) AS waiting
        FROM evidence WHERE pact_id = ? AND occurrence_date = ?`,
     )
-    .get(pactId, monday) as { sessions: number; waiting: number };
-  return { ...counts, target: targetOf(schedule) };
+    .get(pactId, date) as { sessions: number; waiting: number };
+  if (!isPeriodSchedule(schedule)) throw new Error(`pact ${pactId} isn't on a period schedule`);
+  return { scheduleKind: schedule.kind, ...counts, target: targetOf(schedule) };
 }
 
 /**
@@ -94,7 +95,7 @@ export function periodProgress(ctx: CoreContext, pactId: string, monday: LocalDa
 export type OccurrenceView = OccurrenceStatus & {
   /**
    * Today shows it as the owner's to do now: a To do card, or for a bedtime
-   * night the Automatic or No Oura data card. A Weekly count week's card also
+   * night the Automatic or No Oura data card. A period's card also
    * needs today's day to take evidence.
    */
   toDo: boolean;
@@ -169,7 +170,7 @@ export function occurrenceView(ctx: CoreContext, pactId: string, occurrence: Occ
 
 /**
  * Whether the occurrence still needs evidence from its owner, as far as the
- * whole occurrence goes: a Camera day with none submitted, a Weekly count week
+ * whole occurrence goes: a Camera day with none submitted, a period
  * whose approved and waiting days are short of its target. Bedtime and Anki
  * need nothing from the owner here.
  */
@@ -255,14 +256,14 @@ export function skipReason(status: OccurrenceStatus, now: Date): ExcuseSkipReaso
   }
 }
 
-/** SQL: the `pact` row's schedule is Weekly count. */
-export const PERIOD_PACT = `json_extract(pact.schedule, '$.kind') = 'weekly-count'`;
+/** SQL: the `pact` row's schedule is a period schedule (`isPeriodSchedule`). */
+export const PERIOD_PACT = `json_extract(pact.schedule, '$.kind') IN (${PERIOD_KINDS.map((kind) => `'${kind}'`).join(", ")})`;
 
 /**
  * SQL: the Missed `occurrence` row (of the `pact` row) was judged through a
  * rejection. Any rejected evidence will do: on Fixed days and One-time a
- * rejection judges the occurrence at once. A Weekly count week's rejected
- * evidence just doesn't count, so a short week is never Missed through it.
+ * rejection judges the occurrence at once. A period's rejected
+ * evidence just doesn't count, so a short period is never Missed through it.
  */
 export const MISSED_THROUGH_REJECTION = `(NOT ${PERIOD_PACT} AND EXISTS (SELECT 1 FROM evidence
   WHERE evidence.pact_id = occurrence.pact_id AND evidence.occurrence_date = occurrence.date

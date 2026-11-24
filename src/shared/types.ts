@@ -70,6 +70,23 @@ export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as con
 /** A day of the week: "mon" … "sun". */
 export type Weekday = (typeof WEEKDAYS)[number];
 
+/** The kind of a period schedule (`PeriodSchedule`, schedules.ts). */
+export type PeriodKind = "weekly-count" | "every-2-weeks" | "once-a-month";
+
+/**
+ * A trip ahead of a period of Every 2 weeks or Once a month: a vacation the
+ * owner filed with the pact ticked, waiting for approval or approved, that
+ * doesn't cover the period dated `period`, starts after its first day and
+ * overlaps its last 7 days. The earliest-starting one counts. The owner should
+ * do it by `doItBy`, the day before `firstDay`, which is today or later.
+ */
+export interface TripAhead {
+  period: LocalDate;
+  firstDay: LocalDate;
+  lastDay: LocalDate;
+  doItBy: LocalDate;
+}
+
 /** When a pact's occurrences fall due. */
 export type Schedule =
   /** Each listed weekday, in the owner's timezone, is its own occurrence. Listed Monday first, no repeats. */
@@ -80,6 +97,13 @@ export type Schedule =
    * from 1 to `MAX_WEEKLY_TARGET`.
    */
   | { kind: "weekly-count"; target: number }
+  /**
+   * Camera only: each two Mon–Sun weeks, counted from the first occurrence (a
+   * Monday), are one occurrence, Satisfied once a day of them has approved evidence.
+   */
+  | { kind: "every-2-weeks" }
+  /** Camera only: each calendar month is one occurrence, Satisfied once a day of it has approved evidence. */
+  | { kind: "once-a-month" }
   /**
    * Camera only: one occurrence, due at the deadline: `deadline`, a day in
    * the owner's timezone, at the pact's due-by time, or else the midnight
@@ -233,8 +257,23 @@ export interface FirstOccurrence {
   dueAt: Date;
 }
 
+/**
+ * The first periods the Schedule step offers on Every 2 weeks and Once a
+ * month: the one that has today, unless it's due less than an hour from now,
+ * and the next one. Picking the next one sets its first day as the start date.
+ */
+export interface OfferedPeriods {
+  current: FirstOccurrence | null;
+  next: FirstOccurrence;
+}
+
 export type FirstOccurrenceResult =
-  | { ok: true; firstOccurrence: FirstOccurrence }
+  | {
+      ok: true;
+      firstOccurrence: FirstOccurrence;
+      /** Every 2 weeks and Once a month only: see `OfferedPeriods`. */
+      offered?: OfferedPeriods;
+    }
   | { ok: false; reason: "no-days" | "deadline-too-soon" | "pact-not-found" };
 
 /** A card in the Pacts tab. */
@@ -290,6 +329,8 @@ interface PactPageTerms {
   waiting: PactWaitingItem[];
   /** What its heat map shows. */
   history: PactHistory;
+  /** Every 2 weeks and Once a month: the trip ahead of the open period (`TripAhead`), or null. */
+  tripAhead: TripAhead | null;
   /** An Active Oura Ring or Anki pact whose owner's Oura or AnkiWeb can't be read: the same alert as on Today. Else null. */
   connectionProblem: ConnectionProblem | null;
   /**
@@ -423,22 +464,24 @@ export type PactHistory =
       day: HeatMapDay;
     };
 
-/** One week on a Weekly count pact's heat map. */
+/** One period on a period schedule pact's heat map. */
 export interface HeatMapPeriod {
-  /** Its Monday, in the owner's timezone. */
+  /** Its first day, in the owner's timezone: a week's Monday, a month's 1st. */
   date: LocalDate;
-  /** How its occurrence went, or null for a week from the one the pact Ended that was never judged. */
+  /** How its occurrence went, or null for a period from the one the pact Ended in that was never judged. */
   occurrence: OccurrenceRecord | null;
   /** How far it got: see `PeriodProgress`. */
   progress: PeriodProgress;
 }
 
 /**
- * How far a Weekly count week has got: `sessions` days with approved evidence
- * (at most one counts per day), `waiting` more with evidence waiting for a
- * reviewer, toward the `target` its terms set.
+ * How far a period has got: `sessions` days with approved evidence (at most
+ * one counts per day), `waiting` more with evidence waiting for a reviewer,
+ * toward the `target` its terms set (Weekly count's, else 1).
  */
 export interface PeriodProgress {
+  /** Its pact's schedule's kind, which says how to name the period. */
+  scheduleKind: PeriodKind;
   sessions: number;
   waiting: number;
   target: number;
@@ -1004,6 +1047,11 @@ export type TodaySection =
   /** Pacts whose occurrence is open today, and bills to pay, soonest due first. */
   | { kind: "to-do"; cards: (TodayToDoCard | TodayAnkiCard | TodayBillCard)[] }
   /**
+   * Every 2 weeks and Once a month periods open now that still need evidence
+   * today but whose reminder window hasn't come, soonest due first.
+   */
+  | { kind: "later"; cards: TodayToDoCard[] }
+  /**
    * Occurrences judged Missed in the last 48 hours, latest first, except
    * those Missed through a rejection (alerts) and accepted misses.
    */
@@ -1022,24 +1070,27 @@ interface TodayPactCard {
 
 /**
  * A Camera pact whose occurrence is open today and still takes evidence
- * today. A Weekly count week (`period` set) shows while today has none and the
- * week's target isn't met or waiting for approval.
+ * today. A period (`period` set) shows while today has none and the period's
+ * target isn't met or waiting for approval: on Every 2 weeks and Once a
+ * month, under To do in its reminder window, else under Later.
  */
 export interface TodayToDoCard extends TodayPactCard {
   kind: "evidence";
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
-  /** The open occurrence's day in the owner's timezone: for Weekly count, its week's Monday. */
+  /** The open occurrence's day in the owner's timezone: for a period, its first day. */
   occurrenceDate: LocalDate;
   /**
    * Its due-by time today, or midnight ending today, in the owner's timezone;
-   * for Weekly count, the end of its Sunday, so it sorts below things due today.
+   * for a period, the end of its last day, so it sorts below things due today.
    */
   dueAt: Date;
-  /** Its due-by time, or null when it's due at midnight. On Weekly count it limits each day's evidence. */
+  /** Its due-by time, or null when it's due at midnight. On a period schedule it limits each day's evidence. */
   dueBy: ClockTime | null;
-  /** Weekly count only: the week so far. */
+  /** Period schedules only: the period so far. */
   period?: PeriodProgress;
+  /** Every 2 weeks and Once a month only: the trip ahead of the period, if any. */
+  tripAhead?: TripAhead;
 }
 
 /**
@@ -1532,8 +1583,13 @@ export interface NewVacation extends VacationRequest {
 /** An occurrence a vacation covers or skips: a Weekly count week by its Monday, with its Sunday. */
 export interface VacationOccurrence {
   date: LocalDate;
-  /** Weekly count only: its week's Sunday. */
+  /** Period schedules only: the period's last day. */
   through?: LocalDate;
+  /**
+   * In a preview, Every 2 weeks and Once a month: a period the vacation doesn't
+   * cover but would be a trip ahead of (`TripAhead`), with the day to do it by.
+   */
+  doItBy?: LocalDate;
 }
 
 /**
@@ -1552,7 +1608,7 @@ export interface VacationPactPreview {
   covered: VacationOccurrence[];
   /** Oldest first. */
   skipped: (VacationOccurrence & { reason: VacationSkipReason })[];
-  /** Weekly count weeks the dates touch whose Thursday is outside them: not covered, with their full target. */
+  /** Periods the dates touch that they don't cover (see `coveringDays`, vacations.ts): due as usual, with their full target. */
   notCovered: VacationOccurrence[];
 }
 

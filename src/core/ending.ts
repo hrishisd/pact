@@ -2,11 +2,11 @@
 // approved end request, which waits for the occurrence open at approval.
 
 import { addDays } from "../shared/calendar.ts";
+import { lastDayOf } from "../shared/schedules.ts";
 import type { EndTiming, LocalDate } from "../shared/types.ts";
 import { localDateOf, startOfDay } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
 import { isJudged } from "./occurrence-state.ts";
-import { lastDayOf } from "./occurrences.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
 import { ankiCheckHolds } from "./verdict.ts";
 

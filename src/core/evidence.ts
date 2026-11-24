@@ -3,6 +3,7 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { formatDate } from "../shared/format.ts";
+import { isPeriodSchedule } from "../shared/schedules.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptMissResult,
@@ -61,7 +62,6 @@ import {
   type ReviewStateRow,
 } from "./requests.ts";
 import { settle } from "./settle.ts";
-import { isPeriodSchedule } from "../shared/schedules.ts";
 
 export async function submitEvidence(
   ctx: CoreContext,
@@ -120,14 +120,14 @@ export function acceptMiss(
     )
     .run(now, pactId, occurrenceDate);
   if (accepted.changes === 1) return { ok: true };
-  // On Weekly count, a rejected day isn't a miss, but its alert goes the same way.
+  // On a period schedule, a rejected day isn't a miss, but its alert goes the same way.
   const rejected = ctx.db
     .prepare(
       `UPDATE evidence SET rejection_accepted_at = ?
        WHERE pact_id = ? AND day = ? AND decision = 'rejected' AND rejection_accepted_at IS NULL
-         AND (SELECT json_extract(schedule, '$.kind') FROM pact WHERE id = ?) = 'weekly-count'`,
+         AND EXISTS (SELECT 1 FROM pact WHERE pact.id = evidence.pact_id AND ${PERIOD_PACT})`,
     )
-    .run(now, pactId, occurrenceDate, pactId);
+    .run(now, pactId, occurrenceDate);
   return rejected.changes > 0 ? { ok: true } : { ok: false, reason: "nothing-to-accept" };
 }
 
@@ -179,7 +179,7 @@ export interface EvidenceToDecide {
   /** When the pact was created: its reviewers may decide its evidence once its edit window has closed. */
   created_at: string;
   occurrence_date: LocalDate;
-  /** The day it counts for: on Weekly count, the day of the week. */
+  /** The day it counts for: on a period schedule, a day of the period. */
   day: LocalDate;
   /** The owner's: every pact's owner has one, as creating a pact needs it. */
   timezone: string;
@@ -206,9 +206,9 @@ export function evidenceView(
 
 /** Evidence waiting for approval that `reviewerId` may decide: for pacts they review, past the edit window. */
 function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[] {
-  const rows = ctx.all<EvidenceViewRow & { owner_name: string; weekly: 0 | 1 }>(
+  const rows = ctx.all<EvidenceViewRow & { owner_name: string; on_periods: 0 | 1 }>(
     `SELECT evidence.id, evidence.pact_id, pact.name AS pact_name, owner.name AS owner_name,
-              evidence.submitted_at, evidence.occurrence_date, evidence.day, ${PERIOD_PACT} AS weekly
+              evidence.submitted_at, evidence.occurrence_date, evidence.day, ${PERIOD_PACT} AS on_periods
        FROM evidence
        JOIN pact ON pact.id = evidence.pact_id
        JOIN account AS owner ON owner.id = pact.owner_account_id
@@ -228,7 +228,7 @@ function evidenceToReview(ctx: CoreContext, reviewerId: AccountId): QueuedItem[]
         ownerName: row.owner_name,
         penaltyCents: terms.penalty_cents,
         recipientName: recipientName(ctx, terms.recipient_id),
-        ...(row.weekly === 1 && { period: periodProgress(ctx, row.pact_id, row.occurrence_date) }),
+        ...(row.on_periods === 1 && { period: periodProgress(ctx, row.pact_id, row.occurrence_date) }),
         thread: thread(ctx, row.id, true),
       },
       since: new Date(row.submitted_at),
@@ -335,7 +335,7 @@ export function evidencePhotoIds(ctx: CoreContext, evidenceId: string): string[]
  * Whether `ownerId` may submit evidence with `photoCount` photos for
  * `pactId` at `at`, and if so for which occurrence and day: the one open at
  * `at`, unless evidence for it is already waiting or approved, or it's
- * already judged (a rejection judges it Missed at once). On Weekly count
+ * already judged (a rejection judges it Missed at once). On a period schedule
  * that's for the day: one day of evidence counts per day, and a day whose
  * evidence was rejected is made up on another.
  */
@@ -464,11 +464,11 @@ export function rejectedEvidenceAlerts(ctx: CoreContext, ownerId: AccountId): { 
 }
 
 /**
- * One alert per Weekly count day of the owner's whose evidence was
+ * One alert per period schedule day of the owner's whose evidence was
  * rejected, newest rejection first, with when it was rejected: nothing is
  * Missed, and the day can be made up another day. It goes once the owner
- * takes the L on it, an excuse or a vacation covers the week (one rejected after the
- * rejection has its own alert), or the week is judged.
+ * takes the L on it, an excuse or a vacation covers the period (one rejected after the
+ * rejection has its own alert), or the period is judged.
  */
 export function rejectedDayAlerts(ctx: CoreContext, ownerId: AccountId): { at: Date; alert: TodayAlert }[] {
   const rows = ctx.all<{

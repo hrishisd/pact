@@ -10,17 +10,18 @@ import {
   type LocalDate,
   type Schedule,
 } from "../shared/types.ts";
-import { addDays, parseClockTime, parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
+import { addDays, dayCount, parseClockTime, parseDatedReminder, parseLocalDate } from "../shared/calendar.ts";
+import { isPeriodSchedule, lastDayOf, type PeriodSchedule } from "../shared/schedules.ts";
 import { laterDate, localDateOf, mondayOf, startOfDay, wallTime, weekdayOf } from "./calendar.ts";
 
 /** One occurrence's timing. */
 export interface Occurrence {
-  /** Names the occurrence (with its pact): the day its period starts, in the owner's timezone (a Weekly count week's Monday). */
+  /** Names the occurrence (with its pact): the day its period starts, in the owner's timezone (a week's Monday, a month's 1st). */
   date: LocalDate;
   opensAt: Date;
   /**
    * Its due time: midnight ending its day, its due-by time that day, or a
-   * bedtime night's in-bed-by time; for a Weekly count week, the end of its Sunday.
+   * bedtime night's in-bed-by time; for a period schedule's period, the end of its last day.
    */
   dueAt: Date;
   /**
@@ -32,7 +33,6 @@ export interface Occurrence {
 }
 
 type FixedDays = Extract<Schedule, { kind: "fixed-days" }>;
-type WeeklyCount = Extract<Schedule, { kind: "weekly-count" }>;
 type OneTimeSchedule = Extract<Schedule, { kind: "one-time" }>;
 
 /**
@@ -55,11 +55,11 @@ export type DayClock =
 
 /**
  * A recurring schedule's terms, those a change gives the occurrences from
- * a date on: Fixed days, each due on the pact's day clock; or Weekly count
- * (Camera only), whose due-by time, if any, limits each day's evidence.
+ * a date on: Fixed days, each due on the pact's day clock; or a period
+ * schedule (Camera only), whose due-by time, if any, limits each day's evidence.
  */
 export type RecurringTerms =
-  { schedule: FixedDays; day: DayClock } | { schedule: WeeklyCount; dueBy: ClockTime | null };
+  { schedule: FixedDays; day: DayClock } | { schedule: PeriodSchedule; dueBy: ClockTime | null };
 
 /**
  * A One-time pact's terms (Camera only): due at its due-by time on the
@@ -80,8 +80,8 @@ export interface OneTimeTerms {
 export type OccurrenceTerms = (RecurringTerms | OneTimeTerms) & {
   firstOccurrence: LocalDate;
   /**
-   * Optional: the pact's last day. Every occurrence ends by it: a Weekly
-   * count week counts only if its Sunday does. A One-time pact has none.
+   * Optional: the pact's last day. Every occurrence ends by it: a period
+   * counts only if its last day does. A One-time pact has none.
    */
   endDate: LocalDate | null;
 };
@@ -92,6 +92,13 @@ export function hasSchedule<T extends { schedule: Schedule }, K extends Schedule
   kind: K,
 ): terms is Extract<T, { schedule: { kind: K } }> {
   return terms.schedule.kind === kind;
+}
+
+/** Whether `terms` are on a period schedule (`PeriodSchedule`). */
+export function hasPeriodSchedule<T extends { schedule: Schedule }>(
+  terms: T,
+): terms is Extract<T, { schedule: PeriodSchedule }> {
+  return isPeriodSchedule(terms.schedule);
 }
 
 /** A new pact's terms by its schedule's kind: those `OccurrenceTerms` has, but its creation time. */
@@ -107,8 +114,7 @@ const FIRST_OCCURRENCE_LEAD_MS = 60 * 60 * 1000;
  * The terms a pact made at `createdAt` with `terms` gets: the schedule as
  * stored, and its first occurrence, the first scheduled day due at least an
  * hour after `createdAt` (by its day clock), and not before `startDate`;
- * for Weekly count, the week starting the Monday after `createdAt`, or the
- * first starting on or after `startDate`; for One-time, its one occurrence,
+ * for a period schedule, `firstPeriod`'s; for One-time, its one occurrence,
  * which must be due at least an hour after `createdAt` (a start date doesn't
  * apply). Fixed days with no days is refused.
  */
@@ -126,13 +132,13 @@ export function newOccurrenceTerms(
     if (!dueSoonEnough(first, createdAt)) return { ok: false, reason: "deadline-too-soon" };
     return { ok: true, terms: { ...oneTime, firstOccurrence: deadline, endDate: null }, first };
   }
-  if (hasSchedule(terms, "weekly-count")) {
-    const firstOccurrence = firstWeekFrom(addDays(created, 1), startDate);
-    const schedule = { kind: "weekly-count", target: terms.schedule.target } as const;
+  if (hasPeriodSchedule(terms)) {
+    const { schedule, dueBy } = terms;
+    const firstOccurrence = firstPeriod(schedule, createdAt, timezone, startDate);
     return {
       ok: true,
-      terms: { schedule, dueBy: terms.dueBy, firstOccurrence, endDate: null },
-      first: weekOccurrence(firstOccurrence, timezone),
+      terms: { schedule, dueBy, firstOccurrence, endDate: null },
+      first: periodOccurrence(schedule, firstOccurrence, timezone),
     };
   }
   const days = WEEKDAYS.filter((day) => terms.schedule.days.includes(day));
@@ -156,18 +162,79 @@ export function dueSoonEnough(occurrence: Occurrence, at: Date): boolean {
 }
 
 /**
- * The first Monday on or after `from`, or after the start date if that's
- * later: a Weekly count pact's first week once it starts from `from`.
+ * The first period of a pact on `schedule` made at `createdAt`: with a start
+ * date after the day it's made, the first period starting on or after it.
+ * Otherwise, for Weekly count, the week starting the Monday after; for Every
+ * 2 weeks and Once a month, the period that has the day it's made, if it's
+ * due at least an hour after, else the next one.
  */
-export function firstWeekFrom(from: LocalDate, startDate: LocalDate | null): LocalDate {
+export function firstPeriod(
+  schedule: PeriodSchedule,
+  createdAt: Date,
+  timezone: string,
+  startDate: LocalDate | null,
+): LocalDate {
+  const created = localDateOf(createdAt, timezone);
+  if (schedule.kind === "weekly-count") return firstPeriodFrom(schedule, addDays(created, 1), startDate);
+  if (startDate !== null && startDate > created) return firstPeriodFrom(schedule, startDate, null);
+  const { current, next } = offeredPeriods(schedule, createdAt, timezone);
+  return (current ?? next).date;
+}
+
+/**
+ * The first periods a pact on Every 2 weeks or Once a month made at
+ * `createdAt` can have with no start date: the one that has the day it's
+ * made, unless that's due less than an hour after (then null), and the next.
+ */
+export function offeredPeriods(
+  schedule: Extract<PeriodSchedule, { kind: "every-2-weeks" | "once-a-month" }>,
+  createdAt: Date,
+  timezone: string,
+): { current: Occurrence | null; next: Occurrence } {
+  const created = localDateOf(createdAt, timezone);
+  // Two weeks are counted from the first, so the current two start this Monday.
+  const date = schedule.kind === "once-a-month" ? firstOfMonth(created) : mondayOf(created);
+  const current = periodOccurrence(schedule, date, timezone);
+  const next = periodOccurrence(schedule, addDays(lastDayOf(schedule, date), 1), timezone);
+  return { current: dueSoonEnough(current, createdAt) ? current : null, next };
+}
+
+/**
+ * The first day a period on `schedule` can start on, on or after `from`, or
+ * after the start date if that's later: a Monday, or a month's 1st. A pact's
+ * first period once it starts from `from`.
+ */
+export function firstPeriodFrom(schedule: PeriodSchedule, from: LocalDate, startDate: LocalDate | null): LocalDate {
   const start = startDate !== null && startDate > from ? startDate : from;
+  if (schedule.kind === "once-a-month") {
+    const first = firstOfMonth(start);
+    return first < start ? addDays(lastDayOf(schedule, first), 1) : first;
+  }
   const monday = mondayOf(start);
   return monday < start ? addDays(monday, 7) : monday;
 }
 
-/** The last day of the period of the occurrence dated `date` on `schedule`: its Sunday for a Weekly count week. A One-time occurrence is dated by its deadline's date, its last. */
-export function lastDayOf(schedule: Schedule, date: LocalDate): LocalDate {
-  return schedule.kind === "weekly-count" ? addDays(date, WEEKDAYS.length - 1) : date;
+/**
+ * The first day of the period that has the day `day`, for a pact on
+ * `schedule` whose first occurrence is `first`: its week's Monday; the
+ * Monday starting its two weeks, counted from `first`; or its month's 1st.
+ */
+export function periodStart(schedule: PeriodSchedule, first: LocalDate, day: LocalDate): LocalDate {
+  switch (schedule.kind) {
+    case "weekly-count":
+      return mondayOf(day);
+    case "every-2-weeks": {
+      const fortnights = Math.floor((dayCount(first, mondayOf(day)) - 1) / 14);
+      return addDays(first, fortnights * 14);
+    }
+    case "once-a-month":
+      return firstOfMonth(day);
+  }
+}
+
+/** The 1st of `date`'s month. */
+function firstOfMonth(date: LocalDate): LocalDate {
+  return `${date.slice(0, 8)}01`;
 }
 
 export interface Occurrences {
@@ -179,11 +246,11 @@ export interface Occurrences {
    * the rollover hour the next day.
    */
   openAt(t: Date): Occurrence | null;
-  /** The occurrence whose period has the day `day` (a Weekly count week, any of its days), if any. */
+  /** The occurrence whose period has the day `day` (on a period schedule, any of its days), if any. */
   covering(day: LocalDate): Occurrence | null;
   /**
    * When evidence submitted on `day` is due, for the occurrence covering it:
-   * that occurrence's due time, or for a Weekly count week that day's due-by
+   * that occurrence's due time, or on a period schedule that day's due-by
    * time, else midnight ending it. Null with no occurrence covering it.
    */
   dayDueAt(day: LocalDate): Date | null;
@@ -263,7 +330,7 @@ export type EarlierTerms = RecurringTerms & { until: LocalDate };
  * over time: each date follows the first of `earlier` (oldest first) it's
  * dated before, else `current`, and is worked out in the first of
  * `earlierTimezones` (oldest first) it's dated before, else `timezone`. A
- * Weekly count week goes by its Monday. The first occurrence and end date
+ * period goes by its first day. The first occurrence and end date
  * are always `current`'s. A bedtime night closes on `ouraClock`'s clock for
  * it; with none, in the timezone it's worked out in.
  */
@@ -285,15 +352,17 @@ export function occurrencesOverTime(
       submitAnytime ? (earlierTimezones[0]?.timezone ?? timezone) : timezoneOn(deadline),
     );
   }
-  if (hasSchedule(current, "weekly-count")) {
-    const weeks = sameKind(earlier, "weekly-count");
-    const dueByOn = (date: LocalDate) => (weeks.find((terms) => date < terms.until) ?? current).dueBy;
+  if (hasPeriodSchedule(current)) {
+    const { schedule, firstOccurrence } = current;
+    const periods = sameKind(earlier, schedule.kind);
+    const dueByOn = (date: LocalDate) => (periods.find((terms) => date < terms.until) ?? current).dueBy;
+    const periodOf = (day: LocalDate) => periodStart(schedule, firstOccurrence, day);
     return recurringOccurrences(current, zones, {
-      periodOf: mondayOf,
-      // For a day that isn't a Monday, its week's.
-      occurrence: (date) => weekOccurrence(mondayOf(date), timezoneOn(mondayOf(date))),
-      scheduled: (date) => date === mondayOf(date),
-      dayDueAt: (day, week) => dueOnDay(day, dueByOn(week.date), timezoneOn(week.date)),
+      periodOf,
+      // For a day that doesn't start a period, its period's.
+      occurrence: (date) => periodOccurrence(schedule, periodOf(date), timezoneOn(periodOf(date))),
+      scheduled: (date) => date === periodOf(date),
+      dayDueAt: (day, period) => dueOnDay(day, dueByOn(period.date), timezoneOn(period.date)),
       rollover: null,
     });
   }
@@ -330,7 +399,7 @@ function sameKind<K extends RecurringTerms["schedule"]["kind"]>(
 
 /** How a recurring schedule's periods fall: what `recurringOccurrences` needs to know of it. */
 interface Periods {
-  /** The day the period with `day` in it starts: the day itself, or its week's Monday. */
+  /** The day the period with `day` in it starts: the day itself, or its period's first day. */
   periodOf(day: LocalDate): LocalDate;
   /**
    * The occurrence dated `date`, or for a date that isn't one's, as one
@@ -459,9 +528,9 @@ function dueOnDay(date: LocalDate, dueBy: ClockTime | null, timezone: string): D
   return wallTime(date, hour, minute, timezone);
 }
 
-/** A Weekly count week starting on the Monday `date`: open from its start, due at the end of its Sunday. */
-function weekOccurrence(date: LocalDate, timezone: string): Occurrence {
-  const dueAt = startOfDay(addDays(date, WEEKDAYS.length), timezone);
+/** The period on `schedule` starting on `date`: open from its start, due at the end of its last day. */
+function periodOccurrence(schedule: PeriodSchedule, date: LocalDate, timezone: string): Occurrence {
+  const dueAt = startOfDay(addDays(lastDayOf(schedule, date), 1), timezone);
   return { date, opensAt: startOfDay(date, timezone), dueAt, closesAt: dueAt };
 }
 
