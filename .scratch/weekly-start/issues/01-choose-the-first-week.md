@@ -1,6 +1,6 @@
 # 01 Choose a Weekly count pact's first week
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: `../spec.md`. Prototype: branch `prototype/weekly-start`, layout A.
@@ -29,4 +29,4 @@ The Schedule step of a Weekly count pact offers this week, next week or a later 
 
 ## Comments
 
-- 2026-11-24: Built on branch `claude/charming-ritchie-jkzk6u`. Checked in the browser on Monday, Thursday and Saturday of the week of Nov 23; the screens match prototype layout A. Status stays until it's on main.
+- 2026-11-24: Built on branch `claude/charming-ritchie-jkzk6u`. Checked in the browser on Monday, Thursday and Saturday of the week of Nov 23; the screens match prototype layout A.
