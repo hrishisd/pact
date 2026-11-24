@@ -17,6 +17,7 @@ const FORM: Form = {
   dueByOn: true,
   dueBy: "21:00",
   startDate: "2026-11-10",
+  firstPeriodPicked: true,
   endDate: "2026-12-31",
   penalty: "2.50",
   recipientId: "r1",

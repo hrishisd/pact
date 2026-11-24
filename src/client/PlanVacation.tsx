@@ -6,11 +6,21 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { VacationOptionsResponse, VacationPreviewRequest, VacationPreviewResponse } from "../shared/api.ts";
 import { dayCount } from "../shared/calendar.ts";
+import { periodKindOfSchedule } from "../shared/schedules.ts";
 import { MAX_EXCUSE_SPAN_DAYS, MAX_TEXT_CHARS, type FileVacationRefusal } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { dateSpan, formatDate, listNames, money, scheduleText } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
-import { coveredText, firstName, occurrenceNames, pactsText, plural, weekOf } from "./vacation-text.ts";
+import {
+  coveredText,
+  firstName,
+  occurrenceNames,
+  pactsText,
+  periodLabel,
+  periodsText,
+  plural,
+  weekOf,
+} from "./vacation-text.ts";
 import { Loaded, settleUnlessDropped, useLoad, useSend } from "./ui.tsx";
 
 type Options = VacationOptionsResponse;
@@ -400,19 +410,20 @@ const SKIP_TEXT: Record<PactPreview["skipped"][number]["reason"], string> = {
 function CoverRow({ pact, preview, from, to }: { pact: PactOption; preview: PactPreview; from: string; to: string }) {
   const { className, icon } = KIND_ICONS[pact.evidenceKind];
   const { schedule } = pact;
-  const weekly = schedule.kind === "weekly-count";
+  const kind = periodKindOfSchedule(schedule);
   const covered = preview.covered;
+  const dayText = (date: string) => (kind ? periodLabel(kind, date) : formatDate(date));
 
   let head: string;
   const lines: string[] = [];
   if (!preview.ticked) {
-    const [one, many] = weekly ? ["week", "weeks"] : occurrenceNames(pact.evidenceKind);
+    const [one, many] = occurrenceNames(pact.evidenceKind);
     const due =
       covered.length === 0
         ? ""
         : schedule.kind === "one-time"
           ? ` · deadline ${formatDate(schedule.deadline)} still due`
-          : ` · ${plural(covered.length, one, many)} still due`;
+          : ` · ${kind ? periodsText(kind, covered.length) : plural(covered.length, one, many)} still due`;
     head = `Not on vacation${due}`;
   } else {
     const text = coveredText(pact, covered, from, to);
@@ -420,16 +431,20 @@ function CoverRow({ pact, preview, from, to }: { pact: PactOption; preview: Pact
     lines.push(...text.lines);
     if (schedule.kind === "one-time" && covered.length === 0 && preview.skipped.length === 0)
       lines.push("Nothing changes for it.");
-    if (schedule.kind === "weekly-count") {
-      for (const week of preview.notCovered) {
-        lines.push(
-          `${weekOf(week.date)}: not covered, still ${schedule.target} days needed by ${formatDate(week.through ?? week.date)}`,
-        );
-      }
+    // Only a period schedule has periods a vacation touches but doesn't cover.
+    for (const period of preview.notCovered) {
+      lines.push(
+        schedule.kind === "weekly-count"
+          ? `${weekOf(period.date)}: not covered, still ${schedule.target} days needed by ${formatDate(period.through ?? period.date)}`
+          : `${dayText(period.date)} isn't off. ${schedule.kind === "once-a-month" ? "A vacation covers a month only from the 15th to its end." : "A vacation covers 2 weeks only when it covers the whole second week."}`,
+      );
     }
     for (const skipped of preview.skipped) {
-      lines.push(`${weekly ? weekOf(skipped.date) : formatDate(skipped.date)}: ${SKIP_TEXT[skipped.reason]}`);
+      lines.push(`${dayText(skipped.date)}: ${SKIP_TEXT[skipped.reason]}`);
     }
+    // A period the trip won't cover: do it before you go.
+    const doItBy = [...preview.notCovered, ...preview.skipped].find((period) => period.doItBy)?.doItBy;
+    if (doItBy) lines.push(`Do it by ${formatDate(doItBy)}. Reminders move to the 7 days before your trip.`);
   }
 
   return (

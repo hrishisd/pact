@@ -114,3 +114,36 @@ test("ticking every offered pact by hand says All pacts on the confirm step", as
     pactIds: ["gym", "visa"],
   });
 });
+
+test("a month the vacation doesn't cover says why, and to do it before the trip", async () => {
+  const call = { ...pact("call", "Call Grandma", [SAM]), schedule: { kind: "once-a-month" as const } };
+  stubApi({
+    vacationOptions: answers(options([call])),
+    vacationPreview: async ({ pactIds }: VacationPreviewRequest): Promise<VacationPreviewResponse> => ({
+      ok: true,
+      preview: {
+        days: 14,
+        pacts: [
+          {
+            pactId: "call",
+            ticked: pactIds.includes("call"),
+            covered: [],
+            skipped: [],
+            notCovered: [{ date: "2026-12-01", through: "2026-12-31", doItBy: "2026-12-19" }],
+          },
+        ],
+        summary: { kind: "all" },
+        coversNothing: true,
+      },
+    }),
+  });
+  const { user } = render();
+  await pastDates(user);
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("checkbox", { name: /Sam Rivera/ }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+
+  expect(await screen.findByText("No whole months off")).toBeTruthy();
+  expect(screen.getByText("December isn't off. A vacation covers a month only from the 15th to its end.")).toBeTruthy();
+  expect(screen.getByText("Do it by Sat Dec 19. Reminders move to the 7 days before your trip.")).toBeTruthy();
+});

@@ -1,6 +1,6 @@
 // What a pact's schedule says about its periods: pure day arithmetic, no timezone.
 
-import { addDays, parseLocalDate } from "./calendar.ts";
+import { addDays, dayCount, parseLocalDate } from "./calendar.ts";
 import type { LocalDate, PeriodKind, Schedule } from "./types.ts";
 
 /**
@@ -44,4 +44,20 @@ export function lastDayOf(schedule: Schedule, date: LocalDate): LocalDate {
     case "one-time":
       return date;
   }
+}
+
+/** The kind of period each occurrence of `schedule` is, or undefined when each is one day. */
+export function periodKindOfSchedule(schedule: Schedule): PeriodKind | undefined {
+  return isPeriodSchedule(schedule) ? schedule.kind : undefined;
+}
+
+/**
+ * The kind of period an occurrence dated `date` through `through` is, by its
+ * length: a week is 7 days, two weeks 14, a month 28 to 31. Undefined for a
+ * day's occurrence, which has no `through`.
+ */
+export function periodKindOfSpan(date: LocalDate, through: LocalDate | undefined): PeriodKind | undefined {
+  if (through === undefined) return undefined;
+  const days = dayCount(date, through);
+  return days === 7 ? "weekly-count" : days === 14 ? "every-2-weeks" : "once-a-month";
 }

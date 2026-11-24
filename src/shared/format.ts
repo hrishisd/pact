@@ -2,8 +2,16 @@
 // the client and in notifications.
 
 import { parseClockTime, parseLocalDate } from "./calendar.ts";
-import { lastDayOf, type PeriodSchedule } from "./schedules.ts";
-import { WEEKDAYS, type ClockTime, type LocalDate, type Schedule, type TermChange, type Weekday } from "./types.ts";
+import { lastDayOf } from "./schedules.ts";
+import {
+  WEEKDAYS,
+  type ClockTime,
+  type LocalDate,
+  type PeriodKind,
+  type Schedule,
+  type TermChange,
+  type Weekday,
+} from "./types.ts";
 
 /** US cents as dollars: "$5" for whole dollars, "$5.50" otherwise. */
 export function money(cents: number): string {
@@ -46,22 +54,32 @@ const MONTH_NAMES = [
 ] as const;
 
 /**
- * The periods of a pact on `schedule` from the one dated `first` through the
- * one dated `last`, by name: a week by its Monday ("Week of Mon Nov 30"), two
+ * The periods of `kind` from the one dated `first` through the one dated
+ * `last`, by name: a week by its Monday ("Week of Mon Nov 30"), two
  * weeks by their days ("Nov 30 – Dec 13"), a month by its name ("December",
  * or "December – January" for two).
  */
-export function periodName(schedule: PeriodSchedule, first: LocalDate, last: LocalDate = first): string {
-  switch (schedule.kind) {
+export function periodName(kind: PeriodKind, first: LocalDate, last: LocalDate = first): string {
+  switch (kind) {
     case "weekly-count":
       return `Week of ${first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`}`;
     case "every-2-weeks":
-      return dateSpan(first, lastDayOf(schedule, last));
+      return dateSpan(first, lastDayOf({ kind }, last));
     case "once-a-month": {
       const name = (date: LocalDate) => MONTH_NAMES[parseLocalDate(date).month - 1]!;
       return first === last ? name(first) : `${name(first)} – ${name(last)}`;
     }
   }
+}
+
+/** A period's length, as copy says it: "week", "2 weeks", "month". */
+export function periodWord(kind: PeriodKind): string {
+  return { "weekly-count": "week", "every-2-weeks": "2 weeks", "once-a-month": "month" }[kind];
+}
+
+/** The period now, as copy says it: "this week", "these 2 weeks", "this month". */
+export function thisPeriod(kind: PeriodKind): string {
+  return kind === "every-2-weeks" ? "these 2 weeks" : `this ${periodWord(kind)}`;
 }
 
 /** A vacation's dates: "Dec 20 – Jan 2", "Dec 20 – 26" within one month, or "Dec 20" for one day. */

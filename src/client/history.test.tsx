@@ -121,6 +121,54 @@ test("a Weekly count week a vacation covers is drawn and tapped the same way", a
   expect(within(detail).getByText("Excused for your vacation, Jan 7 – 10. No penalty.")).toBeTruthy();
 });
 
+test("a Once a month pact has a square per month, labelled by its month", async () => {
+  const months: Json<HeatMapPeriod>[] = [
+    {
+      date: "2025-12-01",
+      occurrence: { ...satisfied, status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" } },
+      progress: { scheduleKind: "once-a-month", sessions: 1, waiting: 0, target: 1 },
+    },
+    {
+      date: "2026-01-01",
+      occurrence: {
+        status: {
+          kind: "not-judged",
+          opensAt: "2026-01-01T05:00:00Z",
+          dueAt: "2026-02-01T05:00:00Z",
+          evidenceWaiting: false,
+          cover: null,
+          phase: "open",
+          excuseApproval: null,
+        },
+        detail: null,
+      },
+      progress: { scheduleKind: "once-a-month", sessions: 0, waiting: 0, target: 1 },
+    },
+  ];
+  const { user } = renderWithUser(
+    <HeatMap
+      pact={{
+        ...cameraPact(),
+        evidenceKind: "camera",
+        dueBy: null,
+        schedule: { kind: "once-a-month" },
+        history: { kind: "periods", periods: months },
+      }}
+      timezone="America/New_York"
+      now={NOW}
+    />,
+  );
+
+  expect(screen.getByText("One square per month, with how many days counted.")).toBeTruthy();
+  expect([...document.querySelectorAll(".hm-lbl")].map((label) => label.textContent)).toEqual(["Dec", "Jan"]);
+  expect(screen.getByRole("button", { name: "December: Satisfied, 1 of 1" }).textContent).toBe("1");
+  await user.click(screen.getByRole("button", { name: "January: This month, 0 of 1 so far" }));
+
+  const detail = screen.getByRole("status");
+  expect(within(detail).getByText("January")).toBeTruthy();
+  expect(within(detail).getByText("This month").className).toBe("chip c-todo");
+});
+
 test("a day with an excuse waiting for approval has a square and a chip that say the same", async () => {
   const waiting: Json<OccurrenceRecord> = {
     status: {

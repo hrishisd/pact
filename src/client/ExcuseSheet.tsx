@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import type { FileExcuseRequest, Json } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
+import { periodKindOfSchedule } from "../shared/schedules.ts";
 import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
@@ -19,10 +20,21 @@ import {
   type ExcusePreview,
   type FileExcuseRefusal,
   type PactTerms,
+  type PeriodKind,
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
 import { Chip, DayChip, SKIP_REASON_TEXT, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
-import { EDIT_WINDOW_TEXT, formatDate, hoursLeft, listNames, money, scheduleText } from "./format.ts";
+import {
+  EDIT_WINDOW_TEXT,
+  formatDate,
+  hoursLeft,
+  listNames,
+  money,
+  periodName,
+  periodWord,
+  scheduleText,
+} from "./format.ts";
+import { plural } from "./vacation-text.ts";
 import { usePhotoPicks } from "./photos.ts";
 import { Sheet, useNow, useSend } from "./ui.tsx";
 
@@ -228,7 +240,7 @@ function ExcuseForm({
       );
   };
 
-  const { schedule, weekly } = scheduleWords(pact);
+  const { schedule, period } = scheduleWords(pact);
   const problem =
     current && !current.ok
       ? DATES_REFUSAL_TEXT[current.reason]
@@ -238,13 +250,17 @@ function ExcuseForm({
   const picked: Shown = { preview: shown, problem, now, timezone };
 
   const held = current?.ok ? current.preview.heldCents : 0;
-  // On Weekly count the core covers whole weeks.
-  const unit = weekly ? "week" : "day";
+  // On a period schedule the core covers whole periods.
+  const unit = period ? periodWord(period) : "day";
+  // Two weeks are counted in weeks: "Covers 4 weeks".
+  const span = (n: number) => (period === "every-2-weeks" ? `${2 * n} weeks` : plural(n, unit, `${unit}s`));
+  const these = (n: number) =>
+    period === "every-2-weeks" ? `these ${span(n)}` : n === 1 ? `this ${unit}` : `these ${unit}s`;
   return (
     <>
       <span className="meta excuse-sub">
         {pact.name} is {schedule} · {money(pact.penaltyCents)} per miss
-        {weekly && ". Excusing any day excuses the whole week."}
+        {period && `. Excusing any day excuses the whole ${periodWord(period)}.`}
       </span>
       {opened.from === "day" ? (
         <DayDates
@@ -298,7 +314,7 @@ function ExcuseForm({
           <span className="meta">
             {covered === 0
               ? "Pick at least one day that can be excused."
-              : `Covers ${covered} ${covered === 1 ? unit : `${unit}s`}.${held > 0 ? ` You won't owe the ${money(held)} for ${covered === 1 ? `this ${unit}` : `these ${unit}s`} unless the excuse is rejected.` : ""}`}
+              : `Covers ${span(covered)}.${held > 0 ? ` You won't owe the ${money(held)} for ${these(covered)} unless the excuse is rejected.` : ""}`}
           </span>
         )}
         {error && <p className="error small">{error}</p>}
@@ -310,18 +326,18 @@ function ExcuseForm({
   );
 }
 
-/** "Gym is Mon, Wed, Fri", "Read is every day", or "Piano is 3× per week": the schedule's words, and whether it's Weekly count. */
-function scheduleWords(pact: Pact): { schedule: string; weekly: boolean } {
+/** "Gym is Mon, Wed, Fri", "Read is every day", "Piano is 3× per week" or "Call is once a month": the schedule's words, and its kind of period if it has one. */
+function scheduleWords(pact: Pact): { schedule: string; period: PeriodKind | undefined } {
   return {
-    schedule: scheduleText(pact.schedule).replace("Every day", "every day"),
-    weekly: pact.schedule.kind === "weekly-count",
+    schedule: scheduleText(pact.schedule).replace(/^(Every|Once)/, (word) => word.toLowerCase()),
+    period: periodKindOfSchedule(pact.schedule),
   };
 }
 
-/** What a range with no days (or weeks) of the pact says. */
+/** What a range with no days (or weeks, or months) of the pact says. */
 function noDaysText(pact: Pact, from: string, to: string): string {
-  const { schedule, weekly } = scheduleWords(pact);
-  return `The pact has no ${weekly ? "weeks" : "days"} ${from === to ? `on ${formatDate(from)}` : `between ${formatDate(from)} and ${formatDate(to)}`}. Its schedule is ${schedule}.`;
+  const { schedule, period } = scheduleWords(pact);
+  return `The pact has no ${period === "once-a-month" ? "months" : period ? "weeks" : "days"} ${from === to ? `on ${formatDate(from)}` : `between ${formatDate(from)} and ${formatDate(to)}`}. Its schedule is ${schedule}.`;
 }
 
 /**
@@ -346,14 +362,14 @@ function DayDates({
 }) {
   const [more, setMore] = useState(false);
   const [through, setThrough] = useState("");
-  const weekly = pact.schedule.kind === "weekly-count";
+  const period = periodKindOfSchedule(pact.schedule);
   const oura = pact.evidenceKind === "oura";
   const later = preview ? onlyAfter(preview, day) : null;
   return (
     <>
       <DayCard
         day={day}
-        weekly={weekly}
+        period={period}
         oura={oura}
         preview={preview}
         reviewers={reviewers}
@@ -382,7 +398,7 @@ function DayDates({
               (later && (
                 <DayList
                   preview={later}
-                  weekly={weekly}
+                  period={period}
                   oura={oura}
                   timezone={timezone}
                   now={now}
@@ -442,7 +458,7 @@ function PactPageDates({
     setPicked(changed);
     onDates(pactPageDates(changed));
   };
-  const weekly = pact.schedule.kind === "weekly-count";
+  const period = periodKindOfSchedule(pact.schedule);
   const oura = pact.evidenceKind === "oura";
   return (
     <>
@@ -459,9 +475,9 @@ function PactPageDates({
               />
               <span className="rt">
                 <b>{excuseDayText(d)}</b>
-                <small>{recentNote(d, now, timezone, weekly, oura)}</small>
+                <small>{recentNote(d, now, timezone, period, oura)}</small>
               </span>
-              <DayChip status={d.status} now={now} timezone={timezone} week={weekly} oura={oura} />
+              <DayChip status={d.status} now={now} timezone={timezone} period={period} oura={oura} />
             </label>
           ))}
           {daysAhead && (
@@ -516,7 +532,7 @@ function PactPageDates({
               (preview && (
                 <DayList
                   preview={preview}
-                  weekly={weekly}
+                  period={period}
                   oura={oura}
                   timezone={timezone}
                   now={now}
@@ -536,7 +552,7 @@ function PactPageDates({
  */
 function DayCard({
   day,
-  weekly,
+  period,
   oura,
   preview,
   reviewers,
@@ -544,8 +560,8 @@ function DayCard({
   now,
 }: {
   day: string;
-  /** A Weekly count pact: the day stands for its week, which the preview dates by its Monday. */
-  weekly: boolean;
+  /** A period schedule's kind: the day stands for its period, which the preview dates by its first day. */
+  period: PeriodKind | undefined;
   /** A bedtime pact: a night not judged yet is waiting on Oura. */
   oura: boolean;
   preview: Preview | null;
@@ -553,17 +569,17 @@ function DayCard({
   timezone: string;
   now: number;
 }) {
-  // On Weekly count, the core dates a day by its week: its Monday, through its Sunday.
+  // On a period schedule, the core dates a day by its period: its first day, through its last.
   const holds = (d: { date: string; through?: string }) => d.date <= day && day <= (d.through ?? d.date);
   const covered = preview?.covered.find(holds);
   const status = covered?.status;
-  const presented = status && presentOccurrence(status, now, { timezone, week: weekly, oura });
+  const presented = status && presentOccurrence(status, now, { timezone, period, oura });
   const skipped = preview?.skipped.find(holds);
   const week = covered?.date ?? skipped?.date;
   return (
     <div className="card excuse-day">
       <div className="spread">
-        <b>{weekly && week !== undefined ? `Week of ${formatDate(week)}` : formatDate(day)}</b>
+        <b>{period && week !== undefined ? periodName(period, week) : formatDate(day)}</b>
         {presented && <Chip chip={presented.chip} />}
       </div>
       {status?.kind === "missed" ? (
@@ -582,17 +598,17 @@ function DayCard({
   );
 }
 
-/** A date range's days (or a Weekly count pact's weeks), in date order: Covered ones with their note, Skipped ones with why. */
+/** A date range's days (or a period schedule's periods), in date order: Covered ones with their note, Skipped ones with why. */
 function DayList({
   preview,
-  weekly,
+  period,
   oura,
   timezone,
   now,
   empty,
 }: {
   preview: Preview;
-  weekly: boolean;
+  period: PeriodKind | undefined;
   oura: boolean;
   timezone: string;
   now: number;
@@ -602,7 +618,7 @@ function DayList({
     ...preview.covered.map((d) => ({
       date: d.date,
       covered: true,
-      note: presentOccurrence(d.status, now, { timezone, week: weekly, oura }).note,
+      note: presentOccurrence(d.status, now, { timezone, period, oura }).note,
     })),
     ...preview.skipped.map((d) => ({ date: d.date, covered: false, note: SKIP_REASON_TEXT[d.reason] })),
   ].sort((a, b) => a.date.localeCompare(b.date, "en-US"));
@@ -612,7 +628,7 @@ function DayList({
       {rows.map((row) => (
         <div key={row.date} className={row.covered ? "covrow" : "covrow skip"}>
           <span className="rt">
-            <b>{weekly ? `Week of ${formatDate(row.date)}` : formatDate(row.date)}</b>
+            <b>{period ? periodName(period, row.date) : formatDate(row.date)}</b>
             {row.note && <small>{row.note}</small>}
           </span>
           {row.covered ? <span className="chip c-excused">Covered</span> : <span className="chip c-soon">Skipped</span>}
@@ -623,11 +639,11 @@ function DayList({
 }
 
 /** The small line on a recent day's radio row: the time left to file for a miss, else the day's note. */
-function recentNote(d: Day, now: number, timezone: string, weekly: boolean, oura: boolean): string {
+function recentNote(d: Day, now: number, timezone: string, period: PeriodKind | undefined, oura: boolean): string {
   const { status } = d;
   if (status.kind === "missed")
     return `${money(status.penaltyCents)} · ${hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse`;
-  return presentOccurrence(status, now, { timezone, week: weekly, oura }).note;
+  return presentOccurrence(status, now, { timezone, period, oura }).note;
 }
 
 /** `preview` without `day` and the days before it: the later days a run-on adds. */

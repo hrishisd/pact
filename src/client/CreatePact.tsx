@@ -1,6 +1,7 @@
 // The step-by-step pact form: evidence kind, goal, schedule (Fixed days,
-// Weekly count or One-time, with the optional due-by time, and for recurring
-// pacts the start date and end date), penalty, reviewers, reminders,
+// Weekly count, Every 2 weeks, Once a month or One-time, with the optional
+// due-by time, and for recurring pacts the start date or first period, and
+// the end date), penalty, reviewers, reminders,
 // then a check before Create pact. Picking Oura Ring with no connection adds
 // a Connect step, which leaves for Oura's page; Oura's callback brings the
 // browser back here (`?oura=connected`) at Goal. Picking Anki with no
@@ -12,10 +13,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { EvidenceKind, FirstOccurrence, Friend, PactTerms, Recipient, Refusal } from "../shared/types.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
+import { lastDayOf } from "../shared/schedules.ts";
 import { ouraResultText, takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
 import { api, failureText } from "./api.ts";
-import { clockText, clockTime, EDIT_WINDOW_TEXT, formatDate, minutesLeft, parseCents } from "./format.ts";
+import { clockText, clockTime, EDIT_WINDOW_TEXT, formatDate, minutesLeft, parseCents, periodName } from "./format.ts";
 import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
 import { EMPTY_FORM, formOf, optionalTimes, scheduleKindOf, scheduleOf, termsOfForm, type Form } from "./pact-form.ts";
 import {
@@ -413,6 +415,7 @@ function CheckStep({
   const scheduleKey = JSON.stringify(schedule);
   const inBedBy = form.kind === "oura" ? form.inBedBy : undefined;
   const { dueBy, startDate } = optionalTimes(form);
+  const due = dueBy ? clockText(dueBy) : "midnight";
 
   useEffect(() => {
     let current = true;
@@ -470,6 +473,16 @@ function CheckStep({
                 <>
                   The first night is <b>{formatDate(first.first.date)}</b>, in bed by {clockText(inBedBy)}.
                 </>
+              ) : schedule.kind === "once-a-month" ? (
+                <>
+                  Your first month is <b>{periodName(schedule.kind, first.first.date)}</b>. It's due by {due} on{" "}
+                  <b>{formatDate(lastDayOf(schedule, first.first.date))}</b>.
+                </>
+              ) : schedule.kind === "every-2-weeks" ? (
+                <>
+                  Your first 2 weeks start <b>{formatDate(first.first.date)}</b>. They're due by {due} on{" "}
+                  <b>{formatDate(lastDayOf(schedule, first.first.date))}</b>.
+                </>
               ) : schedule.kind === "weekly-count" ? (
                 <>
                   Your first week starts <b>{formatDate(first.first.date)}</b> and ends on Sunday.
@@ -480,8 +493,7 @@ function CheckStep({
                 </>
               ) : (
                 <>
-                  Your first day is <b>{formatDate(first.first.date)}</b>, due by{" "}
-                  {dueBy ? clockText(dueBy) : "midnight"}.
+                  Your first day is <b>{formatDate(first.first.date)}</b>, due by {due}.
                 </>
               )}
             </>

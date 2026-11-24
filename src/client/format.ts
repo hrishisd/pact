@@ -26,7 +26,10 @@ export {
   listNames,
   monthDay,
   money,
+  periodName,
+  periodWord,
   scheduleText,
+  thisPeriod,
   TERM_LABELS,
   termLabel,
 } from "../shared/format.ts";

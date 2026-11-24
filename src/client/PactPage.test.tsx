@@ -359,3 +359,19 @@ describe("the sheets that change a term at once", () => {
     expect(await screen.findByText(/A reminder is set for the due time or later/)).toBeTruthy();
   });
 });
+
+test("a trip ahead of a Once a month pact's open month says when the month is due by instead", async () => {
+  const call: Json<PactTerms> = {
+    ...cameraPact(),
+    evidenceKind: "camera",
+    dueBy: null,
+    schedule: { kind: "once-a-month" },
+    tripAhead: { period: "2026-01-01", firstDay: "2026-01-28", lastDay: "2026-02-05", doItBy: "2026-01-27" },
+    history: { kind: "periods", periods: [] },
+  };
+  stubApi({ pact: answers({ ok: true, pact: call }) });
+  renderPactPage();
+
+  const line = await screen.findByText(/You're away/);
+  expect(line.textContent).toBe("You're away Wed Jan 28 – Thu Feb 5, so January is due by Tue Jan 27.");
+});

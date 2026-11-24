@@ -378,7 +378,7 @@ export function excuseDatesText(ctx: CoreContext, excuseId: string): string {
   const schedule = scheduleOf(
     ctx.one<{ schedule: string }>(`SELECT schedule FROM pact WHERE id = ?`, pactId)!.schedule,
   );
-  if (isPeriodSchedule(schedule)) return periodName(schedule, first, last);
+  if (isPeriodSchedule(schedule)) return periodName(schedule.kind, first, last);
   return first === last ? formatDate(first) : `${formatDate(first)} – ${formatDate(last)}`;
 }
 

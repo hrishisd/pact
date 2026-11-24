@@ -11,9 +11,11 @@ import type {
   LocalDate,
   OccurrenceRecord,
   PactTerms,
+  PeriodKind,
   TodayYesterdayEntry,
 } from "../shared/types.ts";
 import { addDays, parseLocalDate } from "../shared/calendar.ts";
+import { periodKindOfSchedule } from "../shared/schedules.ts";
 import {
   Chip,
   DayChip,
@@ -31,6 +33,8 @@ import {
   listNames,
   money,
   NIGHT_CLOSES_TEXT,
+  periodName,
+  periodWord,
 } from "./format.ts";
 
 type Occurrence = Json<OccurrenceRecord>;
@@ -142,7 +146,14 @@ export function HeatMap({ pact, timezone, now }: { pact: Json<PactTerms>; timezo
   const { history } = pact;
   switch (history.kind) {
     case "periods":
-      return <WeeklyHeatMap weeks={history.periods} timezone={timezone} now={now} />;
+      return (
+        <PeriodHeatMap
+          kind={periodKindOfSchedule(pact.schedule) ?? "weekly-count"}
+          periods={history.periods}
+          timezone={timezone}
+          now={now}
+        />
+      );
     case "one-time":
       return <OneTimeHistory pact={pact} day={history.day} timezone={timezone} now={now} />;
     case "fixed-days":
@@ -316,14 +327,27 @@ function Legend() {
 }
 
 /**
- * A Weekly count pact's History: one square per week since the first, each
- * with the number of days that counted, scrolled to now. Tapping one shows
- * the week below the legend.
+ * A period schedule pact's History: one square per period since the first,
+ * each with the number of days that counted, scrolled to now. Tapping one
+ * shows the period below the legend. A month's square is labelled by its
+ * month; a week's or 2 weeks', by the month that starts in it.
  */
-function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: string; now: number }) {
+function PeriodHeatMap({
+  kind,
+  periods: weeks,
+  timezone,
+  now,
+}: {
+  kind: PeriodKind;
+  periods: Week[];
+  timezone: string;
+  now: number;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
   const scroller = useScrolledToEnd(weeks.length);
   const picked = weeks.find((week) => week.date === selected && week.occurrence !== null);
+  const length = kind === "every-2-weeks" ? 14 : 7;
+  const noun = kind === "once-a-month" ? "month" : kind === "weekly-count" ? "week" : "square";
 
   return (
     <section className="card">
@@ -331,9 +355,9 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
       <div className="hm-scroll" ref={scroller}>
         <div className="hm-weeks">
           {weeks.map((week, i) => {
-            const presented = present(week.occurrence, now, { timezone, week: true });
-            const monday = new Date(`${week.date}T00:00:00Z`);
-            const month = monday.getUTCDate() <= 7 || i === 0 ? MONTHS[monday.getUTCMonth()] : "";
+            const presented = present(week.occurrence, now, { timezone, period: kind });
+            const { month: number, day } = parseLocalDate(week.date);
+            const month = kind === "once-a-month" || day <= length || i === 0 ? MONTHS[number - 1] : "";
             return (
               <div key={week.date} className="hm-wcol">
                 <span className="hm-lbl">{month}</span>
@@ -342,7 +366,7 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
                 ) : (
                   <button
                     className={`cell wk ${presented.square}${week.date === selected ? " sel" : ""}`}
-                    aria-label={`Week of ${formatDate(week.date)}: ${presented.label}, ${weekText(week)}`}
+                    aria-label={`${periodName(kind, week.date)}: ${presented.label}, ${weekText(week)}`}
                     aria-pressed={week.date === selected}
                     onClick={() => setSelected(week.date)}
                   >
@@ -354,24 +378,24 @@ function WeeklyHeatMap({ weeks, timezone, now }: { weeks: Week[]; timezone: stri
           })}
         </div>
       </div>
-      <p className="small muted">One square per week, with how many days counted.</p>
+      <p className="small muted">One square per {periodWord(kind)}, with how many days counted.</p>
       <Legend />
       {picked?.occurrence ? (
         <div className="hmdetail" role="status">
           <div className="spread">
-            <b>Week of {formatDate(picked.date)}</b>
-            <DayChip status={picked.occurrence.status} now={now} timezone={timezone} week />
+            <b>{periodName(kind, picked.date)}</b>
+            <DayChip status={picked.occurrence.status} now={now} timezone={timezone} period={kind} />
           </div>
           <span className="small muted">{weekLine(picked, timezone)}</span>
         </div>
       ) : (
-        <p className="small muted">Tap a week to see what happened.</p>
+        <p className="small muted">Tap a {noun} to see what happened.</p>
       )}
     </section>
   );
 }
 
-/** "2 of 3", with "so far" while the week runs and how many photos wait. */
+/** "2 of 3", with "so far" while the period runs and how many photos wait. */
 function weekText({ progress, occurrence }: Week): string {
   const { sessions, waiting, target } = progress;
   const running = occurrence?.status.kind === "not-judged";
@@ -381,7 +405,7 @@ function weekText({ progress, occurrence }: Week): string {
   ].join(" · ");
 }
 
-/** The line under a tapped week: how far it got, and what a short week cost or the excuse that covered it. */
+/** The line under a tapped period: how far it got, and what a short one cost or the excuse that covered it. */
 function weekLine(week: Week, timezone: string): string {
   const record = week.occurrence;
   if (record === null) return "";

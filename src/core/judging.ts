@@ -36,7 +36,7 @@ export function enqueueMissed(ctx: CoreContext, pactId: string, date: LocalDate)
   };
   const schedule = scheduleOf(pact.schedule);
   const recipient = recipientName(ctx, pact.recipient_id);
-  let body = `${isPeriodSchedule(schedule) ? periodName(schedule, date) : formatDate(date)} · ${money(pact.penalty_cents)} penalty to ${recipient}`;
+  let body = `${isPeriodSchedule(schedule) ? periodName(schedule.kind, date) : formatDate(date)} · ${money(pact.penalty_cents)} penalty to ${recipient}`;
   if (schedule.kind === "weekly-count") {
     const { sessions, target } = periodProgress(ctx, pactId, date);
     const short = target - sessions;

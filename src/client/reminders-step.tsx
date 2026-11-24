@@ -5,7 +5,7 @@
 import { addDays, parseClockTime } from "../shared/calendar.ts";
 import { MAX_REMINDERS, type CreatePactRefusal } from "../shared/types.ts";
 import { clockText } from "./format.ts";
-import { scheduleKindOf, type Form } from "./pact-form.ts";
+import { picksFirstPeriod, scheduleKindOf, type Form } from "./pact-form.ts";
 
 /** What the step needs from the pact form: the kind and due time decide the copy and a new reminder's time. */
 type RemindersForm = Pick<Form, "kind" | "scheduleKind" | "deadline" | "inBedBy" | "dueByOn" | "dueBy" | "reminders">;
@@ -86,9 +86,11 @@ export function RemindersStep({
             ? `Reminders go off on scheduled days before ${due}, unless Pact has already seen the deck finished.`
             : dated
               ? `Each reminder goes off once, at the date and time you set, if you haven't submitted a photo yet. Set it before ${due} on the deadline date.`
-              : scheduleKind === "weekly-count"
-                ? `Reminders go off before ${due} on each day you haven't submitted a photo, until you've submitted enough photos for the week.`
-                : `Reminders go off on scheduled days before ${due}, if you haven't submitted a photo yet.`}
+              : picksFirstPeriod(scheduleKind)
+                ? `Reminders go off before ${due} on each of the last 7 days of ${scheduleKind === "once-a-month" ? "each month" : "every 2 weeks"}, until you've submitted a photo. A trip ahead moves them to the 7 days before it.`
+                : scheduleKind === "weekly-count"
+                  ? `Reminders go off before ${due} on each day you haven't submitted a photo, until you've submitted enough photos for the week.`
+                  : `Reminders go off on scheduled days before ${due}, if you haven't submitted a photo yet.`}
         {hint && ` ${hint}`}
       </small>
     </>

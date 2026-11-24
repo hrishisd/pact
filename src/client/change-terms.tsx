@@ -5,6 +5,7 @@
 
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
+import { PERIOD_KINDS } from "../shared/schedules.ts";
 import type {
   ApprovalReason,
   AtOnceChangeRefusal,
@@ -21,10 +22,12 @@ import {
   formatDate,
   listNames,
   money,
+  periodWord,
   remindersText,
   scheduleText,
   TERM_LABELS,
   termLabel,
+  thisPeriod,
 } from "./format.ts";
 
 export type Term = TermChange["term"];
@@ -49,14 +52,24 @@ export function endsWhenText(
   ending: EndTiming,
 ): string {
   if (ending.kind === "at-once") return "now";
-  const open =
-    terms.schedule.kind === "weekly-count" ? "this week" : terms.evidenceKind === "oura" ? "that night" : "that day";
-  return `after ${formatDate(ending.lastDay)}, once ${open} has been judged`;
+  const kind = PERIOD_KINDS.find((k) => k === terms.schedule.kind);
+  const open = kind ? thisPeriod(kind) : terms.evidenceKind === "oura" ? "that night" : "that day";
+  return `after ${formatDate(ending.lastDay)}, once ${open} ${kind === "every-2-weeks" ? "have" : "has"} been judged`;
 }
 
-/** Whose penalty stays, in "Today's penalty stays $5": This week's, for Weekly count. */
+/** Whose penalty stays, in "Today's penalty stays $5": This week's, This month's or These 2 weeks' on a period schedule. */
 export function openOccurrenceText(schedule: Pick<Schedule, "kind">): string {
-  return schedule.kind === "weekly-count" ? "This week's" : "Today's";
+  switch (schedule.kind) {
+    case "weekly-count":
+      return "This week's";
+    case "every-2-weeks":
+      return "These 2 weeks'";
+    case "once-a-month":
+      return "This month's";
+    case "fixed-days":
+    case "one-time":
+      return "Today's";
+  }
 }
 
 /**
@@ -253,7 +266,7 @@ export function EverythingElse({ request }: { request: Json<TermsChangeRequestVi
 /**
  * When an approved change would start, as a change request says it: "Approving
  * applies from Wed Nov 4, the first day of this pact that hasn't started yet. Today's penalty stays $5." A Weekly count
- * pact's applies from a week, and this week keeps its penalty.
+ * pact's applies from a period, and this period keeps its penalty.
  */
 export function startsText(request: Json<TermsChangeRequestView>, lead: string): string {
   const { start } = request;
@@ -261,12 +274,13 @@ export function startsText(request: Json<TermsChangeRequestView>, lead: string):
   const { schedule } = request.current;
   // A One-time pact's one occurrence takes a change even once it's open.
   if (schedule.kind === "one-time") return `${lead} right away, even if the deadline day has started.`;
-  const unit = request.current.evidenceKind === "oura" ? "night" : schedule.kind === "weekly-count" ? "week" : "day";
+  const kind = PERIOD_KINDS.find((k) => k === schedule.kind);
+  const unit = request.current.evidenceKind === "oura" ? "night" : kind ? periodWord(kind) : "day";
   const today =
     start.todayKeepsCents === null
       ? ""
       : ` ${openOccurrenceText(schedule)} penalty stays ${money(start.todayKeepsCents)}.`;
-  return `${lead} from ${formatDate(start.appliesFrom)}, the first ${unit} of this pact that hasn't started yet.${today}`;
+  return `${lead} from ${formatDate(start.appliesFrom)}, the first ${unit} of this pact that ${kind === "every-2-weeks" ? "haven't" : "hasn't"} started yet.${today}`;
 }
 
 function names(reviewers: { name: string }[]): string {
