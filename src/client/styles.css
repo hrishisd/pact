@@ -203,6 +203,11 @@ p {
   flex-direction: column;
   gap: 14px;
 }
+/* A tall page scrolls; its parts keep their height instead of shrinking to fit.
+   Without this, parts with overflow hidden (.seg, .list) get squashed. */
+.scroll > * {
+  flex-shrink: 0;
+}
 
 /* Bottom tabs. The current tab sits on a soft blue tile, in the accent colour with
    a bold label; the others stay grey with a regular label. */
@@ -1427,7 +1432,6 @@ details.folded .kv {
 }
 .term-list {
   margin: 0;
-  flex-shrink: 0; /* the scrolling page is a flex column: keep every row */
 }
 /* A create-form step opened from Request change: the sheet's title names it. */
 .step-in-sheet > h2 {
