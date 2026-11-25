@@ -982,21 +982,22 @@ export async function run(setup: Setup, actions: readonly Action[]): Promise<Run
 
 /**
  * The shortest list of actions found that still breaks the same invariant as
- * `actions` does: it drops runs of actions, long ones first, and keeps a
- * shorter list whenever that still fails the same way. It asks `outOfTime`
- * before each run, and when that says yes it stops with the shortest so far.
+ * `actions` did (`failed` is how that run ended): it drops runs of actions,
+ * long ones first, and keeps a shorter list whenever that still fails the
+ * same way. It asks `outOfTime` before each run, and when that says yes it
+ * stops with the shortest so far.
  */
 export async function shrink(
   setup: Setup,
   actions: readonly Action[],
-  invariant: string,
+  failed: RunResult,
   runner: (setup: Setup, actions: readonly Action[]) => Promise<RunResult>,
   outOfTime: () => boolean,
 ): Promise<{ actions: Action[]; result: RunResult; stopped: boolean }> {
-  let best = [...actions];
-  let result = await runner(setup, best);
-  if (result.violation?.invariant !== invariant) throw new Error("the run to shrink doesn't break that invariant");
-  best = best.slice(0, result.steps);
+  const invariant = failed.violation?.invariant;
+  if (invariant === undefined) throw new Error("the run to shrink didn't fail");
+  let best = actions.slice(0, failed.steps);
+  let result = failed;
   // Until a whole pass drops nothing: taking one action out often frees others.
   for (let dropped = true; dropped;) {
     dropped = false;

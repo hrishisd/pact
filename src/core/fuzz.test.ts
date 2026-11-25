@@ -14,7 +14,7 @@
 // to 2 minutes (FUZZ_SHRINK_SECONDS), and fails with that run, as what each
 // action did. FUZZ_SHRINK=0 skips the shortening.
 
-import { writeFileSync } from "node:fs";
+import { writeFileSync, writeSync } from "node:fs";
 import { afterAll, expect, test } from "vitest";
 import { actionsOf, run, runBothWays, setupOf, shrink, STATS, type RunResult } from "./testing/fuzz.ts";
 
@@ -46,26 +46,25 @@ async function keepsEveryInvariant(seed: number, runner: typeof run): Promise<vo
     `FUZZ seed ${seed} broke ${invariant} at step ${result.steps} of ${steps}`,
     `setup: ${JSON.stringify(setup)}`,
   ];
-  // Now, before shrinking, so a timeout while shrinking still leaves the seed.
+  // Straight to stderr, not through vitest's console, which holds output until
+  // the test ends: a run killed while shrinking still leaves the seed.
   const which = runner === run ? "one" : "both-ways";
-  console.error(
-    [
-      ...head,
-      result.violation.message,
-      `re-run it: FUZZ_MODE=${which} FUZZ_SEEDS=${seed} FUZZ_STEPS=${result.steps} FUZZ_SHRINK=0 npx vitest run src/core/fuzz.test.ts`,
-    ].join("\n"),
+  const rerun = `FUZZ_MODE=${which} FUZZ_SEEDS=${seed} FUZZ_STEPS=${result.steps} FUZZ_SHRINK=0`;
+  writeSync(
+    2,
+    [...head, result.violation.message, `re-run it: ${rerun} npx vitest run src/core/fuzz.test.ts`, ""].join("\n"),
   );
   const stopAt = wallClockMs() + shrinkSeconds * 1000;
   const short =
     process.env.FUZZ_SHRINK === "0"
       ? { actions: actions.slice(0, result.steps), result, stopped: false }
-      : await shrink(setup, actions.slice(0, result.steps), invariant, runner, () => wallClockMs() > stopAt);
+      : await shrink(setup, actions, result, runner, () => wallClockMs() > stopAt);
   expect.fail(
     [
       ...head,
       short.result.violation?.message ?? result.violation.message,
       `the shortest run found that breaks it (${short.actions.length} actions` +
-        (short.stopped ? `; shrinking stopped at its ${shrinkSeconds} s cap, FUZZ_SHRINK_SECONDS` : "") +
+        (short.stopped ? `; shrinking stopped after ${shrinkSeconds} s, the FUZZ_SHRINK_SECONDS cap` : "") +
         "):",
       ...short.result.log.map((line) => `  ${line}`),
     ].join("\n"),
