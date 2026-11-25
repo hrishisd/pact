@@ -222,6 +222,7 @@ export class World {
     return localDateOf(this.now(), this.timezoneOf(person));
   }
 
+  /** Adds `line` to the log. `run` skips the checks after an action that neither notes nor moves the clock. */
   note(line: string): void {
     this.log.push(`${this.now().toISOString().slice(0, 16)}Z  ${line}`);
   }
@@ -309,6 +310,12 @@ export class World {
     return `P${++this.#names}`;
   }
 
+  /**
+   * Does `action`. A branch that changes anything (runs a command, ticks,
+   * changes a fake source, restarts) must `note` it or move the clock: `run`
+   * takes an action that does neither as one that did nothing, and skips the
+   * checks after it.
+   */
   async apply(action: Action): Promise<void> {
     const [a, b, c, d] = action.n;
     const who = this.person(action.by);
