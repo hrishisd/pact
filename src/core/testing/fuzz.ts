@@ -7,9 +7,10 @@
 // run with some actions taken out is still a run that means something. That
 // is what lets `shrink` cut a failing run down to the few actions that matter.
 //
-// After every action the invariants are checked (fuzz-invariants.ts), on top
-// of the scenario's own check that stored outcomes match `verdictOf`. The
-// first one broken ends the run as a `Violation`, which names the invariant.
+// After every action that did something the invariants are checked
+// (fuzz-invariants.ts), on top of the scenario's own check that stored
+// outcomes match `verdictOf`. The first one broken ends the run as a
+// `Violation`, which names the invariant.
 //
 // fuzz.test.ts runs fixed seeds in `npm test`, and any range of seeds when
 // asked (see the top of that file).
@@ -221,6 +222,7 @@ export class World {
     return localDateOf(this.now(), this.timezoneOf(person));
   }
 
+  /** Adds `line` to the log. An action that changes anything must note it or move the clock (see `apply`). */
   note(line: string): void {
     this.log.push(`${this.now().toISOString().slice(0, 16)}Z  ${line}`);
   }
@@ -308,6 +310,12 @@ export class World {
     return `P${++this.#names}`;
   }
 
+  /**
+   * Does `action`. A branch that changes anything (runs a command, ticks,
+   * changes a fake source, restarts) must `note` it or move the clock: `run`
+   * and `runBothWays` take an action that does neither as one that did
+   * nothing, and skip the checks after it.
+   */
   async apply(action: Action): Promise<void> {
     const [a, b, c, d] = action.n;
     const who = this.person(action.by);
@@ -941,7 +949,17 @@ export interface RunResult {
   log: string[];
 }
 
-/** Applies `actions` in order to a new scenario, checking every invariant after each. */
+/** How long each world's log is, and its time: an action that changes neither did nothing (see `World.apply`). */
+function markOf(...worlds: World[]): string {
+  return worlds.map((world) => `${world.log.length} ${world.now().getTime()}`).join(", ");
+}
+
+/**
+ * Applies `actions` in order to a new scenario, checking every invariant
+ * after each that did something. About a third do nothing, and skipping the
+ * checks after one loses nothing: what the checks read is as it was at the
+ * last check, and the invariants about what changed still compare with that.
+ */
 export async function run(setup: Setup, actions: readonly Action[]): Promise<RunResult> {
   const world = new World(setup);
   let steps = 0;
@@ -950,8 +968,9 @@ export async function run(setup: Setup, actions: readonly Action[]): Promise<Run
     world.checks.all();
     for (const action of actions) {
       steps++;
+      const mark = markOf(world);
       await world.checks.guard(action.do, () => world.apply(action));
-      world.checks.all();
+      if (markOf(world) !== mark) world.checks.all();
     }
     return { violation: null, steps, log: world.log };
   } catch (error) {
@@ -965,30 +984,31 @@ export async function run(setup: Setup, actions: readonly Action[]): Promise<Run
 
 /**
  * The shortest list of actions found that still breaks the same invariant as
- * `actions` does: it drops runs of actions, long ones first, and keeps a
- * shorter list whenever that still fails the same way. At most `budget` runs.
+ * `actions` did (`failed` is how that run ended): it drops runs of actions,
+ * long ones first, and keeps a shorter list whenever that still fails the
+ * same way. It asks `outOfTime` before each run, and when that says yes it
+ * stops with the shortest so far (`stopped`).
  */
 export async function shrink(
   setup: Setup,
   actions: readonly Action[],
-  invariant: string,
-  runner: (setup: Setup, actions: readonly Action[]) => Promise<RunResult> = run,
-  budget = Number(process.env.FUZZ_SHRINK_RUNS ?? 250),
-): Promise<{ actions: Action[]; result: RunResult }> {
-  let best = [...actions];
-  let result = await runner(setup, best);
-  if (result.violation?.invariant !== invariant) throw new Error("the run to shrink doesn't break that invariant");
-  best = best.slice(0, result.steps);
-  let spent = 1;
+  failed: RunResult,
+  runner: (setup: Setup, actions: readonly Action[]) => Promise<RunResult>,
+  outOfTime: () => boolean,
+): Promise<{ actions: Action[]; result: RunResult; stopped: boolean }> {
+  const invariant = failed.violation?.invariant;
+  if (invariant === undefined) throw new Error("the run to shrink didn't fail");
+  let best = actions.slice(0, failed.steps);
+  let result = failed;
   // Until a whole pass drops nothing: taking one action out often frees others.
-  for (let dropped = true; dropped && spent < budget;) {
+  for (let dropped = true; dropped;) {
     dropped = false;
-    for (let size = Math.ceil(best.length / 2); size >= 1 && spent < budget; size = Math.floor(size / 2)) {
+    for (let size = Math.ceil(best.length / 2); size >= 1; size = Math.floor(size / 2)) {
       // From the end: the actions just before the failure matter most, so the early ones go in big pieces.
-      for (let from = Math.max(0, best.length - size); from >= 0 && spent < budget; from -= size) {
+      for (let from = Math.max(0, best.length - size); from >= 0; from -= size) {
+        if (outOfTime()) return { actions: best, result, stopped: true };
         const shorter = [...best.slice(0, from), ...best.slice(from + size)];
         const tried = await runner(setup, shorter);
-        spent++;
         if (tried.violation?.invariant !== invariant) continue;
         best = shorter.slice(0, tried.steps);
         result = tried;
@@ -996,7 +1016,7 @@ export async function shrink(
       }
     }
   }
-  return { actions: best, result };
+  return { actions: best, result, stopped: false };
 }
 
 /** `value` as JSON with each id replaced by when it first appears, so two runs that made their rows in another order compare equal. */
@@ -1048,8 +1068,11 @@ export async function runBothWays(setup: Setup, actions: readonly Action[]): Pro
     await many.start();
     for (const action of actions) {
       steps++;
+      const mark = markOf(once, many);
       await once.checks.guard(action.do, () => once.apply(action));
       await many.checks.guard(action.do, () => many.apply(action));
+      // As in `run`: if neither did anything, both answer as they did at the last comparison.
+      if (markOf(once, many) === mark) continue;
       const difference = firstDifference(withoutIds(once.checks.everything()), withoutIds(many.checks.everything()));
       if (difference !== null) throw new Violation("one-tick-or-many", difference);
     }

@@ -16,8 +16,14 @@ export function zonedWallTimeToInstant(
   timezone: string,
 ): Date {
   const wall = Date.UTC(year, month - 1, day, hour, minute);
-  let instant = wall - offsetMs(wall, timezone);
-  instant = wall - offsetMs(instant, timezone);
+  const key = `${timezone} ${wall}`;
+  let instant = instants.get(key);
+  if (instant === undefined) {
+    instant = wall - offsetMs(wall, timezone);
+    instant = wall - offsetMs(instant, timezone);
+    if (instants.size >= MAX_INSTANTS) instants.clear();
+    instants.set(key, instant);
+  }
   return new Date(instant);
 }
 
@@ -98,6 +104,14 @@ function offsetMs(instantMs: number, timezone: string): number {
 // each keeps one per zone. No eviction: the set of IANA zones is bounded.
 const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 const offsetFormatters = new Map<string, Intl.DateTimeFormat>();
+
+// Each instant takes two formatToParts, and the core asks for the same few
+// again and again, so each answer is kept by zone and wall time. For a given
+// timezone database it never changes, daylight saving included. A
+// long-running server keeps asking about new days, so the map is emptied at
+// MAX_INSTANTS.
+const instants = new Map<string, number>();
+const MAX_INSTANTS = 10_000;
 
 /** `cache`'s formatter for `timezone`, made with `options` the first time. */
 function formatterIn(
