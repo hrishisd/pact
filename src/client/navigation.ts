@@ -208,6 +208,8 @@ export function useNavigation() {
     tab: route.tab,
     /** The page on top, or undefined on a tab's own screen. */
     page: route.stack.at(-1),
+    /** The page under the top one, or undefined when the tab's own screen is under it: what Back returns to. */
+    below: route.stack.at(-2),
     /** Opens a tab's own screen; tapping the current tab while a page is pushed returns to it. */
     selectTab: (tab: TabId) => {
       if (tab !== route.tab || route.stack.length > 0) go({ tab, stack: [] });

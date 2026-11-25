@@ -1,38 +1,131 @@
-/* Pact: one stylesheet. Palette, type and components follow the settled prototype
-   (tmp/pact-flow-prototype.html). Light theme only in v0. */
+/* Pact: one stylesheet. Tokens, type and components follow DESIGN.md. Theme follows
+   the system setting; data-theme on <html> can force one. */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: #f1f4f0;
+  --surface: #fcfdfb;
+  --surface-sunken: #e5eae5;
+  --surface-selected: #d9e0da;
+  --rule: #d2dad4;
+  --rule-strong: #808c84;
+  --ink: #17221d;
+  --ink-muted: #56645c;
+  --ink-faint: #626f67;
+  --on-ink: #fcfdfb;
+  --satisfied: #2b7347;
+  --satisfied-soft: #dceee2;
+  --owed: #ad3227;
+  --owed-soft: #f6dfda;
+  --waiting: #8a5300;
+  --waiting-soft: #f8eacb;
+  --excused: #5e6670;
+  --excused-soft: #e3e6ea;
+  --seal: #5a3e8e;
+  --seal-soft: #eae4f4;
+  --error: #8e2f57;
+  --error-soft: #f4dee7;
+  --scrim: rgba(14, 22, 18, 0.45);
+  --material: rgba(252, 253, 251, 0.72);
+  --shadow-float: 0 8px 24px rgba(14, 22, 18, 0.12);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #101412;
+  --surface: #181d1a;
+  --surface-sunken: #0b0e0c;
+  --surface-selected: #232a26;
+  --rule: #2a322d;
+  --rule-strong: #64706a;
+  --ink: #e8eee9;
+  --ink-muted: #a7b3ab;
+  --ink-faint: #86928a;
+  --on-ink: #101412;
+  --satisfied: #7cc497;
+  --satisfied-soft: #183324;
+  --owed: #f08a78;
+  --owed-soft: #3b1d18;
+  --waiting: #e0b062;
+  --waiting-soft: #352812;
+  --excused: #9aa2ac;
+  --excused-soft: #22262b;
+  --seal: #b9a2e8;
+  --seal-soft: #28203a;
+  --error: #e88aae;
+  --error-soft: #3a1c29;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --material: rgba(24, 29, 26, 0.72);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: #101412;
+    --surface: #181d1a;
+    --surface-sunken: #0b0e0c;
+    --surface-selected: #232a26;
+    --rule: #2a322d;
+    --rule-strong: #64706a;
+    --ink: #e8eee9;
+    --ink-muted: #a7b3ab;
+    --ink-faint: #86928a;
+    --on-ink: #101412;
+    --satisfied: #7cc497;
+    --satisfied-soft: #183324;
+    --owed: #f08a78;
+    --owed-soft: #3b1d18;
+    --waiting: #e0b062;
+    --waiting-soft: #352812;
+    --excused: #9aa2ac;
+    --excused-soft: #22262b;
+    --seal: #b9a2e8;
+    --seal-soft: #28203a;
+    --error: #e88aae;
+    --error-soft: #3a1c29;
+    --scrim: rgba(0, 0, 0, 0.6);
+    --material: rgba(24, 29, 26, 0.72);
+    --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+}
 
 :root {
-  --paper: #f1f4f0;
-  --surface: #ffffff;
-  --sunk: #e5eae5;
-  --ink: #17221d;
-  --muted: #56645c;
-  --line: #d2dad4;
-  --accent: #22457a;
-  --accent-ink: #ffffff;
-  --accent-soft: #e1e8f3;
-  --ok: #2b7347;
-  --ok-bg: #dceee2;
-  --missed: #ad3227;
-  --missed-bg: #f6dfda;
-  --due: #b0520a;
-  --due-bg: #f8e6d4;
-  --fresh: #1d64c2;
-  --fresh-bg: #ddeafb;
-  --excused: #8f5c0c;
-  --excused-bg: #f4e8cf;
-  --excused-cell: #c99a3d; /* a heat map's Excused square: lighter than --excused, as the prototype has it */
-  --vacation-line: #a3ada6; /* a heat map's Vacation square: grey hatching, as the prototype has it */
-  --vacation-hatch: #bcc6bf;
-  --slate: #4f5675;
-  --slate-bg: #e4e6ef;
-  --amber: #8a5300;
-  --amber-bg: #fbebcc;
-  --scrim: rgba(14, 22, 18, 0.45);
-  --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
-  --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
-  color-scheme: light; /* v0 ignores the system dark-mode setting */
+  --font-serif: ui-serif, "New York", Georgia, "Times New Roman", serif;
+  --font-sans: system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-cell: 3px;
+  --radius-control: 10px;
+  --radius-card: 16px;
+  --radius-sheet: 24px;
+  --radius-pill: 999px;
+  --tap-target: 44px;
+  --button-height: 48px;
+  --mark: 20px;
+  --cell: 14px;
+  --thumb: 56px;
+  --content-max: 440px;
+  --duration-check: 180ms;
+  --duration-stamp: 240ms;
+  --duration-sheet: 280ms;
+  --duration-fade: 120ms;
+  --duration-push: 350ms;
+  --duration-select: 250ms;
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --material-blur: blur(20px) saturate(180%);
+  --tabbar-height: 62px;
+  --tabbar-gap: 8px;
+  /* How far content and bottom bars stay above the floating tab bar. */
+  --tabbar-clear: calc(var(--tabbar-height) + var(--tabbar-gap) + env(safe-area-inset-bottom));
 }
 
 * {
@@ -43,12 +136,15 @@ html,
 body,
 #root {
   height: 100%;
+}
+#root {
+  height: 100dvh; /* never 100vh: Safari's toolbar makes vh wrong */
   margin: 0;
 }
 body {
-  background: var(--paper);
+  background: var(--background);
   color: var(--ink);
-  font-family: var(--f-body);
+  font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.45;
   -webkit-text-size-adjust: 100%;
@@ -65,29 +161,32 @@ button {
   cursor: pointer;
 }
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 h1,
 h2,
 h3 {
-  font-family: var(--f-display);
-  font-weight: 700;
+  font-family: var(--font-serif);
+  font-weight: 600;
   margin: 0;
   text-wrap: balance;
-  letter-spacing: -0.01em;
+}
+/* Row and card titles are headlines: sans, as everything you operate. */
+h3 {
+  font-family: var(--font-sans);
 }
 p {
   margin: 0;
 }
 .muted {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .small {
   font-size: 13px;
 }
 .error {
-  color: var(--missed);
+  color: var(--error);
   font-weight: 600;
 }
 
@@ -109,7 +208,7 @@ p {
 }
 .screen.centered > main {
   width: 100%;
-  max-width: 400px;
+  max-width: var(--content-max);
 }
 .stack-lg {
   display: flex;
@@ -129,7 +228,7 @@ p {
 }
 .brand h1 {
   font-size: 44px;
-  color: var(--accent);
+  color: var(--ink);
 }
 .brand p {
   margin-top: 4px;
@@ -141,41 +240,112 @@ p {
   height: 100%;
   display: flex;
   flex-direction: column;
-  max-width: 600px;
+  max-width: var(--content-max);
   margin: 0 auto;
-  background: var(--paper);
+  background: var(--background);
 }
+/* The navigation bar: on a page, Back (with what it returns to) on the left and the
+   title centred; on a tab, its Large Title on the left. Profile on the right, level
+   with either. Once the content scrolls, the bar turns to material. */
 .hdr {
-  display: flex;
+  display: grid;
+  /* Equal sides keep the title centred; each fits Back and a short title before truncating. */
+  grid-template-columns: minmax(96px, 1fr) minmax(0, max-content) minmax(96px, 1fr);
   align-items: center;
-  gap: 10px;
-  padding-top: calc(14px + env(safe-area-inset-top));
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
-  background: var(--paper);
+  gap: 8px;
+  min-height: calc(44px + env(safe-area-inset-top));
+  padding-top: calc(6px + env(safe-area-inset-top));
+  padding-bottom: 6px;
+  background: var(--background);
+  box-shadow: inset 0 -1px 0 transparent;
 }
-.hdr h1 {
-  font-size: 22px;
-  flex: 1;
+.hdr.scrolled {
+  background: var(--material);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  box-shadow: inset 0 -1px 0 var(--rule);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hdr {
+    transition:
+      background-color var(--duration-fade),
+      box-shadow var(--duration-fade);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .hdr.scrolled {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+.nav-lead {
+  justify-self: start;
   min-width: 0;
+  /* The chevron's own padding, pulled into the gutter so it lines up with the content. */
+  margin-left: -8px;
+  max-width: calc(100% + 8px);
+}
+.nav-trail {
+  justify-self: end;
+}
+/* Beside a Large Title, Profile lines up with the title's line, not the date under it. */
+.large-title ~ .nav-trail {
+  align-self: start;
+  margin-top: 3px;
+}
+.nav-title {
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hdr .sub {
+/* Back: a chevron and the title of the screen it returns to, at least 44pt tall. */
+.backbtn {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 4px 0 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 17px;
+  touch-action: manipulation;
+}
+.backbtn svg {
+  flex: none;
+}
+.backbtn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A tab's Large Title, in the bar level with Profile: it takes the Back and title columns. */
+.large-title {
+  grid-column: 1 / 3;
+  justify-self: start;
+  min-width: 0;
+  font-size: 34px;
+  line-height: 41px;
+}
+.large-title .sub {
   display: block;
-  font-family: var(--f-body);
-  font-weight: 500;
-  font-size: 12.5px;
-  color: var(--muted);
-  letter-spacing: 0;
-  min-height: 1.2em;
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: 15px;
+  line-height: 20px;
+  color: var(--ink-muted);
 }
 .iconbtn {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule-strong);
   background: var(--surface);
   display: grid;
   place-items: center;
@@ -185,8 +355,8 @@ p {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--ink);
+  color: var(--on-ink);
   display: grid;
   place-items: center;
   font-weight: 700;
@@ -198,7 +368,7 @@ p {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   padding-top: 14px;
-  padding-bottom: 24px;
+  padding-bottom: calc(var(--tabbar-clear) + 16px);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -209,23 +379,58 @@ p {
   flex-shrink: 0;
 }
 
-/* Bottom tabs. The current tab sits on a soft blue tile, in the accent colour with
-   a bold label; the others stay grey with a regular label. */
+/* Bottom tabs: a capsule floating over the content, as iOS draws its tab bar. The
+   current tab sits on a capsule that slides to it (--tab-index, set by the shell). */
 .tabbar {
+  position: fixed;
+  z-index: 20;
+  bottom: calc(var(--tabbar-gap) + env(safe-area-inset-bottom));
+  left: max(16px, env(safe-area-inset-left));
+  right: max(16px, env(safe-area-inset-right));
+  max-width: calc(var(--content-max) - 32px);
+  margin: 0 auto;
+  height: var(--tabbar-height);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-  padding: 6px max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom))
-    max(6px, env(safe-area-inset-left));
+  padding: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--material);
+  -webkit-backdrop-filter: var(--material-blur);
+  backdrop-filter: var(--material-blur);
+  box-shadow:
+    inset 0 0 0 0.5px var(--rule),
+    var(--shadow-float);
+}
+.tabbar::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: calc(6px + var(--tab-index, 0) * (100% - 12px) / 4);
+  width: calc((100% - 12px) / 4);
+  border-radius: var(--radius-pill);
+  background: var(--surface-selected);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tabbar::before {
+    transition: left var(--duration-select) var(--ease-spring);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .tabbar {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 .tab {
+  position: relative; /* above the sliding capsule */
   background: none;
   border: 0;
   padding: 0;
   display: flex;
   justify-content: center;
-  color: var(--muted);
+  color: var(--ink-muted);
   -webkit-user-select: none;
   user-select: none;
   touch-action: manipulation;
@@ -235,24 +440,24 @@ p {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
-  min-width: 68px;
-  padding: 6px 10px 5px;
-  border-radius: 12px;
-  font-size: 11.5px;
-  font-weight: 400;
+  width: 100%;
+  height: 100%;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
 }
 .tab svg {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
 }
 /* aria-current is "page" on a tab's own screen and "true" while a page is pushed on it. */
 .tab[aria-current] {
-  color: var(--accent);
+  color: var(--ink);
 }
 .tab[aria-current] .tile {
-  background: var(--accent-soft);
-  font-weight: 700;
+  font-weight: 600;
 }
 .tab:active {
   background: none;
@@ -266,8 +471,8 @@ p {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--missed);
-  color: var(--surface);
+  background: var(--ink);
+  color: var(--on-ink);
   font-size: 11px;
   font-weight: 700;
   display: grid;
@@ -277,7 +482,7 @@ p {
 /* ---------- components ---------- */
 .card {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 16px;
   padding: 14px;
   display: flex;
@@ -300,14 +505,13 @@ p {
   gap: 10px;
 }
 .label {
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--ink-muted);
 }
 .btn {
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule-strong);
   background: var(--surface);
   border-radius: 12px;
   padding: 11px 14px;
@@ -319,13 +523,13 @@ p {
   touch-action: manipulation;
 }
 .btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-ink);
 }
 .btn.danger {
-  color: var(--missed);
-  border-color: var(--missed);
+  color: var(--owed);
+  border-color: var(--owed);
 }
 .btn.sm {
   padding: 6px 10px;
@@ -347,7 +551,7 @@ p {
   background: none;
   border: 0;
   padding: 0;
-  color: var(--accent);
+  color: var(--ink);
   font-weight: 600;
 }
 .field {
@@ -361,11 +565,11 @@ p {
 }
 .inp {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule-strong);
   background: var(--surface);
   border-radius: 10px;
   padding: 10px 12px;
-  font-size: 16px; /* 16px stops iOS zooming into the field */
+  font-size: 17px; /* 16px or more stops iOS zooming into the field */
 }
 
 .avatar.sm {
@@ -408,28 +612,30 @@ p {
   outline: none;
 }
 .tcard-open:focus-visible::after {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 .card-actions {
   position: relative;
   z-index: 1;
 }
-.tcard:hover {
-  border-color: var(--muted);
+@media (hover: hover) {
+  .tcard:hover {
+    border-color: var(--ink-muted);
+  }
 }
 .meta {
   font-size: 12.5px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .pen,
 .meta.pen {
-  color: var(--missed);
+  color: var(--owed);
   font-weight: 700;
 }
 .due,
 .meta.due {
-  color: var(--due);
+  color: var(--waiting);
   font-weight: 600;
 }
 .chip {
@@ -443,57 +649,57 @@ p {
   white-space: nowrap;
 }
 .c-ok {
-  background: var(--ok-bg);
-  color: var(--ok);
+  background: var(--satisfied-soft);
+  color: var(--satisfied);
 }
 .c-missed {
-  background: var(--missed-bg);
-  color: var(--missed);
+  background: var(--owed-soft);
+  color: var(--owed);
 }
 .c-todo {
-  background: var(--ok);
-  color: var(--paper);
+  background: var(--satisfied);
+  color: var(--background);
 }
 .c-soon {
-  background: var(--sunk);
-  color: var(--muted);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
 }
 /* A bedtime night Oura hasn't reported yet: something the owner can still act on, orange like due times. */
 .c-due {
-  background: var(--due-bg);
-  color: var(--due);
+  background: var(--waiting-soft);
+  color: var(--waiting);
 }
 .c-excused {
-  background: var(--excused-bg);
+  background: var(--excused-soft);
   color: var(--excused);
 }
 .c-vac {
-  background: var(--sunk);
-  color: var(--muted);
-  box-shadow: inset 0 0 0 1px var(--vacation-line);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  box-shadow: inset 0 0 0 1px var(--excused);
 }
 .c-wait {
-  background: var(--slate-bg);
-  color: var(--slate);
+  background: var(--waiting-soft);
+  color: var(--waiting);
 }
 /* A review item of the owner's that a reviewer's question waits on: blue, as its Today alert. */
 .c-reply {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--ink);
 }
 
 /* A pact in its edit window: a blue chip next to its name, a blue left edge, a blue bar on its page. */
 .c-new {
-  background: var(--fresh-bg);
-  color: var(--fresh);
+  background: var(--surface-selected);
+  color: var(--ink);
 }
 .card.fresh,
 .cards > .rowbtn.fresh {
-  border-left: 4px solid var(--fresh);
+  border-left: 4px solid var(--ink);
 }
 .alert.fresh {
-  background: var(--fresh-bg);
-  border-color: var(--fresh);
+  background: var(--surface-selected);
+  border-color: var(--rule);
 }
 .namerow {
   display: flex;
@@ -509,12 +715,12 @@ p {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 16px;
   overflow: hidden;
 }
 .list > * + * {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--rule);
 }
 .rowbtn {
   display: flex;
@@ -533,7 +739,7 @@ p {
   flex-direction: column;
 }
 .rowbtn .rt small {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .cards {
   display: flex;
@@ -542,14 +748,14 @@ p {
 }
 .cards > .rowbtn {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 14px;
   touch-action: manipulation;
 }
 .cards > .rowbtn::after,
 .ledger-card > .rowbtn::after {
   content: "\203A";
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 22px;
   line-height: 1;
   margin-left: 2px;
@@ -570,11 +776,13 @@ p {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 14px;
 }
-.ledger-card:has(> .rowbtn:hover) {
-  border-color: var(--muted);
+@media (hover: hover) {
+  .ledger-card:has(> .rowbtn:hover) {
+    border-color: var(--ink-muted);
+  }
 }
 .ledger-card > .rowbtn {
   padding-bottom: 0;
@@ -585,7 +793,7 @@ p {
 }
 /* What approved payments have paid, in a ledger's history. */
 .paid {
-  color: var(--ok);
+  color: var(--satisfied);
   font-weight: 700;
 }
 /* A rejected payment's amount: it never counted. */
@@ -593,7 +801,7 @@ p {
   text-decoration: line-through;
 }
 .bigmoney {
-  font-family: var(--f-mono);
+  font-family: var(--font-mono);
   font-size: 30px;
   font-weight: 500;
   letter-spacing: -0.02em;
@@ -605,7 +813,7 @@ p {
   text-align: left;
 }
 .num {
-  font-family: var(--f-mono);
+  font-family: var(--font-mono);
 }
 
 /* A pact's terms. */
@@ -617,14 +825,14 @@ p {
   margin: 0;
 }
 .kv dt {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .kv dd {
   margin: 0;
   min-width: 0;
 }
 .kv a {
-  color: var(--accent);
+  color: var(--ink);
 }
 
 .alert {
@@ -636,15 +844,15 @@ p {
   border: 1px solid;
 }
 .alert.info {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--surface-selected);
+  border-color: var(--rule);
 }
 .alert.bad {
-  background: var(--missed-bg);
-  border-color: var(--missed);
+  background: var(--owed-soft);
+  border-color: var(--owed);
 }
 .invite-link {
-  font-family: var(--f-mono);
+  font-family: var(--font-mono);
   font-size: 13px;
   overflow-wrap: anywhere;
   user-select: all;
@@ -673,8 +881,8 @@ p {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--ink);
   font-weight: 700;
   font-size: 13px;
   display: grid;
@@ -684,11 +892,11 @@ p {
   width: 18px;
   height: 18px;
   vertical-align: -4px;
-  color: var(--accent);
+  color: var(--ink);
 }
 .alert.ok {
-  background: var(--ok-bg);
-  border-color: var(--ok);
+  background: var(--satisfied-soft);
+  border-color: var(--satisfied);
 }
 .switch-row {
   display: flex;
@@ -704,7 +912,7 @@ p {
   flex-direction: column;
 }
 .switch-row small {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 12.5px;
   line-height: 1.35;
 }
@@ -716,7 +924,7 @@ p {
   height: 26px;
   margin: 0;
   border-radius: 13px;
-  background: var(--line);
+  background: var(--rule);
   position: relative;
   cursor: pointer;
   transition: background 0.15s;
@@ -730,11 +938,10 @@ p {
   height: 22px;
   border-radius: 50%;
   background: var(--surface);
-  box-shadow: 0 1px 2px var(--scrim);
   transition: transform 0.15s;
 }
 .switch:checked {
-  background: var(--ok);
+  background: var(--satisfied);
 }
 .switch:checked::after {
   transform: translateX(18px);
@@ -751,12 +958,13 @@ p {
   z-index: 30;
 }
 .sheet {
-  background: var(--paper);
+  background: var(--background);
   width: 100%;
-  max-width: 600px;
+  max-width: var(--content-max);
   max-height: 90%;
   overflow: auto;
-  border-radius: 22px 22px 0 0;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  box-shadow: var(--shadow-float);
   padding-top: 10px;
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
   display: flex;
@@ -783,7 +991,7 @@ p {
   width: 42px;
   height: 5px;
   border-radius: 3px;
-  background: var(--line);
+  background: var(--rule);
   margin: 0 auto;
 }
 .sheet h2 {
@@ -813,16 +1021,16 @@ p {
   flex: 1;
   height: 4px;
   border-radius: 2px;
-  background: var(--line);
+  background: var(--rule);
 }
 .steps i.on {
-  background: var(--accent);
+  background: var(--ink);
 }
 .scroll h2 {
   font-size: 20px;
 }
 .field small {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 13px;
 }
 textarea.inp {
@@ -833,9 +1041,9 @@ textarea.inp {
   align-self: flex-start;
 }
 .btn[aria-pressed="true"] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--surface-selected);
+  border-color: var(--ink);
+  color: var(--ink);
 }
 /* Evidence kind tiles. Tapping one moves to the next step. */
 .kind-tiles {
@@ -849,18 +1057,18 @@ textarea.inp {
   align-items: flex-start;
   gap: 6px;
   text-align: left;
-  border: 1.5px solid var(--line);
+  border: 1.5px solid var(--rule);
   background: var(--surface);
   border-radius: 16px;
   padding: 14px 12px;
   min-height: 150px;
 }
 .kind-tile b {
-  font-family: var(--f-display);
+  font-family: var(--font-serif);
   font-size: 17px;
 }
 .kind-tile small {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 12.5px;
   line-height: 1.35;
 }
@@ -869,7 +1077,7 @@ textarea.inp {
 }
 .kind-tile:disabled {
   cursor: not-allowed;
-  background: var(--paper);
+  background: var(--background);
 }
 .kind-tile:disabled b,
 .kind-tile:disabled .tico {
@@ -879,7 +1087,7 @@ textarea.inp {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: var(--sunk);
+  background: var(--surface-sunken);
   display: grid;
   place-items: center;
   margin-bottom: 4px;
@@ -891,7 +1099,7 @@ textarea.inp {
 /* Fixed days or Weekly count, on the Schedule step. */
 .seg {
   display: flex;
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 12px;
   overflow: hidden;
   background: var(--surface);
@@ -903,12 +1111,12 @@ textarea.inp {
   padding: 9px 6px;
   font-weight: 600;
   font-size: 13.5px;
-  color: var(--muted);
+  color: var(--ink-muted);
   touch-action: manipulation;
 }
 .seg button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--ink);
+  color: var(--on-ink);
 }
 /* A Weekly count's target: − 3× per week (Mon–Sun) +. */
 .stepper {
@@ -935,15 +1143,15 @@ textarea.inp {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 1.5px solid var(--ok);
+  border: 1.5px solid var(--satisfied);
   display: block;
 }
 .dots i.on {
-  background: var(--ok);
+  background: var(--satisfied);
 }
 .dots i.wait {
-  border-color: var(--slate);
-  background: var(--slate-bg);
+  border-color: var(--waiting);
+  background: var(--waiting-soft);
 }
 /* Weekday picker, Monday first. */
 .days {
@@ -955,16 +1163,16 @@ textarea.inp {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   background: var(--surface);
   font-weight: 600;
   font-size: 13px;
   touch-action: manipulation;
 }
 .days button[aria-pressed="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-ink);
 }
 .money-inp {
   display: flex;
@@ -983,7 +1191,7 @@ textarea.inp {
   gap: 12px;
   align-items: center;
   text-align: left;
-  border: 1.5px solid var(--line);
+  border: 1.5px solid var(--rule);
   background: var(--surface);
   border-radius: 14px;
   padding: 10px 12px;
@@ -1000,8 +1208,8 @@ textarea.inp {
 }
 .opt[aria-pressed="true"],
 .opt:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--ink);
+  background: var(--surface-selected);
 }
 .opt .rt {
   flex: 1;
@@ -1010,34 +1218,34 @@ textarea.inp {
   flex-direction: column;
 }
 .opt small {
-  color: var(--muted);
+  color: var(--ink-muted);
   overflow-wrap: anywhere;
 }
 .opt input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--accent);
+  accent-color: var(--ink);
 }
 .glyph {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: var(--sunk);
+  background: var(--surface-sunken);
   display: grid;
   place-items: center;
-  font-family: var(--f-display);
+  font-family: var(--font-serif);
   font-weight: 700;
   flex: none;
 }
 /* Back / Next, kept in reach at the bottom of the form. */
 .footbar {
   position: sticky;
-  bottom: 0;
+  bottom: 0; /* of the scroll area's content box, whose padding already clears the tab bar */
   margin-top: auto;
   display: flex;
   gap: 10px;
   padding-block: 12px 4px;
-  background: linear-gradient(to bottom, transparent, var(--paper) 30%);
+  background: linear-gradient(to bottom, transparent, var(--background) 30%);
 }
 .btn.grow {
   flex: 1;
@@ -1046,7 +1254,7 @@ textarea.inp {
 /* Evidence on a Today card: a camera button, then thumbnails of the photos
    taken (each removable) with a tile to take another. */
 .evidence {
-  border-top: 1px dashed var(--line);
+  border-top: 1px dashed var(--rule);
   padding-top: 10px;
   cursor: default;
 }
@@ -1069,15 +1277,15 @@ textarea.inp {
   aspect-ratio: 3 / 4;
   object-fit: cover;
   border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--sunk);
+  border: 1px solid var(--rule);
+  background: var(--surface-sunken);
 }
 .ph-add {
   display: grid;
   place-items: center;
   border-style: dashed;
   font-size: 26px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .thumb .remove {
   position: absolute;
@@ -1109,21 +1317,21 @@ textarea.inp {
   height: 20px;
 }
 .k-evidence {
-  background: var(--ok-bg);
-  color: var(--ok);
+  background: var(--satisfied-soft);
+  color: var(--satisfied);
 }
 .k-payment {
-  background: var(--missed-bg);
-  color: var(--missed);
+  background: var(--owed-soft);
+  color: var(--owed);
 }
 .k-excuse {
-  background: var(--slate-bg);
-  color: var(--slate);
+  background: var(--excused-soft);
+  color: var(--excused);
 }
 /* An Oura connection: grey, like the Automatic section, since it needs nothing. */
 .k-ring {
-  background: var(--sunk);
-  color: var(--muted);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
 }
 
 /* A review item kind as a coloured badge with its icon, on Review. */
@@ -1146,9 +1354,9 @@ textarea.inp {
 
 /* Review: one item at a time, with its decision buttons kept in reach. */
 .counter {
-  font-family: var(--f-mono);
+  font-family: var(--font-mono);
   font-size: 13px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .big-photo {
   display: block;
@@ -1156,8 +1364,8 @@ textarea.inp {
   max-height: 340px;
   object-fit: cover;
   border-radius: 14px;
-  border: 1px solid var(--line);
-  background: var(--sunk);
+  border: 1px solid var(--rule);
+  background: var(--surface-sunken);
 }
 /* A payment's screenshot is often tall: show all of it rather than crop. */
 .big-photo.whole {
@@ -1165,12 +1373,12 @@ textarea.inp {
 }
 .decide {
   position: sticky;
-  bottom: 0;
+  bottom: 0; /* as .footbar */
   display: grid;
   grid-template-columns: 1fr 1.3fr;
   gap: 8px;
   padding-block: 10px 4px;
-  background: linear-gradient(to bottom, transparent, var(--paper) 25%);
+  background: linear-gradient(to bottom, transparent, var(--background) 25%);
 }
 .decide.with-ask {
   grid-template-columns: 1fr 1fr 1.3fr;
@@ -1183,7 +1391,7 @@ textarea.inp {
 }
 .msg {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 14px 14px 14px 4px;
   padding: 8px 11px;
   max-width: 88%;
@@ -1196,17 +1404,17 @@ textarea.inp {
 }
 .msg.mine {
   align-self: flex-end;
-  background: var(--accent-soft);
-  border-color: var(--accent-soft);
+  background: var(--surface-selected);
+  border-color: var(--surface-selected);
   border-radius: 14px 14px 4px 14px;
 }
 .msg small {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 11.5px;
 }
 .btn.ok {
-  background: var(--ok);
-  border-color: var(--ok);
+  background: var(--satisfied);
+  border-color: var(--satisfied);
   color: var(--surface);
 }
 
@@ -1227,7 +1435,7 @@ textarea.inp {
   white-space: nowrap;
 }
 .covrow .rt small {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 12.5px;
 }
 
@@ -1240,13 +1448,13 @@ textarea.inp {
   gap: 4px;
 }
 .covrow.skip b {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-weight: 600;
 }
 .opt input[type="radio"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--accent);
+  accent-color: var(--ink);
   flex: none;
 }
 .dates {
@@ -1304,25 +1512,25 @@ a.btn {
   color: inherit;
 }
 a.btn.primary {
-  color: var(--accent-ink);
+  color: var(--on-ink);
 }
 
 /* Change requests: the amber pencil kind, the Request change list, its verdict, and before/after diffs. */
 .k-change {
-  background: var(--amber-bg);
-  color: var(--amber);
+  background: var(--waiting-soft);
+  color: var(--waiting);
 }
 .c-change {
-  background: var(--amber-bg);
-  color: var(--amber);
+  background: var(--waiting-soft);
+  color: var(--waiting);
 }
 .c-ended {
-  background: var(--sunk);
-  color: var(--muted);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
 }
 .alert.amber {
-  background: var(--amber-bg);
-  border-color: var(--amber);
+  background: var(--waiting-soft);
+  border-color: var(--waiting);
 }
 .termrow {
   display: grid;
@@ -1332,7 +1540,7 @@ a.btn.primary {
   padding: 11px 12px;
 }
 .termrow dt {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 13px;
 }
 .termrow dd {
@@ -1341,17 +1549,17 @@ a.btn.primary {
   overflow-wrap: anywhere;
 }
 .termrow.changed {
-  background: var(--amber-bg);
+  background: var(--waiting-soft);
 }
 .termrow.changed.stricter {
-  background: var(--ok-bg);
+  background: var(--satisfied-soft);
 }
 .termrow.changed.at-once {
-  background: var(--sunk);
+  background: var(--surface-sunken);
 }
 .termrow s,
 .diff s {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 13px;
   display: block;
 }
@@ -1361,20 +1569,20 @@ a.btn.primary {
   font-weight: 600;
 }
 .t-needs-approval {
-  color: var(--amber);
+  color: var(--waiting);
 }
 .t-stricter {
-  color: var(--ok);
+  color: var(--satisfied);
 }
 .t-at-once {
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .diff {
   display: flex;
   flex-direction: column;
   margin: 0;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -1386,10 +1594,10 @@ a.btn.primary {
   align-items: start;
 }
 .diff > div + div {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--rule);
 }
 .diff dt {
-  color: var(--muted);
+  color: var(--ink-muted);
   font-size: 13px;
 }
 .diff dd {
@@ -1407,24 +1615,24 @@ a.btn.primary {
   border: 1px solid;
 }
 .verdict.needs-approval {
-  background: var(--amber-bg);
-  border-color: var(--amber);
+  background: var(--waiting-soft);
+  border-color: var(--waiting);
 }
 .verdict.stricter,
 .verdict.at-once {
-  background: var(--ok-bg);
-  border-color: var(--ok);
+  background: var(--satisfied-soft);
+  border-color: var(--satisfied);
 }
 .verdict.nothing {
-  background: var(--sunk);
-  border-color: var(--line);
-  color: var(--muted);
+  background: var(--surface-sunken);
+  border-color: var(--rule);
+  color: var(--ink-muted);
 }
 details.folded summary,
 details.ended summary {
   cursor: pointer;
   font-weight: 600;
-  color: var(--muted);
+  color: var(--ink-muted);
   padding: 6px 2px;
 }
 details.folded .kv {
@@ -1456,7 +1664,7 @@ details.folded .kv {
 }
 .hm-lbl {
   font-size: 10px;
-  color: var(--muted);
+  color: var(--ink-muted);
   line-height: 15px;
   height: 15px;
   white-space: nowrap;
@@ -1471,43 +1679,43 @@ details.folded .kv {
   width: 15px;
   height: 15px;
   border-radius: 4px;
-  background: var(--sunk);
+  background: var(--surface-sunken);
   border: 0;
   padding: 0;
 }
 .cell.none {
   background: transparent;
-  outline: 1px solid var(--sunk);
+  outline: 1px solid var(--surface-sunken);
   outline-offset: -1px;
 }
 .cell.satisfied {
-  background: var(--ok);
+  background: var(--satisfied);
 }
 .cell.missed {
-  background: var(--missed);
+  background: var(--owed);
 }
 .cell.excused {
-  background: var(--excused-cell);
+  background: var(--excused);
 }
 /* A day a vacation excused: hatched grey, so a trip doesn't read as a run of excuses. */
 .cell.vac {
-  background: repeating-linear-gradient(135deg, var(--vacation-hatch) 0 2px, var(--surface) 2px 4.5px);
-  outline: 1px solid var(--vacation-line);
+  background: repeating-linear-gradient(135deg, var(--excused) 0 1.5px, var(--excused-soft) 1.5px 4px);
+  outline: 1px solid var(--excused);
   outline-offset: -1px;
 }
 .cell.not-judged {
-  background: var(--slate-bg);
-  outline: 1.5px solid var(--slate);
+  background: var(--waiting-soft);
+  outline: 1.5px solid var(--waiting);
   outline-offset: -1.5px;
 }
 .cell.open {
-  background: var(--accent-soft);
-  outline: 1.5px solid var(--accent);
+  background: var(--surface-selected);
+  outline: 1.5px solid var(--ink);
   outline-offset: -1.5px;
 }
 .cell.ahead {
   background: transparent;
-  outline: 1px dashed var(--line);
+  outline: 1px dashed var(--rule);
   outline-offset: -1px;
 }
 .cell.sel {
@@ -1534,20 +1742,20 @@ details.folded .kv {
   place-items: center;
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
+  color: var(--on-ink);
 }
 .cell.wk.open {
-  color: var(--accent);
+  color: var(--ink);
 }
 .cell.wk.not-judged {
-  color: var(--slate);
+  color: var(--waiting);
 }
 .legend {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .legend .cell {
   display: inline-block;
@@ -1564,7 +1772,7 @@ details.folded .kv {
   font-size: 13.5px;
   padding: 8px 11px;
   border-radius: 10px;
-  background: var(--sunk);
+  background: var(--surface-sunken);
 }
 /* A One-time pact's History: its one square beside how it went. */
 .hmdetail.one {
@@ -1579,7 +1787,7 @@ details.folded .kv {
   border-radius: 5px;
 }
 .hmdetail.one > .cell.none {
-  outline-color: var(--line);
+  outline-color: var(--rule);
 }
 .hmdetail.one > .rt {
   display: flex;
@@ -1605,8 +1813,8 @@ details.folded .kv {
 
 /* Anki (ticket 02 prototype): the third Source tile, the Connect AnkiWeb step, the deck tree and Today's count. */
 .k-anki {
-  background: var(--sunk);
-  color: var(--muted);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
 }
 .kind-tiles.three {
   grid-template-columns: 1fr 1fr;
@@ -1616,24 +1824,24 @@ details.folded .kv {
   min-height: 0;
 }
 .tos {
-  border-left: 3px solid var(--due);
+  border-left: 3px solid var(--waiting);
   padding: 2px 0 2px 10px;
   font-size: 13.5px;
 }
 .keeps {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--ink-muted);
 }
 .deck-tree {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   border-radius: 16px;
   overflow: hidden;
 }
 .deck-tree > * + * {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--rule);
 }
 .deck {
   display: flex;
@@ -1654,31 +1862,31 @@ details.folded .kv {
   white-space: nowrap;
 }
 .deck[aria-checked="true"] {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--ink);
   font-weight: 700;
 }
 .deck .radio {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 1.5px solid var(--line);
+  border: 1.5px solid var(--rule);
   flex: none;
   display: grid;
   place-items: center;
 }
 .deck[aria-checked="true"] .radio {
-  border-color: var(--accent);
+  border-color: var(--ink);
 }
 .deck[aria-checked="true"] .radio::after {
   content: "";
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--ink);
 }
 .leftbig {
-  font-family: var(--f-mono);
+  font-family: var(--font-mono);
   font-size: 22px;
   font-weight: 500;
   line-height: 1.1;
@@ -1706,8 +1914,8 @@ details.folded .kv {
 
 /* Vacations: the Profile card, the Plan a vacation flow and the review item. */
 .k-vacation {
-  background: var(--sunk);
-  color: var(--muted);
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
 }
 .vaccard {
   gap: 8px;
@@ -1727,13 +1935,13 @@ details.folded .kv {
 .sumrow .spread {
   align-items: baseline;
 }
-/* A page that ends in a footer bar: the bar sits flush on the tab bar, and
+/* A page that ends in a footer bar: the bar sits just above the tab bar, and
    content fades out above it instead of scrolling under its buttons. */
 .scroll.has-foot {
-  padding-bottom: 0;
+  padding-bottom: var(--tabbar-clear);
 }
 .has-foot > .footbar {
-  background: var(--paper);
+  background: var(--background);
   padding-bottom: 14px;
 }
 .has-foot > .footbar::before {
@@ -1743,7 +1951,7 @@ details.folded .kv {
   right: 0;
   bottom: 100%;
   height: 18px;
-  background: linear-gradient(to bottom, transparent, var(--paper));
+  background: linear-gradient(to bottom, transparent, var(--background));
   pointer-events: none;
 }
 /* Today's banner during a vacation: See what's excused lists each pact on white. */
@@ -1775,13 +1983,13 @@ details.folded .kv {
   width: 0;
   height: 3px;
   border-radius: 0 2px 2px 0;
-  background: var(--accent);
+  background: var(--ink);
   pointer-events: none;
 }
 .pullbar.working {
   width: 100% !important;
   border-radius: 0;
-  background: linear-gradient(90deg, transparent 0, var(--accent) 30%, var(--accent) 60%, transparent 90%) no-repeat;
+  background: linear-gradient(90deg, transparent 0, var(--ink) 30%, var(--ink) 60%, transparent 90%) no-repeat;
   background-size: 50% 100%;
   animation: pullbar 1.1s linear infinite;
 }
@@ -1795,7 +2003,7 @@ details.folded .kv {
 }
 /* Under a Today card: a check a pull sent couldn't reach Oura or AnkiWeb. */
 .meta.unreached {
-  color: var(--due);
+  color: var(--waiting);
   font-weight: 600;
 }
 

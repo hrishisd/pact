@@ -1,58 +1,43 @@
-// Icons, from the settled prototype. They draw in currentColor.
+// Icons: Lucide (DESIGN.md), in the house style. They draw in currentColor.
 
-const common = {
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 1.8,
-  "aria-hidden": true,
-} as const;
+import {
+  Banknote,
+  BookOpen,
+  CalendarCheck,
+  Camera,
+  ChevronLeft,
+  ClipboardCheck,
+  Layers,
+  Luggage,
+  MessageSquareText,
+  Moon,
+  Pencil,
+  Plus,
+  ScrollText,
+  Share,
+  type LucideIcon,
+} from "lucide-react";
 
-export const TodayIcon = () => (
-  <svg {...common}>
-    <rect x="3.5" y="5" width="17" height="15" rx="3" />
-    <path d="M3.5 10h17M8 3v4M16 3v4" />
-    <circle cx="12" cy="15" r="1.6" fill="currentColor" />
-  </svg>
-);
+/** One Lucide icon: 24px in the tab bar and rows, 20px inline with text, stroke 1.75. */
+function Icon({ icon: I, size = 24, className }: { icon: LucideIcon; size?: 20 | 24; className?: string }) {
+  return <I size={size} strokeWidth={1.75} aria-hidden={true} {...(className !== undefined && { className })} />;
+}
 
-export const PactsIcon = () => (
-  <svg {...common}>
-    <path d="M6 3.5h9l3.5 3.5v13.5H6z" />
-    <path d="M9 11h6M9 14.5h6M9 18h3.5" />
-  </svg>
-);
+export const TodayIcon = () => <Icon icon={CalendarCheck} />;
 
-export const ReviewIcon = () => (
-  <svg {...common}>
-    <rect x="3.5" y="6" width="17" height="13.5" rx="3" />
-    <path d="M8 3.5h8M8.5 12.5l2.5 2.5 4.5-5" />
-  </svg>
-);
+export const PactsIcon = () => <Icon icon={ScrollText} />;
 
-export const LedgersIcon = () => (
-  <svg {...common}>
-    <path d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 17z" />
-    <path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H19M9 8.5h6" />
-  </svg>
-);
+export const ReviewIcon = () => <Icon icon={ClipboardCheck} />;
+
+export const LedgersIcon = () => <Icon icon={BookOpen} />;
 
 /** Safari's Share button, as the setup guide describes it. */
-export const ShareIcon = () => (
-  <svg {...common} className="inline-ico">
-    <path d="M12 15V3.5M8 7l4-3.5L16 7" />
-    <path d="M8.5 10.5H6v10h12v-10h-2.5" />
-  </svg>
-);
+export const ShareIcon = () => <Icon icon={Share} size={20} className="inline-ico" />;
 
 /** Safari's Add to Home Screen row. */
-export const AddIcon = () => (
-  <svg {...common} className="inline-ico">
-    <rect x="4" y="4" width="16" height="16" rx="3.5" />
-    <path d="M12 8v8M8 12h8" />
-  </svg>
-);
+export const AddIcon = () => <Icon icon={Plus} size={20} className="inline-ico" />;
 
+// Lucide has no brand marks, so Google's stays drawn here.
 export const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
     <path
@@ -68,60 +53,21 @@ export const GoogleIcon = () => (
   </svg>
 );
 
-export const BackIcon = () => (
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-    <path d="M14.5 5.5 8 12l6.5 6.5" />
-  </svg>
-);
+export const BackIcon = () => <Icon icon={ChevronLeft} />;
 
-export const CameraIcon = () => (
-  <svg {...common}>
-    <path d="M4 8.5A2 2 0 0 1 6 6.5h2l1.5-2h5l1.5 2h2a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
-    <circle cx="12" cy="13" r="3.6" />
-  </svg>
-);
+export const CameraIcon = () => <Icon icon={Camera} />;
 
-/** A stack of cards, for Anki: Anki's own icon is a star, which would read as a brand mark. */
-export const CardsIcon = () => (
-  <svg {...common}>
-    <rect x="7" y="4" width="12" height="16" rx="2.2" />
-    <path d="M4.5 7.5v10.3A2.2 2.2 0 0 0 6.7 20" />
-    <path d="M10.5 10h5M10.5 13.5h5" />
-  </svg>
-);
+/** Layers, for Anki: Anki's own icon is a star, which would read as a brand mark. */
+export const CardsIcon = () => <Icon icon={Layers} />;
 
-export const SuitcaseIcon = () => (
-  <svg {...common}>
-    <rect x="3.5" y="7.5" width="17" height="12" rx="2.5" />
-    <path d="M9 7.5V5.5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5.5v2M3.5 12.5h17" />
-  </svg>
-);
+export const SuitcaseIcon = () => <Icon icon={Luggage} />;
 
-export const RingIcon = () => (
-  <svg {...common}>
-    <circle cx="12" cy="12" r="8" />
-    <circle cx="12" cy="12" r="5" />
-  </svg>
-);
+/** Oura Ring evidence is a bedtime, so a moon. */
+export const RingIcon = () => <Icon icon={Moon} />;
 
-export const DollarIcon = () => (
-  <svg {...common} strokeWidth={1.9}>
-    <path d="M15.5 8.2c-.6-1.2-1.9-1.9-3.6-1.9-2 0-3.4 1-3.4 2.5 0 3.5 7.3 1.9 7.3 5.5 0 1.6-1.6 2.7-3.9 2.7-1.8 0-3.2-.8-3.8-2.1M12 4v16" />
-  </svg>
-);
+export const DollarIcon = () => <Icon icon={Banknote} />;
 
-/** The Excuse kind: a calendar with an X. */
-export const ExcuseIcon = () => (
-  <svg {...common}>
-    <rect x="4" y="5.5" width="16" height="14" rx="2.5" />
-    <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4M9.5 12.5l5 5M14.5 12.5l-5 5" />
-  </svg>
-);
+export const ExcuseIcon = () => <Icon icon={MessageSquareText} />;
 
 /** The Change kind: a pencil. */
-export const PencilIcon = () => (
-  <svg {...common}>
-    <path d="M15.5 4.5l4 4L9 19l-5 1 1-5z" />
-    <path d="M13.5 6.5l4 4" />
-  </svg>
-);
+export const PencilIcon = () => <Icon icon={Pencil} />;

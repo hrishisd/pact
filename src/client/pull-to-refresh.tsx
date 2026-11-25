@@ -27,6 +27,9 @@ export function useRefreshOnPull(refresh: Refresh): void {
   useEffect(() => register(() => latest.current()), [register]);
 }
 
+/** How far the content scrolls before the header counts as scrolled, and turns to material. */
+const SCROLLED_PX = 4;
+
 /**
  * The shell's header and scroll area. On a tab (`pullable`), the scroll area
  * has pull to refresh and the header its bar; a page opened from a tab has
@@ -51,6 +54,8 @@ export function PullToRefresh({
   /** The refresh running now, if any. */
   const running = useRef<{ refresh: Refresh } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Scrolled: the header turns to material, with a hairline under it.
+  const [scrolled, setScrolled] = useState(false);
 
   /** Ends `run`, unless a newer run has taken its place. */
   const end = useCallback((run: { refresh: Refresh }) => {
@@ -140,9 +145,19 @@ export function PullToRefresh({
     };
   }, [pullable, run]);
 
+  // Checked on every render too, as a new screen in the same scroll area starts wherever it is.
+  useEffect(() => {
+    const scroller = scroll.current;
+    if (!scroller) return;
+    const update = () => setScrolled(scroller.scrollTop > SCROLLED_PX);
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => scroller.removeEventListener("scroll", update);
+  });
+
   return (
     <RegisterRefresh.Provider value={register}>
-      <header className="hdr gut">
+      <header className={scrolled ? "hdr gut scrolled" : "hdr gut"}>
         {header}
         {pullable && <div ref={bar} className={refreshing ? "pullbar working" : "pullbar"} aria-hidden="true" />}
       </header>

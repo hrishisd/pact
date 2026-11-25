@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { API_PATHS, APP_PATHS, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
@@ -182,7 +182,7 @@ function Shell({
   onSignedOut: () => void;
 }) {
   const nav = useNavigation();
-  const { tab, page } = nav;
+  const { tab, page, below } = nav;
   // A vacation's decision or question opens /profile: the sheet over Today.
   const [profileOpen, setProfileOpen] = useState(() => opensProfileSheet(window.location.pathname));
   // What the Profile sheet's Vacation section says when it opens, after a vacation is sent.
@@ -365,6 +365,8 @@ function Shell({
   };
 
   const { title, subtitle = "", body, foot = false } = page ? pageView(page) : tabView(tab);
+  // What Back returns to, named on the back button as iOS does.
+  const backTo = below ? pageView(below).title : TABS[tab].label;
 
   return (
     <div className="app">
@@ -374,24 +376,39 @@ function Shell({
         mainClassName={foot ? "scroll gut has-foot" : "scroll gut"}
         header={
           <>
-            {page && (
-              <button className="iconbtn" aria-label="Back" onClick={nav.back}>
-                <BackIcon />
-              </button>
+            {/* A page: Back, then its title centred. A tab: its Large Title, level with Profile. */}
+            {page ? (
+              <>
+                <span className="nav-lead">
+                  <button className="backbtn" aria-label={`Back to ${backTo}`} onClick={nav.back}>
+                    <BackIcon />
+                    <span>{backTo}</span>
+                  </button>
+                </span>
+                <h1 className="nav-title">{title}</h1>
+              </>
+            ) : (
+              <h1 className="large-title">
+                {title}
+                {subtitle && <span className="sub">{subtitle}</span>}
+              </h1>
             )}
-            <h1>
-              {title}
-              <span className="sub">{subtitle}</span>
-            </h1>
-            <button className="avatar" aria-label="Profile" onClick={openProfile}>
-              {initial(profile.name)}
-            </button>
+            <span className="nav-trail">
+              <button className="avatar" aria-label="Profile" onClick={openProfile}>
+                {initial(profile.name)}
+              </button>
+            </span>
           </>
         }
       >
         {body}
       </PullToRefresh>
-      <nav className="tabbar" aria-label="Main">
+      {/* --tab-index places the capsule that marks the current tab. */}
+      <nav
+        className="tabbar"
+        aria-label="Main"
+        style={{ "--tab-index": (Object.keys(TABS) as TabId[]).indexOf(tab) } as CSSProperties}
+      >
         {(Object.keys(TABS) as TabId[]).map((id) => {
           const { label, Icon } = TABS[id];
           return (
