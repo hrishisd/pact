@@ -983,29 +983,29 @@ export async function run(setup: Setup, actions: readonly Action[]): Promise<Run
 /**
  * The shortest list of actions found that still breaks the same invariant as
  * `actions` does: it drops runs of actions, long ones first, and keeps a
- * shorter list whenever that still fails the same way. At most `budget` runs.
+ * shorter list whenever that still fails the same way. It asks `outOfTime`
+ * before each run, and when that says yes it stops with the shortest so far.
  */
 export async function shrink(
   setup: Setup,
   actions: readonly Action[],
   invariant: string,
-  runner: (setup: Setup, actions: readonly Action[]) => Promise<RunResult> = run,
-  budget = Number(process.env.FUZZ_SHRINK_RUNS ?? 250),
-): Promise<{ actions: Action[]; result: RunResult }> {
+  runner: (setup: Setup, actions: readonly Action[]) => Promise<RunResult>,
+  outOfTime: () => boolean,
+): Promise<{ actions: Action[]; result: RunResult; stopped: boolean }> {
   let best = [...actions];
   let result = await runner(setup, best);
   if (result.violation?.invariant !== invariant) throw new Error("the run to shrink doesn't break that invariant");
   best = best.slice(0, result.steps);
-  let spent = 1;
   // Until a whole pass drops nothing: taking one action out often frees others.
-  for (let dropped = true; dropped && spent < budget;) {
+  for (let dropped = true; dropped;) {
     dropped = false;
-    for (let size = Math.ceil(best.length / 2); size >= 1 && spent < budget; size = Math.floor(size / 2)) {
+    for (let size = Math.ceil(best.length / 2); size >= 1; size = Math.floor(size / 2)) {
       // From the end: the actions just before the failure matter most, so the early ones go in big pieces.
-      for (let from = Math.max(0, best.length - size); from >= 0 && spent < budget; from -= size) {
+      for (let from = Math.max(0, best.length - size); from >= 0; from -= size) {
+        if (outOfTime()) return { actions: best, result, stopped: true };
         const shorter = [...best.slice(0, from), ...best.slice(from + size)];
         const tried = await runner(setup, shorter);
-        spent++;
         if (tried.violation?.invariant !== invariant) continue;
         best = shorter.slice(0, tried.steps);
         result = tried;
@@ -1013,7 +1013,7 @@ export async function shrink(
       }
     }
   }
-  return { actions: best, result };
+  return { actions: best, result, stopped: false };
 }
 
 /** `value` as JSON with each id replaced by when it first appears, so two runs that made their rows in another order compare equal. */
