@@ -41,7 +41,7 @@ Read before writing code and at review time. `npm run lint` enforces the mechani
 
 - Google Fonts load from Google, matching the prototype.
 - `ctx.one` and `ctx.all` keep one prepared statement per SQL text (`src/core/context.ts`), because profiling put re-preparing at about 37% of an idle tick (683 prepares a tick) and the cache cut `vacations.test.ts` from about 20 s to 11 s; elsewhere `db.prepare` per call is fine at this scale, and other statements are cached only when profiling says so.
-- `zonedWallTimeToInstant` keeps each answer by zone and wall time (`src/core/calendar.ts`), emptied at 10,000 entries, because profiling put its `formatToParts` calls at 12–32% of the core's time (one 300-step fuzz seed made 37,000 of them for 241 different instants) and the cache cut five 300-step fuzz seeds from about 40 s to 32 s.
+- `zonedWallTimeToInstant` keeps each answer by zone and wall time (`src/core/calendar.ts`), emptied at 10,000 entries, because each answer costs two `formatToParts` and the core asks for the same few again and again: fuzz seed 1000 at 300 steps makes about 189,000 calls for 565 different ones (99.7% answered from the cache). The cache cut `FUZZ_MODE=one FUZZ_SEEDS=1000-1004 FUZZ_STEPS=300` from about 39 s to 34 s, and both modes from 134 s to 113 s.
 - Commands don't wait for outbox delivery, so a slow push service never delays a tap; the scheduler's tick does wait. Scenarios wait through their account handles (`deliveriesSettled`).
 - `src/server/pages.ts` has its own hex colours: those pages are plain HTML with no shared stylesheet.
 - Light theme only.
