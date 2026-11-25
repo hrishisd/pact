@@ -222,7 +222,7 @@ export class World {
     return localDateOf(this.now(), this.timezoneOf(person));
   }
 
-  /** Adds `line` to the log. `run` skips the checks after an action that neither notes nor moves the clock. */
+  /** Adds `line` to the log. An action that changes anything must note it or move the clock (see `apply`). */
   note(line: string): void {
     this.log.push(`${this.now().toISOString().slice(0, 16)}Z  ${line}`);
   }
@@ -313,8 +313,8 @@ export class World {
   /**
    * Does `action`. A branch that changes anything (runs a command, ticks,
    * changes a fake source, restarts) must `note` it or move the clock: `run`
-   * takes an action that does neither as one that did nothing, and skips the
-   * checks after it.
+   * and `runBothWays` take an action that does neither as one that did
+   * nothing, and skip the checks after it.
    */
   async apply(action: Action): Promise<void> {
     const [a, b, c, d] = action.n;
@@ -949,21 +949,16 @@ export interface RunResult {
   log: string[];
 }
 
-/**
- * How long `world`'s log is, and the time. An action that leaves both as they
- * were did nothing: every action that runs a command, ticks, moves the clock,
- * changes a fake source or restarts notes it.
- */
-function markOf(world: World): string {
-  return `${world.log.length} ${world.now().getTime()}`;
+/** How long each world's log is, and its time: an action that changes neither did nothing (see `World.apply`). */
+function markOf(...worlds: World[]): string {
+  return worlds.map((world) => `${world.log.length} ${world.now().getTime()}`).join(", ");
 }
 
 /**
  * Applies `actions` in order to a new scenario, checking every invariant
- * after each that did something. About a third of actions find nothing to
- * act on. Skipping the checks after one loses nothing: what the checks read
- * hasn't changed since the last check, and the invariants about what changed
- * since the last check still compare with that one.
+ * after each that did something. About a third do nothing, and skipping the
+ * checks after one loses nothing: what the checks read is as it was at the
+ * last check, and the invariants about what changed still compare with that.
  */
 export async function run(setup: Setup, actions: readonly Action[]): Promise<RunResult> {
   const world = new World(setup);
@@ -992,7 +987,7 @@ export async function run(setup: Setup, actions: readonly Action[]): Promise<Run
  * `actions` did (`failed` is how that run ended): it drops runs of actions,
  * long ones first, and keeps a shorter list whenever that still fails the
  * same way. It asks `outOfTime` before each run, and when that says yes it
- * stops with the shortest so far.
+ * stops with the shortest so far (`stopped`).
  */
 export async function shrink(
   setup: Setup,
@@ -1073,11 +1068,11 @@ export async function runBothWays(setup: Setup, actions: readonly Action[]): Pro
     await many.start();
     for (const action of actions) {
       steps++;
-      const marks = `${markOf(once)}, ${markOf(many)}`;
+      const mark = markOf(once, many);
       await once.checks.guard(action.do, () => once.apply(action));
       await many.checks.guard(action.do, () => many.apply(action));
       // As in `run`: if neither did anything, both answer as they did at the last comparison.
-      if (`${markOf(once)}, ${markOf(many)}` === marks) continue;
+      if (markOf(once, many) === mark) continue;
       const difference = firstDifference(withoutIds(once.checks.everything()), withoutIds(many.checks.everything()));
       if (difference !== null) throw new Violation("one-tick-or-many", difference);
     }

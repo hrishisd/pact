@@ -9,8 +9,8 @@
 //
 // A quarter of the seeds have people change their timezone during the run.
 //
-// A failure prints the seed, the invariant broken and the command to re-run
-// it at once. Then it looks for the shortest run that still breaks it, for up
+// A failure prints at once the seed, the invariant broken and the command to
+// re-run it. Then it looks for the shortest run that still breaks it, for up
 // to 2 minutes (FUZZ_SHRINK_SECONDS), and fails with that run, as what each
 // action did. FUZZ_SHRINK=0 skips the shortening.
 
@@ -31,8 +31,6 @@ function seeds(): number[] {
 
 const steps = Number(process.env.FUZZ_STEPS ?? 100);
 const shrinkSeconds = Number(process.env.FUZZ_SHRINK_SECONDS ?? 120);
-
-/** Milliseconds on the real clock, only to stop shrinking in time. */
 const wallClockMs = () => performance.now(); // conventions-ok: caps shrinking by wall time, never decides a result
 
 /** Runs a seed with `runner` and fails with the shortest run found that breaks the same invariant. */
@@ -46,10 +44,10 @@ async function keepsEveryInvariant(seed: number, runner: typeof run): Promise<vo
     `FUZZ seed ${seed} broke ${invariant} at step ${result.steps} of ${steps}`,
     `setup: ${JSON.stringify(setup)}`,
   ];
-  // Straight to stderr, not through vitest's console, which holds output until
-  // the test ends: a run killed while shrinking still leaves the seed.
   const which = runner === run ? "one" : "both-ways";
   const rerun = `FUZZ_MODE=${which} FUZZ_SEEDS=${seed} FUZZ_STEPS=${result.steps} FUZZ_SHRINK=0`;
+  // Straight to stderr, not through vitest's console, which holds output until
+  // the test ends: a run killed while shrinking still leaves the seed.
   writeSync(
     2,
     [...head, result.violation.message, `re-run it: ${rerun} npx vitest run src/core/fuzz.test.ts`, ""].join("\n"),
