@@ -7,9 +7,10 @@
 // run with some actions taken out is still a run that means something. That
 // is what lets `shrink` cut a failing run down to the few actions that matter.
 //
-// After every action the invariants are checked (fuzz-invariants.ts), on top
-// of the scenario's own check that stored outcomes match `verdictOf`. The
-// first one broken ends the run as a `Violation`, which names the invariant.
+// After every action that did something the invariants are checked
+// (fuzz-invariants.ts), on top of the scenario's own check that stored
+// outcomes match `verdictOf`. The first one broken ends the run as a
+// `Violation`, which names the invariant.
 //
 // fuzz.test.ts runs fixed seeds in `npm test`, and any range of seeds when
 // asked (see the top of that file).
@@ -941,7 +942,22 @@ export interface RunResult {
   log: string[];
 }
 
-/** Applies `actions` in order to a new scenario, checking every invariant after each. */
+/**
+ * How long `world`'s log is, and the time. An action that leaves both as they
+ * were did nothing: every action that runs a command, ticks, moves the clock,
+ * changes a fake source or restarts notes it.
+ */
+function markOf(world: World): string {
+  return `${world.log.length} ${world.now().getTime()}`;
+}
+
+/**
+ * Applies `actions` in order to a new scenario, checking every invariant
+ * after each that did something. About a third of actions find nothing to
+ * act on. Skipping the checks after one loses nothing: what the checks read
+ * hasn't changed since the last check, and the invariants about what changed
+ * since the last check still compare with that one.
+ */
 export async function run(setup: Setup, actions: readonly Action[]): Promise<RunResult> {
   const world = new World(setup);
   let steps = 0;
@@ -950,8 +966,9 @@ export async function run(setup: Setup, actions: readonly Action[]): Promise<Run
     world.checks.all();
     for (const action of actions) {
       steps++;
+      const mark = markOf(world);
       await world.checks.guard(action.do, () => world.apply(action));
-      world.checks.all();
+      if (markOf(world) !== mark) world.checks.all();
     }
     return { violation: null, steps, log: world.log };
   } catch (error) {
@@ -1048,8 +1065,11 @@ export async function runBothWays(setup: Setup, actions: readonly Action[]): Pro
     await many.start();
     for (const action of actions) {
       steps++;
+      const marks = `${markOf(once)}, ${markOf(many)}`;
       await once.checks.guard(action.do, () => once.apply(action));
       await many.checks.guard(action.do, () => many.apply(action));
+      // As in `run`: if neither did anything, both answer as they did at the last comparison.
+      if (`${markOf(once)}, ${markOf(many)}` === marks) continue;
       const difference = firstDifference(withoutIds(once.checks.everything()), withoutIds(many.checks.everything()));
       if (difference !== null) throw new Violation("one-tick-or-many", difference);
     }
