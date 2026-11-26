@@ -8,13 +8,13 @@
 
 import { useEffect, useState } from "react";
 import type { FileExcuseRequest, Json } from "../shared/api.ts";
-import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { addDays } from "../shared/calendar.ts";
 import { periodKindOfSchedule } from "../shared/schedules.ts";
 import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
   MAX_TEXT_CHARS,
+  type BedtimeKind,
   type ExcuseDatesRefusal,
   type ExcuseDay,
   type ExcuseOptions,
@@ -24,6 +24,7 @@ import {
   type PeriodKind,
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
+import { bedtimeKindOf } from "./bedtime-text.ts";
 import { Chip, DayChip, SKIP_REASON_TEXT, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
 import {
   EDIT_WINDOW_TEXT,
@@ -364,7 +365,7 @@ function DayDates({
   const [more, setMore] = useState(false);
   const [through, setThrough] = useState("");
   const period = periodKindOfSchedule(pact.schedule);
-  const bedtime = isBedtimeKind(pact.evidenceKind);
+  const bedtime = bedtimeKindOf(pact.evidenceKind);
   const later = preview ? onlyAfter(preview, day) : null;
   return (
     <>
@@ -460,7 +461,7 @@ function PactPageDates({
     onDates(pactPageDates(changed));
   };
   const period = periodKindOfSchedule(pact.schedule);
-  const bedtime = isBedtimeKind(pact.evidenceKind);
+  const bedtime = bedtimeKindOf(pact.evidenceKind);
   return (
     <>
       <div className="field">
@@ -563,8 +564,8 @@ function DayCard({
   day: string;
   /** A period schedule's kind: the day stands for its period, which the preview dates by its first day. */
   period: PeriodKind | undefined;
-  /** A bedtime pact: a night not judged yet is waiting on its sleep. */
-  bedtime: boolean;
+  /** A bedtime pact's kind: a night not judged yet is waiting on its sleep. */
+  bedtime: BedtimeKind | undefined;
   preview: Preview | null;
   reviewers: string;
   timezone: string;
@@ -610,7 +611,7 @@ function DayList({
 }: {
   preview: Preview;
   period: PeriodKind | undefined;
-  bedtime: boolean;
+  bedtime: BedtimeKind | undefined;
   timezone: string;
   now: number;
   empty: string;
@@ -640,7 +641,13 @@ function DayList({
 }
 
 /** The small line on a recent day's radio row: the time left to file for a miss, else the day's note. */
-function recentNote(d: Day, now: number, timezone: string, period: PeriodKind | undefined, bedtime: boolean): string {
+function recentNote(
+  d: Day,
+  now: number,
+  timezone: string,
+  period: PeriodKind | undefined,
+  bedtime: BedtimeKind | undefined,
+): string {
   const { status } = d;
   if (status.kind === "missed")
     return `${money(status.penaltyCents)} · ${hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse`;

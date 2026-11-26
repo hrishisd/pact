@@ -621,6 +621,13 @@ export interface AppleHealthSamplesRequest {
     Partial<Pick<AppleHealthSampleFields, "value" | "source">>)[];
 }
 
+/**
+ * Opens the Shortcuts app and runs the owner's Pact Health Shortcut, which
+ * uploads their last 3 days of samples: Sync now on Today and Run Pact
+ * Health on the setup page.
+ */
+export const RUN_PACT_HEALTH_URL = "shortcuts://run-shortcut?name=Pact%20Health";
+
 /** The largest upload the Pact Health Shortcut may send: 1 MB. */
 export const APPLE_HEALTH_MAX_BODY_BYTES = 1024 * 1024;
 

@@ -7,14 +7,17 @@
 // During an approved vacation, its banner comes after the alerts, and the
 // pacts it covers are gone from the sections.
 //
-// A bedtime night whose sleep hasn't arrived yet comes first, as No Oura data. While
-// that card is on screen, Today checks Oura now: when it opens, when the app
-// comes back to the foreground, and every 30 seconds. While an Anki day not
+// A bedtime night whose sleep hasn't arrived yet comes first, as No Oura data
+// or No Apple Health data. While an Oura night's card is on screen, Today
+// checks Oura now: when it opens, when the app comes back to the foreground,
+// and every 30 seconds. Pact can't reach an iPhone, so an Apple Health
+// night's card has Sync now, which runs the Pact Health Shortcut, and Today
+// loads again when the app comes back to the foreground. While an Anki day not
 // judged yet is on screen, Today checks AnkiWeb now when it opens and when the
 // app comes back to the foreground, so a deck just finished and synced clears.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { API_PATHS, type Json } from "../shared/api.ts";
+import { API_PATHS, RUN_PACT_HEALTH_URL, type Json } from "../shared/api.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
   type AcceptExcuseRejectionResult,
@@ -39,7 +42,8 @@ import {
 } from "../shared/types.ts";
 import { dayCount } from "../shared/calendar.ts";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
-import { AppleHealthConnectionAlert } from "./apple-health.tsx";
+import { AppleHealthConnectionAlert, useReloadOnReturn } from "./apple-health.tsx";
+import { BEDTIME_TEXT, inBedText } from "./bedtime-text.ts";
 import { api, failureText, uploadFailureText } from "./api.ts";
 import {
   ankiMissText,
@@ -117,13 +121,13 @@ export function Today({
     today?.alerts.some((alert) => alert.kind === "connection" && alert.service === service) ?? false;
   const ouraConnectionProblem = brokenConnection("oura");
   const ankiConnectionProblem = brokenConnection("anki");
+  const appleHealthConnectionProblem = brokenConnection("apple_health");
+  const waitingOn = (kind: Json<TodayNoSleepDataCard>["evidenceKind"]) =>
+    today?.sections.some(
+      (section) => section.kind === "no-sleep-data" && section.cards.some((card) => card.evidenceKind === kind),
+    ) ?? false;
   // Checking can't help while the connection is broken.
-  const oura = useCheckNow(
-    !ouraConnectionProblem && (today?.sections.some((section) => section.kind === "no-sleep-data") ?? false),
-    api.checkOura,
-    reload,
-    CHECK_OURA_EVERY_MS,
-  );
+  const oura = useCheckNow(!ouraConnectionProblem && waitingOn("oura"), api.checkOura, reload, CHECK_OURA_EVERY_MS);
   const anki = useCheckNow(
     !ankiConnectionProblem &&
       (today?.sections.some((section) => section.kind === "to-do" && section.cards.some((c) => c.kind === "anki")) ??
@@ -132,6 +136,8 @@ export function Today({
     reload,
     null,
   );
+  // Back from Shortcuts after Sync now: the upload may have judged the night.
+  useReloadOnReturn(waitingOn("apple_health"), reload);
   // A pull checks Oura and AnkiWeb whatever cards show (the core asks only
   // about nights and days still waiting), then reloads Today.
   useRefreshOnPull(async () => {
@@ -189,6 +195,7 @@ export function Today({
                 oura={oura}
                 anki={anki}
                 ouraConnectionProblem={ouraConnectionProblem}
+                appleHealthConnectionProblem={appleHealthConnectionProblem}
                 onOpenPact={onOpenPact}
                 onOpenLedger={onOpenLedger}
                 onFileExcuse={setExcusing}
@@ -319,6 +326,7 @@ function Section({
   oura,
   anki,
   ouraConnectionProblem,
+  appleHealthConnectionProblem,
   onOpenPact,
   onOpenLedger,
   onFileExcuse,
@@ -333,6 +341,8 @@ function Section({
   anki: CheckState;
   /** Whether Pact can't read the owner's Oura: syncing won't help, reconnecting will. */
   ouraConnectionProblem: boolean;
+  /** Whether the owner has no upload key: Sync now won't help, setting up Apple Health will. */
+  appleHealthConnectionProblem: boolean;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onFileExcuse: OnFileExcuse;
@@ -347,7 +357,7 @@ function Section({
           card={card}
           now={now}
           check={oura}
-          ouraConnectionProblem={ouraConnectionProblem}
+          connectionProblem={card.evidenceKind === "oura" ? ouraConnectionProblem : appleHealthConnectionProblem}
           onOpen={() => onOpenPact(card.pactId, card.name)}
           onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
         />
@@ -598,42 +608,55 @@ function LaterCard({
 }
 
 /**
- * Last night's bedtime, which Oura hasn't reported yet: syncing the ring
- * before 6pm still counts. Tonight's deadline rides on it, and File excuse
- * covers a night without the ring.
+ * Last night's bedtime, whose sleep hasn't arrived yet: syncing it before
+ * 6pm still counts. Oura's syncs from the Oura app, and Today checks Oura
+ * itself; Apple Health's comes from the Pact Health Shortcut, which Sync now
+ * runs. Tonight's deadline rides on it, and File excuse covers a night
+ * without the tracker.
  */
 function NoSleepDataCard({
   card,
   now,
-  check: { checking, unreachable },
-  ouraConnectionProblem,
+  check,
+  connectionProblem,
   onOpen,
   onFileExcuse,
 }: {
   card: Json<TodayNoSleepDataCard>;
   now: number;
+  /** Where the check of Oura stands; an Apple Health night doesn't use it. */
   check: CheckState;
-  ouraConnectionProblem: boolean;
+  /** Whether the night's connection is broken: syncing won't help, reconnecting or setting up will. */
+  connectionProblem: boolean;
   onOpen: () => void;
   onFileExcuse: () => void;
 }) {
   const night = formatDate(card.occurrenceDate).split(" ")[0];
   const { tonight } = card;
+  const oura = card.evidenceKind === "oura";
+  const checking = oura && check.checking;
+  const toSync = oura
+    ? connectionProblem
+      ? "Reconnect Oura to count it."
+      : "Open the Oura app to sync it."
+    : connectionProblem
+      ? "Set up Apple Health to count it."
+      : "Sync now runs Pact Health on your iPhone to send it.";
   return (
     <PactCard
       name={card.name}
       penaltyCents={card.penaltyCents}
       chip={
-        checking ? <span className="chip c-soon">Checking…</span> : <span className="chip c-due">No Oura data</span>
+        checking ? (
+          <span className="chip c-soon">Checking…</span>
+        ) : (
+          <span className="chip c-due">{BEDTIME_TEXT[card.evidenceKind].noData}</span>
+        )
       }
       onOpen={onOpen}
     >
-      <div className="meta">
-        {checking
-          ? "Checking Oura…"
-          : `${night} night hasn't synced yet. ${ouraConnectionProblem ? "Reconnect Oura to count it." : "Open the Oura app to sync it."}`}
-      </div>
-      {unreachable && !checking && <div className="meta unreached">{UNREACHED_TEXT.oura}</div>}
+      <div className="meta">{checking ? "Checking Oura…" : `${night} night hasn't synced yet. ${toSync}`}</div>
+      {oura && check.unreachable && !checking && <div className="meta unreached">{UNREACHED_TEXT.oura}</div>}
       <div className="meta due">
         Missed at {NIGHT_CLOSES_TEXT} if it hasn't synced · {timeLeft(Date.parse(card.closesAt) - now)}
       </div>
@@ -643,6 +666,11 @@ function NoSleepDataCard({
         </div>
       )}
       <CardActions className="row2">
+        {!oura && !connectionProblem && (
+          <a className="btn sm primary" href={RUN_PACT_HEALTH_URL}>
+            Sync now
+          </a>
+        )}
         <button className="btn sm" onClick={onFileExcuse}>
           File excuse
         </button>
@@ -740,7 +768,7 @@ function missedLine({ detail, occurrenceDate }: Json<TodayMissedCard>, timezone:
     case "anki":
       return `${formatDate(occurrenceDate)} · ${ankiMissText(detail.lastCheck, timezone)}`;
     case "night":
-      return `${formatDate(occurrenceDate)} night · ${detail.inBedAt === null ? `no sleep data by ${NIGHT_CLOSES_TEXT}` : `in bed at ${clockText(detail.inBedAt)}`}`;
+      return `${formatDate(occurrenceDate)} night · ${detail.inBedAt === null ? `no sleep data by ${NIGHT_CLOSES_TEXT}` : `in bed at ${inBedText(clockText(detail.inBedAt), detail.source)}`}`;
     case undefined:
       return formatDate(occurrenceDate);
   }

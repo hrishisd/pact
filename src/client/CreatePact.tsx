@@ -6,7 +6,9 @@
 // a Connect step, which leaves for Oura's page; Oura's callback brings the
 // browser back here (`?oura=connected`) at Goal. Picking Anki with no
 // connection adds a Connect AnkiWeb step, which signs in on the spot and goes
-// on to Goal, where the owner picks the deck. Editing a pact in its edit
+// on to Goal, where the owner picks the deck. Picking Apple Health with no
+// connection adds a Set up Apple Health step, the setup page itself: Next
+// goes on to Goal once an upload key is made. Editing a pact in its edit
 // window reuses the form without the evidence kind step. The core decides
 // every rule; the steps only stop the owner moving on with a field left empty.
 
@@ -27,7 +29,8 @@ import { ouraResultText, takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
 import { api, failureText } from "./api.ts";
 import { clockText, clockTime, EDIT_WINDOW_TEXT, formatDate, minutesLeft, parseCents, periodName } from "./format.ts";
-import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
+import { AppleHealthSetup, SETUP_INTRO } from "./apple-health.tsx";
+import { CameraIcon, CardsIcon, HeartIcon, RingIcon } from "./icons.tsx";
 import { EMPTY_FORM, formOf, optionalTimes, scheduleKindOf, scheduleOf, termsOfForm, type Form } from "./pact-form.ts";
 import {
   ListsFailed,
@@ -114,6 +117,10 @@ interface Connections {
   ankiConnected: boolean;
   /** Whether this server has Anki set up: without it, the Anki tile can't be picked. */
   ankiAvailable: boolean;
+  /** Whether the account has an upload key: without one, Apple Health adds the Set up Apple Health step. */
+  appleHealthConnected: boolean;
+  /** The profile's timezone, for the Set up Apple Health step's last upload. */
+  timezone: string;
 }
 
 /**
@@ -124,12 +131,15 @@ export function CreatePact({
   onCancel,
   onCreated,
   onInvite,
+  onAppleHealthConnected,
   ...opened
 }: ({ editing: Pact } | { connections: Connections }) & {
   onCancel: () => void;
   /** After creating the pact, or saving the edit. */
   onCreated: (pactId: string, name: string) => void;
   onInvite: () => void;
+  /** After the Set up Apple Health step makes an upload key: the profile's connections changed. */
+  onAppleHealthConnected?: () => void;
 }) {
   const editing = "editing" in opened ? opened.editing : undefined;
   const connections = "connections" in opened ? opened.connections : null;
@@ -144,6 +154,9 @@ export function CreatePact({
   // Connecting AnkiWeb happens on this page, so the Connect step goes once it has.
   const [ankiConnected, setAnkiConnected] = useState(connections?.ankiConnected ?? false);
   const [ankiLogin, setAnkiLogin] = useState<AnkiLogin>(NO_ANKI_LOGIN);
+  // As the form opened: the Set up step stays once a key is made, so Back still shows its upload URL, which Pact can't show again.
+  const [appleHealthConnected] = useState(connections?.appleHealthConnected ?? false);
+  const [uploadUrl, setUploadUrl] = useState<string | null>(null);
   const [step, setStep] = useState<Step>(editing || ouraResult === "connected" ? "goal" : "kind");
   const [tried, setTried] = useState(false);
   // With only one saved recipient, it's the one.
@@ -152,14 +165,19 @@ export function CreatePact({
   });
   const top = useRef<HTMLDivElement>(null);
 
-  /** Whether picking `kind` adds a Connect step: Oura Ring or Anki, with no connection yet. */
+  /** Whether picking `kind` adds a Connect step: Oura Ring, Anki or Apple Health, with no connection yet. */
   const connects = (kind: EvidenceKind) =>
-    (kind === "oura" && connections?.ouraConnected === false) || (kind === "anki" && !ankiConnected);
+    (kind === "oura" && connections?.ouraConnected === false) ||
+    (kind === "anki" && !ankiConnected) ||
+    (kind === "apple_health" && !appleHealthConnected);
   const steps: Step[] = editing
     ? AFTER_KIND
     : ["kind", ...(connects(form.kind) ? (["connect"] as const) : []), ...AFTER_KIND];
   const stepIndex = steps.indexOf(step);
-  const problem = stepProblem(step, form);
+  const problem =
+    step === "connect" && form.kind === "apple_health" && uploadUrl === null
+      ? "apple-health-not-connected"
+      : stepProblem(step, form);
   const update = (change: Partial<Form>) => setForm((f) => ({ ...f, ...change }));
 
   const {
@@ -231,6 +249,23 @@ export function CreatePact({
       body =
         form.kind === "anki" ? (
           <ConnectAnkiStep login={ankiLogin} onChange={(change) => setAnkiLogin((l) => ({ ...l, ...change }))} />
+        ) : form.kind === "apple_health" ? (
+          <>
+            <div className="stack">
+              <h2>Set up Apple Health</h2>
+              <p className="muted">{SETUP_INTRO}</p>
+            </div>
+            <AppleHealthSetup
+              timezone={connections?.timezone ?? "UTC"}
+              uploadUrl={uploadUrl}
+              onUploadUrl={(url) => {
+                setTried(false);
+                setUploadUrl(url);
+                onAppleHealthConnected?.();
+              }}
+            />
+            <small className="muted">You can finish the Shortcut later: it's under Apple Health in Profile.</small>
+          </>
         ) : (
           <ConnectStep />
         );
@@ -313,7 +348,7 @@ export function CreatePact({
           >
             {ankiLogin.busy ? "Connecting…" : "Connect AnkiWeb"}
           </button>
-        ) : step === "connect" ? (
+        ) : step === "connect" && form.kind !== "apple_health" ? (
           // A full page load: Oura's page, then its callback, which brings the browser back here.
           <a className="btn primary grow" href={API_PATHS.ouraConnect}>
             Connect Oura
@@ -344,7 +379,7 @@ function KindStep({
   return (
     <>
       <h2>How will you prove it?</h2>
-      <div className="kind-tiles three">
+      <div className="kind-tiles">
         <button className="kind-tile" onClick={() => onPick("camera")}>
           <span className="tico">
             <CameraIcon />
@@ -367,6 +402,13 @@ function KindStep({
           <b>Anki</b>
           <small>Finish a deck each day and sync. Pact checks AnkiWeb, so you don't need to submit anything.</small>
           {!ankiAvailable && <span className="chip c-soon">Anki isn't set up yet</span>}
+        </button>
+        <button className="kind-tile" onClick={() => onPick("apple_health")}>
+          <span className="tico">
+            <HeartIcon />
+          </span>
+          <b>Apple Health</b>
+          <small>Bedtime, from the Health app on your iPhone. Any tracker that writes sleep there works.</small>
         </button>
       </div>
     </>

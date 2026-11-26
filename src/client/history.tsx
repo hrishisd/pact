@@ -17,6 +17,7 @@ import type {
 } from "../shared/types.ts";
 import { addDays, parseLocalDate } from "../shared/calendar.ts";
 import { periodKindOfSchedule } from "../shared/schedules.ts";
+import { bedtimeKindOf, inBedText } from "./bedtime-text.ts";
 import {
   Chip,
   DayChip,
@@ -63,7 +64,7 @@ function occurrenceLine(record: Occurrence, timezone: string, reviewerNames: str
     detail?.kind === "night"
       ? detail.inBedAt === null
         ? `No sleep data had synced by ${NIGHT_CLOSES_TEXT}.`
-        : `In bed at ${clockText(detail.inBedAt)}.`
+        : `In bed at ${inBedText(clockText(detail.inBedAt), detail.source)}.`
       : undefined;
   switch (status.kind) {
     case "satisfied":
@@ -184,7 +185,7 @@ function OneTimeHistory({
   // Open before its date, with Submit anytime: it's due on the deadline's date, not today.
   const { chip, square } = presentOccurrence(record.status, now, {
     timezone,
-    bedtime: isBedtimeKind(pact.evidenceKind),
+    bedtime: bedtimeKindOf(pact.evidenceKind),
     dueOn: day.date,
   });
   const line = occurrenceLine(
@@ -257,7 +258,7 @@ function DailyHeatMap({
                   <HeatMapSquare
                     key={day.date}
                     day={day}
-                    presented={present(day.occurrence, now, { timezone, bedtime: isBedtimeKind(pact.evidenceKind) })}
+                    presented={present(day.occurrence, now, { timezone, bedtime: bedtimeKindOf(pact.evidenceKind) })}
                     selected={day.date === selected}
                     onSelect={() => setSelected(day.date)}
                   />
@@ -279,7 +280,7 @@ function DailyHeatMap({
               status={picked.occurrence.status}
               now={now}
               timezone={timezone}
-              bedtime={isBedtimeKind(pact.evidenceKind)}
+              bedtime={bedtimeKindOf(pact.evidenceKind)}
             />
           </div>
           {line && <span className="small muted">{line}</span>}
@@ -481,7 +482,7 @@ export function Yesterday({
                 status={entry.occurrence.status}
                 now={now}
                 timezone={timezone}
-                bedtime={isBedtimeKind(entry.evidenceKind)}
+                bedtime={bedtimeKindOf(entry.evidenceKind)}
               />
             </button>
           );

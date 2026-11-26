@@ -31,7 +31,8 @@ export type Page =
   | { kind: "evidence"; id: string }
   | { kind: "payment"; id: string }
   | { kind: "notifications" }
-  | { kind: "plan-vacation" };
+  | { kind: "plan-vacation" }
+  | { kind: "apple-health" };
 
 interface Route {
   tab: TabId;
@@ -69,6 +70,8 @@ export function pagePath(page: Page): string {
       return APP_PATHS.notifications;
     case "plan-vacation":
       return APP_PATHS.newVacation;
+    case "apple-health":
+      return APP_PATHS.appleHealth;
   }
 }
 
@@ -102,6 +105,11 @@ const PAGE_ROUTES: { pattern: RegExp; route: (id: string) => Route }[] = [
   {
     pattern: pathPattern(APP_PATHS.newVacation),
     route: () => ({ tab: "today", stack: [{ kind: "plan-vacation" }] }),
+  },
+  // Apple Health setup opens from Profile, the create form and Today's alert.
+  {
+    pattern: pathPattern(APP_PATHS.appleHealth),
+    route: () => ({ tab: "today", stack: [{ kind: "apple-health" }] }),
   },
   {
     pattern: pathPattern(APP_PATHS.editPact),

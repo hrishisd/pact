@@ -3,11 +3,20 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { CreatePact } from "./CreatePact.tsx";
 import { answers, renderWithUser, stubApi } from "./testing/render.tsx";
 
+/** No Apple Health connection; the timezone is for its setup step. */
+const appleHealth = { appleHealthConnected: false, timezone: "America/New_York" };
+
 test("a typed Camera name stays after Back, Oura Ring and an in-bed-by time", async () => {
   stubApi({ friends: answers([]), recipients: answers([]) });
   const { user } = renderWithUser(
     <CreatePact
-      connections={{ ouraConnected: true, ouraAvailable: true, ankiConnected: false, ankiAvailable: false }}
+      connections={{
+        ouraConnected: true,
+        ouraAvailable: true,
+        ankiConnected: false,
+        ankiAvailable: false,
+        ...appleHealth,
+      }}
       onCancel={vi.fn()}
       onCreated={vi.fn()}
       onInvite={vi.fn()}
@@ -26,7 +35,13 @@ test("with no name typed, an in-bed-by time names the pact", async () => {
   stubApi({ friends: answers([]), recipients: answers([]) });
   const { user } = renderWithUser(
     <CreatePact
-      connections={{ ouraConnected: true, ouraAvailable: true, ankiConnected: false, ankiAvailable: false }}
+      connections={{
+        ouraConnected: true,
+        ouraAvailable: true,
+        ankiConnected: false,
+        ankiAvailable: false,
+        ...appleHealth,
+      }}
       onCancel={vi.fn()}
       onCreated={vi.fn()}
       onInvite={vi.fn()}
@@ -48,7 +63,13 @@ test("a pact that's created keeps Create pact disabled while the page goes to it
   const onCreated = vi.fn();
   const { user } = renderWithUser(
     <CreatePact
-      connections={{ ouraConnected: false, ouraAvailable: false, ankiConnected: false, ankiAvailable: false }}
+      connections={{
+        ouraConnected: false,
+        ouraAvailable: false,
+        ankiConnected: false,
+        ankiAvailable: false,
+        ...appleHealth,
+      }}
       onCancel={vi.fn()}
       onCreated={onCreated}
       onInvite={vi.fn()}
@@ -96,7 +117,13 @@ describe("Once a month on the Schedule step", () => {
     });
     const rendered = renderWithUser(
       <CreatePact
-        connections={{ ouraConnected: false, ouraAvailable: false, ankiConnected: false, ankiAvailable: false }}
+        connections={{
+          ouraConnected: false,
+          ouraAvailable: false,
+          ankiConnected: false,
+          ankiAvailable: false,
+          ...appleHealth,
+        }}
         onCancel={vi.fn()}
         onCreated={vi.fn()}
         onInvite={vi.fn()}
@@ -163,7 +190,13 @@ describe("Once a month on the Schedule step", () => {
     });
     const { user } = renderWithUser(
       <CreatePact
-        connections={{ ouraConnected: false, ouraAvailable: false, ankiConnected: false, ankiAvailable: false }}
+        connections={{
+          ouraConnected: false,
+          ouraAvailable: false,
+          ankiConnected: false,
+          ankiAvailable: false,
+          ...appleHealth,
+        }}
         onCancel={vi.fn()}
         onCreated={vi.fn()}
         onInvite={vi.fn()}
@@ -237,7 +270,13 @@ async function toWeeklySchedule(user: ReturnType<typeof renderWithUser>["user"])
   await user.click(screen.getByRole("radio", { name: /^Some days each week/ }));
 }
 
-const noConnections = { ouraConnected: false, ouraAvailable: false, ankiConnected: false, ankiAvailable: false };
+const noConnections = {
+  ouraConnected: false,
+  ouraAvailable: false,
+  ankiConnected: false,
+  ankiAvailable: false,
+  ...appleHealth,
+};
 
 test("a Weekly count pact offers this week, next week or a later Monday, next week picked, and sends the Monday chosen", async () => {
   const spies = stubApi({
@@ -294,4 +333,65 @@ test("this week too short to reach the target is greyed out with why", async () 
   const thisWeek = (await screen.findByRole("radio", { name: /^This week/ })) as HTMLInputElement;
   expect(thisWeek.disabled).toBe(true);
   expect(thisWeek.closest("label")?.textContent).toContain("Only 2 days left, fewer than 3×.");
+});
+
+describe("Apple Health", () => {
+  const UPLOAD_URL = "https://pact.example/api/apple-health/samples?key=abc123";
+
+  function renderForm(appleHealthConnected: boolean) {
+    const onAppleHealthConnected = vi.fn();
+    const rendered = renderWithUser(
+      <CreatePact
+        connections={{ ...noConnections, appleHealthConnected }}
+        onCancel={vi.fn()}
+        onCreated={vi.fn()}
+        onInvite={vi.fn()}
+        onAppleHealthConnected={onAppleHealthConnected}
+      />,
+    );
+    return { ...rendered, onAppleHealthConnected };
+  }
+
+  test("with no connection, the tile leads to Set up Apple Health, which goes on to Goal once a key is made", async () => {
+    const spies = stubApi({
+      friends: answers([]),
+      recipients: answers([]),
+      appleHealth: answers({ connected: false, lastUpload: null }, { connected: true, lastUpload: null }),
+      makeAppleHealthKey: answers({ uploadUrl: UPLOAD_URL }),
+    });
+    const { user, onAppleHealthConnected } = renderForm(false);
+
+    const tile = screen.getByRole("button", { name: /^Apple Health/ });
+    expect(tile.textContent).toContain("Bedtime, from the Health app on your iPhone.");
+    await user.click(tile);
+    expect(screen.getByRole("heading", { name: "Set up Apple Health" })).toBeTruthy();
+    expect(screen.getByText("Step 2 of 8")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Set up Apple Health first.")).toBeTruthy();
+
+    await user.click(await screen.findByRole("button", { name: "Make upload key" }));
+    expect(await screen.findByText(UPLOAD_URL)).toBeTruthy();
+    expect(screen.queryByText("Set up Apple Health first.")).toBeNull();
+    expect(onAppleHealthConnected).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(screen.getByLabelText(/^In bed by/)).toBeTruthy();
+    expect(
+      screen.getByText("If Apple Health shows you got into bed after this time, the night is missed."),
+    ).toBeTruthy();
+    // Pact can't show the URL again, so Back keeps it on screen.
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByText(UPLOAD_URL)).toBeTruthy();
+    expect(spies.makeAppleHealthKey).toHaveBeenCalledTimes(1);
+  });
+
+  test("with a connection, the tile goes straight to Goal", async () => {
+    stubApi({ friends: answers([]), recipients: answers([]) });
+    const { user } = renderForm(true);
+
+    await user.click(screen.getByRole("button", { name: /^Apple Health/ }));
+
+    expect(screen.getByLabelText(/^In bed by/)).toBeTruthy();
+    expect(screen.getByText("Step 2 of 7")).toBeTruthy();
+  });
 });

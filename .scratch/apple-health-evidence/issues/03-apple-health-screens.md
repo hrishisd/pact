@@ -16,8 +16,26 @@ Spec: `../spec.md` stories 1, 2, 3, 5, 7, 8 and the Screens and Shortcut section
 
 ## Acceptance criteria
 
-- [ ] Client tests for the tile, the setup page and the Sync now card.
-- [ ] `npm run check` and `npm run test:e2e` pass.
-- [ ] Screenshots of each screen at phone width.
+- [x] Client tests for the tile, the setup page and the Sync now card.
+- [x] `npm run check` and `npm run test:e2e` pass.
+- [x] Screenshots of each screen at phone width.
 
 ## Comments
+
+### 2026-11-26, agent
+
+Built; Status left as it was for the human to move. Screenshots (390 px wide, 2x) are in `../screenshots/`: 01 the Source tiles, 01b the create form's Set up Apple Health step, 02–04 the setup page before a key, just after one (a dev key) and with a last upload, 05 and 05b Profile's row and its Disconnect warning, 06 Today's No Apple Health data card with Sync now, 07 Today with yesterday's night Satisfied "In bed at 11:52pm · Oura.", 08 the pact's page with that night tapped. Data: a "Bed by 12:30am" pact, every night, $10 to Sam, reviewed by Anish, and an upload of Oura-sourced stages plus two Calm sessions.
+
+Decisions:
+- The create form's Set up step is the setup page itself (`AppleHealthSetup`, `src/client/apple-health.tsx`), not a trip to another page and back: no navigation state to carry. Next says "Set up Apple Health first." until a key is made. The step stays in the form once shown (the connection is read as the form opened), so Back still shows the upload URL, which Pact can't show again. Making the key reloads the profile, so the next form skips the step. A line under it says the Shortcut can be finished later from Profile.
+- The setup page is a pushed page (`apple-health` in `navigation.ts`, on Today's tab, so a fresh load of `/apple-health` opens it). Sections: Upload URL, Build the Shortcut (the spec's 8 steps word for word, as `ol.gsteps`, step 3's two actions as a sub-list), Run it automatically, Check it works (last upload, Run Pact Health). The page loads the last upload again on `focus` and `visibilitychange`.
+- Upload key copy: "Make upload key" with no key; after it, the URL in the info alert with Copy ("Copy it now: Pact shows it only once… anyone with it can send sleep to your account"); opened again, "Make a new key" asks first ("Your old upload URL stops working at once").
+- Last upload: "Last upload 9:02am · 14 sleep samples, 2 mindful sessions", with "Wed Nov 25, " before the time when it wasn't today, singular for 1.
+- Profile: Apple Health shows only once connected, like Oura and AnkiWeb (a disconnected owner gets the alert on Today and the pact page, whose Set up Apple Health opens the page). Its button says "Set up" (primary) until the first upload, then "Make a new key"; both open the page. Disconnect warns "…until you set it up again. Your upload URL stops working."
+- Today: Today checks Oura only when an Oura night's card shows. The Apple Health card says "Thu night hasn't synced yet. Sync now runs Pact Health on your iPhone to send it." with Sync now (`RUN_PACT_HEALTH_URL`, `src/shared/api.ts`) beside File excuse; without a key, "Set up Apple Health to count it." and no Sync now. Today loads again when Pact comes back to the front while such a card shows. A pull still checks Oura whatever shows, as before. The Automatic card needed no change.
+- Wording per bedtime kind lives in `BEDTIME_TEXT` (`src/client/bedtime-text.ts`): the No data chip, the pact page's "judged from Apple Health", and the Goal, Schedule, Reminders and Reviewers hints. `presentOccurrence`'s `bedtime` option is now the bedtime kind. The night's source shows as "in bed at 1:59am · Oura" on Today's Missed card, Yesterday and the heat map's detail.
+- The notification setting's hint now says "last night's sleep data" instead of "Oura data".
+- `.gsteps li` became `.gsteps > li`, so a list inside a step isn't numbered.
+
+Not done: the Copy button's "Copied" can't be seen in the headless screenshots (no clipboard permission), and nothing was tried on a real iPhone (the Shortcut and `shortcuts://` are for `manual-checks.md`). The setup page's Shortcut steps are text only; an iCloud link to a built Shortcut is out of scope.
+

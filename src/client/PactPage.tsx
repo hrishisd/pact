@@ -25,6 +25,7 @@ import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
 import { AppleHealthConnectionAlert } from "./apple-health.tsx";
+import { BEDTIME_TEXT } from "./bedtime-text.ts";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
 import { AT_ONCE_REFUSAL_TEXT, endsWhenText, openOccurrenceText } from "./change-terms.tsx";
@@ -235,7 +236,9 @@ function StageLine({ pact }: { pact: Pact }) {
     <div className="row2">
       <span className={`chip ${chip.className}`}>{chip.label}</span>
       <span className="muted">
-        {isBedtimePact(pact) ? `In bed by ${clockText(pact.inBedBy)}, judged from your ring` : pact.description}
+        {isBedtimePact(pact)
+          ? `In bed by ${clockText(pact.inBedBy)}, ${BEDTIME_TEXT[pact.evidenceKind].judgedFrom}`
+          : pact.description}
       </span>
     </div>
   );

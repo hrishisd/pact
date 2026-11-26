@@ -28,6 +28,7 @@ const LINKS: Record<Page["kind"], { page: Page; tab: TabId; under: Page[] }> = {
   payment: { page: { kind: "payment", id: ID }, tab: "today", under: [] },
   notifications: { page: { kind: "notifications" }, tab: "today", under: [] },
   "plan-vacation": { page: { kind: "plan-vacation" }, tab: "today", under: [] },
+  "apple-health": { page: { kind: "apple-health" }, tab: "today", under: [] },
 };
 
 describe("a link to a page opens that page on a fresh load", () => {

@@ -6,6 +6,7 @@ import { addDays, parseClockTime } from "../shared/calendar.ts";
 import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isOncePerPeriod } from "../shared/schedules.ts";
 import { MAX_REMINDERS, type CreatePactRefusal } from "../shared/types.ts";
+import { BEDTIME_TEXT, bedtimeKindOf } from "./bedtime-text.ts";
 import { clockText } from "./format.ts";
 import { scheduleKindOf, type Form } from "./pact-form.ts";
 
@@ -45,7 +46,7 @@ export function RemindersStep({
   hint?: string;
 }) {
   const { reminders } = form;
-  const bedtime = isBedtimeKind(form.kind);
+  const bedtime = bedtimeKindOf(form.kind);
   const due = bedtime
     ? `your in-bed-by time${form.inBedBy === "" ? "" : `, ${clockText(form.inBedBy)}`}`
     : form.dueByOn && form.dueBy !== ""
@@ -83,7 +84,7 @@ export function RemindersStep({
       )}
       <small className="muted">
         {bedtime
-          ? `Reminders go off every scheduled night before ${due}, even if you're already in bed. Pact can't tell you're in bed until your ring syncs.`
+          ? `Reminders go off every scheduled night before ${due}, even if you're already in bed. ${BEDTIME_TEXT[bedtime].remindersHint}`
           : form.kind === "anki"
             ? `Reminders go off on scheduled days before ${due}, unless Pact has already seen the deck finished.`
             : dated
