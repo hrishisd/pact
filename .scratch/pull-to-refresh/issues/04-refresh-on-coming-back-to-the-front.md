@@ -50,14 +50,24 @@ Settled with the owner on 2026-11-26 in a grilling session. No prototype: the on
 ## Acceptance criteria
 
 - [x] The human has decided whether, and when, Pact reloads on coming back to the front, and what a failure then shows.
-- [ ] Coming back after a short gap reloads nothing; after more than 10 minutes or on a new day, the shown tab or view page reloads once, and the badge.
-- [ ] Form pages never reload by themselves.
-- [ ] The pull bar moves during the reload.
-- [ ] A failed reload stays quiet, retries once (after about 3 s or on `online`), and shows "couldn't load" only if the retry fails. No "Couldn't reach" line from this reload.
-- [ ] While a sheet is open, the reload waits until the last sheet closes.
-- [ ] Today checks Oura and AnkiWeb once, not twice, on a long-gap return.
-- [ ] A pull during the reload doesn't start another.
-- [ ] Today's header shows the new day after midnight, together with the reloaded cards, both on return and while open.
-- [ ] `docs/behaviour.md` says what coming back to the front does.
-- [ ] Phone checks added to `../manual-checks.md`.
-- [ ] `npm run check` passes.
+- [x] Coming back after a short gap reloads nothing; after more than 10 minutes or on a new day, the shown tab or view page reloads once, and the badge.
+- [x] Form pages never reload by themselves.
+- [x] The pull bar moves during the reload.
+- [x] A failed reload stays quiet, retries once (after about 3 s or on `online`), and shows "couldn't load" only if the retry fails. No "Couldn't reach" line from this reload.
+- [x] While a sheet is open, the reload waits until the last sheet closes.
+- [x] Today checks Oura and AnkiWeb once, not twice, on a long-gap return.
+- [x] A pull during the reload doesn't start another.
+- [x] Today's header shows the new day after midnight, together with the reloaded cards, both on return and while open.
+- [x] `docs/behaviour.md` says what coming back to the front does.
+- [x] Phone checks added to `../manual-checks.md`.
+- [x] `npm run check` passes.
+
+## Comments
+
+Built on 2026-11-26. Where the decisions left a choice, or met the code:
+
+- **Form pages and the badge (3).** A form registers no refresh, so on a form nothing reloads by itself, the Review badge included: the badge reloads with the shown screen's refresh, and a form has none. The badge catches up on the next tab change or refresh.
+- **When "last loaded" is (1).** A screen counts as loaded when it opens and when a refresh of it settles, whether it loaded or failed, so a failed pull also counts. This follows "any refresh counts" and keeps the header's day on the cards' day: the header turns when the refresh settles, not when it starts.
+- **The wait before the second try (5).** The bar keeps moving through the 3 seconds, since the refresh hasn't finished; a pull meanwhile is ignored. On Today the second try checks Oura and AnkiWeb again before reloading (the network may be back), still without "Couldn't reach".
+- **A sheet open on Today (6 and 7).** Today's own check on every return, while a No Oura data or Anki To do card shows, still runs at once with a sheet open and reloads Today, as before. The refresh then waits for the sheet; when it closes, the refresh checks again. So with a sheet open, a service can be checked twice on one return (the core answers an AnkiWeb check within 15 seconds of the last with what that one found). Without a sheet, each is checked once.
+- `useRefreshOnPull` is now `useRefresh`, since view pages register one but can't be pulled.
