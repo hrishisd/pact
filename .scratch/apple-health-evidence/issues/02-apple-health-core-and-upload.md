@@ -1,6 +1,6 @@
 # 02 Apple Health: core, upload key and upload route
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: `../spec.md` stories 1, 3, 4, 6, 7, 8 and the Terms, Connection, Upload and Judging sections.

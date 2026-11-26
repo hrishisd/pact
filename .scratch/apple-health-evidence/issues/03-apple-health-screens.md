@@ -1,6 +1,6 @@
 # 03 Apple Health: screens
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: `../spec.md` stories 1, 2, 3, 5, 7, 8 and the Screens and Shortcut sections. The human skipped a prototype; screenshots go in the PR and they'll give feedback on the built screens.

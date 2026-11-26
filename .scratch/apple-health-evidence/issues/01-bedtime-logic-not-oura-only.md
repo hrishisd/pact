@@ -1,6 +1,6 @@
 # 01 Bedtime logic not tied to Oura
 
-Status: ready-for-agent
+Status: done
 
 Spec: `../spec.md`, "Shared bedtime logic".
 
