@@ -21,7 +21,7 @@ import type {
   OuraSource,
   Photo,
   PhotoStore,
-  Push,
+  OutgoingPush,
   PushDevice,
   StoredPhoto,
 } from "../ports.ts";
@@ -51,14 +51,14 @@ export class FakeClock implements Clock {
 /** Records every notification it delivers, its badge, and the devices it went to, in delivery order. */
 export class RecordingNotifier implements Notifier {
   readonly sent: Notification[] = [];
-  /** The badge each of `sent` carried. */
-  readonly #badges: number[] = [];
+  /** The badge each of `sent` carried, if any. */
+  readonly #badges: (number | undefined)[] = [];
   readonly #devices: { recipient: AccountId; device: PushDevice }[] = [];
   readonly #expired = new Set<string>();
   readonly #failing = new Set<string>();
   #held: Promise<void> = Promise.resolve();
 
-  async deliver({ badge, ...notification }: Push, devices: readonly PushDevice[]): Promise<DeliveryReport> {
+  async deliver({ badge, ...notification }: OutgoingPush, devices: readonly PushDevice[]): Promise<DeliveryReport> {
     await this.#held;
     this.sent.push(structuredClone(notification as Notification));
     this.#badges.push(badge);
@@ -79,10 +79,10 @@ export class RecordingNotifier implements Notifier {
     return this.sent.filter((n) => n.recipient === account.id && (kind === undefined || n.kind === kind));
   }
 
-  /** The badge of every notification delivered to `account`, or only those of `kind`, in delivery order. */
-  badgesSentTo(account: { id: AccountId }, kind?: NotificationKind): number[] {
+  /** The badge (undefined: none) of every notification delivered to `account`, or only those of `kind`, in delivery order. */
+  badgesSentTo(account: { id: AccountId }, kind?: NotificationKind): (number | undefined)[] {
     return this.sent.flatMap((n, i) =>
-      n.recipient === account.id && (kind === undefined || n.kind === kind) ? [this.#badges[i]!] : [],
+      n.recipient === account.id && (kind === undefined || n.kind === kind) ? [this.#badges[i]] : [],
     );
   }
 

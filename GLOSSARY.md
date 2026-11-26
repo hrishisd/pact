@@ -131,6 +131,10 @@ _Avoid_: Contact, connection, follower, buddy
 The list of items waiting for a reviewer's decision.
 _Avoid_: Inbox, to-do list
 
+**Icon badge**:
+The number on Pact's icon on the Home Screen: the size of the person's Review Queue, set by each push and each time the app loads the queue. Not the Review tab's badge inside the app, which shows the same count; their own To do never counts.
+_Avoid_: Notification count, unread count
+
 **Withdrawn**:
 A review item no one can decide any more. Its owner withdrew it (a change request or a vacation), or the system did because it was **moot**: deciding it either way could no longer change any outcome, penalty or terms, as for a change request when its pact Ended or an excuse whose every day approved evidence made Satisfied. The reason is recorded and shown; nobody is notified. A payment is never withdrawn.
 

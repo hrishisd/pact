@@ -18,12 +18,13 @@ interface AppBadge {
 
 /**
  * Loads the worker, with these windows of the app already showing, in a
- * browser that can (or with `badge` null, can't) badge the app's icon.
+ * browser whose `navigator` can badge the app's icon, or (`{}`) can't, or
+ * (null) with none at all.
  * `fire` resolves once the event's work is done.
  */
 function worker(
   openWindows: { focus: () => Promise<void>; navigate: (url: string) => Promise<void> }[] = [],
-  badge: AppBadge | null = { setAppBadge: async () => {}, clearAppBadge: async () => {} },
+  navigator: AppBadge | object | null = { setAppBadge: async () => {}, clearAppBadge: async () => {} },
 ) {
   const handlers = new Map<string, Handler>();
   const shown: [string, { body: string; data: { url: string } }][] = [];
@@ -39,7 +40,7 @@ function worker(
       matchAll: async () => openWindows,
       openWindow: async (url: string) => opened.push(url),
     },
-    navigator: { ...badge },
+    ...(navigator !== null && { navigator }),
   };
   runInNewContext(SOURCE, { self });
   const fire = async (type: string, event: object) => {
@@ -119,6 +120,14 @@ describe("the app icon's badge", () => {
   });
 
   test("a browser that can't badge the icon still shows the notification", async () => {
+    const { fire, shown } = worker([], {});
+
+    await fire("push", push(3));
+
+    expect(shown).toHaveLength(1);
+  });
+
+  test("even with no navigator at all, the notification shows", async () => {
     const { fire, shown } = worker([], null);
 
     await fire("push", push(3));

@@ -16,6 +16,7 @@ import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-p
 import { AskSheet, Thread } from "./questions.tsx";
 import { coveredText, firstName, pactsText, periodLabel, plural } from "./vacation-text.ts";
 import { useRefresh } from "./pull-to-refresh.tsx";
+import { loadReviewQueue } from "./app-badge.ts";
 import { Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
@@ -27,7 +28,7 @@ export function Review({
   timezone: string;
   onQueue: (length: number) => void;
 }) {
-  const { state, reload } = useLoad(api.reviewQueue, API_PATHS.reviewQueue);
+  const { state, reload } = useLoad(loadReviewQueue, API_PATHS.reviewQueue);
   const queue = loadedData(state);
   const { state: waitingState, reload: reloadWaiting } = useLoad(api.waitingOnReply, API_PATHS.waitingOnReply);
   useRefresh(async (run) => (await Promise.all([reload(run), reloadWaiting(run)])).every(Boolean));

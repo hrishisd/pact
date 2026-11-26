@@ -4,7 +4,7 @@ import type { LocalDate } from "../shared/types.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { AppleHealthPage, lastUploadText } from "./apple-health.tsx";
-import { badgeAppIcon } from "./app-badge.ts";
+import { loadReviewQueue } from "./app-badge.ts";
 import { ChangePact } from "./ChangePact.tsx";
 import { useReloadWhenDue } from "./coming-back.ts";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
@@ -480,7 +480,7 @@ const TAB_LOADS: Record<TabId, [string, () => Promise<unknown>][]> = {
   today: [[API_PATHS.today, () => api.today()]],
   pacts: [[API_PATHS.pacts, () => api.pacts()]],
   review: [
-    [API_PATHS.reviewQueue, () => api.reviewQueue()],
+    [API_PATHS.reviewQueue, loadReviewQueue],
     [API_PATHS.waitingOnReply, () => api.waitingOnReply()],
   ],
   ledgers: [[API_PATHS.ledgers, () => api.ledgers()]],
@@ -506,50 +506,36 @@ function useLoadTabs(tab: TabId) {
 /**
  * The Review tab's badge: how many items wait for this account's decision.
  * Loaded on each change to another tab, sharing the Review tab's load
- * (last-loaded.ts), and by itself when due, on any page, forms included,
- * pages opened over the Review tab too (`useReloadWhenDue`, coming-back.ts).
- * The Review tab, while `reviewShown`, sets it whenever its queue loads, and
- * reloads that itself, so there the badge doesn't.
- * The app's icon shows the same count (app-badge.ts): set at each load, and
- * again on each return to the front, since a push may have changed it.
+ * (last-loaded.ts), and by itself on every return to the front, however
+ * short, and at midnight, on any page, forms included, pages opened over the
+ * Review tab too (`useReloadWhenDue`, coming-back.ts): a push may have
+ * changed the app's icon, which each load sets (`loadReviewQueue`,
+ * app-badge.ts). The Review tab, while `reviewShown`, sets it whenever its
+ * queue loads, and reloads that itself, so there the badge doesn't.
  */
 function useReviewCount(
   tab: TabId,
   reviewShown: boolean,
   timezone: string,
 ): { value: number; set: (length: number) => void } {
-  const [value, setValue] = useState(0);
-  /** The count last loaded; null until the first load. */
-  const known = useRef<number | null>(null);
-  const set = useCallback((length: number) => {
-    known.current = length;
-    setValue(length);
-    badgeAppIcon(length);
-  }, []);
-  useEffect(() => {
-    const cameBack = () => {
-      if (document.visibilityState === "visible" && known.current !== null) badgeAppIcon(known.current);
-    };
-    document.addEventListener("visibilitychange", cameBack);
-    return () => document.removeEventListener("visibilitychange", cameBack);
-  }, []);
+  const [value, set] = useState(0);
   /** When the count that shows started loading (ms). */
   const loadedAt = useRef(Date.now());
   const load = useCallback(() => {
     const startedAt = Date.now();
     // A badge that fails to load just keeps its last count, and is due again.
-    loadAndRemember(API_PATHS.reviewQueue, api.reviewQueue).then(
+    loadAndRemember(API_PATHS.reviewQueue, loadReviewQueue).then(
       (queue) => {
         loadedAt.current = startedAt;
         set(queue.length);
       },
       () => {},
     );
-  }, [set]);
+  }, []);
   useEffect(() => {
     if (tab !== "review") load();
   }, [tab, load]);
-  useReloadWhenDue(() => (reviewShown ? null : loadedAt.current), timezone, load);
+  useReloadWhenDue(() => (reviewShown ? null : loadedAt.current), timezone, load, { everyReturn: true });
   return { value, set };
 }
 

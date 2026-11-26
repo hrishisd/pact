@@ -30,8 +30,8 @@ self.addEventListener("push", (event) => {
  * fails can't stop the notification showing.
  */
 async function badgeIcon(count) {
-  if (!Number.isInteger(count) || count < 0 || !("setAppBadge" in self.navigator)) return;
   try {
+    if (!Number.isInteger(count) || count < 0 || !("setAppBadge" in self.navigator)) return;
     await (count === 0 ? self.navigator.clearAppBadge() : self.navigator.setAppBadge(count));
   } catch {}
 }

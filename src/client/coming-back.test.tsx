@@ -439,7 +439,7 @@ describe("in the app", () => {
     });
   });
 
-  test("on Today, a short trip away reloads nothing", async () => {
+  test("on Today, a short trip away reloads only the Review badge, which a push may have changed on the app's icon", async () => {
     window.history.replaceState(null, "", APP_PATHS.today);
     const spies = stubAll();
     renderWithUser(<App />);
@@ -448,7 +448,7 @@ describe("in the app", () => {
     const before = counts(spies);
     comeBackAt("2026-11-21T15:09:00Z");
     await settle();
-    expect(counts(spies)).toEqual(before);
+    expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
   });
 
   test("Today's header turns to the new day with its cards at midnight, with the app in front", async () => {
@@ -540,10 +540,10 @@ describe("in the app", () => {
     await settle();
     expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
     expect(busy()).toBeNull();
-    // Back again soon after: the badge loaded at 15:11.
-    comeBackAt("2026-11-21T15:20:00Z");
+    // Back again soon after: the badge reloads on every return, the form still doesn't.
+    comeBackAt("2026-11-21T15:13:00Z");
     await settle();
-    expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
+    expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 2 });
   });
 
   test("on a form opened over the Review tab, the Review badge still reloads by itself", async () => {

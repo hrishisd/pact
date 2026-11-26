@@ -3,7 +3,10 @@
 
 import { describe, expect, test } from "vitest";
 import type { PushDevice } from "./ports.ts";
-import { failOnCall } from "./testing/fakes.ts";
+import { createContext } from "./context.ts";
+import { openDatabase } from "./db.ts";
+import { deliverPending } from "./outbox.ts";
+import { failOnCall, RecordingNotifier } from "./testing/fakes.ts";
 import { gymEvidenceWaiting, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
 import { ok, owed } from "./testing/queries.ts";
@@ -406,6 +409,7 @@ describe("the app icon's badge", () => {
   test("each push carries its recipient's Review Queue size as it goes, the item it tells of included", async () => {
     const s = scenario();
     const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    for (const person of [owner, reviewer, second]) await person.savePushSubscription(device(person.id));
     const gym = await createPact("Gym", MON_WED_FRI);
     const run = await createPact("Run", MON_WED_FRI);
     s.setClockTo("Mon 18:00");
@@ -425,9 +429,21 @@ describe("the app icon's badge", () => {
     expect(s.notifier.badgesSentTo(second, "owner-replied")).toEqual([1]);
   });
 
+  test("a push to someone with no devices carries no badge", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    s.setClockTo("Mon 18:00");
+
+    await submit(owner, gym);
+
+    expect(s.notifier.badgesSentTo(reviewer, "review-item")).toEqual([undefined]);
+  });
+
   test("a push sent again after a failure carries the count when it goes, not when it was queued", async () => {
     const s = scenario();
     const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    await reviewer.savePushSubscription(device("phone"));
     const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
     const run = await createPact("Run", MON_WED_FRI, { reviewers: [reviewer] });
     s.setClockTo("Mon 18:00");
@@ -438,5 +454,59 @@ describe("the app icon's badge", () => {
     await submit(owner, run);
 
     expect(s.notifier.badgesSentTo(reviewer, "review-item")).toEqual([2, 2]);
+  });
+
+  test("a device sent to again after it alone failed gets the count then", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    await reviewer.savePushSubscription(device("fine"));
+    await reviewer.savePushSubscription(device("down"));
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    const run = await createPact("Run", MON_WED_FRI, { reviewers: [reviewer] });
+    s.setClockTo("Mon 18:00");
+    s.notifier.fail(device("down").endpoint);
+
+    await submit(owner, gym);
+    s.notifier.recover(device("down").endpoint);
+    await submit(owner, run);
+
+    // Gym's to both devices (the down one failing), Gym's again to the down one alone, then Run's.
+    expect(s.notifier.badgesSentTo(reviewer, "review-item")).toEqual([1, 2, 2]);
+    expect(s.notifier.devicesOf(reviewer).map((d) => d.endpoint)).toEqual([
+      device("fine").endpoint,
+      device("down").endpoint,
+      device("down").endpoint,
+      device("fine").endpoint,
+    ]);
+  });
+
+  // At `deliverPending`'s own interface: no command can break the Review Queue,
+  // so a broken one is handed in.
+  test("when the count can't be worked out, the push still goes, with no badge, and it's logged", async () => {
+    const s = scenario();
+    const owner = await s.signIn("owner");
+    await owner.savePushSubscription(device("phone"));
+    s.notifier.fail(device("phone").endpoint);
+    await s.core.raiseRestoreAlert();
+    const logs: string[] = [];
+    const ctx = createContext({
+      db: openDatabase(s.dbPath),
+      clock: s.clock,
+      newId: () => "unused",
+      log: (line) => logs.push(line),
+      enqueue: () => {},
+      ankiChecksRunning: new Map(),
+    });
+    const notifier = new RecordingNotifier();
+
+    await deliverPending(ctx, notifier, () => {
+      throw new Error("the queue broke");
+    });
+
+    expect(notifier.kindsSentTo(owner)).toEqual(["operator-alert"]);
+    expect(notifier.badgesSentTo(owner)).toEqual([undefined]);
+    expect(notifier.devicesOf(owner)).toEqual([device("phone")]);
+    expect(logs).toContainEqual(expect.stringMatching(/operator-alert to .* without a badge: .*the queue broke/));
+    ctx.db.close();
   });
 });
