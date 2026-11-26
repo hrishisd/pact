@@ -189,7 +189,7 @@ function Shell({
   const [profileOpen, setProfileOpen] = useState(() => opensProfileSheet(window.location.pathname));
   // What the Profile sheet's Vacation section says when it opens, after a vacation is sent.
   const [vacationMessage, setVacationMessage] = useState<string | null>(null);
-  const reviewCount = useReviewCount(tab, profile.timezone);
+  const reviewCount = useReviewCount(tab, tab === "review" && page === undefined, profile.timezone);
   useLoadTabs(tab);
   // The day Today's cards are for, once loaded: its header shows it, so it turns with them.
   // Until then, and if Today's first load fails, the header shows the clock's day in the profile's timezone.
@@ -479,16 +479,20 @@ function useLoadTabs(tab: TabId) {
 /**
  * The Review tab's badge: how many items wait for this account's decision.
  * Loaded on each change to another tab, sharing the Review tab's load
- * (last-loaded.ts), and by itself when due, on any page, forms included
- * (`useReloadWhenDue`, coming-back.ts). The Review tab sets it whenever its
- * queue loads, and reloads that itself, so there the badge doesn't.
+ * (last-loaded.ts), and by itself when due, on any page, forms included,
+ * pages opened over the Review tab too (`useReloadWhenDue`, coming-back.ts).
+ * The Review tab, while `reviewShown`, sets it whenever its queue loads, and
+ * reloads that itself, so there the badge doesn't.
  */
-function useReviewCount(tab: TabId, timezone: string): { value: number; set: (length: number) => void } {
+function useReviewCount(
+  tab: TabId,
+  reviewShown: boolean,
+  timezone: string,
+): { value: number; set: (length: number) => void } {
   const [value, set] = useState(0);
   /** When the count that shows started loading (ms). */
   const loadedAt = useRef(Date.now());
   const load = useCallback(() => {
-    if (tab === "review") return;
     const startedAt = Date.now();
     // A badge that fails to load just keeps its last count, and is due again.
     loadAndRemember(API_PATHS.reviewQueue, api.reviewQueue).then(
@@ -498,9 +502,11 @@ function useReviewCount(tab: TabId, timezone: string): { value: number; set: (le
       },
       () => {},
     );
-  }, [tab]);
-  useEffect(load, [load]);
-  useReloadWhenDue(() => (tab === "review" ? null : loadedAt.current), timezone, load);
+  }, []);
+  useEffect(() => {
+    if (tab !== "review") load();
+  }, [tab, load]);
+  useReloadWhenDue(() => (reviewShown ? null : loadedAt.current), timezone, load);
   return { value, set };
 }
 

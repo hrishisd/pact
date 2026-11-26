@@ -387,6 +387,7 @@ describe("in the app", () => {
     thread: { comments: [], waitingOnReply: false },
   };
 
+  const unanswered = () => new Promise<never>(() => {});
   function stubAll(reviewQueue = answers<ReviewQueueResponse>([]), today = answers(NOTHING_TODAY)) {
     return stubApi({
       me: answers(me),
@@ -399,6 +400,11 @@ describe("in the app", () => {
       checkOura: answers({ ok: true }),
       checkAnki: answers({ ok: true }),
       vacationOptions: answers({ today: "2026-11-21", recurring: [], oneTime: [], inEditWindow: false }),
+      // What the Profile sheet loads; never answered, since no test looks at it.
+      lastVacation: unanswered,
+      vacations: unanswered,
+      friends: unanswered,
+      notifications: unanswered,
     });
   }
   /** How many times each call was made so far. */
@@ -537,6 +543,24 @@ describe("in the app", () => {
     // Back again soon after: the badge loaded at 15:11.
     comeBackAt("2026-11-21T15:20:00Z");
     await settle();
+    expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
+  });
+
+  test("on a form opened over the Review tab, the Review badge still reloads by itself", async () => {
+    window.history.replaceState(null, "", APP_PATHS.review);
+    const spies = stubAll(answers<ReviewQueueResponse>([], [VACATION]));
+    const { user } = renderWithUser(<App />);
+    await screen.findByText("Nothing to review");
+    await opened(spies);
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+    await user.click(await screen.findByRole("button", { name: "Plan a vacation" }));
+    await screen.findByLabelText("First day");
+    await settle();
+    const before = counts(spies);
+
+    comeBackAt("2026-11-21T15:11:00Z");
+
+    expect(await screen.findByLabelText("1 to review")).toBeTruthy();
     expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
   });
 
