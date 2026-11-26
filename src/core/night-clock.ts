@@ -1,11 +1,29 @@
-// Reading Oura's timestamps on Oura's own clock, where the ring was.
+// Reading a sleep's timestamps on the clock its night is read on. A
+// timestamp here carries the UTC offset of that clock: Oura's own, where the
+// ring was, for an Oura Ring night, and the account's timezone's for an
+// Apple Health one (`nightClockOf`, rows.ts).
 
 import { addDays, parseClockTime } from "../shared/calendar.ts";
 import type { ClockTime, LocalDate } from "../shared/types.ts";
+import { zoneOffsetAt } from "./calendar.ts";
 import { NIGHT_STARTS_HOUR } from "./occurrences.ts";
 
 /**
- * A timestamp as Oura wrote it, read on Oura's own clock: "YYYY-MM-DDTHH:MM".
+ * The instant `timestamp` (ISO 8601 with a UTC offset) names, written on
+ * `timezone`'s clock then: "2026-01-06T23:40:00-05:00".
+ */
+export function inTimezone(timestamp: string, timezone: string): string {
+  const instant = new Date(timestamp);
+  const offsetMs = zoneOffsetAt(instant, timezone);
+  const wall = new Date(instant.getTime() + offsetMs).toISOString().slice(0, 19);
+  const minutes = Math.round(Math.abs(offsetMs) / 60_000);
+  const hh = String(Math.floor(minutes / 60)).padStart(2, "0");
+  const mm = String(minutes % 60).padStart(2, "0");
+  return `${wall}${offsetMs < 0 ? "-" : "+"}${hh}:${mm}`;
+}
+
+/**
+ * A timestamp read on the clock it was written with: "YYYY-MM-DDTHH:MM".
  * Oura's timestamps carry the UTC offset where the ring was, so their wall
  * time is the time there.
  */

@@ -1,7 +1,7 @@
-// Connections: the core's record of each account's Oura and AnkiWeb
-// connections, the profile that lists them, and marking one Needs
+// Connections: the core's record of each account's Oura, AnkiWeb and Apple
+// Health connections, the profile that lists them, and marking one Needs
 // reconnecting. The adapters keep the tokens; src/server/connections.ts
-// orders the two.
+// orders the two. Apple Health's upload key is apple-health.ts's.
 
 import { APP_PATHS } from "../shared/api.ts";
 import {
@@ -12,11 +12,15 @@ import {
   type ConnectionService,
   type Profile,
 } from "../shared/types.ts";
+import { lastUpload } from "./apple-health.ts";
 import type { CoreContext } from "./context.ts";
 import { accountRow } from "./rows.ts";
 
+/** A service whose connection can need reconnecting: Apple Health's upload key is never refused, only replaced or deleted. */
+type ReconnectableService = Exclude<ConnectionService, "apple_health">;
+
 /** The push when a connection needs reconnecting, by service. */
-const RECONNECT_PUSH: Record<ConnectionService, { title: string; body: string }> = {
+const RECONNECT_PUSH: Record<ReconnectableService, { title: string; body: string }> = {
   oura: { title: "Oura needs reconnecting", body: RECONNECT_TEXT.oura },
   anki: { title: "AnkiWeb needs reconnecting", body: RECONNECT_TEXT.anki },
 };
@@ -33,6 +37,7 @@ export function profile(ctx: CoreContext, accountId: AccountId): Profile {
       status: row.status,
       connectedAt: new Date(row.connected_at),
       activePacts: activePactsUsing(ctx, accountId, row.service),
+      ...(row.service === "apple_health" && { lastUpload: lastUpload(ctx, accountId) }),
     }));
   return { email, name, timezone, connections };
 }
@@ -65,7 +70,7 @@ export function activePactsUsing(ctx: CoreContext, accountId: AccountId, service
 }
 
 /** Connects the account to `service`, or marks a connection that needs reconnecting connected again. */
-function connect(ctx: CoreContext, accountId: AccountId, service: ConnectionService): void {
+export function connect(ctx: CoreContext, accountId: AccountId, service: ConnectionService): void {
   ctx.db
     .prepare(
       `INSERT INTO connection (account_id, service, status, connected_at) VALUES (?, ?, 'connected', ?)
@@ -74,7 +79,7 @@ function connect(ctx: CoreContext, accountId: AccountId, service: ConnectionServ
     .run(accountId, service, ctx.clock.now().toISOString());
 }
 
-function disconnect(ctx: CoreContext, accountId: AccountId, service: ConnectionService): void {
+export function disconnect(ctx: CoreContext, accountId: AccountId, service: ConnectionService): void {
   ctx.db.prepare(`DELETE FROM connection WHERE account_id = ? AND service = ?`).run(accountId, service);
 }
 
@@ -87,7 +92,7 @@ function disconnect(ctx: CoreContext, accountId: AccountId, service: ConnectionS
  */
 export function markDisconnected(
   ctx: CoreContext,
-  service: ConnectionService,
+  service: ReconnectableService,
   account: AccountId,
   askedAt: Date,
 ): void {

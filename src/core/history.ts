@@ -1,6 +1,7 @@
 // History: the pact page's heat map of past occurrences, and Today's Yesterday.
 
 import { addDays } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import {
   WEEKDAYS,
@@ -21,12 +22,21 @@ import type { CoreContext } from "./context.ts";
 import { onApprovedVacation } from "./covers.ts";
 import { occurrenceStatus, rejection, PERIOD_PACT, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
-import { wallClock } from "./oura-clock.ts";
+import { wallClock } from "./night-clock.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
 
 /** The day an Ended pact Ended, in `timezone`; null while it's Active. */
 export function endedOnOf(pact: Pick<PactRow, "ended_at">, timezone: string): LocalDate | null {
   return pact.ended_at === null ? null : localDateOf(new Date(pact.ended_at), timezone);
+}
+
+/** A judged night's detail: when the owner was in bed (wall-clock "HH:MM"), and the Apple Health source that said so, if any. */
+export function nightDetail(bedtimeStart: string | null, source: string | null): OccurrenceDetail {
+  return {
+    kind: "night",
+    inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11),
+    ...(source !== null && { source }),
+  };
 }
 
 /** An Anki day's deciding check as its occurrence row stores it; null when no check reached AnkiWeb. */
@@ -159,11 +169,12 @@ export function occurrenceRecord(
   const status = occurrenceStatus(ctx, pact.id, occurrence);
   const row = ctx.one<{
     bedtime_start: string | null;
+    bedtime_source: string | null;
     anki_cards_left: number | null;
     anki_checked_at: string | null;
     recipient_name: string | null;
   }>(
-    `SELECT occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at,
+    `SELECT occurrence.bedtime_start, occurrence.bedtime_source, occurrence.anki_cards_left, occurrence.anki_checked_at,
               recipient.name AS recipient_name
        FROM occurrence
        LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
@@ -174,9 +185,8 @@ export function occurrenceRecord(
   );
   const judged = status.kind === "satisfied" || status.kind === "missed";
   let detail: OccurrenceDetail | null = null;
-  if (pact.evidence_kind === "oura" && judged) {
-    const bedtimeStart = row?.bedtime_start ?? null;
-    detail = { kind: "night", inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
+  if (isBedtimeKind(pact.evidence_kind) && judged) {
+    detail = nightDetail(row?.bedtime_start ?? null, row?.bedtime_source ?? null);
   }
   if (pact.evidence_kind === "anki" && row && judged) detail = { kind: "anki", lastCheck: ankiCheckOf(row) };
   return { status: recordedStatus(ctx, pact, occurrence.date, status, row?.recipient_name ?? null), detail };

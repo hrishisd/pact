@@ -7,16 +7,18 @@
 //
 // Two facts it watches for itself: which checks of AnkiWeb are still
 // running, which the core keeps only in memory, and when each bedtime
-// night's first sleep period reached the core. The core stores the latter
-// (`judgeNights`); the check takes it from what Oura gave the core instead,
-// so a wrong stored period shows as a mismatch too.
+// night's first main sleep reached the core. The core stores the latter
+// (`judgeNights`); the check works it out instead from what Oura gave the
+// core, or for an Apple Health night from the samples uploaded (merged into
+// sessions here, by the spec's rules), so a wrong stored sleep shows as a
+// mismatch too.
 
 import { addDays } from "../../shared/calendar.ts";
-import type { AccountId, LocalDate } from "../../shared/types.ts";
-import { localDateOf } from "../calendar.ts";
+import type { AccountId, AppleHealthUpload, EvidenceKind, LocalDate } from "../../shared/types.ts";
+import { localDateOf, wallTime } from "../calendar.ts";
 import { createContext, type CoreContext } from "../context.ts";
 import { openWithPragmas, type Db } from "../db.ts";
-import { nightOf, wallClock } from "../oura-clock.ts";
+import { inTimezone, nightOf, wallClock } from "../night-clock.ts";
 import type { AnkiSource, Clock, OuraSleepPeriod, OuraSource } from "../ports.ts";
 import { ANKI_CHECK_HOLDS_JUDGING_MS } from "../judging.ts";
 import { occurrencesOf } from "../rows.ts";
@@ -56,7 +58,20 @@ function knownMismatchTicket(mismatch: Mismatch): string | null {
   return KNOWN_MISMATCHES.find((known) => known.matches(mismatch))?.ticket ?? null;
 }
 
-/** Watches what the core asks of Oura and AnkiWeb, and when the scheduler ticks. */
+/**
+ * A time the core judged Apple Health nights: a tick (every account's) or an
+ * upload (its account's, with the sleep samples it kept), and each account's
+ * timezone then, filled in by the check after it (`noteTimezones`).
+ */
+interface AppleHealthJudging {
+  at: Date;
+  /** The account that uploaded; null for a tick. */
+  account: AccountId | null;
+  sleep: { start: number; end: number }[];
+  timezones: Map<AccountId, string | null> | null;
+}
+
+/** Watches what the core asks of Oura and AnkiWeb, what Apple Health uploads it gets, and when the scheduler ticks. */
 export class SourceWatch {
   readonly #clock: Clock;
   /** By account: each time the core asked Oura for sleep, and what it got (none if the call failed). */
@@ -64,6 +79,8 @@ export class SourceWatch {
   /** By account: each check of AnkiWeb, and when it was answered (null while it runs). */
   readonly #ankiChecks = new Map<AccountId, AnkiCheckRun[]>();
   readonly #ticks: Date[] = [];
+  /** In order: each tick and each Apple Health upload. */
+  readonly #judgings: AppleHealthJudging[] = [];
 
   constructor(clock: Clock) {
     this.#clock = clock;
@@ -120,11 +137,31 @@ export class SourceWatch {
       for (const call of calls) for (const p of call.periods) if (!seen.has(p.id)) seen.set(p.id, call.at.getTime());
       return [account, [...seen]];
     });
-    return JSON.stringify([firstSeen, [...this.#ankiChecks]]);
+    const uploads = this.#judgings.filter((judging) => judging.account !== null).length;
+    return JSON.stringify([firstSeen, [...this.#ankiChecks], uploads]);
   }
 
   tick(at: Date): void {
     this.#ticks.push(at);
+    this.#judgings.push({ at, account: null, sleep: [], timezones: null });
+  }
+
+  /** An upload the core took from `account` at `at`: the sleep samples it keeps and judges by. */
+  appleHealthUpload(account: AccountId, at: Date, upload: AppleHealthUpload): void {
+    this.#judgings.push({ at, account, sleep: countedSleep(upload, at), timezones: null });
+  }
+
+  /** Gives each tick and upload since the last call the accounts' timezones now, which they had then. */
+  noteTimezones(timezones: () => Map<AccountId, string | null>): void {
+    const unnoted = this.#judgings.filter((judging) => judging.timezones === null);
+    if (unnoted.length === 0) return;
+    const now = timezones();
+    for (const judging of unnoted) judging.timezones = now;
+  }
+
+  /** How many ticks and uploads there have been: a pact first seen now was made after them. */
+  judgingCount(): number {
+    return this.#judgings.length;
   }
 
   ankiChecks(account: AccountId): AnkiCheckRun[] {
@@ -151,6 +188,99 @@ export class SourceWatch {
     }
     return null;
   }
+
+  /**
+   * The first main sleep the core had for the account's Apple Health night
+   * on `date`, read on `zone`'s clock, and when: at the first tick or upload
+   * of the account's, from the `after`th on (the pact's making), whose
+   * samples so far show one; none if one at or after `closesAt` came first,
+   * which judged the night without it.
+   */
+  appleHealthFirstSleep(
+    account: AccountId,
+    date: LocalDate,
+    zone: string,
+    closesAt: Date,
+    after: number,
+  ): { start: string; arrivedAt: Date } | null {
+    const sleep: { start: number; end: number }[] = [];
+    for (const [i, judging] of this.#judgings.entries()) {
+      if (judging.account !== null && judging.account !== account) continue;
+      sleep.push(...judging.sleep);
+      if (i < after) continue;
+      const start = firstMainSleep(sleep, judging.timezones?.get(account) ?? null, date, zone);
+      if (start !== null) return { start, arrivedAt: judging.at };
+      if (judging.at.getTime() >= closesAt.getTime()) return null;
+    }
+    return null;
+  }
+}
+
+const MINUTE_MS = 60 * 1000;
+
+/**
+ * The spec's rules for an upload's sleep samples, worked out apart from the
+ * core's: type "sleep" in any case, ISO 8601 dates with an offset, not ending
+ * before they start, more than 14 days old or starting after the upload,
+ * and no "awake" in the value.
+ */
+function countedSleep(upload: AppleHealthUpload, at: Date): { start: number; end: number }[] {
+  const counted: { start: number; end: number }[] = [];
+  for (const sample of upload.samples) {
+    const [start, end] = [instantMs(sample.start), instantMs(sample.end)];
+    if (sample.type.trim().toLowerCase() !== "sleep" || start === null || end === null || end < start) continue;
+    if (end < at.getTime() - 14 * 24 * 60 * MINUTE_MS || start > at.getTime()) continue;
+    if (!sample.value.toLowerCase().includes("awake")) counted.push({ start, end });
+  }
+  return counted;
+}
+
+function instantMs(text: string): number | null {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|([+-]\d{2}):?(\d{2}))$/.exec(text.trim());
+  if (!match) return null;
+  const ms = Date.parse(match[1]! + (match[2] === "Z" ? "Z" : `${match[3]}:${match[4]}`));
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * The start, on `zone`'s clock, of the first main sleep (3 hours or more)
+ * of the night of `date` in `sleep`, merged into sessions where samples
+ * overlap or are at most an hour apart with no 18:00 in `timezone` (the
+ * account's) from one to the next; null if there's none.
+ */
+function firstMainSleep(
+  sleep: { start: number; end: number }[],
+  timezone: string | null,
+  date: LocalDate,
+  zone: string,
+): string | null {
+  const sorted = [...sleep].sort((a, b) => a.start - b.start || a.end - b.end);
+  const sessions: { start: number; end: number }[] = [];
+  for (const sample of sorted) {
+    const last = sessions.at(-1);
+    if (
+      last &&
+      sample.start - last.end <= 60 * MINUTE_MS &&
+      !(timezone && sixPmFrom(last.end, sample.start, timezone))
+    ) {
+      last.end = Math.max(last.end, sample.end);
+    } else sessions.push({ ...sample });
+  }
+  const starts = sessions
+    .filter((session) => session.end - session.start >= 3 * 60 * MINUTE_MS)
+    .map((session) => inTimezone(new Date(session.start).toISOString(), zone))
+    .filter((start) => nightOf(start) === date)
+    .sort((a, b) => wallClock(a).localeCompare(wallClock(b), "en-US"));
+  return starts[0] ?? null;
+}
+
+/** Whether 18:00 in `timezone` falls from `from` to `to`, both included. */
+function sixPmFrom(from: number, to: number, timezone: string): boolean {
+  const day = localDateOf(new Date(from), timezone);
+  return [day, addDays(day, 1)].some((d) => {
+    const sixPm = wallTime(d, 18, 0, timezone).getTime();
+    return sixPm >= from && sixPm <= to;
+  });
 }
 
 /** Checks a scenario's database after each command and tick; see the top of this file. */
@@ -167,6 +297,8 @@ export class VerdictCheck {
    * stays quick.
    */
   #last: { readAt: string; now: Date; instants: number[]; tickedThrough: string | null } | null = null;
+  /** By pact: how many ticks and uploads the watch had seen when a check first saw the pact (just after it was made). */
+  readonly #pactSeenAfter = new Map<string, number>();
 
   constructor(dbPath: string, clock: Clock, watch: SourceWatch) {
     this.#dbPath = dbPath;
@@ -177,6 +309,7 @@ export class VerdictCheck {
   /** Throws listing every mismatch not known. */
   check(): void {
     const ctx = this.#context();
+    this.#noteJudgings(ctx);
     const now = this.#clock.now();
     const readAt = factsFingerprint(ctx) + this.#watch.version();
     const tickedThrough = lastTickOf(ctx);
@@ -215,11 +348,18 @@ export class VerdictCheck {
    */
   mismatches(instants: number[] = [], waitsForTick: () => void = () => {}): Mismatch[] {
     const ctx = this.#context();
+    this.#noteJudgings(ctx);
     const now = this.#clock.now();
     const lastTick = lastTickOf(ctx);
     const tickedThrough = lastTick === null ? null : new Date(lastTick);
-    const pacts = ctx.all<{ id: string; timezone: string; first_occurrence: LocalDate; owner: AccountId }>(
-      `SELECT pact.id, account.timezone, pact.first_occurrence, pact.owner_account_id AS owner
+    const pacts = ctx.all<{
+      id: string;
+      timezone: string;
+      first_occurrence: LocalDate;
+      owner: AccountId;
+      evidence_kind: EvidenceKind;
+    }>(
+      `SELECT pact.id, account.timezone, pact.first_occurrence, pact.owner_account_id AS owner, pact.evidence_kind
          FROM pact JOIN account ON account.id = pact.owner_account_id ORDER BY pact.id`,
     );
     // Occurrences are listed only a week ahead, so a jump past that checks again.
@@ -251,11 +391,22 @@ export class VerdictCheck {
           }
           continue;
         }
-        if (facts.automatic?.kind === "oura") {
-          const sleep = this.#watch.firstSleep(pact.owner, date, facts.occurrence.closesAt);
+        // A bedtime night's sleep as Oura gave it to the core, or as uploaded from Apple Health.
+        if (facts.automatic?.kind === "bedtime") {
+          const { closesAt } = facts.occurrence;
+          const sleep =
+            pact.evidence_kind === "oura"
+              ? this.#watch.firstSleep(pact.owner, date, closesAt)
+              : this.#watch.appleHealthFirstSleep(
+                  pact.owner,
+                  date,
+                  occurrences.timezoneOn(date),
+                  closesAt,
+                  this.#pactSeenAfter.get(pact.id) ?? 0,
+                );
           facts.automatic = {
             ...facts.automatic,
-            firstBedtimeStart: sleep?.start ?? null,
+            bedtimeStart: sleep?.start ?? null,
             arrivedAt: sleep?.arrivedAt ?? null,
           };
         }
@@ -279,6 +430,24 @@ export class VerdictCheck {
   close(): void {
     this.#db?.close();
     this.#db = null;
+  }
+
+  /**
+   * Notes the accounts' timezones for the ticks and uploads since the last
+   * check, which runs after each, and when each pact was first seen.
+   */
+  #noteJudgings(ctx: CoreContext): void {
+    this.#watch.noteTimezones(
+      () =>
+        new Map(
+          ctx
+            .all<{ id: AccountId; timezone: string | null }>(`SELECT id, timezone FROM account`)
+            .map((row) => [row.id, row.timezone]),
+        ),
+    );
+    for (const { id } of ctx.all<{ id: string }>(`SELECT id FROM pact`)) {
+      if (!this.#pactSeenAfter.has(id)) this.#pactSeenAfter.set(id, this.#watch.judgingCount());
+    }
   }
 
   #context(): CoreContext {

@@ -280,3 +280,49 @@ describe("the daily heat map's month labels", () => {
     expect(monthLabels(weeksOf(days(first, count)))).toEqual(labels);
   });
 });
+
+test("an Apple Health night says when its owner got into bed and the app its sleep came from, and one waiting says No Apple Health data", async () => {
+  const days: Json<HeatMapDay>[] = [
+    {
+      date: "2026-01-10",
+      occurrence: {
+        status: { kind: "satisfied", approvedBy: null, cover: null, phase: "past-due" },
+        detail: { kind: "night", inBedAt: "00:12", source: "Oura" },
+      },
+    },
+    {
+      date: "2026-01-11",
+      occurrence: {
+        status: {
+          kind: "not-judged",
+          excuseApproval: null,
+          cover: null,
+          phase: "past-due",
+          evidenceWaiting: false,
+          opensAt: "2026-01-11T05:00:00Z",
+          dueAt: "2026-01-12T05:30:00Z",
+        },
+        detail: null,
+      },
+    },
+  ];
+  const { user } = renderWithUser(
+    <HeatMap
+      pact={{
+        ...cameraPact(),
+        evidenceKind: "apple_health",
+        description: "",
+        schedule: { kind: "fixed-days", days: ["sat", "sun"] },
+        inBedBy: "00:30",
+        history: { kind: "fixed-days", days },
+      }}
+      timezone="America/New_York"
+      now={NOW}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: "Sat Jan 10: Satisfied" }));
+  expect(within(screen.getByRole("status")).getByText("In bed at 12:12am · Oura.")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Sun Jan 11: No Apple Health data" }));
+  expect(within(screen.getByRole("status")).getByText("No Apple Health data")).toBeTruthy();
+});

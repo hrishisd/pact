@@ -35,6 +35,7 @@ import {
   INVITE_REQUIRED_PATH,
   APP_PATHS,
   MAX_PHOTO_BYTES,
+  APPLE_HEALTH_MAX_BODY_BYTES,
   OURA_RESULT_PARAM,
   type OuraResult,
   PAYMENT_AMOUNT_FIELD,
@@ -43,11 +44,14 @@ import {
   type AcceptExcuseRejectionResponse,
   type AcceptVacationRejectionResponse,
   type AnkiDecksResponse,
+  type AppleHealthResponse,
   type CheckAnkiResponse,
   type CheckOuraResponse,
   type ConnectAnkiRequest,
   type ConnectAnkiResponse,
   type DisconnectAnkiResponse,
+  type DisconnectAppleHealthResponse,
+  type MakeAppleHealthKeyResponse,
   type AskOwnerRequest,
   type DisconnectOuraResponse,
   type AcceptInviteResponse,
@@ -128,6 +132,7 @@ import {
   type TodayResponse,
 } from "../shared/api.ts";
 import { INVITE_REQUIRED_CODE, isInviteRequired, type Auth } from "./auth.ts";
+import { readUpload, REFUSED_TEXT, UNKNOWN_KEY_TEXT, uploadText } from "./apple-health.ts";
 import { connections } from "./connections.ts";
 import { inviteRequiredPage, signInFailedPage } from "./pages.ts";
 import { arrayOf, boolean, number, object, oneOf, optional, string, union, type Fields, type Parser } from "./parse.ts";
@@ -413,6 +418,29 @@ export function createApp({
     return c.json<InviteLookupResponse>(json(accountId ? core.as(accountId).invite(token) : core.invite(token)));
   });
 
+  // The Pact Health Shortcut's uploads: made as the account whose upload key
+  // the request carries, in `?key=` or as a bearer token, never a session, so
+  // registered before the session middleware (and the JSON body limit: it has
+  // its own). Every answer is plain text, which Shortcuts shows. Nothing logs
+  // the query, which holds the key: `onError` logs the path alone.
+  app.post(
+    API_PATHS.appleHealthSamples,
+    async (c, next) => {
+      const bearer = /^Bearer\s+(\S+)$/i.exec(c.req.header("Authorization") ?? "")?.[1];
+      // An empty `?key=` is no key: the bearer token, if any, is.
+      const accountId = core.accountIdForUploadKey(c.req.query("key") || bearer || "");
+      if (accountId === null) return c.text(UNKNOWN_KEY_TEXT, 401);
+      c.set("accountId", accountId);
+      await next();
+    },
+    bodyLimit({ maxSize: APPLE_HEALTH_MAX_BODY_BYTES, onError: (c) => c.text(REFUSED_TEXT["too-big"], 400) }),
+    async (c) => {
+      const read = readUpload(await c.req.text());
+      if (!read.ok) return c.text(REFUSED_TEXT[read.reason], 400);
+      return c.text(uploadText(await account(c).uploadAppleHealth(read.upload)));
+    },
+  );
+
   // Every other /api body is read only up to MAX_JSON_BODY_BYTES; past it,
   // a 413 before the session is even looked up. The photo upload routes
   // (`postPhotos`) have their own, larger limits.
@@ -516,6 +544,17 @@ export function createApp({
   app.post(API_PATHS.ankiDisconnect, async (c) => {
     await connection.disconnect(c.get("accountId"), "anki");
     return c.json<DisconnectAnkiResponse>(me(c.get("accountId")));
+  });
+
+  app.get(API_PATHS.appleHealth, (c) => c.json<AppleHealthResponse>(json(account(c).appleHealth())));
+
+  app.post(API_PATHS.appleHealthKey, async (c) => {
+    return c.json<MakeAppleHealthKeyResponse>(await account(c).makeAppleHealthKey());
+  });
+
+  app.post(API_PATHS.appleHealthDisconnect, async (c) => {
+    await account(c).disconnectAppleHealth();
+    return c.json<DisconnectAppleHealthResponse>(me(c.get("accountId")));
   });
 
   app.get(API_PATHS.me, (c) => c.json<MeResponse>(me(c.get("accountId"))));

@@ -3,6 +3,7 @@
 
 import { isPeriodSchedule, lastDayOf, targetOf } from "../shared/schedules.ts";
 import {
+  BEDTIME_KINDS,
   PERIOD_KINDS,
   type AccountId,
   type EvidenceKind,
@@ -96,14 +97,14 @@ export function periodProgress(ctx: CoreContext, pactId: string, date: LocalDate
 export type OccurrenceView = OccurrenceStatus & {
   /**
    * Today shows it as the owner's to do now: a To do card, or for a bedtime
-   * night the Automatic or No Oura data card. A period's card also
+   * night the Automatic or no sleep data card. A period's card also
    * needs today's day to take evidence.
    */
   toDo: boolean;
   /**
    * Its reminders still fire (at their times, before its due time): the same
    * cover rule as `toDo` (R7), so a waiting excuse stops both and a waiting
-   * vacation keeps both. A bedtime night Oura has already judged gets none.
+   * vacation keeps both. A bedtime night already judged gets none.
    */
   remind: boolean;
 };
@@ -142,7 +143,7 @@ export function occurrenceView(ctx: CoreContext, pactId: string, occurrence: Occ
   };
   // R7: one rule for Today and reminders. Judged, or under a cover that takes it off the owner, it's not theirs to do.
   const owed = outcome === null && keepsToDo(found) && evidenceStillNeeded(ctx, pactId, date, evidenceKind, evidence);
-  // A bedtime night stays on Today, under No Oura data, until it closes.
+  // A bedtime night stays on Today, under no sleep data, until it closes.
   const inWindow = now >= occurrence.opensAt.getTime() && now < occurrence.closesAt.getTime();
   const standing = {
     cover,
@@ -230,11 +231,14 @@ export function pactsToJudge(ctx: CoreContext, pactId?: string): PactToJudge[] {
   );
 }
 
+/** The bedtime evidence kinds as an SQL list, for `IN (...)`. */
+const BEDTIME_KINDS_SQL = BEDTIME_KINDS.map((kind) => `'${kind}'`).join(", ");
+
 /** Ended bedtime pacts with a night not judged that fell due before they Ended, as `pactsToJudge` reads them. */
 export function endedBedtimePacts(ctx: CoreContext): PactToJudge[] {
   return ctx.all<PactToJudge>(`SELECT ${PACT_TO_JUDGE_COLUMNS}
        FROM pact JOIN account ON account.id = pact.owner_account_id
-       WHERE pact.stage = 'ended' AND pact.evidence_kind = 'oura' AND pact.ended_at IS NOT NULL
+       WHERE pact.stage = 'ended' AND pact.evidence_kind IN (${BEDTIME_KINDS_SQL}) AND pact.ended_at IS NOT NULL
          AND (pact.judged_through IS NULL OR pact.judged_through < date(pact.ended_at, '+1 day'))
        ORDER BY pact.created_at, pact.id`);
 }

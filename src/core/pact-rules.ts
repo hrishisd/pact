@@ -16,6 +16,7 @@ import {
   type NewPact,
   type Schedule,
 } from "../shared/types.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import { laterDate, weekdayOf } from "./calendar.ts";
 import type { ChangeableTerms } from "./changes.ts";
@@ -101,13 +102,13 @@ export function checkedTerms(
   createdAt: Date,
   change = false,
 ): CheckedTerms | { ok: false; reason: CreatePactRefusal } {
-  const oura = pact.evidenceKind === "oura";
+  const bedtime = isBedtimeKind(pact.evidenceKind);
   const anki = pact.evidenceKind === "anki";
-  if (oura && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
+  if (bedtime && (pact.inBedBy === undefined || !isClockTime(pact.inBedBy))) {
     return { ok: false, reason: "invalid-in-bed-by" };
   }
-  // A ring's nights are Fixed days only, and at most one day of evidence counts a day.
-  if (isPeriodSchedule(pact.schedule) && (oura || anki)) return { ok: false, reason: "invalid-schedule" };
+  // Nights are Fixed days only, and at most one day of evidence counts a day.
+  if (isPeriodSchedule(pact.schedule) && (bedtime || anki)) return { ok: false, reason: "invalid-schedule" };
   if (pact.schedule.kind === "weekly-count") {
     const { target } = pact.schedule;
     if (!Number.isSafeInteger(target) || target < 1 || target > MAX_WEEKLY_TARGET) {
@@ -115,13 +116,13 @@ export function checkedTerms(
     }
   }
   const oneTime = pact.schedule.kind === "one-time";
-  if (pact.schedule.kind === "one-time" && (oura || anki || !isLocalDate(pact.schedule.deadline))) {
+  if (pact.schedule.kind === "one-time" && (bedtime || anki || !isLocalDate(pact.schedule.deadline))) {
     return { ok: false, reason: "invalid-schedule" };
   }
-  // A due-by time is for evidence the owner submits; a ring's night has its in-bed-by time.
+  // A due-by time is for evidence the owner submits; a night has its in-bed-by time.
   if (
     pact.dueBy !== undefined &&
-    (oura || !isDueBy(pact.dueBy) || (ankiRollover !== null && !ankiDueByFits(pact.dueBy, ankiRollover)))
+    (bedtime || !isDueBy(pact.dueBy) || (ankiRollover !== null && !ankiDueByFits(pact.dueBy, ankiRollover)))
   ) {
     return { ok: false, reason: "invalid-due-by" };
   }
@@ -137,12 +138,12 @@ export function checkedTerms(
   const named = checkedName(pact.name);
   if (!named.ok) return named;
   const { name } = named;
-  // Oura Ring and Anki pacts have no photo to describe.
-  const description = oura || anki ? "" : pact.description.trim();
-  if (!oura && !anki && description === "") return { ok: false, reason: "blank-description" };
+  // Bedtime and Anki pacts have no photo to describe.
+  const description = bedtime || anki ? "" : pact.description.trim();
+  if (!bedtime && !anki && description === "") return { ok: false, reason: "blank-description" };
   if (textTooLong(description)) return { ok: false, reason: "text-too-long" };
   const dueBy = pact.dueBy ?? null;
-  // The day clock is for Fixed days: Oura Ring and Anki pacts were refused any other schedule above.
+  // The day clock is for Fixed days: bedtime and Anki pacts were refused any other schedule above.
   const day = dayClockOf(
     { evidence_kind: pact.evidenceKind, anki_rollover_hour: ankiRollover },
     pact.inBedBy ?? null,
@@ -208,7 +209,7 @@ export function remindersInTime(
 
 /**
  * The day clock of `pact` with the times `inBedBy` and `dueBy`: a Camera
- * pact's days, an Oura Ring pact's nights, an Anki pact's Anki days. The
+ * pact's days, a bedtime pact's nights, an Anki pact's Anki days. The
  * schema keeps the rollover hour set on Anki pacts, and only on them.
  */
 export function dayClockOf(
@@ -216,12 +217,13 @@ export function dayClockOf(
   inBedBy: ClockTime | null,
   dueBy: ClockTime | null,
 ): DayClock {
+  if (isBedtimeKind(pact.evidence_kind)) {
+    if (inBedBy === null) throw new Error("a bedtime pact has no in-bed-by time");
+    return { kind: "night", inBedBy };
+  }
   switch (pact.evidence_kind) {
     case "camera":
       return { kind: "day", dueBy };
-    case "oura":
-      if (inBedBy === null) throw new Error("an Oura Ring pact has no in-bed-by time");
-      return { kind: "night", inBedBy };
     case "anki":
       if (pact.anki_rollover_hour === null) throw new Error("an Anki pact has no rollover hour");
       return { kind: "anki", rollover: pact.anki_rollover_hour, dueBy };

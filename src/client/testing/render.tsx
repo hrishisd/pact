@@ -123,6 +123,14 @@ export function comeBackAt(time: string): void {
   });
 }
 
+/** Leaves the app and comes straight back to the front, as after running a Shortcut. */
+export function leaveAndComeBack(): void {
+  act(() => {
+    setVisibility("hidden");
+    setVisibility("visible");
+  });
+}
+
 /** Renders `ui` on the document, with a user who clicks and types through it. */
 export function renderWithUser(ui: ReactElement): RenderResult & { user: UserEvent } {
   return { user: userEvent.setup(), ...render(ui) };

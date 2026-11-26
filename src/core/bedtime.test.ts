@@ -362,7 +362,7 @@ describe("a traveller's night closes at 18:00 on Oura's clock", () => {
     await s.advanceTo("Wed 18:00");
     expect(night(owner, pactId, s.date("Tue"))).toBe("not-judged");
     expect(owner.today().sections[0]).toEqual({
-      kind: "no-oura-data",
+      kind: "no-sleep-data",
       cards: [expect.objectContaining({ occurrenceDate: s.date("Tue"), closesAt: s.at("Wed 23:00") })],
     });
 

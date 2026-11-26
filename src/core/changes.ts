@@ -21,7 +21,7 @@ import { ankiDueByOrder, minutesFrom, NIGHT_STARTS_HOUR, type DayClock } from ".
 export interface ChangeableTerms {
   name: string;
   description: string;
-  /** Oura Ring only; null for Camera. */
+  /** Bedtime pacts only; null for Camera and Anki. */
   inBedBy: ClockTime | null;
   /** Camera and Anki, or null for midnight. */
   dueBy: ClockTime | null;

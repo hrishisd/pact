@@ -21,8 +21,10 @@ import {
   type WeekStartsRequest,
 } from "../shared/types.ts";
 import { addDays } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isOncePerPeriod, lastDayOf, type OncePerPeriodKind } from "../shared/schedules.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
+import { BEDTIME_TEXT, bedtimeKindOf } from "./bedtime-text.ts";
 import {
   clockText,
   dateIn,
@@ -73,6 +75,7 @@ export type Problem =
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
   "anki-not-connected": "Connect AnkiWeb first.",
+  "apple-health-not-connected": "Set up Apple Health first.",
   "unknown-deck": "Pick a deck.",
   "anki-due-by": "Pick a time from noon until your Anki day ends, or turn off Due by a set time.",
   "invalid-in-bed-by": "Pick a time.",
@@ -211,7 +214,7 @@ export function PactFormStep({
 
 function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
   if (form.kind === "anki") return <AnkiGoalStep form={form} update={update} />;
-  if (form.kind === "oura") {
+  if (isBedtimeKind(form.kind)) {
     return (
       <>
         <h2>Goal</h2>
@@ -226,7 +229,7 @@ function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>
               update(form.named || inBedBy === "" ? { inBedBy } : { inBedBy, name: inBedByName(inBedBy) });
             }}
           />
-          <small>If your ring shows you got into bed after this time, the night is missed.</small>
+          <small>{BEDTIME_TEXT[form.kind].goalHint}</small>
         </label>
         <NameField form={form} update={update} placeholder="e.g. In bed by midnight" />
       </>
@@ -381,7 +384,7 @@ function ScheduleStep({
   weekStartsFor: WeekStartsFor;
 }) {
   const { days } = form;
-  const oura = form.kind === "oura";
+  const bedtime = bedtimeKindOf(form.kind);
   const anki = form.kind === "anki";
   const scheduleKind = scheduleKindOf(form);
   const weekly = scheduleKind === "weekly-count";
@@ -472,8 +475,8 @@ function ScheduleStep({
       ) : (
         <>
           <div className="field">
-            <span>{oura ? "Nights" : "Days"}</span>
-            <div className="days" role="group" aria-label={oura ? "Nights" : "Days"}>
+            <span>{bedtime ? "Nights" : "Days"}</span>
+            <div className="days" role="group" aria-label={bedtime ? "Nights" : "Days"}>
               {WEEKDAYS.map((day) => (
                 <button
                   key={day}
@@ -491,13 +494,13 @@ function ScheduleStep({
             aria-pressed={everyDay}
             onClick={() => onDays(everyDay ? [] : [...WEEKDAYS])}
           >
-            {oura ? "Every night" : "Every day"}
+            {bedtime ? "Every night" : "Every day"}
           </button>
         </>
       )}
       <small className="muted">
-        {oura
-          ? `Pact checks each night when your ring syncs. If there's no sleep data by ${NIGHT_CLOSES_TEXT} the next day, the night is missed.`
+        {bedtime
+          ? `${BEDTIME_TEXT[bedtime].checks} If there's no sleep data by ${NIGHT_CLOSES_TEXT} the next day, the night is missed.`
           : anki
             ? `Finish the deck and sync before ${until}. If AnkiWeb doesn't show the deck finished by then, the day is missed.`
             : oneTime
@@ -1072,8 +1075,8 @@ export function ReviewersStep({
       </div>
       <small className="muted">
         {hint ??
-          (kind === "oura"
-            ? "Your ring decides each night, so there are no photos to review. Reviewers decide on your excuses, change requests, and payments."
+          (isBedtimeKind(kind)
+            ? `${BEDTIME_TEXT[kind].decides}, so there are no photos to review. Reviewers decide on your excuses, change requests, and payments.`
             : kind === "anki"
               ? "AnkiWeb decides each day, so there's nothing to review. Reviewers decide on your excuses, change requests, and payments."
               : "One of your reviewers must approve each photo. Reviewers also decide on your excuses, change requests, and payments.")}

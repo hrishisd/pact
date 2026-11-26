@@ -105,6 +105,7 @@ const EVIDENCE_TEXT: Record<Pact["evidenceKind"], string> = {
   camera: "Camera photo, checked by a reviewer",
   oura: "Oura Ring",
   anki: "Anki, checked on AnkiWeb",
+  apple_health: "Apple Health, from the Pact Health Shortcut",
 };
 
 /** A term row's own Change or Add, after its value; nothing without `onClick`. */

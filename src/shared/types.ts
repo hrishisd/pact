@@ -119,8 +119,15 @@ export type Schedule =
 export const MAX_WEEKLY_TARGET = 7;
 
 /** How a pact's evidence is gathered. Picked at creation and never changes. */
-export const EVIDENCE_KINDS = ["camera", "oura", "anki"] as const;
+export const EVIDENCE_KINDS = ["camera", "oura", "anki", "apple_health"] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
+
+/**
+ * The evidence kinds of bedtime pacts: each occurrence is a night, judged by
+ * when the owner's first main sleep of it started (`isBedtimeKind`).
+ */
+export const BEDTIME_KINDS = ["oura", "apple_health"] as const satisfies readonly EvidenceKind[];
+export type BedtimeKind = (typeof BEDTIME_KINDS)[number];
 
 /** A service that supplies evidence: every evidence kind but Camera. */
 export type ConnectionService = Exclude<EvidenceKind, "camera">;
@@ -128,10 +135,10 @@ export type ConnectionService = Exclude<EvidenceKind, "camera">;
 export interface NewPact {
   evidenceKind: EvidenceKind;
   name: string;
-  /** For Camera: what the photo will show. Oura Ring pacts have none. */
+  /** For Camera: what the photo will show. Bedtime and Anki pacts have none. */
   description: string;
   /**
-   * Oura Ring only: the in-bed-by time. An evening time (from 18:00) is due
+   * Bedtime pacts only: the in-bed-by time. An evening time (from 18:00) is due
    * that evening; an earlier one, the morning after.
    */
   inBedBy?: ClockTime;
@@ -181,12 +188,14 @@ export type CreatePactRefusal =
   | "oura-not-connected"
   /** An Anki pact needs the owner's AnkiWeb connection first. */
   | "anki-not-connected"
+  /** An Apple Health pact needs the owner's upload key first. */
+  | "apple-health-not-connected"
   /** An Anki pact's deck is missing, or isn't in the owner's deck list as AnkiWeb last gave it. */
   | "unknown-deck"
-  /** An Oura Ring pact's in-bed-by time is missing or isn't "HH:MM". */
+  /** A bedtime pact's in-bed-by time is missing or isn't "HH:MM". */
   | "invalid-in-bed-by"
   /**
-   * A due-by time on an Oura Ring pact, at midnight, or not "HH:MM"; on an
+   * A due-by time on a bedtime pact, at midnight, or not "HH:MM"; on an
    * Anki pact, one after the collection's rollover hour and before noon.
    */
   | "invalid-due-by"
@@ -205,7 +214,7 @@ export type CreatePactRefusal =
   | TextTooLong
   | "no-days"
   /**
-   * A Weekly count or One-time on an Oura Ring or Anki pact, a target that isn't a
+   * A Weekly count or One-time on a bedtime or Anki pact, a target that isn't a
    * whole number from 1 to `MAX_WEEKLY_TARGET`, or a deadline that isn't "YYYY-MM-DD".
    */
   | "invalid-schedule"
@@ -245,7 +254,7 @@ export interface PactTiming {
   schedule: Schedule;
   /** Anki pacts open and fall due on the Anki day, which starts at the collection's rollover hour. Default Camera. */
   evidenceKind?: EvidenceKind;
-  /** Oura Ring only: see `NewPact.inBedBy`. */
+  /** Bedtime pacts only: see `NewPact.inBedBy`. */
   inBedBy?: ClockTime;
   /** Camera and Anki: see `NewPact.dueBy`. */
   dueBy?: ClockTime;
@@ -362,9 +371,9 @@ interface PactPageTerms {
   /**
    * When the owner is reminded, each a clock time in their timezone, in the order
    * they go off. On a Camera pact: that time on each scheduled day, before
-   * the day's due time, while it has no evidence. On an Oura Ring pact: each
+   * the day's due time, while it has no evidence. On a bedtime pact: each
    * scheduled night (from 18:00 that evening, else the morning after), before
-   * the in-bed-by time, unless Oura has already judged the night. Neither fires on
+   * the in-bed-by time, unless the night is already judged. Neither fires on
    * an occurrence an approved excuse covers. On a One-time pact each is
    * dated and goes off once, before the deadline, unless evidence was
    * already submitted.
@@ -430,7 +439,7 @@ export type TermsByKind =
       dueBy: ClockTime | null;
     }
   | {
-      evidenceKind: "oura";
+      evidenceKind: BedtimeKind;
       schedule: FixedDays;
       /** The in-bed-by time. */
       inBedBy: ClockTime;
@@ -444,7 +453,7 @@ export type TermsByKind =
       anki: AnkiTerms;
     };
 
-/** Oura Ring and Anki pacts have Fixed days schedules only. */
+/** Bedtime and Anki pacts have Fixed days schedules only. */
 type FixedDays = Extract<Schedule, { kind: "fixed-days" }>;
 
 /** Cards in a deck as Anki's deck list counts them, the deck's daily limits applied and its subdecks included. */
@@ -556,7 +565,7 @@ export interface HeatMapDay {
 export interface OccurrenceRecord {
   status: RecordedStatus;
   /**
-   * Once judged Satisfied or Missed, on Oura Ring and Anki pacts: the night's
+   * Once judged Satisfied or Missed, on bedtime and Anki pacts: the night's
    * sleep, or the check that decided the Anki day. Null for anything else.
    */
   detail: OccurrenceDetail | null;
@@ -586,13 +595,18 @@ export type RecordedStatus =
       vacation?: { from: LocalDate; to: LocalDate };
     });
 
-/** What an Oura Ring or Anki pact's judged occurrence adds to its record. */
+/** What a bedtime or Anki pact's judged occurrence adds to its record. */
 export type OccurrenceDetail =
   /**
-   * When the owner got into bed, on Oura's clock, or null when Oura
-   * reported no sleep by 18:00 the next day.
+   * When the owner got into bed, on the night's clock (Oura's, for an Oura
+   * Ring night), or null when no sleep arrived by 18:00 the next day.
    */
-  | { kind: "night"; inBedAt: ClockTime | null }
+  | {
+      kind: "night";
+      inBedAt: ClockTime | null;
+      /** The app an Apple Health night's sleep came from ("Oura"), when it had one; left out otherwise. */
+      source?: string;
+    }
   /** The check that decided the Anki day, or null when no check reached AnkiWeb that day. */
   | { kind: "anki"; lastCheck: AnkiCheck | null };
 
@@ -913,20 +927,83 @@ export interface Profile {
   connections: Connection[];
 }
 
-/** A link to an outside service that supplies evidence: Oura or AnkiWeb. */
+/**
+ * A link to an outside service that supplies evidence: Oura, AnkiWeb, or
+ * Apple Health while the account has an upload key.
+ */
 export interface Connection {
   service: ConnectionService;
-  /** Needs reconnecting once the service refuses its tokens; until then, connected. */
+  /** Needs reconnecting once the service refuses its tokens; until then, connected. Apple Health is always connected. */
   status: "connected" | "needs-reconnecting";
+  /** When it was connected: for Apple Health, when its upload key was made. */
   connectedAt: Date;
   /** How many of the owner's Active pacts use it: disconnecting leaves their days to count as Missed. */
   activePacts: number;
+  /** Apple Health only: the Pact Health Shortcut's last upload, or null before the first. Left out for the others. */
+  lastUpload?: AppleHealthLastUpload | null;
 }
 
 /**
- * Why the owner's Oura (or AnkiWeb) can't be read while an Active pact needs
- * it: the service refused Pact's tokens or login (Needs reconnecting), or the
- * owner disconnected it.
+ * The account's Apple Health connection, for its setup page: whether it has
+ * an upload key, and the last upload from its Pact Health Shortcut.
+ */
+export interface AppleHealthStatus {
+  connected: boolean;
+  /** The last upload, kept after a new key or a disconnect; null before the first. */
+  lastUpload: AppleHealthLastUpload | null;
+}
+
+/** The last upload from an account's Pact Health Shortcut: when, and how many samples of each type it held. */
+export interface AppleHealthLastUpload {
+  at: Date;
+  sleepSamples: number;
+  mindfulSessions: number;
+}
+
+/**
+ * A new upload key, shown this once inside the upload URL the Pact Health
+ * Shortcut posts to: `https://<host>/api/apple-health/samples?key=<key>`.
+ * Pact keeps only its hash, so it can't show the key again.
+ */
+export interface AppleHealthKey {
+  uploadUrl: string;
+}
+
+/** One Apple Health sample as the Pact Health Shortcut sends it: each field as text, not read yet. */
+export interface AppleHealthSampleFields {
+  /** "sleep" or "mindful"; any other type is skipped. */
+  type: string;
+  /** ISO 8601 with a UTC offset or "Z". */
+  start: string;
+  end: string;
+  /** For sleep, the Sleep Analysis value ("In Bed", "Core", "Awake"…); unused for mindful. */
+  value: string;
+  /** The app that wrote it ("Oura", "Google Health"), or "". */
+  source: string;
+}
+
+/** An upload from the Pact Health Shortcut: its samples, and the lines of it the server couldn't split into fields. */
+export interface AppleHealthUpload {
+  samples: AppleHealthSampleFields[];
+  unreadableLines: number;
+}
+
+/**
+ * What Pact made of an upload: the sleep samples and mindful sessions it
+ * held from the last 14 days, new or already stored, and the lines it
+ * skipped because it couldn't read them. Samples of other types, and ones
+ * too old or still to come, are left out of both.
+ */
+export interface AppleHealthUploadResult {
+  sleepSamples: number;
+  mindfulSessions: number;
+  skippedLines: number;
+}
+
+/**
+ * Why the owner's Oura, AnkiWeb or Apple Health can't be read while an
+ * Active pact needs it: the service refused Pact's tokens or login (Needs
+ * reconnecting, never for Apple Health), or the owner disconnected it.
  */
 export type ConnectionProblem = "needs-reconnecting" | "not-connected";
 
@@ -934,6 +1011,7 @@ export type ConnectionProblem = "needs-reconnecting" | "not-connected";
 export const RECONNECT_TEXT: Record<ConnectionService, string> = {
   oura: "A night with no data by 6pm counts as Missed. Reconnect before then.",
   anki: "If Pact can't see the deck finished by the due time, the day is missed. Reconnect before then.",
+  apple_health: "A night with no data by 6pm counts as Missed. Set up Apple Health again before then.",
 };
 
 /**
@@ -977,9 +1055,11 @@ export interface TodayVacation {
 export type TodayAlert =
   /**
    * The owner has an Active pact judged from `service` but Pact can't read
-   * it. On Oura, a night with no data by 18:00 the next day counts as Missed;
-   * on AnkiWeb, a day whose deck isn't finished by its due time. First of all
-   * alerts, Oura before AnkiWeb; it goes once the owner reconnects.
+   * it. On Oura and Apple Health, a night with no data by 18:00 the next day
+   * counts as Missed; on AnkiWeb, a day whose deck isn't finished by its due
+   * time. First of all alerts, Oura, then AnkiWeb, then Apple Health (only
+   * ever not connected: its upload key was deleted); it goes once the owner
+   * reconnects.
    */
   | { kind: "connection"; service: ConnectionService; status: ConnectionProblem }
   /**
@@ -1098,8 +1178,8 @@ export type TodayAlert =
       reviewerNames: string[];
     };
 export type TodaySection =
-  /** Bedtime nights past their in-bed-by time that Oura hasn't reported yet, soonest cutoff first. */
-  | { kind: "no-oura-data"; cards: TodayNoOuraDataCard[] }
+  /** Bedtime nights past their in-bed-by time whose sleep hasn't arrived yet, soonest cutoff first. */
+  | { kind: "no-sleep-data"; cards: TodayNoSleepDataCard[] }
   /** Pacts whose occurrence is open today, and bills to pay, soonest due first. */
   | { kind: "to-do"; cards: (TodayToDoCard | TodayAnkiCard | TodayBillCard)[] }
   /**
@@ -1112,7 +1192,7 @@ export type TodaySection =
    * those Missed through a rejection (alerts) and accepted misses.
    */
   | { kind: "missed"; cards: TodayMissedCard[] }
-  /** Bedtime pacts whose night runs now, soonest deadline first. Nothing to do: Oura reports it. */
+  /** Bedtime pacts whose night runs now, soonest deadline first. Nothing to do: its sleep is reported. */
   | { kind: "automatic"; cards: TodayAutomaticCard[] }
   /** Pacts whose first occurrence hasn't opened yet, soonest first. */
   | { kind: "coming-up"; cards: TodayComingUpCard[] };
@@ -1218,10 +1298,14 @@ export type MissedDetail =
   | { kind: "period"; progress: PeriodProgress };
 
 /**
- * A bedtime night past its in-bed-by time that Oura hasn't reported yet and
- * no excuse covers. Syncing the ring before `closesAt` still counts.
+ * A bedtime night past its in-bed-by time whose sleep hasn't arrived yet and
+ * no excuse covers. Syncing it before `closesAt` still counts.
  */
-export interface TodayNoOuraDataCard extends TodayPactCard {
+export interface TodayNoSleepDataCard extends TodayPactCard {
+  /** Where its sleep comes from: Oura Ring checks Oura, Apple Health asks the owner to run the Pact Health Shortcut. */
+  evidenceKind: BedtimeKind;
+  /** Why the night's sleep can't arrive (Oura needs reconnecting, Apple Health has no upload key), or null when it can: syncing won't help, reconnecting or setting up will. */
+  connectionProblem: ConnectionProblem | null;
   /** The night's day in the owner's timezone. */
   occurrenceDate: LocalDate;
   /** 18:00 the next day: with no sleep data by then, it's Missed. */
@@ -1311,7 +1395,7 @@ export type TodayWaitingItem =
 export interface TodayYesterdayEntry {
   pactId: string;
   name: string;
-  /** A bedtime night not judged yet is waiting on Oura, not a reviewer. */
+  /** A bedtime night not judged yet is waiting on its sleep, not a reviewer. */
   evidenceKind: EvidenceKind;
   /** Yesterday, in the owner's timezone. */
   occurrenceDate: LocalDate;

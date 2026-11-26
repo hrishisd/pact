@@ -18,11 +18,14 @@ import {
   type AcceptVacationRejectionResponse,
   type AnkiDecksResponse,
   type CheckAnkiResponse,
+  type AppleHealthResponse,
   type CheckOuraResponse,
   type ConnectAnkiRequest,
   type ConnectAnkiResponse,
   type DisconnectAnkiResponse,
+  type DisconnectAppleHealthResponse,
   type DisconnectOuraResponse,
+  type MakeAppleHealthKeyResponse,
   type AcceptInviteResponse,
   type AcceptMissResponse,
   type AddRecipientRequest,
@@ -232,6 +235,10 @@ export const api = {
   ankiDecks: () => call<AnkiDecksResponse>(API_PATHS.ankiDecks),
   checkAnki: () => postQuietly<CheckAnkiResponse>(API_PATHS.ankiCheck),
   disconnectAnki: () => post<DisconnectAnkiResponse>(API_PATHS.ankiDisconnect),
+  appleHealth: () => call<AppleHealthResponse>(API_PATHS.appleHealth),
+  /** Makes a new upload key, replacing any: the old Shortcut stops working. */
+  makeAppleHealthKey: () => post<MakeAppleHealthKeyResponse>(API_PATHS.appleHealthKey),
+  disconnectAppleHealth: () => post<DisconnectAppleHealthResponse>(API_PATHS.appleHealthDisconnect),
   setTimezone: (timezone: string) =>
     post<SetTimezoneResponse>(API_PATHS.timezone, { timezone } satisfies SetTimezoneRequest),
   /** Works signed out. */

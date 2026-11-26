@@ -3,8 +3,10 @@
 // own Change all show it. The core decides when each goes off.
 
 import { addDays, parseClockTime } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isOncePerPeriod } from "../shared/schedules.ts";
 import { MAX_REMINDERS, type CreatePactRefusal } from "../shared/types.ts";
+import { BEDTIME_TEXT, bedtimeKindOf } from "./bedtime-text.ts";
 import { clockText } from "./format.ts";
 import { scheduleKindOf, type Form } from "./pact-form.ts";
 
@@ -23,7 +25,7 @@ export const REMINDER_PROBLEMS = {
  * deadline before 12:30am).
  */
 function suggestedReminder(form: RemindersForm): string {
-  const due = form.kind === "oura" ? form.inBedBy : form.dueByOn ? form.dueBy : "";
+  const due = isBedtimeKind(form.kind) ? form.inBedBy : form.dueByOn ? form.dueBy : "";
   const { hour, minute } = due === "" ? { hour: 20, minute: 30 } : parseClockTime(due);
   const before = hour * 60 + minute - 30;
   const minutes = (before + 24 * 60) % (24 * 60);
@@ -44,8 +46,8 @@ export function RemindersStep({
   hint?: string;
 }) {
   const { reminders } = form;
-  const oura = form.kind === "oura";
-  const due = oura
+  const bedtime = bedtimeKindOf(form.kind);
+  const due = bedtime
     ? `your in-bed-by time${form.inBedBy === "" ? "" : `, ${clockText(form.inBedBy)}`}`
     : form.dueByOn && form.dueBy !== ""
       ? `the due-by time, ${clockText(form.dueBy)}`
@@ -81,8 +83,8 @@ export function RemindersStep({
         </button>
       )}
       <small className="muted">
-        {oura
-          ? `Reminders go off every scheduled night before ${due}, even if you're already in bed. Pact can't tell you're in bed until your ring syncs.`
+        {bedtime
+          ? `Reminders go off every scheduled night before ${due}, even if you're already in bed. ${BEDTIME_TEXT[bedtime].remindersHint}`
           : form.kind === "anki"
             ? `Reminders go off on scheduled days before ${due}, unless Pact has already seen the deck finished.`
             : dated

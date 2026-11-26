@@ -1,12 +1,13 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { Json, LedgerResponse, TodayResponse } from "../shared/api.ts";
+import { RUN_PACT_HEALTH_URL, type Json, type LedgerResponse, type TodayResponse } from "../shared/api.ts";
 import type { CheckNowResult, TodayToDoCard } from "../shared/types.ts";
 import { PullToRefresh } from "./pull-to-refresh.tsx";
 import {
   answers,
   comeBackAt,
   endSheetSlides,
+  leaveAndComeBack,
   onOurSide,
   pullDown,
   renderWithUser,
@@ -206,12 +207,14 @@ const OURA_WAITING: TodayResponse = {
   ...TODAY,
   sections: [
     {
-      kind: "no-oura-data",
+      kind: "no-sleep-data",
       cards: [
         {
           pactId: "bed",
           name: "In bed by 11",
           penaltyCents: 1000,
+          evidenceKind: "oura",
+          connectionProblem: null,
           occurrenceDate: "2026-01-04",
           closesAt: "2026-01-05T23:00:00Z",
           tonight: null,
@@ -769,5 +772,79 @@ describe("a Once a month or Every 2 weeks pact on Today", () => {
     const todo = await card("Call Grandma");
     expect(todo.textContent).toContain("Do it by Tue Jan 27 · 7 days left");
     expect(todo.textContent).toContain("You're away Wed Jan 28 – Thu Feb 5");
+  });
+});
+
+describe("an Apple Health night with no data", () => {
+  const APPLE_HEALTH_WAITING: TodayResponse = {
+    ...TODAY,
+    sections: [
+      {
+        kind: "no-sleep-data",
+        cards: [
+          {
+            pactId: "bed",
+            name: "Bed by 12:30am",
+            penaltyCents: 1000,
+            evidenceKind: "apple_health",
+            connectionProblem: null,
+            occurrenceDate: "2026-01-04",
+            closesAt: "2026-01-05T23:00:00Z",
+            tonight: null,
+          },
+        ],
+      },
+    ],
+  };
+
+  test("says No Apple Health data, with Sync now to run Pact Health, and doesn't check Oura", async () => {
+    const spies = stubApi({
+      today: answers(APPLE_HEALTH_WAITING),
+      checkOura: answers({ ok: true }),
+      checkAnki: answers({ ok: true }),
+    });
+    renderToday();
+
+    const night = await card("Bed by 12:30am");
+    expect(within(night).getByText("No Apple Health data")).toBeTruthy();
+    expect(
+      within(night).getByText("Sun night hasn't synced yet. Sync now runs Pact Health on your iPhone to send it."),
+    ).toBeTruthy();
+    expect(within(night).getByRole("link", { name: "Sync now" }).getAttribute("href")).toBe(RUN_PACT_HEALTH_URL);
+    expect(spies.checkOura).not.toHaveBeenCalled();
+  });
+
+  test("loads Today again when Pact comes back to the front, after Sync now", async () => {
+    const spies = stubApi({
+      today: answers(APPLE_HEALTH_WAITING, { ...TODAY, sections: [] }),
+      checkAnki: answers({ ok: true }),
+    });
+    renderToday();
+    await card("Bed by 12:30am");
+
+    leaveAndComeBack();
+
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Bed by 12:30am" })).toBeNull());
+    expect(spies.today).toHaveBeenCalledTimes(2);
+  });
+
+  test("without an upload key, says to set up Apple Health instead of Sync now", async () => {
+    const [section] = APPLE_HEALTH_WAITING.sections as [
+      Extract<TodayResponse["sections"][number], { kind: "no-sleep-data" }>,
+    ];
+    stubApi({
+      today: answers<TodayResponse>({
+        ...APPLE_HEALTH_WAITING,
+        alerts: [{ kind: "connection", service: "apple_health", status: "not-connected" }],
+        sections: [{ ...section, cards: [{ ...section.cards[0]!, connectionProblem: "not-connected" }] }],
+      }),
+      checkAnki: answers({ ok: true }),
+    });
+    renderToday();
+
+    const night = await card("Bed by 12:30am");
+    expect(within(night).getByText("Sun night hasn't synced yet. Set up Apple Health to count it.")).toBeTruthy();
+    expect(within(night).queryByRole("link", { name: "Sync now" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Set up Apple Health" })).toBeTruthy();
   });
 });

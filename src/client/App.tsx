@@ -3,6 +3,7 @@ import { API_PATHS, APP_PATHS, OURA_RECONNECT_PATH, type MeResponse } from "../s
 import type { LocalDate } from "../shared/types.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
+import { AppleHealthPage, lastUploadText } from "./apple-health.tsx";
 import { ChangePact } from "./ChangePact.tsx";
 import { useReloadWhenDue } from "./coming-back.ts";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
@@ -11,7 +12,17 @@ import { EvidencePage } from "./EvidencePage.tsx";
 import { ExcusePage } from "./ExcusePage.tsx";
 import { formatDate, formatDay, initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
-import { BackIcon, CardsIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, RingIcon, TodayIcon } from "./icons.tsx";
+import {
+  BackIcon,
+  CardsIcon,
+  GoogleIcon,
+  HeartIcon,
+  LedgersIcon,
+  PactsIcon,
+  ReviewIcon,
+  RingIcon,
+  TodayIcon,
+} from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
 import type { ItemOpeners } from "./item-page.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
@@ -26,7 +37,7 @@ import { PlanVacation } from "./PlanVacation.tsx";
 import { Pacts } from "./Pacts.tsx";
 import { Review } from "./Review.tsx";
 import { Today } from "./Today.tsx";
-import { Centered, Sheet, loadedData, useLoad, useSend } from "./ui.tsx";
+import { Centered, Sheet, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 import { VacationSection } from "./VacationSection.tsx";
 
 type Session =
@@ -232,6 +243,12 @@ function Shell({
     setProfileOpen(false);
     nav.push({ kind: "notifications" });
   };
+  const openAppleHealth = () => {
+    setProfileOpen(false);
+    nav.push({ kind: "apple-health" });
+  };
+  // A new upload key connects Apple Health: Profile shows it, and the next pact form skips its setup.
+  const reloadProfile = () => void api.me().then(onProfile, () => {});
 
   const pageView = (page: Page): View => {
     switch (page.kind) {
@@ -262,7 +279,10 @@ function Shell({
                 ouraAvailable: profile.ouraAvailable,
                 ankiConnected: profile.connections.some((connection) => connection.service === "anki"),
                 ankiAvailable: profile.ankiAvailable,
+                appleHealthConnected: profile.connections.some((connection) => connection.service === "apple_health"),
+                timezone: profile.timezone,
               }}
+              onAppleHealthConnected={reloadProfile}
               onCancel={nav.back}
               onCreated={(id, name) => nav.replace({ kind: "pact", id, name })}
               onInvite={openProfile}
@@ -335,6 +355,11 @@ function Shell({
               }}
             />
           ),
+        };
+      case "apple-health":
+        return {
+          title: "Apple Health",
+          body: <AppleHealthPage timezone={profile.timezone} onKeyMade={reloadProfile} />,
         };
     }
   };
@@ -429,6 +454,7 @@ function Shell({
           onSetUpNotifications={openNotifications}
           vacationMessage={vacationMessage}
           onPlanVacation={planVacation}
+          onSetUpAppleHealth={openAppleHealth}
           onClose={() => setProfileOpen(false)}
           onProfile={onProfile}
           onSignedOut={onSignedOut}
@@ -518,6 +544,7 @@ function ProfileSheet({
   onSetUpNotifications,
   vacationMessage,
   onPlanVacation,
+  onSetUpAppleHealth,
   onClose,
   onProfile,
   onSignedOut,
@@ -528,6 +555,8 @@ function ProfileSheet({
   /** What the Vacation section says on opening, such as "Sent to Sam for approval." */
   vacationMessage: string | null;
   onPlanVacation: () => void;
+  /** Opens the Apple Health page, from its connection's Set up or Make a new key. */
+  onSetUpAppleHealth: () => void;
   onClose: () => void;
   onProfile: (p: MeResponse) => void;
   onSignedOut: () => void;
@@ -558,7 +587,12 @@ function ProfileSheet({
       <NotificationsSection push={push} onSetUp={onSetUpNotifications} />
 
       {profile.connections.length > 0 && (
-        <ConnectionsSection connections={profile.connections} timezone={profile.timezone} onProfile={onProfile} />
+        <ConnectionsSection
+          connections={profile.connections}
+          timezone={profile.timezone}
+          onProfile={onProfile}
+          onSetUpAppleHealth={onSetUpAppleHealth}
+        />
       )}
 
       <section className="stack">
@@ -605,25 +639,35 @@ function ProfileSheet({
 }
 
 /**
- * The connections the owner has made (Oura, AnkiWeb), each with its status.
- * Reconnect when Oura refused its tokens or AnkiWeb its login (AnkiWeb's
- * signs in again on the spot); Disconnect first warns how many
- * Active pacts use it, since their days count as Missed until it's back.
+ * The connections the owner has made (Oura, AnkiWeb, Apple Health), each
+ * with its status. Reconnect when Oura refused its tokens or AnkiWeb its
+ * login (AnkiWeb's signs in again on the spot); Apple Health shows its last
+ * upload and opens its page to set up or make a new key. Disconnect first
+ * warns how many Active pacts use it, since their days count as Missed
+ * until it's back.
  */
 function ConnectionsSection({
   connections,
   timezone,
   onProfile,
+  onSetUpAppleHealth,
 }: {
   connections: MeResponse["connections"];
   timezone: string;
   onProfile: (p: MeResponse) => void;
+  onSetUpAppleHealth: () => void;
 }) {
   return (
     <section className="stack">
       <div className="label">Connections</div>
       {connections.map((connection) => (
-        <ConnectionRow key={connection.service} connection={connection} timezone={timezone} onProfile={onProfile} />
+        <ConnectionRow
+          key={connection.service}
+          connection={connection}
+          timezone={timezone}
+          onProfile={onProfile}
+          onSetUpAppleHealth={onSetUpAppleHealth}
+        />
       ))}
     </section>
   );
@@ -631,7 +675,8 @@ function ConnectionsSection({
 
 /**
  * What each service's row says, how it disconnects, and how it reconnects:
- * Oura through its own sign-in page, AnkiWeb with a form right here.
+ * Oura through its own sign-in page, AnkiWeb with a form right here, Apple
+ * Health on its setup page (it never needs reconnecting: its key is only replaced).
  */
 const SERVICES = {
   oura: {
@@ -642,6 +687,7 @@ const SERVICES = {
     iconClass: "k-ring",
     disconnect: () => api.disconnectOura(),
     reconnect: { kind: "link", href: OURA_RECONNECT_PATH },
+    again: "reconnect",
   },
   anki: {
     name: "AnkiWeb",
@@ -651,6 +697,17 @@ const SERVICES = {
     iconClass: "k-anki",
     disconnect: () => api.disconnectAnki(),
     reconnect: { kind: "form" },
+    again: "reconnect",
+  },
+  apple_health: {
+    name: "Apple Health",
+    short: "Apple Health",
+    unit: "nights",
+    icon: <HeartIcon />,
+    iconClass: "k-ring",
+    disconnect: () => api.disconnectAppleHealth(),
+    reconnect: { kind: "link", href: APP_PATHS.appleHealth },
+    again: "set it up again",
   },
 } as const;
 
@@ -658,11 +715,14 @@ function ConnectionRow({
   connection,
   timezone,
   onProfile,
+  onSetUpAppleHealth,
 }: {
   connection: MeResponse["connections"][number];
   timezone: string;
   onProfile: (p: MeResponse) => void;
+  onSetUpAppleHealth: () => void;
 }) {
+  const now = useNow();
   // Asking: Disconnect's warning is open. Reconnecting: AnkiWeb's sign-in form is.
   const [mode, setMode] = useState<"idle" | "asking" | "reconnecting">("idle");
   const service = SERVICES[connection.service];
@@ -695,6 +755,9 @@ function ConnectionRow({
           <span className="rt">
             <b>{service.name}</b>
             <small>Connected {formatDay(connection.connectedAt, timezone)}</small>
+            {connection.lastUpload !== undefined && (
+              <small>{lastUploadText(connection.lastUpload, now, timezone)}</small>
+            )}
           </span>
           {connection.status === "connected" ? (
             <span className="chip c-ok">Connected</span>
@@ -711,11 +774,12 @@ function ConnectionRow({
                 <b>
                   {n} active {n === 1 ? "pact uses" : "pacts use"} {service.short}.
                 </b>{" "}
-                {n === 1 ? "Its" : "Their"} {service.unit} will count as Missed until you reconnect.
+                {n === 1 ? "Its" : "Their"} {service.unit} will count as Missed until you {service.again}.
               </>
             ) : (
               `Disconnect ${service.short}? You can connect it again when you next create a pact that uses it.`
             )}
+            {connection.service === "apple_health" && " Your upload URL stops working."}
           </span>
           <div className="row2">
             <button className="btn sm" disabled={busy} onClick={() => setMode("idle")}>
@@ -730,6 +794,11 @@ function ConnectionRow({
         <AnkiReconnectForm onReconnected={() => void reconnected()} onCancel={() => setMode("idle")} />
       ) : (
         <div className="row2">
+          {connection.service === "apple_health" && (
+            <button className={connection.lastUpload ? "btn sm" : "btn sm primary"} onClick={onSetUpAppleHealth}>
+              {connection.lastUpload ? "Make a new key" : "Set up"}
+            </button>
+          )}
           {connection.status === "needs-reconnecting" &&
             (service.reconnect.kind === "link" ? (
               <a className="btn sm primary" href={service.reconnect.href}>

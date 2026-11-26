@@ -54,10 +54,19 @@ _Avoid_: Instance, check-in, day, session
 When an occurrence is due and judged: on Fixed days, the due-by time or in-bed-by time, or else midnight; for Weekly count, the end of Sunday; for Every 2 weeks and Once a month, the end of the period's last day; for One-time, the deadline.
 
 **In-bed-by time**:
-The time an Oura Ring pact's owner must be in bed by each scheduled night, such as 12:00am. An evening time (from 6pm) is that evening; an earlier one is the morning after. It's the night's due time.
+The time a bedtime pact's owner must be in bed by each scheduled night, such as 12:00am. An evening time (from 6pm) is that evening; an earlier one is the morning after. It's the night's due time.
+
+**Bedtime pact**:
+A pact whose occurrences are nights, judged from when the owner got into bed rather than from evidence they submit: an Oura Ring or Apple Health pact. Its terms have an in-bed-by time and Fixed days.
+
+**Main sleep**:
+A sleep that can decide a night: Oura's long sleep, or an Apple Health sleep session of 3 hours or more. A shorter one, such as a nap, never does.
+
+**Sleep session**:
+One sleep in Apple Health samples: the samples that aren't Awake (In Bed counts), merged where they overlap or are at most an hour apart. It runs from its earliest start to its latest end, and comes from the app of its earliest sample, such as Oura or Google Health.
 
 **Night**:
-A bedtime pact's occurrence: the night of Tue Oct 21 runs from 6pm Tuesday to 6pm Wednesday. Oura's first main sleep starting in it decides it; with none by 6pm Wednesday, it's Missed.
+A bedtime pact's occurrence: the night of Tue Oct 21 runs from 6pm Tuesday to 6pm Wednesday. The first main sleep starting in it decides it; with none by 6pm Wednesday, it's Missed.
 
 **Due-by time**:
 An optional time of day, such as 9:00am, that a Camera pact's evidence, or an Anki pact's deck, is due by instead of midnight. On a recurring pact it applies each day; on a One-time pact it's the time of the deadline.
@@ -88,12 +97,19 @@ Proof that an occurrence was Satisfied. It's either pulled automatically (e.g. s
 _Avoid_: Proof, submission, check-in
 
 **Evidence kind**:
-How a pact's evidence is gathered. It's the first thing picked when creating a pact and never changes. There are three: **Camera** (the owner takes a photo and a reviewer checks it), **Oura Ring** (the ring reports when the owner got into bed, so there's nothing to submit or review) and **Anki** (the owner finishes a deck each day and Pact checks AnkiWeb, so there's nothing to submit or review).
+How a pact's evidence is gathered. It's the first thing picked when creating a pact and never changes. There are four: **Camera** (the owner takes a photo and a reviewer checks it), **Oura Ring** (the ring reports when the owner got into bed, so there's nothing to submit or review), **Anki** (the owner finishes a deck each day and Pact checks AnkiWeb, so there's nothing to submit or review) and **Apple Health** (the owner's Pact Health Shortcut sends the sleep their tracker wrote into Apple Health, judged as an Oura Ring night is).
 _Avoid_: Evidence type, data source, source
 
 **Connection**:
-A link between a Pact account and an outside service that supplies evidence, such as Oura or AnkiWeb. Some evidence kinds need one; Camera doesn't.
+A link between a Pact account and an outside service that supplies evidence, such as Oura, AnkiWeb or Apple Health. Some evidence kinds need one; Camera doesn't. Apple Health's is the account's upload key.
 _Avoid_: Integration, connector, link
+
+**Upload key**:
+The secret that lets the owner's Pact Health Shortcut send Apple Health samples to their account, shown once inside their upload URL. Having one is the Apple Health connection; making a new one stops the old one working.
+_Avoid_: API key, upload token
+
+**Pact Health Shortcut**:
+The Shortcut, named exactly Pact Health, that the owner builds on their iPhone from the Apple Health setup page. It reads the last 3 days of sleep and mindful minutes from Apple Health and posts them to their upload URL. Automations run it, and so does Sync now.
 
 **Excuse**:
 The owner's request to have one or more occurrences of one pact treated as excused, either because there was a good reason not to keep them or because the evidence was wrong.

@@ -22,7 +22,7 @@ export interface Connections {
    * adapter forgets the tokens. AnkiWeb's host key and collection copy go
    * once any check already running for the account has finished.
    */
-  disconnect(accountId: AccountId, service: ConnectionService): Promise<void>;
+  disconnect(accountId: AccountId, service: Exclude<ConnectionService, "apple_health">): Promise<void>;
 }
 
 export function connections({

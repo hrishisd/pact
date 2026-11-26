@@ -27,7 +27,7 @@ const SETTING_COPY: Record<NotificationSetting, { label: string; hint: string }>
   "overdue-bill": { label: "Overdue bill", hint: "A bill of yours is overdue, or one of a friend's you review" },
   "connection-problem": {
     label: "Connection problem",
-    hint: "Oura or AnkiWeb needs reconnecting, or last night's Oura data hasn't synced by 3pm",
+    hint: "Oura or AnkiWeb needs reconnecting, or last night's sleep data hasn't synced by 3pm",
   },
   "reviewed-pact": {
     label: "Pacts you review",

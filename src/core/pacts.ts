@@ -4,6 +4,7 @@
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
 import { money, scheduleText } from "../shared/format.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import type {
   AccountId,
@@ -179,7 +180,7 @@ export function deletePact(ctx: CoreContext, accountId: AccountId, pactId: strin
   if (!row) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(row, ctx.clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
   // In its window a pact can have evidence, reminders sent, a day an Anki check judged
-  // Satisfied and a night's first sleep from Oura. It has no penalty, since nothing is due
+  // Satisfied and a night's first sleep. It has no penalty, since nothing is due
   // within an hour of creation, and no excuse, vacation or change request, which the
   // window refuses.
   removeEvidence(ctx, pactId, () => true);
@@ -368,6 +369,7 @@ export const SERVICE_OF_KIND: Record<EvidenceKind, ConnectionService | null> = {
   camera: null,
   oura: "oura",
   anki: "anki",
+  apple_health: "apple_health",
 };
 
 /** An Active pact as Today and the Pacts tab read it. */
@@ -456,8 +458,8 @@ export function checkedPact(
 }
 
 /**
- * Where `pact`'s evidence comes from, or why it can't. Creating an Oura Ring
- * or Anki pact needs its connection, and an Anki pact a deck from the owner's
+ * Where `pact`'s evidence comes from, or why it can't. Creating an Oura Ring,
+ * Anki or Apple Health pact needs its connection, and an Anki pact a deck from the owner's
  * deck list. An edit or a change (`existing` given) needs neither, unless it
  * gives an Anki pact another deck: its own deck counts as known even with
  * the connection gone. An Anki pact's day turns at the collection's rollover
@@ -475,6 +477,11 @@ export function evidenceSource(
     case "oura":
       if (existing === undefined && !hasConnection(ctx, ownerId, "oura")) {
         return { ok: false, reason: "oura-not-connected" };
+      }
+      return { ok: true, ankiDeckId: null, ankiRollover: null };
+    case "apple_health":
+      if (existing === undefined && !hasConnection(ctx, ownerId, "apple_health")) {
+        return { ok: false, reason: "apple-health-not-connected" };
       }
       return { ok: true, ankiDeckId: null, ankiRollover: null };
     case "anki": {
@@ -591,9 +598,9 @@ export function termsByKind(ctx: CoreContext, pact: PactRow): TermsByKind {
   const schedule = scheduleOf(pact.schedule);
   if (pact.evidence_kind === "camera") return { evidenceKind: "camera", schedule, dueBy: pact.due_by };
   if (schedule.kind !== "fixed-days") throw new Error(`${pact.evidence_kind} pact ${pact.id} isn't on Fixed days`);
-  if (pact.evidence_kind === "oura") {
-    if (pact.in_bed_by === null) throw new Error(`Oura Ring pact ${pact.id} has no in-bed-by time`);
-    return { evidenceKind: "oura", schedule, inBedBy: pact.in_bed_by };
+  if (isBedtimeKind(pact.evidence_kind)) {
+    if (pact.in_bed_by === null) throw new Error(`bedtime pact ${pact.id} has no in-bed-by time`);
+    return { evidenceKind: pact.evidence_kind, schedule, inBedBy: pact.in_bed_by };
   }
   const anki = ankiTerms(ctx, pact);
   if (!anki) throw new Error(`Anki pact ${pact.id} has no deck`);
@@ -627,8 +634,10 @@ export function moveOneTimeOccurrence(ctx: CoreContext, pactId: string, from: Lo
   if (from === to) return;
   ctx.db
     .prepare(
-      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at)
-       SELECT pact_id, ?, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at FROM occurrence
+      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, bedtime_source, bedtime_arrived_at,
+                               miss_accepted_at)
+       SELECT pact_id, ?, outcome, judged_at, bedtime_start, bedtime_source, bedtime_arrived_at, miss_accepted_at
+       FROM occurrence
        WHERE pact_id = ? AND date = ?`,
     )
     .run(to, pactId, from);

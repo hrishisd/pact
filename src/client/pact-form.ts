@@ -4,6 +4,7 @@
 
 import { parseDatedReminder } from "../shared/calendar.ts";
 import type { Json } from "../shared/api.ts";
+import { isBedtimeKind, isBedtimePact } from "../shared/evidence-kinds.ts";
 import type { EvidenceKind, PactChange, PactTerms, Schedule, Weekday } from "../shared/types.ts";
 import { termsOfKind, type Term } from "./change-terms.tsx";
 import { centsInputText, parseCents } from "./format.ts";
@@ -12,7 +13,7 @@ type Pact = Json<PactTerms>;
 
 export interface Form {
   kind: EvidenceKind;
-  /** Oura Ring: "HH:MM" as the time field gives it, or "" until picked. */
+  /** Bedtime pacts: "HH:MM" as the time field gives it, or "" until picked. */
   inBedBy: string;
   /** Anki only: the deck's id, or null until picked, and its full name as the deck list gave it. */
   ankiDeckId: string | null;
@@ -58,7 +59,7 @@ export interface Form {
   reminders: string[];
 }
 
-/** The kind of schedule the form makes: only Camera has the others, so Oura and Anki make Fixed days. */
+/** The kind of schedule the form makes: only Camera has the others, so bedtime and Anki pacts make Fixed days. */
 export function scheduleKindOf(form: Pick<Form, "kind" | "scheduleKind">): Schedule["kind"] {
   return form.kind === "camera" ? form.scheduleKind : "fixed-days";
 }
@@ -114,7 +115,7 @@ export function formOf(pact: Pact): Form {
 
 /** The form's in-bed-by and due-by fields, as a pact's terms have them. */
 function dueTimesForm(terms: Pact): Pick<Form, "inBedBy" | "dueByOn" | "dueBy"> {
-  if (terms.evidenceKind === "oura") return { inBedBy: terms.inBedBy, dueByOn: false, dueBy: "" };
+  if (isBedtimePact(terms)) return { inBedBy: terms.inBedBy, dueByOn: false, dueBy: "" };
   return { inBedBy: "", dueByOn: terms.dueBy !== null, dueBy: terms.dueBy ?? "" };
 }
 
@@ -161,7 +162,7 @@ export function termsOfForm(form: Form): Omit<PactChange, "note"> | { problem: "
   return {
     name: form.name.trim(),
     description: form.kind === "camera" ? form.description.trim() : "",
-    ...(form.kind === "oura" && { inBedBy: form.inBedBy }),
+    ...(isBedtimeKind(form.kind) && { inBedBy: form.inBedBy }),
     ...(form.kind === "anki" && form.ankiDeckId !== null && { ankiDeckId: form.ankiDeckId }),
     ...optionalTimes(form),
     schedule: scheduleOf(form),

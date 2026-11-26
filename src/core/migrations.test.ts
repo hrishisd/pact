@@ -531,3 +531,63 @@ function shape(db: ReturnType<typeof openDatabase>): unknown {
       .all(),
   };
 }
+
+test("migration 39: pacts and connections keep their rows and references, and take Apple Health", () => {
+  // At migration 38: an Oura Ring pact with a judged night, and an Oura connection.
+  const seeded = openDatabase(path, migrations.slice(0, 38));
+  seeded.exec(`
+    INSERT INTO account (id, email, email_key, name, timezone, created_at)
+      VALUES ('owner', 'owner@example.test', 'owner@example.test', 'owner', 'America/New_York', '2026-01-01T00:00:00Z');
+    INSERT INTO recipient (id, owner_account_id, name, created_at)
+      VALUES ('sam', 'owner', 'Sam', '2026-01-01T00:00:00Z');
+    INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                      recipient_id, stage, first_occurrence, created_at, judged_through, in_bed_by, reminders)
+      VALUES ('bed', 'owner', 'In bed by midnight', '', 'oura',
+              '{"kind":"fixed-days","days":["mon","tue","wed","thu","fri","sat","sun"]}', 500,
+              'sam', 'active', '2026-01-05', '2026-01-01T00:00:00Z', '2026-01-05', '00:00', '["22:00"]');
+    INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, bedtime_arrived_at)
+      VALUES ('bed', '2026-01-05', 'satisfied', '2026-01-06T12:00:00Z', '2026-01-05T23:40:00-05:00', '2026-01-06T12:00:00Z');
+    INSERT INTO connection (account_id, service, status, connected_at)
+      VALUES ('owner', 'oura', 'connected', '2026-01-02T00:00:00Z');
+  `);
+  const pactColumns = seeded.pragma("table_info(pact)");
+  const pactBefore = seeded.prepare("SELECT * FROM pact").get() as Record<string, unknown>;
+  const occurrenceBefore = seeded.prepare("SELECT * FROM occurrence").get() as Record<string, unknown>;
+  const connectionBefore = seeded.prepare("SELECT * FROM connection").all();
+  seeded.close();
+
+  const db = openDatabase(path, migrations.slice(0, 39));
+
+  // Every column kept, in order; only the evidence kind's CHECK changed.
+  expect(db.pragma("table_info(pact)")).toEqual(pactColumns);
+  expect(db.prepare("SELECT * FROM pact").get()).toEqual(pactBefore);
+  expect(db.prepare("SELECT * FROM occurrence").get()).toEqual({ ...occurrenceBefore, bedtime_source: null });
+  expect(db.prepare("SELECT * FROM connection").all()).toEqual(connectionBefore);
+  expect(db.pragma("index_list(pact)")).toEqual([
+    expect.objectContaining({ name: "pact_owner" }),
+    expect.objectContaining({ name: "sqlite_autoindex_pact_1" }),
+  ]);
+  expect(db.pragma("foreign_key_check")).toEqual([]);
+
+  db.prepare(
+    `INSERT INTO pact (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                       recipient_id, stage, first_occurrence, created_at, in_bed_by)
+     VALUES ('health', 'owner', 'Bed by 11', '', 'apple_health', '{"kind":"fixed-days","days":["tue"]}', 500, 'sam',
+             'active', '2026-01-06', '2026-01-01T00:00:00Z', '23:00')`,
+  ).run();
+  db.prepare(
+    "INSERT INTO connection (account_id, service, status, connected_at) VALUES ('owner', 'apple_health', 'connected', ?)",
+  ).run("2026-01-03T00:00:00Z");
+  expect(() =>
+    db
+      .prepare(
+        "INSERT INTO connection (account_id, service, status, connected_at) VALUES ('owner', 'fitbit', 'connected', ?)",
+      )
+      .run("2026-01-03T00:00:00Z"),
+  ).toThrow(/CHECK constraint failed/);
+  // The references to the rebuilt pact are enforced.
+  expect(() => db.prepare("INSERT INTO occurrence (pact_id, date) VALUES ('none', '2026-01-05')").run()).toThrow(
+    /FOREIGN KEY constraint failed/,
+  );
+  db.close();
+});

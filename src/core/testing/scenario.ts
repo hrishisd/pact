@@ -30,7 +30,7 @@ import { wallTime } from "../calendar.ts";
 import { addDays } from "../../shared/calendar.ts";
 import { createPactCore, type AccountView, type PactCore } from "../core.ts";
 import { operatorAlerts, type OperatorAlerts } from "../operator-alerts.ts";
-import type { AccountId, ChangePactResult, LocalDate, SignInResult } from "../../shared/types.ts";
+import type { AccountId, AppleHealthUpload, ChangePactResult, LocalDate, SignInResult } from "../../shared/types.ts";
 import {
   FakeAnkiSource,
   FakeClock,
@@ -181,8 +181,17 @@ export function scenario(): Scenario {
         if (typeof value !== "function") return value;
         // Commands don't wait for delivery; a scenario's next line may assert on it.
         return (...args: unknown[]) => {
+          // The verdict check works out Apple Health nights from the uploads it saw. Other
+          // commands don't read the clock here: a test may fail its nth read.
+          const calledAt = prop === "uploadAppleHealth" ? clock.now() : null;
           const result = value.apply(view, args);
           if (!(result instanceof Promise)) return result;
+          if (calledAt !== null) {
+            void result.then(
+              () => watch.appleHealthUpload(id, calledAt, args[0] as AppleHealthUpload),
+              () => {},
+            );
+          }
           return result
             .finally(() => core.deliveriesSettled())
             .then((value: unknown) => {

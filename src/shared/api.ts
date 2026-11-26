@@ -4,6 +4,9 @@
 import type {
   AccountId,
   AnkiDecksResult,
+  AppleHealthKey,
+  AppleHealthSampleFields,
+  AppleHealthStatus,
   CheckNowResult,
   AcceptExcuseRejectionResult,
   AcceptVacationRejectionResult,
@@ -160,6 +163,8 @@ export const APP_PATHS = {
   profile: "/profile",
   /** An invite link. It shows before sign-in, so the app reads it apart from the other pages. */
   invite: (token: string) => `/invite/${encodeURIComponent(token)}`,
+  /** Apple Health setup: the upload key and URL, the Pact Health Shortcut's steps, the last upload. From Create pact and Profile. */
+  appleHealth: "/apple-health",
 } as const;
 
 /**
@@ -185,6 +190,19 @@ export const API_PATHS = {
   ankiCheck: "/api/anki/check",
   /** POST (no body): remove the account's AnkiWeb connection; answers with the profile. */
   ankiDisconnect: "/api/anki/disconnect",
+  /** GET: the account's Apple Health connection and last upload, for the setup page. */
+  appleHealth: "/api/apple-health",
+  /** POST (no body): make a new upload key, which replaces the old one; answers with the upload URL, shown once. */
+  appleHealthKey: "/api/apple-health/key",
+  /** POST (no body): delete the account's upload key, which disconnects Apple Health; answers with the profile. */
+  appleHealthDisconnect: "/api/apple-health/disconnect",
+  /**
+   * POST from the Pact Health Shortcut, not the app: Apple Health samples,
+   * one `type|start|end|value|source` per line (or JSON, see
+   * `AppleHealthSamplesRequest`). Authenticated by the upload key in `?key=`
+   * or `Authorization: Bearer`, never a session; answers in plain text.
+   */
+  appleHealthSamples: "/api/apple-health/samples",
   timezone: "/api/me/timezone",
   today: "/api/today",
   invites: "/api/invites",
@@ -578,6 +596,47 @@ export type CheckAnkiResponse = CheckNowResult;
 
 /** POST /api/anki/disconnect: the profile, now without its AnkiWeb connection. */
 export type DisconnectAnkiResponse = MeResponse;
+
+/** GET /api/apple-health: whether the account has an upload key, and the last upload. */
+export type AppleHealthResponse = Json<AppleHealthStatus>;
+
+/** POST /api/apple-health/key: the new upload URL, with the key in it. Pact can't show it again. */
+export type MakeAppleHealthKeyResponse = Json<AppleHealthKey>;
+
+/** POST /api/apple-health/disconnect: the profile, now without its Apple Health connection. */
+export type DisconnectAppleHealthResponse = MeResponse;
+
+/**
+ * POST /api/apple-health/samples with a body that starts with "{": the
+ * samples as JSON, for a Shortcut that builds that instead of lines, whatever
+ * its Content-Type. Any other body is read as text, one
+ * `type|start|end|value|source` per line.
+ * Over APPLE_HEALTH_MAX_BODY_BYTES or APPLE_HEALTH_MAX_LINES (samples, for
+ * JSON) is a 400; a missing or unknown key a 401. Each answer is plain text
+ * for the person reading it in Shortcuts.
+ */
+export interface AppleHealthSamplesRequest {
+  /**
+   * Each sample is read on its own: a field left out or null is "", and a
+   * number is read as its text. A sample of another shape (not an object, or
+   * a field that's an object) is skipped and counted, as an unreadable line is.
+   */
+  samples: (Omit<AppleHealthSampleFields, "value" | "source"> &
+    Partial<Pick<AppleHealthSampleFields, "value" | "source">>)[];
+}
+
+/**
+ * Opens the Shortcuts app and runs the owner's Pact Health Shortcut, which
+ * uploads their last 3 days of samples: Sync now on Today and Run Pact
+ * Health on the setup page.
+ */
+export const RUN_PACT_HEALTH_URL = "shortcuts://run-shortcut?name=Pact%20Health";
+
+/** The largest upload the Pact Health Shortcut may send: 1 MB. */
+export const APPLE_HEALTH_MAX_BODY_BYTES = 1024 * 1024;
+
+/** The most lines (or JSON samples) one upload may have. */
+export const APPLE_HEALTH_MAX_LINES = 5000;
 
 /** GET /api/today */
 export type TodayResponse = Json<Today>;

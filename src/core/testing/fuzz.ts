@@ -16,10 +16,12 @@
 // asked (see the top of that file).
 
 import { addDays } from "../../shared/calendar.ts";
+import { isBedtimeKind } from "../../shared/evidence-kinds.ts";
 import { termsOf } from "../../shared/terms.ts";
 import {
   MAX_TEXT_CHARS,
   WEEKDAYS,
+  type AppleHealthSampleFields,
   type NewPact,
   type PactChange,
   type PactTerms,
@@ -78,8 +80,9 @@ const WEIGHTS = {
   "accept-vacation-rejection": 1,
   // Money.
   "record-payment": 4,
-  // Oura and AnkiWeb.
+  // Oura, AnkiWeb and Apple Health.
   sleep: 3,
+  "apple-health-upload": 3,
   "anki-counts": 3,
   "check-source": 2,
   "connect-or-disconnect": 1,
@@ -107,7 +110,7 @@ export interface Setup {
   outages: boolean;
   /** Whether people change their timezone during the run. */
   timezoneChanges: boolean;
-  /** Whether Oura Ring and Anki pacts are made. Off, the run is Camera only. */
+  /** Whether Oura Ring, Anki and Apple Health pacts are made. Off, the run is Camera only. */
   automatic: boolean;
 }
 
@@ -249,6 +252,7 @@ export class World {
       if (!setup.automatic) continue;
       await person.connectOura();
       await person.connectAnki();
+      await person.makeAppleHealthKey();
       DECKS.forEach((id, i) => s.ankiSource.setDeck(person.id, { id, name: `Deck ${i + 1}`, review: 20 }));
       this.setAnkiDay(person);
       await person.ankiDecks();
@@ -256,7 +260,7 @@ export class World {
     await s.advanceTo(this.now().toISOString());
     this.note(
       `start: owner in ${setup.timezones[0]}, bea in ${setup.timezones[1]}, cal in ${setup.timezones[2]}` +
-        (setup.automatic ? ", Oura and AnkiWeb connected" : ""),
+        (setup.automatic ? ", Oura, AnkiWeb and Apple Health connected" : ""),
     );
   }
 
@@ -672,6 +676,15 @@ export class World {
         this.note(`Oura has ${who.name} in bed at ${period.bedtime_start} (${period.type})`);
         return;
       }
+      case "apple-health-upload": {
+        if (!this.setup.automatic) return;
+        const samples = appleHealthSamples(this.now(), this.timezoneOf(who), [a, b, c, d]);
+        const unreadableLines = d % 11 === 0 ? 1 + (d % 3) : 0;
+        await this.command(who, `uploadAppleHealth(${samples.length} samples, ${unreadableLines} unreadable)`, () =>
+          who.uploadAppleHealth({ samples, unreadableLines }),
+        );
+        return;
+      }
       case "anki-counts": {
         if (!this.setup.automatic) return;
         const left = a % 3 === 0 ? 0 : a % 40;
@@ -690,6 +703,12 @@ export class World {
       }
       case "connect-or-disconnect": {
         if (!this.setup.automatic || a % 2 === 0) return;
+        if (b % 3 === 2) {
+          // Apple Health: a new key replaces the old one; disconnecting deletes it.
+          if (c % 2 === 0) await this.command(who, "disconnectAppleHealth()", () => who.disconnectAppleHealth());
+          else await this.command(who, "makeAppleHealthKey()", () => who.makeAppleHealthKey());
+          return;
+        }
         const oura = b % 2 === 0;
         const source = oura ? s.ouraSource : s.ankiSource;
         switch (c % 4) {
@@ -749,8 +768,10 @@ export class World {
     d: number,
     kind?: NewPact["evidenceKind"],
   ): NewPact | undefined {
-    const roll = a % 10;
-    const evidenceKind = kind ?? (!this.setup.automatic || roll < 8 ? "camera" : roll === 8 ? "oura" : "anki");
+    const roll = a % 20;
+    const evidenceKind =
+      kind ??
+      (!this.setup.automatic || roll < 16 ? "camera" : roll === 16 ? "oura" : roll === 17 ? "apple_health" : "anki");
     const today = this.today(who);
     const recipient = pick(who.recipients(), b);
     if (!recipient) return undefined;
@@ -781,9 +802,9 @@ export class World {
       penaltyCents: d % 23 === 0 ? 0 : PENALTIES[d % PENALTIES.length]!,
       recipientId: recipient.id,
       reviewerIds: (reviewers.length > 0 || d % 19 === 0 ? reviewers : [friends[c % friends.length]!]).map((r) => r.id),
-      ...(evidenceKind === "oura" && { inBedBy: ["22:30", "23:00", "00:00", "01:00"][(d >>> 8) % 4]! }),
+      ...(isBedtimeKind(evidenceKind) && { inBedBy: ["22:30", "23:00", "00:00", "01:00"][(d >>> 8) % 4]! }),
       ...(evidenceKind === "anki" && { ankiDeckId: DECKS[(d >>> 8) % DECKS.length]! }),
-      ...(evidenceKind !== "oura" && dueBy !== undefined && { dueBy }),
+      ...(!isBedtimeKind(evidenceKind) && dueBy !== undefined && { dueBy }),
       ...(startDate !== undefined && { startDate }),
       ...(endDate !== undefined && { endDate }),
       ...((d >>> 12) % 3 === 0 && { reminders: this.reminders(who, schedule, d >>> 14, c >>> 16) }),
@@ -825,7 +846,7 @@ export class World {
           return;
         }
         case 2:
-          if (pact.evidenceKind === "oura") change.inBedBy = ["22:00", "23:00", "00:00", "01:30"][n % 4]!;
+          if (isBedtimeKind(pact.evidenceKind)) change.inBedBy = ["22:00", "23:00", "00:00", "01:30"][n % 4]!;
           else if (n % 4 === 0) delete change.dueBy;
           else change.dueBy = CLOCK_TIMES[n % CLOCK_TIMES.length]!;
           return;
@@ -888,6 +909,46 @@ function sleepPeriod(start: Date, timezone: string, type: OuraSleepPeriod["type"
     time_in_bed: 7 * 60 * 60,
     total_sleep_duration: 6 * 60 * 60,
   };
+}
+
+/**
+ * What a Pact Health Shortcut uploads: a night's sleep, starting some time
+ * in the 18 hours before `now`, as stages with gaps (some over an hour),
+ * some Awake, sometimes as short as a nap, written with `timezone`'s offset
+ * or as UTC, from one of a few apps; sometimes a mindful session, a sample
+ * of another type, one too old, one still to come, one whose dates can't be
+ * read, and a sample twice.
+ */
+function appleHealthSamples(
+  now: Date,
+  timezone: string,
+  [a, b, c, d]: [number, number, number, number],
+): AppleHealthSampleFields[] {
+  const source = ["Oura", "Google Health", "Apple Watch", ""][b % 4]!;
+  const text = (instant: Date) =>
+    c % 5 === 0 ? instant.toISOString() : sleepPeriod(instant, timezone, "long_sleep").bedtime_start;
+  const sample = (start: Date, minutes: number, value: string, type = "sleep") => ({
+    type,
+    start: text(start),
+    end: text(new Date(start.getTime() + minutes * MINUTE)),
+    value,
+    source,
+  });
+  const samples: AppleHealthSampleFields[] = [];
+  let at = new Date(now.getTime() - (a % (18 * 60)) * MINUTE);
+  for (let stage = 0; stage < 1 + (b % 5); stage++) {
+    const minutes = 20 + ((c >>> (stage * 3)) % 7) * 30;
+    const value = (d >>> stage) % 6 === 0 ? "Awake" : ["In Bed", "Core", "Deep", "REM", "Asleep"][(c >>> stage) % 5]!;
+    samples.push(sample(at, minutes, value));
+    at = new Date(at.getTime() + (minutes + ((d >>> (stage * 2)) % 4) * 25) * MINUTE);
+  }
+  if (d % 3 === 0) samples.push(sample(new Date(now.getTime() - 20 * HOUR), 10, "", "mindful"));
+  if (d % 5 === 0) samples.push(sample(now, 30, "60", "heart_rate"));
+  if (d % 7 === 0) samples.push(sample(new Date(now.getTime() - 16 * 24 * HOUR), 420, "Core"));
+  if (d % 13 === 0) samples.push(sample(new Date(now.getTime() + 10 * MINUTE), 420, "Core"));
+  if (d % 17 === 0) samples.push({ type: "sleep", start: "last night", end: "this morning", value: "Core", source });
+  if (a % 4 === 0) samples.push(samples[0]!);
+  return samples;
 }
 
 function names(people: AccountHandle[]): string {

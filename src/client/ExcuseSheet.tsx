@@ -14,6 +14,7 @@ import {
   MAX_EXCUSE_PHOTOS,
   MAX_EXCUSE_SPAN_DAYS,
   MAX_TEXT_CHARS,
+  type BedtimeKind,
   type ExcuseDatesRefusal,
   type ExcuseDay,
   type ExcuseOptions,
@@ -23,6 +24,7 @@ import {
   type PeriodKind,
 } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT, uploadFailureText } from "./api.ts";
+import { bedtimeKindOf } from "./bedtime-text.ts";
 import { Chip, DayChip, SKIP_REASON_TEXT, excuseDayText, presentOccurrence } from "./excuse-days.tsx";
 import {
   EDIT_WINDOW_TEXT,
@@ -363,14 +365,14 @@ function DayDates({
   const [more, setMore] = useState(false);
   const [through, setThrough] = useState("");
   const period = periodKindOfSchedule(pact.schedule);
-  const oura = pact.evidenceKind === "oura";
+  const bedtime = bedtimeKindOf(pact.evidenceKind);
   const later = preview ? onlyAfter(preview, day) : null;
   return (
     <>
       <DayCard
         day={day}
         period={period}
-        oura={oura}
+        bedtime={bedtime}
         preview={preview}
         reviewers={reviewers}
         timezone={timezone}
@@ -399,7 +401,7 @@ function DayDates({
                 <DayList
                   preview={later}
                   period={period}
-                  oura={oura}
+                  bedtime={bedtime}
                   timezone={timezone}
                   now={now}
                   empty={noDaysText(pact, addDays(day, 1), through)}
@@ -459,7 +461,7 @@ function PactPageDates({
     onDates(pactPageDates(changed));
   };
   const period = periodKindOfSchedule(pact.schedule);
-  const oura = pact.evidenceKind === "oura";
+  const bedtime = bedtimeKindOf(pact.evidenceKind);
   return (
     <>
       <div className="field">
@@ -475,9 +477,9 @@ function PactPageDates({
               />
               <span className="rt">
                 <b>{excuseDayText(d)}</b>
-                <small>{recentNote(d, now, timezone, period, oura)}</small>
+                <small>{recentNote(d, now, timezone, period, bedtime)}</small>
               </span>
-              <DayChip status={d.status} now={now} timezone={timezone} period={period} oura={oura} />
+              <DayChip status={d.status} now={now} timezone={timezone} period={period} bedtime={bedtime} />
             </label>
           ))}
           {daysAhead && (
@@ -533,7 +535,7 @@ function PactPageDates({
                 <DayList
                   preview={preview}
                   period={period}
-                  oura={oura}
+                  bedtime={bedtime}
                   timezone={timezone}
                   now={now}
                   empty={noDaysText(pact, aheadFrom, aheadTo)}
@@ -553,7 +555,7 @@ function PactPageDates({
 function DayCard({
   day,
   period,
-  oura,
+  bedtime,
   preview,
   reviewers,
   timezone,
@@ -562,8 +564,8 @@ function DayCard({
   day: string;
   /** A period schedule's kind: the day stands for its period, which the preview dates by its first day. */
   period: PeriodKind | undefined;
-  /** A bedtime pact: a night not judged yet is waiting on Oura. */
-  oura: boolean;
+  /** A bedtime pact's kind: a night not judged yet is waiting on its sleep. */
+  bedtime: BedtimeKind | undefined;
   preview: Preview | null;
   reviewers: string;
   timezone: string;
@@ -573,7 +575,7 @@ function DayCard({
   const holds = (d: { date: string; through?: string }) => d.date <= day && day <= (d.through ?? d.date);
   const covered = preview?.covered.find(holds);
   const status = covered?.status;
-  const presented = status && presentOccurrence(status, now, { timezone, period, oura });
+  const presented = status && presentOccurrence(status, now, { timezone, period, bedtime });
   const skipped = preview?.skipped.find(holds);
   const week = covered?.date ?? skipped?.date;
   return (
@@ -602,14 +604,14 @@ function DayCard({
 function DayList({
   preview,
   period,
-  oura,
+  bedtime,
   timezone,
   now,
   empty,
 }: {
   preview: Preview;
   period: PeriodKind | undefined;
-  oura: boolean;
+  bedtime: BedtimeKind | undefined;
   timezone: string;
   now: number;
   empty: string;
@@ -618,7 +620,7 @@ function DayList({
     ...preview.covered.map((d) => ({
       date: d.date,
       covered: true,
-      note: presentOccurrence(d.status, now, { timezone, period, oura }).note,
+      note: presentOccurrence(d.status, now, { timezone, period, bedtime }).note,
     })),
     ...preview.skipped.map((d) => ({ date: d.date, covered: false, note: SKIP_REASON_TEXT[d.reason] })),
   ].sort((a, b) => a.date.localeCompare(b.date, "en-US"));
@@ -639,11 +641,17 @@ function DayList({
 }
 
 /** The small line on a recent day's radio row: the time left to file for a miss, else the day's note. */
-function recentNote(d: Day, now: number, timezone: string, period: PeriodKind | undefined, oura: boolean): string {
+function recentNote(
+  d: Day,
+  now: number,
+  timezone: string,
+  period: PeriodKind | undefined,
+  bedtime: BedtimeKind | undefined,
+): string {
   const { status } = d;
   if (status.kind === "missed")
     return `${money(status.penaltyCents)} · ${hoursLeft(Date.parse(status.excusableUntil) - now)} left to file an excuse`;
-  return presentOccurrence(status, now, { timezone, period, oura }).note;
+  return presentOccurrence(status, now, { timezone, period, bedtime }).note;
 }
 
 /** `preview` without `day` and the days before it: the later days a run-on adds. */

@@ -2,6 +2,7 @@
 // Plan a vacation and on its review item.
 
 import type { Json } from "../shared/api.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { periodKindOfSchedule } from "../shared/schedules.ts";
 import type {
   EvidenceKind,
@@ -74,9 +75,8 @@ export function coveredText(
 
 /** What a pact's occurrences are called, one and many: nights, Anki days, or days. */
 export function occurrenceNames(kind: EvidenceKind): [string, string] {
+  if (isBedtimeKind(kind)) return ["night", "nights"];
   switch (kind) {
-    case "oura":
-      return ["night", "nights"];
     case "anki":
       return ["Anki day", "Anki days"];
     case "camera":

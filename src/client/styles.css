@@ -661,14 +661,14 @@ p {
   list-style: none;
   counter-reset: gstep;
 }
-.gsteps li {
+.gsteps > li {
   counter-increment: gstep;
   display: grid;
   grid-template-columns: 26px 1fr;
   gap: 10px;
   align-items: start;
 }
-.gsteps li::before {
+.gsteps > li::before {
   content: counter(gstep);
   width: 26px;
   height: 26px;
@@ -1823,4 +1823,29 @@ details.folded .kv {
 }
 .tcard.slim .evidence.full {
   flex-basis: 100%;
+}
+
+/* Apple Health setup: the Pact Health Shortcut's steps, with what to type in them, and the automations. */
+.gsteps.shortcut ul,
+.automations {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.automations {
+  margin: 0;
+}
+.gsteps.shortcut code {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  background: var(--sunk);
+  border-radius: 5px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.last-upload {
+  flex-wrap: nowrap;
 }

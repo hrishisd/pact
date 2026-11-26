@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
+import { isBedtimeKind, isBedtimePact } from "../shared/evidence-kinds.ts";
 import { periodKindOfSchedule } from "../shared/schedules.ts";
 import {
   MAX_NAME_CHARS,
@@ -23,6 +24,8 @@ import {
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
+import { AppleHealthConnectionAlert } from "./apple-health.tsx";
+import { BEDTIME_TEXT } from "./bedtime-text.ts";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
 import { AT_ONCE_REFUSAL_TEXT, endsWhenText, openOccurrenceText } from "./change-terms.tsx";
@@ -106,6 +109,8 @@ export function PactPage({
             {pact.connectionProblem &&
               (pact.evidenceKind === "anki" ? (
                 <AnkiConnectionAlert status={pact.connectionProblem} onReconnected={reload} />
+              ) : pact.evidenceKind === "apple_health" ? (
+                <AppleHealthConnectionAlert />
               ) : (
                 <OuraConnectionAlert status={pact.connectionProblem} />
               ))}
@@ -233,8 +238,8 @@ function StageLine({ pact }: { pact: Pact }) {
     <div className="row2">
       <span className={`chip ${chip.className}`}>{chip.label}</span>
       <span className="muted">
-        {pact.evidenceKind === "oura"
-          ? `In bed by ${clockText(pact.inBedBy)}, judged from your ring`
+        {isBedtimePact(pact)
+          ? `In bed by ${clockText(pact.inBedBy)}, ${BEDTIME_TEXT[pact.evidenceKind].judgedFrom}`
           : pact.description}
       </span>
     </div>
@@ -561,7 +566,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
           className="inp"
           maxLength={MAX_NAME_CHARS}
           value={name}
-          placeholder={pact.evidenceKind === "oura" ? "e.g. In bed by midnight" : "e.g. Gym"}
+          placeholder={isBedtimeKind(pact.evidenceKind) ? "e.g. In bed by midnight" : "e.g. Gym"}
           onChange={(e) => setName(e.target.value)}
         />
         <small>A new name applies right away, with no approval.</small>

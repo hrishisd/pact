@@ -353,7 +353,7 @@ export function evidenceAcceptance(
     ownerId,
   );
   if (!row) return { ok: false, reason: "pact-not-found" };
-  // Oura reports a bedtime night; there's never a photo to submit.
+  // Only a Camera pact takes photos: a bedtime night or an Anki day is judged from its source.
   if (row.evidence_kind !== "camera") return { ok: false, reason: "not-open" };
   if (photoCount === 0) return { ok: false, reason: "no-photos" };
   if (photoCount > MAX_EVIDENCE_PHOTOS) return { ok: false, reason: "too-many-photos" };
