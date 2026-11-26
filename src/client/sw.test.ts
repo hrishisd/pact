@@ -4,14 +4,27 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 const SOURCE = readFileSync(join(import.meta.dirname, "public", "sw.js"), "utf8");
 
 type Handler = (event: object) => void;
 
-/** Loads the worker, with these windows of the app already showing. `fire` resolves once the event's work is done. */
-function worker(openWindows: { focus: () => Promise<void>; navigate: (url: string) => Promise<void> }[] = []) {
+/** What the browser can do with the app icon's badge: set it, clear it, or nothing at all (null). */
+interface AppBadge {
+  setAppBadge: (count: number) => Promise<void>;
+  clearAppBadge: () => Promise<void>;
+}
+
+/**
+ * Loads the worker, with these windows of the app already showing, in a
+ * browser that can (or with `badge` null, can't) badge the app's icon.
+ * `fire` resolves once the event's work is done.
+ */
+function worker(
+  openWindows: { focus: () => Promise<void>; navigate: (url: string) => Promise<void> }[] = [],
+  badge: AppBadge | null = { setAppBadge: async () => {}, clearAppBadge: async () => {} },
+) {
   const handlers = new Map<string, Handler>();
   const shown: [string, { body: string; data: { url: string } }][] = [];
   const opened: string[] = [];
@@ -26,6 +39,7 @@ function worker(openWindows: { focus: () => Promise<void>; navigate: (url: strin
       matchAll: async () => openWindows,
       openWindow: async (url: string) => opened.push(url),
     },
+    navigator: { ...badge },
   };
   runInNewContext(SOURCE, { self });
   const fire = async (type: string, event: object) => {
@@ -64,6 +78,67 @@ test("a push whose data isn't JSON, or is empty, still shows a notification", as
   await fire("push", { data: { json: () => JSON.parse("") } });
 
   expect(shown.map(([title]) => title)).toEqual(["Pact", "Pact"]);
+});
+
+describe("the app icon's badge", () => {
+  const push = (badge: unknown) => ({
+    data: { json: () => ({ title: "Sam submitted evidence", body: "", url: "/", badge }) },
+  });
+  function badgeCalls() {
+    const calls: string[] = [];
+    return {
+      calls,
+      badge: {
+        setAppBadge: async (count: number) => void calls.push(`set ${count}`),
+        clearAppBadge: async () => void calls.push("clear"),
+      },
+    };
+  }
+
+  test("a push sets it to the count it carries, and clears it at 0", async () => {
+    const { calls, badge } = badgeCalls();
+    const { fire, shown } = worker([], badge);
+
+    await fire("push", push(3));
+    await fire("push", push(0));
+
+    expect(calls).toEqual(["set 3", "clear"]);
+    expect(shown).toHaveLength(2);
+  });
+
+  test("a push with no count leaves it as it is", async () => {
+    const { calls, badge } = badgeCalls();
+    const { fire, shown } = worker([], badge);
+
+    await fire("push", push(undefined));
+    await fire("push", push("3"));
+    await fire("push", {});
+
+    expect(calls).toEqual([]);
+    expect(shown).toHaveLength(3);
+  });
+
+  test("a browser that can't badge the icon still shows the notification", async () => {
+    const { fire, shown } = worker([], null);
+
+    await fire("push", push(3));
+
+    expect(shown).toHaveLength(1);
+  });
+
+  test("a badge that fails, refused or thrown, still shows the notification, which iPhone requires of every push", async () => {
+    const { fire, shown } = worker([], {
+      setAppBadge: () => Promise.reject(new Error("NotAllowedError")),
+      clearAppBadge: () => {
+        throw new Error("NotAllowedError");
+      },
+    });
+
+    await fire("push", push(3));
+    await fire("push", push(0));
+
+    expect(shown).toHaveLength(2);
+  });
 });
 
 test("tapping with no window open opens the page", async () => {

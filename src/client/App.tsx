@@ -4,6 +4,7 @@ import type { LocalDate } from "../shared/types.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { AppleHealthPage, lastUploadText } from "./apple-health.tsx";
+import { badgeAppIcon } from "./app-badge.ts";
 import { ChangePact } from "./ChangePact.tsx";
 import { useReloadWhenDue } from "./coming-back.ts";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
@@ -509,13 +510,29 @@ function useLoadTabs(tab: TabId) {
  * pages opened over the Review tab too (`useReloadWhenDue`, coming-back.ts).
  * The Review tab, while `reviewShown`, sets it whenever its queue loads, and
  * reloads that itself, so there the badge doesn't.
+ * The app's icon shows the same count (app-badge.ts): set at each load, and
+ * again on each return to the front, since a push may have changed it.
  */
 function useReviewCount(
   tab: TabId,
   reviewShown: boolean,
   timezone: string,
 ): { value: number; set: (length: number) => void } {
-  const [value, set] = useState(0);
+  const [value, setValue] = useState(0);
+  /** The count last loaded; null until the first load. */
+  const known = useRef<number | null>(null);
+  const set = useCallback((length: number) => {
+    known.current = length;
+    setValue(length);
+    badgeAppIcon(length);
+  }, []);
+  useEffect(() => {
+    const cameBack = () => {
+      if (document.visibilityState === "visible" && known.current !== null) badgeAppIcon(known.current);
+    };
+    document.addEventListener("visibilitychange", cameBack);
+    return () => document.removeEventListener("visibilitychange", cameBack);
+  }, []);
   /** When the count that shows started loading (ms). */
   const loadedAt = useRef(Date.now());
   const load = useCallback(() => {
@@ -528,7 +545,7 @@ function useReviewCount(
       },
       () => {},
     );
-  }, []);
+  }, [set]);
   useEffect(() => {
     if (tab !== "review") load();
   }, [tab, load]);

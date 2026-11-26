@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api.ts";
+import { badgeAppIcon } from "./app-badge.ts";
 
 export type PushState =
   /** Not known yet. */
@@ -132,8 +133,9 @@ export function usePush(): Push {
   return { state, turnOn };
 }
 
-/** For signing out: this device stops getting the account's pushes. Never stops the sign-out. */
+/** For signing out: this device stops getting the account's pushes, and its icon their count. Never stops the sign-out. */
 export async function forgetThisDevice(): Promise<void> {
+  badgeAppIcon(0);
   try {
     if (!isSupported()) return;
     const subscription = await currentSubscription();

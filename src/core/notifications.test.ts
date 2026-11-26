@@ -4,7 +4,7 @@
 import { describe, expect, test } from "vitest";
 import type { PushDevice } from "./ports.ts";
 import { failOnCall } from "./testing/fakes.ts";
-import { gymEvidenceWaiting, MON_WED_FRI, ownerWithReviewers, photo } from "./testing/camera-pact.ts";
+import { gymEvidenceWaiting, MON_WED_FRI, ownerWithReviewers, photo, submit } from "./testing/camera-pact.ts";
 import { scenario } from "./testing/scenario.ts";
 import { ok, owed } from "./testing/queries.ts";
 
@@ -399,5 +399,44 @@ describe("delivery happens after the command", () => {
     await s.advanceTo("Mon 18:01");
 
     expect(s.notifier.sentTo(reviewer, "review-item")).toHaveLength(1);
+  });
+});
+
+describe("the app icon's badge", () => {
+  test("each push carries its recipient's Review Queue size as it goes, the item it tells of included", async () => {
+    const s = scenario();
+    const { owner, reviewer, second, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI);
+    const run = await createPact("Run", MON_WED_FRI);
+    s.setClockTo("Mon 18:00");
+
+    const gymEvidence = await submit(owner, gym);
+    const runEvidence = await submit(owner, run);
+    expect(s.notifier.badgesSentTo(reviewer, "review-item")).toEqual([1, 2]);
+
+    await reviewer.decide(gymEvidence, { kind: "approve" });
+    // The owner reviews nothing: their own items waiting aren't in it.
+    expect(s.notifier.badgesSentTo(owner, "evidence-decided")).toEqual([0]);
+
+    await reviewer.askOwner(runEvidence, "Which gym?");
+    await owner.reply(runEvidence, "The one on Main St");
+    // Back in both queues, the decided one gone from both.
+    expect(s.notifier.badgesSentTo(reviewer, "owner-replied")).toEqual([1]);
+    expect(s.notifier.badgesSentTo(second, "owner-replied")).toEqual([1]);
+  });
+
+  test("a push sent again after a failure carries the count when it goes, not when it was queued", async () => {
+    const s = scenario();
+    const { owner, reviewer, createPact } = await ownerWithReviewers(s);
+    const gym = await createPact("Gym", MON_WED_FRI, { reviewers: [reviewer] });
+    const run = await createPact("Run", MON_WED_FRI, { reviewers: [reviewer] });
+    s.setClockTo("Mon 18:00");
+    failOnCall(s.notifier, "deliver", 1);
+
+    await submit(owner, gym);
+    expect(s.notifier.sentTo(reviewer)).toEqual([]);
+    await submit(owner, run);
+
+    expect(s.notifier.badgesSentTo(reviewer, "review-item")).toEqual([2, 2]);
   });
 });

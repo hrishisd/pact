@@ -15,15 +15,7 @@ import {
 } from "../shared/types.ts";
 import { localDateOf } from "./calendar.ts";
 import type { CoreContext } from "./context.ts";
-import type {
-  Email,
-  Mailer,
-  Notification,
-  NotificationKind,
-  NotificationOf,
-  Notifier,
-  OperatorAlertDetails,
-} from "./ports.ts";
+import type { Email, Mailer, NotificationKind, NotificationOf, Notifier, OperatorAlertDetails, Push } from "./ports.ts";
 
 /**
  * Which setting turns a kind of notification off. Operator alerts can't be,
@@ -236,25 +228,34 @@ export function notificationSettings(ctx: CoreContext, accountId: AccountId): No
   return NOTIFICATION_SETTINGS.map((setting) => ({ setting, enabled: !settingIsOff(ctx, accountId, setting) }));
 }
 
-/** Delivers each push waiting, oldest first. Emails go apart (`deliverEmails`). */
-export async function deliverPending(ctx: CoreContext, notifier: Notifier): Promise<void> {
+/**
+ * Delivers each push waiting, oldest first, each with `badgeOf` its
+ * recipient as it goes: their Review Queue size, for the app's icon. Emails
+ * go apart (`deliverEmails`).
+ */
+export async function deliverPending(
+  ctx: CoreContext,
+  notifier: Notifier,
+  badgeOf: (recipient: AccountId) => number,
+): Promise<void> {
   const rows = ctx.all<OutboxRow>(`SELECT id, recipient_account_id, kind, payload, sent_to
        FROM outbox WHERE channel = 'push' AND delivered_at IS NULL ORDER BY id`);
   for (const row of rows) {
     try {
       // Stored by `enqueue`, so the kind and its payload match.
-      const notification = {
+      const push = {
         recipient: row.recipient_account_id,
         kind: row.kind,
         payload: JSON.parse(row.payload) as unknown,
-      } as Notification;
+        badge: badgeOf(row.recipient_account_id),
+      } as Push;
       const devices = ctx.all<PushDevice>(
         `SELECT endpoint, p256dh, auth FROM push_subscription WHERE account_id = ? ORDER BY endpoint`,
         row.recipient_account_id,
       );
       const sentTo = JSON.parse(row.sent_to) as string[];
       const toSend = devices.filter((device) => !sentTo.includes(device.endpoint));
-      const { expired, failed } = await notifier.deliver(notification, toSend);
+      const { expired, failed } = await notifier.deliver(push, toSend);
       for (const endpoint of expired) {
         ctx.db.prepare(`DELETE FROM push_subscription WHERE endpoint = ?`).run(endpoint);
       }

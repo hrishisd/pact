@@ -1,7 +1,7 @@
 // The Web Push adapter, at its boundary: what it sends to a push service, and
 // what it makes of the answer. Nothing reaches the network.
 
-import { createECDH, createHash, createPublicKey, verify } from "node:crypto";
+import { createDecipheriv, createECDH, createHash, createPublicKey, hkdfSync, verify } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import type { NotificationOf, PushDevice } from "./ports.ts";
 import { FakeClock } from "./testing/fakes.ts";
@@ -25,7 +25,7 @@ const vapid = (() => {
   return { publicKey: ecdh.getPublicKey("base64url"), privateKey: ecdh.getPrivateKey("base64url") };
 })();
 
-const notification: NotificationOf<"review-item"> = {
+const notification: NotificationOf<"review-item"> & { badge: number } = {
   recipient: "reviewer-id",
   kind: "review-item",
   payload: {
@@ -36,6 +36,7 @@ const notification: NotificationOf<"review-item"> = {
     itemId: "secret-detail",
     pactId: "secret-pact",
   },
+  badge: 3,
 };
 
 /** A browser's side of a subscription, able to read what's sent to it. */
@@ -46,6 +47,30 @@ function browserDevice(name: string): PushDevice {
     p256dh: ecdh.getPublicKey("base64url"),
     auth: Buffer.alloc(16, 5).toString("base64url"),
   };
+}
+
+/** What the browser `name` (`browserDevice`) reads from an encrypted message (RFC 8291). */
+function readAs(name: string, encrypted: Buffer): unknown {
+  const device = fixedKeys(`device ${name}`);
+  const salt = encrypted.subarray(0, 16);
+  const keyLength = encrypted[20]!;
+  const serverPublicKey = encrypted.subarray(21, 21 + keyLength);
+  const record = encrypted.subarray(21 + keyLength);
+  const hkdf = (secret: Uint8Array, hkdfSalt: Uint8Array, info: Uint8Array, length: number) =>
+    Buffer.from(hkdfSync("sha256", secret, hkdfSalt, info, length));
+  const ikm = hkdf(
+    device.computeSecret(serverPublicKey),
+    Buffer.from(browserDevice(name).auth, "base64url"),
+    Buffer.concat([Buffer.from("WebPush: info\0"), device.getPublicKey(), serverPublicKey]),
+    32,
+  );
+  const key = hkdf(ikm, salt, Buffer.from("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = hkdf(ikm, salt, Buffer.from("Content-Encoding: nonce\0"), 12);
+  const decipher = createDecipheriv("aes-128-gcm", key, nonce);
+  decipher.setAuthTag(record.subarray(-16));
+  const padded = Buffer.concat([decipher.update(record.subarray(0, -16)), decipher.final()]);
+  // The last record ends with 0x02.
+  return JSON.parse(padded.subarray(0, padded.lastIndexOf(2)).toString());
 }
 
 function notifierAnswering(answer: (request: Request) => Response | Promise<Response>) {
@@ -124,6 +149,19 @@ describe("what's sent to the push service", () => {
         Buffer.from(signature, "base64url"),
       ),
     ).toBe(true);
+  });
+
+  test("the device reads the text to show, the page it opens and the badge for the app's icon, and nothing else", async () => {
+    const { notifier, requests } = notifierAnswering(() => new Response(null, { status: 201 }));
+
+    await notifier.deliver(notification, [browserDevice("phone")]);
+
+    expect(readAs("phone", Buffer.from(await requests[0]!.arrayBuffer()))).toEqual({
+      title: "Sam submitted evidence",
+      body: "Gym · Mon Jan 5",
+      url: "/review",
+      badge: 3,
+    });
   });
 
   test("no devices sends nothing", async () => {
