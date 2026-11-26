@@ -156,6 +156,13 @@ describe("the owner's Today after a decision", () => {
 
     await reviewer.decide(evidenceId, { kind: "approve" });
 
-    expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
+    expect(owner.today()).toEqual({
+      date: expect.any(String),
+      hasPacts: true,
+      alerts: [],
+      sections: [],
+      waiting: [],
+      yesterday: [],
+    });
   });
 });

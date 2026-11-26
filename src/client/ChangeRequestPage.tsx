@@ -10,6 +10,7 @@ import { api, failureText } from "./api.ts";
 import { DiffList, endsWhenText, EverythingElse, startsText } from "./change-terms.tsx";
 import { formatDayTime, listNames } from "./format.ts";
 import { ItemKindHeader, ItemStateChip, OwnerThread, StateLine } from "./item-page.tsx";
+import { useRefresh } from "./pull-to-refresh.tsx";
 import { LoadedFound, useLoad, useSend } from "./ui.tsx";
 
 export function ChangeRequestPage({
@@ -23,6 +24,7 @@ export function ChangeRequestPage({
   onOpenPact: (pactId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(() => api.changeRequest(changeRequestId), API_PATHS.changeRequest(changeRequestId));
+  useRefresh(reload);
   // Here rather than in the view, like the load, so a refusal's words outlast the reload after it.
   const withdrawal = useSend(
     async (id: string) => {

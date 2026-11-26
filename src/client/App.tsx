@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { API_PATHS, APP_PATHS, OURA_RECONNECT_PATH, type MeResponse } from "../shared/api.ts";
+import type { LocalDate } from "../shared/types.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { AppleHealthPage, lastUploadText } from "./apple-health.tsx";
 import { ChangePact } from "./ChangePact.tsx";
+import { useReloadWhenDue } from "./coming-back.ts";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
 import { CreatePact, EditPact } from "./CreatePact.tsx";
 import { EvidencePage } from "./EvidencePage.tsx";
 import { ExcusePage } from "./ExcusePage.tsx";
-import { formatDay, initial } from "./format.ts";
+import { formatDate, formatDay, initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
 import {
   BackIcon,
@@ -198,8 +200,11 @@ function Shell({
   const [profileOpen, setProfileOpen] = useState(() => opensProfileSheet(window.location.pathname));
   // What the Profile sheet's Vacation section says when it opens, after a vacation is sent.
   const [vacationMessage, setVacationMessage] = useState<string | null>(null);
-  const reviewCount = useReviewCount(tab);
+  const reviewCount = useReviewCount(tab, tab === "review" && page === undefined, profile.timezone);
   useLoadTabs(tab);
+  // The day Today's cards are for, once loaded: its header shows it, so it turns with them.
+  // Until then, and if Today's first load fails, the header shows the clock's day in the profile's timezone.
+  const [todayDate, setTodayDate] = useState<LocalDate | null>(null);
   const push = usePush();
   // Pact and recipient names learnt by loading their pages, for a page opened from a link.
   const [pactNames, pactLoaded] = useLearntNames();
@@ -365,12 +370,13 @@ function Shell({
       case "today":
         return {
           title: label,
-          subtitle: formatDay(new Date().toISOString(), profile.timezone),
+          subtitle: todayDate === null ? formatDay(new Date().toISOString(), profile.timezone) : formatDate(todayDate),
           body: (
             <>
               <NotificationsAlert push={push} onSetUp={openNotifications} />
               <Today
                 timezone={profile.timezone}
+                onDate={setTodayDate}
                 onOpenPact={openPact}
                 onOpenLedger={openLedger}
                 openers={openers}
@@ -393,9 +399,10 @@ function Shell({
 
   return (
     <div className="app">
-      {/* A tab has pull to refresh; a page opened from one doesn't. */}
+      {/* A tab has pull to refresh; a page opened from one doesn't. Both refresh by themselves when due. */}
       <PullToRefresh
         pullable={page === undefined}
+        timezone={profile.timezone}
         mainClassName={foot ? "scroll gut has-foot" : "scroll gut"}
         header={
           <>
@@ -498,18 +505,34 @@ function useLoadTabs(tab: TabId) {
 /**
  * The Review tab's badge: how many items wait for this account's decision.
  * Loaded on each change to another tab, sharing the Review tab's load
- * (last-loaded.ts); the Review tab sets it whenever its queue loads.
+ * (last-loaded.ts), and by itself when due, on any page, forms included,
+ * pages opened over the Review tab too (`useReloadWhenDue`, coming-back.ts).
+ * The Review tab, while `reviewShown`, sets it whenever its queue loads, and
+ * reloads that itself, so there the badge doesn't.
  */
-function useReviewCount(tab: TabId): { value: number; set: (length: number) => void } {
+function useReviewCount(
+  tab: TabId,
+  reviewShown: boolean,
+  timezone: string,
+): { value: number; set: (length: number) => void } {
   const [value, set] = useState(0);
-  useEffect(() => {
-    if (tab === "review") return;
-    // A badge that fails to load just keeps its last count.
+  /** When the count that shows started loading (ms). */
+  const loadedAt = useRef(Date.now());
+  const load = useCallback(() => {
+    const startedAt = Date.now();
+    // A badge that fails to load just keeps its last count, and is due again.
     loadAndRemember(API_PATHS.reviewQueue, api.reviewQueue).then(
-      (queue) => set(queue.length),
+      (queue) => {
+        loadedAt.current = startedAt;
+        set(queue.length);
+      },
       () => {},
     );
-  }, [tab]);
+  }, []);
+  useEffect(() => {
+    if (tab !== "review") load();
+  }, [tab, load]);
+  useReloadWhenDue(() => (reviewShown ? null : loadedAt.current), timezone, load);
   return { value, set };
 }
 

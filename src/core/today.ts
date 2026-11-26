@@ -57,8 +57,10 @@ export function todayPage(ctx: CoreContext, accountId: AccountId): Today {
   const { alerts, sections } = todayCards(ctx, accountId, timezone);
   const hasPacts = ctx.db.prepare(`SELECT 1 FROM pact WHERE owner_account_id = ?`).get(accountId) !== undefined;
   const yesterday = yesterdayEntries(ctx, accountId, timezone);
-  const vacations = vacationsOnNow(ctx, accountId, timezone, localDateOf(ctx.clock.now(), timezone));
+  const date = localDateOf(ctx.clock.now(), timezone);
+  const vacations = vacationsOnNow(ctx, accountId, timezone, date);
   return {
+    date,
     hasPacts,
     alerts,
     sections,

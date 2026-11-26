@@ -16,7 +16,7 @@
 // judged yet is on screen, Today checks AnkiWeb now when it opens and when the
 // app comes back to the foreground, so a deck just finished and synced clears.
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { API_PATHS, RUN_PACT_HEALTH_URL, type Json } from "../shared/api.ts";
 import {
   MAX_EVIDENCE_PHOTOS,
@@ -76,7 +76,8 @@ import { usePhotoPicks } from "./photos.ts";
 import { VacationBanner } from "./VacationBanner.tsx";
 import { OuraConnectionAlert, ouraResultText, takeOuraResult } from "./oura.tsx";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
-import { useRefreshOnPull } from "./pull-to-refresh.tsx";
+import { onComingBack } from "./coming-back.ts";
+import { useRefresh } from "./pull-to-refresh.tsx";
 import { EditWindowChip, Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** What the File excuse sheet is open on: a pact, and the day it was opened from (none for the pact-page form). */
@@ -96,6 +97,7 @@ function excuseTargetFor(about: { pactId: string; name: string; occurrenceDate: 
 
 export function Today({
   timezone,
+  onDate,
   onOpenPact,
   onOpenLedger,
   openers,
@@ -104,6 +106,8 @@ export function Today({
 }: {
   /** The profile's timezone, for when bills and days are due and when AnkiWeb was checked. */
   timezone: string;
+  /** Hears the day the cards shown are for, once loaded (null before), for the header. */
+  onDate?: (date: LocalDate | null) => void;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   /** Each kind's own page: a waiting row or a reviewer's question opens its item's. */
@@ -113,6 +117,9 @@ export function Today({
 }) {
   const { state, reload } = useLoad(api.today, API_PATHS.today);
   const today = loadedData(state);
+  const date = today?.date ?? null;
+  // Before the browser paints, so the header's day turns with the cards.
+  useLayoutEffect(() => onDate?.(date), [date, onDate]);
   const now = useNow();
   const [excusing, setExcusing] = useState<ExcuseTarget | null>(null);
   // Back from reconnecting Oura: say so if it didn't work.
@@ -137,11 +144,11 @@ export function Today({
   );
   // Back from Shortcuts after Sync now: the upload may have judged the night.
   useReloadOnReturn(waitingOn("apple_health"), reload);
-  // A pull checks Oura and AnkiWeb whatever cards show (the core asks only
+  // A refresh checks Oura and AnkiWeb whatever cards show (the core asks only
   // about nights and days still waiting), then reloads Today.
-  useRefreshOnPull(async () => {
-    await Promise.all([ouraConnectionProblem || oura.pull(), ankiConnectionProblem || anki.pull()]);
-    await reload();
+  useRefresh(async ({ pulled, quiet }) => {
+    await Promise.all([ouraConnectionProblem || oura.join(pulled), ankiConnectionProblem || anki.join(pulled)]);
+    return reload({ quiet });
   });
   // A waiting row or a reviewer's question opens the page of the item it's about.
   const open = (item: Json<TodayWaitingItem>) => openItem(item, openers);
@@ -239,7 +246,7 @@ function alertKey(alert: Json<TodayAlert>): string {
   }
 }
 
-/** Under a card, after a check a pull sent couldn't reach the service. */
+/** Under a card, after a check a pull sent or joined couldn't reach the service. */
 const UNREACHED_TEXT: Record<Exclude<ConnectionService, "apple_health">, string> = {
   oura: "Couldn't reach Oura. Pact will try again.",
   anki: "Couldn't reach AnkiWeb. Pact will try again.",
@@ -259,19 +266,20 @@ interface CheckState {
 /**
  * While `active` (a No Oura data card, or an Anki day not judged, is on
  * screen), checks now at once, whenever the app comes back to the
- * foreground, and every `everyMs` while it's in front, if set; then
- * `onChecked` reloads Today. `pull` checks now whatever is on screen,
- * joining a check already running, and leaves the reload to the pull.
- * One check runs at a time; the core ignores checks that come too fast.
- * Only a check a pull sent shows that the service couldn't be reached; any
- * check that answers ok clears it.
+ * foreground, unless Today is due a refresh then, which checks instead
+ * (`onComingBack`, coming-back.ts), and every `everyMs` while it's in front,
+ * if set; then `onChecked` reloads Today. `join` checks now whatever is on
+ * screen, joining a check already running, and leaves the reload to Today's
+ * refresh. One check runs at a time; the core ignores checks that come too
+ * fast. Only a check a pull (`join(true)`) sent or joined shows that the
+ * service couldn't be reached; any check that answers ok clears it.
  */
 function useCheckNow(
   active: boolean,
   checkNow: () => Promise<CheckNowResult>,
   onChecked: () => void,
   everyMs: number | null,
-): CheckState & { pull: () => Promise<void> } {
+): CheckState & { join: (pulled: boolean) => Promise<void> } {
   const [checking, setChecking] = useState(false);
   const [unreachable, setUnreachable] = useState(false);
   const running = useRef<Promise<CheckNowResult | null> | null>(null);
@@ -296,24 +304,24 @@ function useCheckNow(
     if (running.current || document.visibilityState === "hidden") return;
     void send().then(() => checked.current());
   }, [send]);
-  const pull = useCallback(async () => {
-    const result = await send();
-    if (result && !result.ok) setUnreachable(true);
-  }, [send]);
+  const join = useCallback(
+    async (pulled: boolean) => {
+      const result = await send();
+      if (pulled && result && !result.ok) setUnreachable(true);
+    },
+    [send],
+  );
   useEffect(() => {
     if (!active) return;
     check();
     const timer = everyMs === null ? undefined : window.setInterval(check, everyMs);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") check();
-    };
-    document.addEventListener("visibilitychange", onVisible);
+    const stopListening = onComingBack(check);
     return () => {
       window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
+      stopListening();
     };
   }, [active, check, everyMs]);
-  return { checking, unreachable, pull };
+  return { checking, unreachable, join };
 }
 
 function Section({

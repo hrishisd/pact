@@ -277,7 +277,7 @@ function AnkiGoalStep({ form, update }: { form: Form; update: (change: Partial<F
               ? "Connect AnkiWeb first."
               : `Couldn't load your decks. ${failed ? failureText(failed.error, "Check your connection.") : "AnkiWeb didn't answer."}`}
         </span>
-        <button className="btn sm self-start" onClick={reload}>
+        <button className="btn sm self-start" onClick={() => void reload()}>
           Try again
         </button>
       </div>

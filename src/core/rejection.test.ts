@@ -18,6 +18,7 @@ describe("a rejection is final straight away", () => {
     await reviewer.decide(evidenceId, { kind: "reject", reason: "Blurry" });
 
     expect(owner.today()).toEqual({
+      date: expect.any(String),
       hasPacts: true,
       alerts: [
         {
@@ -52,6 +53,7 @@ describe("a rejection is final straight away", () => {
     await reviewer.decide(evidenceId, { kind: "reject", reason: "That's last week's photo" });
 
     expect(owner.today()).toEqual({
+      date: expect.any(String),
       hasPacts: true,
       alerts: [
         {
@@ -158,7 +160,14 @@ describe("the rejected-evidence alert", () => {
     s.setClockTo("Mon 16:00");
     expect(await owner.acceptMiss(gym, s.date("Mon"))).toEqual({ ok: true });
 
-    expect(owner.today()).toEqual({ hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] });
+    expect(owner.today()).toEqual({
+      date: expect.any(String),
+      hasPacts: true,
+      alerts: [],
+      sections: [],
+      waiting: [],
+      yesterday: [],
+    });
     expect(owner.ledgers()).toEqual([summary]);
     expect(owner.ledger(summary!.recipientId)).toEqual(ledger);
     expect(ledger).toMatchObject({

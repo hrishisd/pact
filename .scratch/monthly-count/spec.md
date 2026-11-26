@@ -2,7 +2,7 @@
 
 Current rules: `docs/behaviour.md`. This spec records the design as it was decided.
 
-Status: ready-for-agent
+Status: done
 
 Designed in a grilling session on 2026-11-24, with one prototype round (published at https://claude.ai/artifact/Jo7dtMVHSf1FydTHdgB8Qi; the file is on the local branch `prototype/monthly-count`). The owner picked option C (presets) for the Schedule step and T2 (quiet until the last week) for Today. Vocabulary follows `GLOSSARY.md`. Decisions marked "(build)" were settled while building, from the code, where the grilling left a detail open.
 

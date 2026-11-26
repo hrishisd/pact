@@ -84,6 +84,7 @@ describe("the spec's example", () => {
     expect(owed(owner)).toBe(500);
     expect(ledgerHistory(owner)).toEqual([expect.objectContaining({ occurrenceDate: s.date("Mon"), held: false })]);
     expect(owner.today()).toEqual({
+      date: expect.any(String),
       hasPacts: true,
       alerts: [
         {

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { API_PATHS, APP_PATHS, RUN_PACT_HEALTH_URL, type Json } from "../shared/api.ts";
 import { RECONNECT_TEXT, type AppleHealthLastUpload } from "../shared/types.ts";
 import { api, failureText } from "./api.ts";
+import { onComingBack } from "./coming-back.ts";
 import { clockTime, dateIn, dateUnlessToday } from "./format.ts";
 import { HeartIcon } from "./icons.tsx";
 import { plural } from "./vacation-text.ts";
@@ -47,20 +48,14 @@ export function lastUploadText(last: Json<AppleHealthLastUpload> | null, now: nu
 
 /**
  * Calls `reload` each time Pact comes back to the front while `active`: the
- * owner may have just run Pact Health in Shortcuts, so a new upload shows.
+ * owner may have just run Pact Health in Shortcuts, so a new upload shows. A
+ * return on which the shown screen refreshes by itself runs no such listener,
+ * so the screen loads once (`onComingBack`, coming-back.ts).
  */
 export function useReloadOnReturn(active: boolean, reload: () => unknown): void {
   useEffect(() => {
     if (!active) return;
-    const onReturn = () => {
-      if (document.visibilityState === "visible") reload();
-    };
-    document.addEventListener("visibilitychange", onReturn);
-    window.addEventListener("focus", onReturn);
-    return () => {
-      document.removeEventListener("visibilitychange", onReturn);
-      window.removeEventListener("focus", onReturn);
-    };
+    return onComingBack(() => void reload());
   }, [active, reload]);
 }
 

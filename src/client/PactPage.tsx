@@ -46,6 +46,7 @@ import { datesText } from "./excuse-days.tsx";
 import { openItem, WaitingItemRow, type ItemOpeners } from "./item-page.tsx";
 import { TermsList } from "./terms-list.tsx";
 import { REMINDER_PROBLEMS, RemindersStep } from "./reminders-step.tsx";
+import { useRefresh } from "./pull-to-refresh.tsx";
 import { LoadedFound, Sheet, loadFailure, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 type Pact = Json<PactTerms>;
@@ -79,6 +80,7 @@ export function PactPage({
   // Opened again, it starts from the pact as last loaded while it loads afresh. Reloaded after a change made
   // here, keeping the pact shown meanwhile and if the reload fails. The at-once changes send only their own term.
   const { state, reload } = useLoad(() => api.pact(pactId), API_PATHS.pact(pactId));
+  useRefresh(reload);
   const result = loadedData(state);
   // One clock for the page: the edit window's countdown, what it allows, and the heat map's today.
   const now = useNow();
@@ -623,7 +625,7 @@ function AddReviewerSheet({
         <p className="error">
           Your friends couldn't load. {failureText(failed.error, "Check your connection and try again.")}
         </p>
-        <button className="btn block" onClick={loadFriends}>
+        <button className="btn block" onClick={() => void loadFriends()}>
           Try again
         </button>
       </>
@@ -639,7 +641,7 @@ function AddReviewerSheet({
           <button className="btn primary" onClick={onInvite}>
             Invite a friend
           </button>
-          <button className="btn" onClick={loadFriends}>
+          <button className="btn" onClick={() => void loadFriends()}>
             Check again
           </button>
         </div>
@@ -659,7 +661,7 @@ function AddReviewerSheet({
             kind={pact.evidenceKind}
             hint={hint}
             onInvite={onInvite}
-            onCheckAgain={loadFriends}
+            onCheckAgain={() => void loadFriends()}
           />
         </div>
         {error && <p className="error">{error}</p>}

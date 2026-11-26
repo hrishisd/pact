@@ -13,6 +13,8 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.useRealTimers();
+  // Back to jsdom's own visibilityState, for a test that set it (`comeBackAt`, render.tsx).
+  delete (document as { visibilityState?: unknown }).visibilityState;
   // Tests in one file share the module, so what one test loaded mustn't show in the next.
   stopReloading();
   forgetLoaded();

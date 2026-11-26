@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { RUN_PACT_HEALTH_URL, type AppleHealthResponse } from "../shared/api.ts";
 import { AppleHealthPage } from "./apple-health.tsx";
-import { answers, renderWithUser, stubApi } from "./testing/render.tsx";
+import { answers, leaveAndComeBack, renderWithUser, stubApi } from "./testing/render.tsx";
 
 const NOW = "2026-11-26T15:00:00Z";
 const UPLOAD_URL = "https://pact.example/api/apple-health/samples?key=abc123";
@@ -102,7 +102,7 @@ describe("the last upload", () => {
     renderPage();
     await screen.findByText("No upload yet");
 
-    fireEvent.focus(window);
+    leaveAndComeBack();
 
     expect(await screen.findByText("Last upload 9:02am · 14 sleep samples, 2 mindful sessions")).toBeTruthy();
     await waitFor(() => expect(spies.appleHealth).toHaveBeenCalledTimes(2));

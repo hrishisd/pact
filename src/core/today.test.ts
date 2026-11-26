@@ -12,7 +12,23 @@ describe("Today", () => {
     const owner = await s.signIn("owner");
     await owner.setTimezone("America/New_York");
 
-    expect(owner.today()).toEqual({ hasPacts: false, alerts: [], sections: [], waiting: [], yesterday: [] });
+    expect(owner.today()).toEqual({
+      date: expect.any(String),
+      hasPacts: false,
+      alerts: [],
+      sections: [],
+      waiting: [],
+      yesterday: [],
+    });
+  });
+
+  test("says the owner's date in their timezone, turning at their midnight", async () => {
+    const s = scenario();
+    const { owner } = await ownerWithReviewers(s);
+    s.setClockTo("Mon 23:59");
+    expect(owner.today().date).toBe(s.date("Mon"));
+    s.setClockTo("Tue 00:00");
+    expect(owner.today().date).toBe(s.date("Tue"));
   });
 
   test("an owner with a pact but nothing open today isn't a new account", async () => {
@@ -23,6 +39,7 @@ describe("Today", () => {
 
     s.setClockTo("Tue 10:00");
     expect(owner.today()).toEqual({
+      date: expect.any(String),
       hasPacts: true,
       alerts: [],
       sections: [],
@@ -41,6 +58,7 @@ describe("Today", () => {
     const stretch = await createPact("Stretch", EVERY_DAY, { penaltyCents: 300 });
 
     expect(owner.today()).toEqual({
+      date: expect.any(String),
       hasPacts: true,
       alerts: [],
       sections: [

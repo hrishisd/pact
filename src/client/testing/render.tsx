@@ -2,7 +2,7 @@
 // screen with a user to drive it, and answer its api calls with typed stubs
 // instead of a server. Cleanup after each test is in setup.ts.
 
-import { fireEvent, render, screen, type RenderResult } from "@testing-library/react";
+import { act, fireEvent, render, screen, type RenderResult } from "@testing-library/react";
 import { userEvent, type UserEvent } from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { vi, type MockInstance } from "vitest";
@@ -103,6 +103,32 @@ export function pullDown(finger = 2 * PULL_THRESHOLD_PX, scrollArea: HTMLElement
  */
 export function endSheetSlides(): void {
   for (const sheet of screen.queryAllByRole("dialog")) fireEvent.transitionEnd(sheet);
+}
+
+/** Says the app is in the background or in front, as iOS does when the user leaves it or comes back. */
+function setVisibility(state: DocumentVisibilityState): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+/**
+ * Leaves the app, moves the fake clock to `time` with no timer running (as
+ * when iOS suspends it), and comes back to the front. Needs fake timers.
+ */
+export function comeBackAt(time: string): void {
+  act(() => {
+    setVisibility("hidden");
+    vi.setSystemTime(new Date(time));
+    setVisibility("visible");
+  });
+}
+
+/** Leaves the app and comes straight back to the front, as after running a Shortcut. */
+export function leaveAndComeBack(): void {
+  act(() => {
+    setVisibility("hidden");
+    setVisibility("visible");
+  });
 }
 
 /** Renders `ui` on the document, with a user who clicks and types through it. */

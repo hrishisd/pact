@@ -1023,6 +1023,8 @@ export const RECONNECT_TEXT: Record<ConnectionService, string> = {
  * lists the pacts due yesterday, by name.
  */
 export interface Today {
+  /** The owner's date now, in their timezone: the day this Today is for, as its header says. */
+  date: LocalDate;
   /** False until the account has made a pact: a new account's Today says what to do first. */
   hasPacts: boolean;
   alerts: TodayAlert[];
