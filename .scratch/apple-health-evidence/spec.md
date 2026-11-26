@@ -101,7 +101,7 @@ Automations (Shortcuts → Automation → New, each set to **Run Immediately**):
 
 ### Mindful minutes, next
 
-Not built in this version; recorded so this version's choices fit it. Ticket 04 settles it with the human.
+Not built in this version; recorded so this version's choices fit it. The human decided the close time (18:00 the next day) and Fixed days only, and deferred the rest (ticket 04).
 
 - An Apple Health pact with measure **mindful minutes** and a daily target ("10 mindful minutes"), on Fixed days with an optional due-by time, like a Camera day on the account's timezone.
 - A day's minutes are the mindful sessions that start that day, before its due time, overlaps merged. The day is Satisfied as soon as an upload shows the target met.
