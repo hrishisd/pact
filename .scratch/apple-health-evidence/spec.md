@@ -67,7 +67,7 @@ Oura Ring and Apple Health pacts are both **bedtime pacts**: the same terms (in-
 ### Judging
 
 - Samples whose value contains "awake" (any case) are ignored. Every other sample counts as sleep, "In Bed" included, so that a tracker that writes only In Bed (Oura) and one that writes only stages both work.
-- **Sleep sessions:** the counted samples, merged where they overlap or the gap between them is at most 60 minutes. A session starts at its earliest start and ends at its latest end.
+- **Sleep sessions:** the counted samples, merged where they overlap or the gap between them is at most 60 minutes, but never across a gap that contains a night boundary (18:00 in the account's timezone; a gap that ends or starts exactly at 18:00 contains it). A session starts at its earliest start and ends at its latest end. (The boundary rule was decided after review: without it, a nap ending just before 18:00 merged with sleep starting just after, so the session started before 18:00 and counted for the night before, leaving the real night Missed.)
 - **Main sleep:** a session at least 3 hours long. Shorter ones are naps and never decide a night.
 - A night is decided by the first main sleep that starts in its window (as Oura's first long sleep): Satisfied if it starts by the in-bed-by time, Missed if later. No main sleep before the night closes means Missed at close. The bedtime, when it arrived and its source (the source of the session's earliest sample) are stored on the night, as for Oura.
 - A night stays decided once settled, as for Oura: a later upload doesn't rejudge it.

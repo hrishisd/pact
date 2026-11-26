@@ -16,8 +16,10 @@ import type {
   LocalDate,
 } from "../shared/types.ts";
 import { judgeNights, type SleepSession } from "./bedtime.ts";
+import { localDateOf } from "./calendar.ts";
 import { connect, disconnect } from "./connections.ts";
 import type { CoreContext } from "./context.ts";
+import { nightStartsAt } from "./occurrences.ts";
 import { hasConnection } from "./rows.ts";
 
 const MINUTE_MS = 60 * 1000;
@@ -143,10 +145,13 @@ export function uploadAppleHealth(
  * after the day before `from` (UTC), enough for the nights from `from` on:
  * the samples that count (any whose value doesn't contain "awake", In Bed
  * included) merged where they overlap or the gap between them is at most 60
- * minutes. A session runs from its earliest start to its latest end, is a
- * main sleep at 3 hours or more, and its source is its earliest sample's.
+ * minutes, unless a night starts in the gap (18:00 in the account's
+ * timezone), so a nap just before 18:00 never moves the night's sleep into
+ * the night before. A session runs from its earliest start to its latest
+ * end, is a main sleep at 3 hours or more, and its source is its earliest sample's.
  */
 export function appleHealthSessions(ctx: CoreContext, account: AccountId, from: LocalDate): SleepSession[] {
+  const timezone = ctx.one<{ timezone: string | null }>(`SELECT timezone FROM account WHERE id = ?`, account)?.timezone;
   const samples = ctx.all<{ start_at: string; end_at: string; source: string }>(
     `SELECT start_at, end_at, source FROM apple_health_sample
        WHERE account_id = ? AND type = 'sleep' AND end_at >= ? AND lower(value) NOT LIKE '%awake%'
@@ -158,7 +163,11 @@ export function appleHealthSessions(ctx: CoreContext, account: AccountId, from: 
   for (const sample of samples) {
     const [start, end] = [Date.parse(sample.start_at), Date.parse(sample.end_at)];
     const last = sessions.at(-1);
-    if (last !== undefined && start - last.end <= SESSION_GAP_MS) last.end = Math.max(last.end, end);
+    const merges =
+      last !== undefined &&
+      start - last.end <= SESSION_GAP_MS &&
+      !(timezone && nightStartsBetween(last.end, start, timezone));
+    if (merges) last.end = Math.max(last.end, end);
     else sessions.push({ start, end, source: sample.source });
   }
   return sessions.map((session) => ({
@@ -167,6 +176,14 @@ export function appleHealthSessions(ctx: CoreContext, account: AccountId, from: 
     isMain: session.end - session.start >= MAIN_SLEEP_MS,
     source: session.source === "" ? null : session.source,
   }));
+}
+
+/** Whether a night starts (18:00 in `timezone`) from `end` to `start`, both included: never when they overlap. */
+function nightStartsBetween(end: number, start: number, timezone: string): boolean {
+  const date = localDateOf(new Date(end), timezone);
+  let nightStart = nightStartsAt(date, timezone).getTime();
+  if (nightStart < end) nightStart = nightStartsAt(addDays(date, 1), timezone).getTime();
+  return nightStart <= start;
 }
 
 /** ISO 8601 with a time and a UTC offset or "Z", as Shortcuts writes a date: "2026-11-25T23:41:09-05:00". */

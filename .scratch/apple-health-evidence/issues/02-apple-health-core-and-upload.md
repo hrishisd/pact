@@ -49,3 +49,15 @@ For ticket 03:
 - Core: `AccountView.appleHealth()`, `makeAppleHealthKey()`, `disconnectAppleHealth()`, `uploadAppleHealth(upload)`; `PactCore.accountIdForUploadKey(key)`.
 
 Verification: `npm run check` passes (89 files, 1742 tests). The upload flow in `docs/agents/local-dev.md` was tried with curl on a dev server with a scratch database. `scripts/fuzz-deep.sh` passes in full: seeds 1000–1199, 300 steps, 4 jobs, about 21 minutes. (Only doc comments, docs and the glossary changed after the fuzz run started; `npm run lint` ran after them.)
+
+### 2026-11-26, agent (review fixes)
+
+Fixes from a review of the core and server, each with a test written first:
+- Upload parsing (`readUpload`, `src/server/apple-health.ts`): a text line with missing fields now has them empty and goes to the core, which skips another type (`steps|1234`) silently and counts a sleep or mindful line without its dates; the server no longer counts short lines itself. A JSON sample is read on its own: a number is read as its text, null or left out as "", and a sample of another shape (not an object, or a field that's an object) is counted unreadable instead of making the whole upload a 400. `{ "samples": [...] }` of another shape is still a 400.
+- An empty `?key=` falls back to the bearer token.
+- The 15:00 push (`pushNoSleepData`, `bedtime.ts`): still one per owner and night (no migration), now worded for every bedtime kind waiting that night, in `BEDTIME_KINDS` order: "Open the Oura app to sync it, and open Pact and tap Sync now before 6pm, or the night is missed." A kind whose night is waiting but hasn't reached 15:00 on its own clock yet is named too.
+- Sessions (`appleHealthSessions`): never merged across a gap that holds 18:00 in the account's timezone, ends and starts at 18:00 included; spec Judging and `docs/behaviour.md` updated.
+- The verdict check (`verdict-check.ts`) now works out an Apple Health night's first main sleep and when it arrived from the uploads it saw (the scenario's account handles report each `uploadAppleHealth`), with its own reading of the samples and its own merging, instead of trusting the stored bedtime. A night's sleep arrives at the first tick or upload of the owner's, after the pact was made, whose samples show one; a tick or upload at or after the close without one judged it without. Each tick and upload takes the accounts' timezones from the check that follows it. Mutating the core's main-sleep length or dropping the 18:00 rule makes scenarios fail through the check.
+- Today's No-data card carries `connectionProblem` from the core, so the client no longer maps a card's evidence kind to a connection alert; the Automatic card no longer carries `evidenceKind`, which nothing read.
+
+Verification: `npm run check`, `npm run test:e2e`, and `scripts/fuzz-deep.sh` (seeds 1000–1199, 300 steps) after the judging and harness changes.

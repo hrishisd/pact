@@ -205,6 +205,7 @@ describe("a pull on Today", () => {
             name: "In bed by 11",
             penaltyCents: 1000,
             evidenceKind: "oura",
+            connectionProblem: null,
             occurrenceDate: "2026-01-04",
             closesAt: "2026-01-05T23:00:00Z",
             tonight: null,
@@ -666,6 +667,7 @@ describe("an Apple Health night with no data", () => {
             name: "Bed by 12:30am",
             penaltyCents: 1000,
             evidenceKind: "apple_health",
+            connectionProblem: null,
             occurrenceDate: "2026-01-04",
             closesAt: "2026-01-05T23:00:00Z",
             tonight: null,
@@ -707,10 +709,14 @@ describe("an Apple Health night with no data", () => {
   });
 
   test("without an upload key, says to set up Apple Health instead of Sync now", async () => {
+    const [section] = APPLE_HEALTH_WAITING.sections as [
+      Extract<TodayResponse["sections"][number], { kind: "no-sleep-data" }>,
+    ];
     stubApi({
       today: answers<TodayResponse>({
         ...APPLE_HEALTH_WAITING,
         alerts: [{ kind: "connection", service: "apple_health", status: "not-connected" }],
+        sections: [{ ...section, cards: [{ ...section.cards[0]!, connectionProblem: "not-connected" }] }],
       }),
       checkAnki: answers({ ok: true }),
     });

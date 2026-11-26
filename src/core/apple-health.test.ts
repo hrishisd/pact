@@ -405,6 +405,38 @@ describe("judging a night", () => {
     ]);
   });
 
+  test("sleep is never merged across 18:00: a nap just before it doesn't pull the night's sleep into the night before", async () => {
+    const s = appleHealthScenario();
+    const { owner, createPact } = await ownerWithAppleHealth(s);
+    const pactId = await createPact("00:00");
+    s.setClockTo("Tue 08:00");
+    await upload(owner, sleepSample("Mon 23:00", "Tue 07:00"));
+
+    // 30 minutes apart, but 18:00 falls between them.
+    s.setClockTo("Wed 08:00");
+    await upload(owner, sleepSample("Tue 17:00", "Tue 17:50"), sleepSample("Tue 18:20", "Wed 06:00"));
+    expect(night(owner, pactId, s.date("Tue"))).toBe("satisfied");
+    expect(dayOn(owner, pactId, s.date("Tue"))?.detail).toEqual({ kind: "night", inBedAt: "18:20", source: "Oura" });
+
+    // Touching at 18:00 is across it too.
+    s.setClockTo("Thu 08:00");
+    await upload(owner, sleepSample("Wed 15:00", "Wed 18:00"), sleepSample("Wed 18:00", "Thu 02:00"));
+    expect(dayOn(owner, pactId, s.date("Wed"))?.detail).toEqual({ kind: "night", inBedAt: "18:00", source: "Oura" });
+  });
+
+  test("the 18:00 sleep isn't merged across is the account's", async () => {
+    const s = appleHealthScenario();
+    const { owner, createPact } = await ownerWithAppleHealth(s, "America/Los_Angeles");
+    const pactId = await createPact("00:00");
+    s.setClockTo("Tue 11:00");
+    await upload(owner, sleepSample("Tue 02:00", "Tue 10:00"));
+
+    // 17:00 to 17:50 and from 18:20 in Los Angeles: 20:00 to 20:50 and from 21:20 in New York.
+    s.setClockTo("Wed 11:00");
+    await upload(owner, sleepSample("Tue 20:00", "Tue 20:50"), sleepSample("Tue 21:20", "Wed 09:00"));
+    expect(dayOn(owner, pactId, s.date("Tue"))?.detail).toEqual({ kind: "night", inBedAt: "18:20", source: "Oura" });
+  });
+
   test("In Bed and stages from two apps overlap into one session, from the earliest start, with that sample's source", async () => {
     const s = appleHealthScenario();
     const { owner, createPact } = await ownerWithAppleHealth(s);
@@ -555,7 +587,7 @@ describe("Today and the 15:00 push", () => {
     const { owner, createPact } = await ownerWithAppleHealth(s);
     const pactId = await createPact("00:00", ["mon"]);
     await s.advanceTo("Mon 20:00");
-    expect(cards(owner, "automatic")).toEqual([expect.objectContaining({ pactId, evidenceKind: "apple_health" })]);
+    expect(cards(owner, "automatic")).toEqual([expect.objectContaining({ pactId })]);
 
     await s.advanceTo("Tue 09:00");
     expect(owner.today().sections).toEqual([
@@ -567,6 +599,7 @@ describe("Today and the 15:00 push", () => {
             name: "In bed by midnight",
             penaltyCents: 500,
             evidenceKind: "apple_health",
+            connectionProblem: null,
             occurrenceDate: s.date("Mon"),
             closesAt: s.at("Tue 18:00"),
             tonight: null,
@@ -604,12 +637,31 @@ describe("Today and the 15:00 push", () => {
     ]);
   });
 
-  test("disconnected, the push says to set Apple Health up again", async () => {
+  test("an Apple Health and an Oura Ring night waiting at 15:00: one push, telling the owner to sync both", async () => {
+    const s = appleHealthScenario();
+    const { owner, reviewer, sam, createPact } = await ownerWithAppleHealth(s);
+    await createPact("00:00", ["mon"]);
+    await owner.connectOura();
+    ok(await owner.createPact(bedtimePact(sam.id, reviewer, "00:00", ["mon"])));
+    await s.advanceTo("Tue 15:00");
+
+    expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          body: "Open the Oura app to sync it, and open Pact and tap Sync now before 6pm, or the night is missed.",
+        }),
+      }),
+    ]);
+  });
+
+  test("disconnected, the card says so and the push says to set Apple Health up again", async () => {
     const s = appleHealthScenario();
     const { owner, createPact } = await ownerWithAppleHealth(s);
     await createPact("00:00", ["mon"]);
     await owner.disconnectAppleHealth();
     await s.advanceTo("Tue 15:00");
+
+    expect(cards(owner, "no-sleep-data")).toEqual([expect.objectContaining({ connectionProblem: "not-connected" })]);
 
     expect(s.notifier.sentTo(owner, "connection-problem")).toEqual([
       expect.objectContaining({

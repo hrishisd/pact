@@ -616,7 +616,11 @@ export type DisconnectAppleHealthResponse = MeResponse;
  * for the person reading it in Shortcuts.
  */
 export interface AppleHealthSamplesRequest {
-  /** A sample's value and source may be left out: each is then "". */
+  /**
+   * Each sample is read on its own: a field left out or null is "", and a
+   * number is read as its text. A sample of another shape (not an object, or
+   * a field that's an object) is skipped and counted, as an unreadable line is.
+   */
   samples: (Omit<AppleHealthSampleFields, "value" | "source"> &
     Partial<Pick<AppleHealthSampleFields, "value" | "source">>)[];
 }

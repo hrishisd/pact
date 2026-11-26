@@ -427,7 +427,8 @@ export function createApp({
     API_PATHS.appleHealthSamples,
     async (c, next) => {
       const bearer = /^Bearer\s+(\S+)$/i.exec(c.req.header("Authorization") ?? "")?.[1];
-      const accountId = core.accountIdForUploadKey(c.req.query("key") ?? bearer ?? "");
+      // An empty `?key=` is no key: the bearer token, if any, is.
+      const accountId = core.accountIdForUploadKey(c.req.query("key") || bearer || "");
       if (accountId === null) return c.text(UNKNOWN_KEY_TEXT, 401);
       c.set("accountId", accountId);
       await next();

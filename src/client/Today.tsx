@@ -121,7 +121,6 @@ export function Today({
     today?.alerts.some((alert) => alert.kind === "connection" && alert.service === service) ?? false;
   const ouraConnectionProblem = brokenConnection("oura");
   const ankiConnectionProblem = brokenConnection("anki");
-  const appleHealthConnectionProblem = brokenConnection("apple_health");
   const waitingOn = (kind: Json<TodayNoSleepDataCard>["evidenceKind"]) =>
     today?.sections.some(
       (section) => section.kind === "no-sleep-data" && section.cards.some((card) => card.evidenceKind === kind),
@@ -194,8 +193,6 @@ export function Today({
                 now={now}
                 oura={oura}
                 anki={anki}
-                ouraConnectionProblem={ouraConnectionProblem}
-                appleHealthConnectionProblem={appleHealthConnectionProblem}
                 onOpenPact={onOpenPact}
                 onOpenLedger={onOpenLedger}
                 onFileExcuse={setExcusing}
@@ -325,8 +322,6 @@ function Section({
   now,
   oura,
   anki,
-  ouraConnectionProblem,
-  appleHealthConnectionProblem,
   onOpenPact,
   onOpenLedger,
   onFileExcuse,
@@ -339,10 +334,6 @@ function Section({
   oura: CheckState;
   /** Where the check of AnkiWeb stands. */
   anki: CheckState;
-  /** Whether Pact can't read the owner's Oura: syncing won't help, reconnecting will. */
-  ouraConnectionProblem: boolean;
-  /** Whether the owner has no upload key: Sync now won't help, setting up Apple Health will. */
-  appleHealthConnectionProblem: boolean;
   onOpenPact: (id: string, name: string) => void;
   onOpenLedger: (recipientId: string, name: string) => void;
   onFileExcuse: OnFileExcuse;
@@ -357,7 +348,6 @@ function Section({
           card={card}
           now={now}
           check={oura}
-          connectionProblem={card.evidenceKind === "oura" ? ouraConnectionProblem : appleHealthConnectionProblem}
           onOpen={() => onOpenPact(card.pactId, card.name)}
           onFileExcuse={() => onFileExcuse(excuseTargetFor(card))}
         />
@@ -618,7 +608,6 @@ function NoSleepDataCard({
   card,
   now,
   check,
-  connectionProblem,
   onOpen,
   onFileExcuse,
 }: {
@@ -626,14 +615,13 @@ function NoSleepDataCard({
   now: number;
   /** Where the check of Oura stands; an Apple Health night doesn't use it. */
   check: CheckState;
-  /** Whether the night's connection is broken: syncing won't help, reconnecting or setting up will. */
-  connectionProblem: boolean;
   onOpen: () => void;
   onFileExcuse: () => void;
 }) {
   const night = formatDate(card.occurrenceDate).split(" ")[0];
   const { tonight } = card;
   const oura = card.evidenceKind === "oura";
+  const connectionProblem = card.connectionProblem !== null;
   const checking = oura && check.checking;
   const toSync = oura
     ? connectionProblem

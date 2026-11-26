@@ -7,7 +7,13 @@ import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
 import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { formatDate } from "../shared/format.ts";
-import type { AccountId, BedtimeKind, CheckNowResult, LocalDate } from "../shared/types.ts";
+import {
+  BEDTIME_KINDS,
+  type AccountId,
+  type BedtimeKind,
+  type CheckNowResult,
+  type LocalDate,
+} from "../shared/types.ts";
 import { earlierDate, laterDate, localDateOf } from "./calendar.ts";
 import { errorText, markDisconnected, recentCheckNow, type ChecksNow } from "./connections.ts";
 import type { Command, CoreContext } from "./context.ts";
@@ -279,27 +285,39 @@ export async function fetchOuraSleep(
  * At 15:00 the day after, a bedtime night still not judged sends its owner
  * one push, unless an excuse was filed for it or an approved vacation covers
  * it (a vacation waiting for approval keeps it, as it keeps reminders). One per owner and night, so
- * two pacts waiting on the same night send one. A night already closed by
- * the time the scheduler gets here was just judged, so it sends none.
+ * two pacts waiting on the same night send one, telling the owner how to
+ * sync each kind waiting that night. A night already closed by the time the
+ * scheduler gets here was just judged, so it sends none.
  */
 export function pushNoSleepData(ctx: CoreContext, t: Date): void {
+  const unsynced = new Map<string, { owner: AccountId; date: LocalDate; kinds: Set<BedtimeKind>; due: boolean }>();
   for (const { pact, kind, night, zone, clock } of nightsWaiting(ctx, t)) {
-    const offset = clock.offsets(night.date, zone);
-    if (t.getTime() < noSleepDataPushAt(night.date, zone, offset).getTime()) continue;
     if (t.getTime() >= night.closesAt.getTime() || isJudged(ctx, pact.id, night.date)) continue;
     if (!keepsToDo(coverOn(ctx, pact.id, night.date))) continue;
+    const key = `${pact.owner_account_id} ${night.date}`;
+    const entry = unsynced.get(key) ?? { owner: pact.owner_account_id, date: night.date, kinds: new Set(), due: false };
+    entry.kinds.add(kind);
+    // Each kind's night is on its own clock, so one may reach 15:00 before another.
+    entry.due ||= t.getTime() >= noSleepDataPushAt(night.date, zone, clock.offsets(night.date, zone)).getTime();
+    unsynced.set(key, entry);
+  }
+  for (const { owner, date, kinds, due } of unsynced.values()) {
+    if (!due) continue;
     const sent = ctx.db
       .prepare(`INSERT INTO no_oura_data_push_sent (account_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`)
-      .run(pact.owner_account_id, night.date);
+      .run(owner, date);
     if (sent.changes === 0) continue;
-    const fix = syncText(ctx, kind, pact.owner_account_id);
+    const fixes = BEDTIME_KINDS.filter((kind) => kinds.has(kind)).map((kind, i) => {
+      const fix = syncText(ctx, kind, owner);
+      return i === 0 ? fix : fix[0]!.toLowerCase() + fix.slice(1);
+    });
     ctx.enqueue({
-      recipient: pact.owner_account_id,
+      recipient: owner,
       kind: "connection-problem",
       payload: {
-        occurrenceDate: night.date,
-        title: `${formatDate(night.date).split(" ")[0]} night hasn't synced`,
-        body: `${fix} before 6pm, or the night is missed.`,
+        occurrenceDate: date,
+        title: `${formatDate(date).split(" ")[0]} night hasn't synced`,
+        body: `${fixes.join(", and ")} before 6pm, or the night is missed.`,
         url: APP_PATHS.today,
       },
     });

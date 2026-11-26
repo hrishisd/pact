@@ -1302,6 +1302,8 @@ export type MissedDetail =
 export interface TodayNoSleepDataCard extends TodayPactCard {
   /** Where its sleep comes from: Oura Ring checks Oura, Apple Health asks the owner to run the Pact Health Shortcut. */
   evidenceKind: BedtimeKind;
+  /** Why the night's sleep can't arrive (Oura needs reconnecting, Apple Health has no upload key), or null when it can: syncing won't help, reconnecting or setting up will. */
+  connectionProblem: ConnectionProblem | null;
   /** The night's day in the owner's timezone. */
   occurrenceDate: LocalDate;
   /** 18:00 the next day: with no sleep data by then, it's Missed. */
@@ -1312,7 +1314,6 @@ export interface TodayNoSleepDataCard extends TodayPactCard {
 
 /** A bedtime pact's night that runs now. */
 export interface TodayAutomaticCard extends TodayPactCard {
-  evidenceKind: BedtimeKind;
   /** When its edit window closes; null once it has. */
   editWindowClosesAt: Date | null;
   /** The night's day in the owner's timezone. */

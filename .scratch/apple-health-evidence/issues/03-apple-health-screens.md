@@ -39,3 +39,11 @@ Decisions:
 
 Not done: the Copy button's "Copied" can't be seen in the headless screenshots (no clipboard permission), and nothing was tried on a real iPhone (the Shortcut and `shortcuts://` are for `manual-checks.md`). The setup page's Shortcut steps are text only; an iCloud link to a built Shortcut is out of scope.
 
+
+### 2026-11-26, agent (review)
+
+Reviewed the screens commit for rules in the client, glossary words, Oura copy on Apple Health pacts, Today's checks, buttons and links, and the `shortcuts://` links.
+- Changed: Today's No-data card decided which connection a night depends on by mapping its evidence kind to a connection alert. The core now puts `connectionProblem` on `TodayNoSleepDataCard`, and the card reads it. No copy or look changes.
+- Changed: `TodayAutomaticCard.evidenceKind` was sent but never read (the Automatic card is worded alike for both kinds), so it's gone.
+- Checked, no change: Today checks Oura on its own only while an Oura night's card shows; a pull still checks Oura whatever shows, as before this feature (the core asks Oura only about Oura nights). No bedtime copy says Oura or the ring for an Apple Health pact. Run Pact Health and Sync now are links (they open a URL); Profile's Set up / Make a new key are buttons that push the page, as Set up notifications does. Both `shortcuts://` links use `RUN_PACT_HEALTH_URL`, which matches the spec. They do nothing off an iPhone, which the spec accepts.
+- Left for the human: the disconnected alert's Set up Apple Health is a plain link to `/apple-health`, so it reloads the app instead of pushing the page; and Profile's "Make a new key" opens the page instead of making a key.

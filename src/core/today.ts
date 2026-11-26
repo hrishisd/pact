@@ -34,7 +34,7 @@ import { billsForToday } from "./money.ts";
 import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
-import { activePacts, type ActivePact } from "./pacts.ts";
+import { activePacts, SERVICE_OF_KIND, type ActivePact } from "./pacts.ts";
 import { rejectedVacationAlerts, vacationsOnNow } from "./vacations.ts";
 import {
   accountRow,
@@ -207,7 +207,7 @@ function pactToday(
   timezone: string,
   now: Date,
 ): TodayPlacement | null {
-  if (isBedtimeKind(pact.evidenceKind)) return bedtimeToday(ctx, pact, pact.evidenceKind, timezone, now);
+  if (isBedtimeKind(pact.evidenceKind)) return bedtimeToday(ctx, ownerId, pact, pact.evidenceKind, timezone, now);
   switch (pact.evidenceKind) {
     case "anki":
       return ankiToday(ctx, ownerId, pact, timezone, now);
@@ -224,6 +224,7 @@ function pactToday(
  */
 function bedtimeToday(
   ctx: CoreContext,
+  ownerId: AccountId,
   pact: ActivePact,
   evidenceKind: BedtimeKind,
   timezone: string,
@@ -258,6 +259,7 @@ function bedtimeToday(
       card: {
         ...cardOn(ctx, pact, lastNight.date),
         evidenceKind,
+        connectionProblem: connectionProblem(ctx, ownerId, SERVICE_OF_KIND[evidenceKind]!),
         occurrenceDate: lastNight.date,
         closesAt: lastNight.closesAt,
         tonight: tonightCard ?? null,
@@ -269,7 +271,6 @@ function bedtimeToday(
       section: "automatic",
       card: {
         ...cardOn(ctx, pact, tonightCard.occurrenceDate),
-        evidenceKind,
         editWindowClosesAt: pact.editWindowClosesAt,
         ...tonightCard,
       },

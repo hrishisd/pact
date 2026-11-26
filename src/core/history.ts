@@ -30,7 +30,6 @@ export function endedOnOf(pact: Pick<PactRow, "ended_at">, timezone: string): Lo
   return pact.ended_at === null ? null : localDateOf(new Date(pact.ended_at), timezone);
 }
 
-/** An Anki day's deciding check as its occurrence row stores it; null when no check reached AnkiWeb. */
 /** A judged night's detail: when the owner was in bed (wall-clock "HH:MM"), and the Apple Health source that said so, if any. */
 export function nightDetail(bedtimeStart: string | null, source: string | null): OccurrenceDetail {
   return {
@@ -40,6 +39,7 @@ export function nightDetail(bedtimeStart: string | null, source: string | null):
   };
 }
 
+/** An Anki day's deciding check as its occurrence row stores it; null when no check reached AnkiWeb. */
 export function ankiCheckOf(row: { anki_cards_left: number | null; anki_checked_at: string | null }): AnkiCheck | null {
   if (row.anki_cards_left === null || row.anki_checked_at === null) return null;
   return { cardsLeft: row.anki_cards_left, checkedAt: new Date(row.anki_checked_at) };

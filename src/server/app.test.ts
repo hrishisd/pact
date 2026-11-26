@@ -2993,12 +2993,19 @@ describe("Apple Health", () => {
     expect(response).toMatchObject({ status: 200, text: "Pact got 1 sleep sample and 0 mindful sessions." });
   });
 
-  test("lines it can't read are skipped and counted; blank lines and a header aren't", async () => {
+  test("sleep and mindful lines it can't read are skipped and counted; blank lines and other types aren't", async () => {
     const { s, key } = await ownerWithKey();
     s.setClockTo("Tue 09:00");
-    const body = ["type|start|end|value|source", "", "sleep|yesterday|today|Core|Watch", "nonsense", LINES, ""].join(
-      "\r\n",
-    );
+    const body = [
+      "type|start|end|value|source",
+      "",
+      "sleep|yesterday|today|Core|Watch",
+      "mindful|2026-01-05T12:00:00-05:00",
+      "steps|1234",
+      "nonsense",
+      LINES,
+      "",
+    ].join("\r\n");
 
     const response = await upload(s, body, { key });
 
@@ -3006,6 +3013,36 @@ describe("Apple Health", () => {
       status: 200,
       text: "Pact got 2 sleep samples and 1 mindful session, and skipped 2 lines it couldn't read.",
     });
+  });
+
+  test("a JSON sample is read on its own: numbers as text, null as empty, and one of another shape skipped and counted", async () => {
+    const { s, key } = await ownerWithKey();
+    s.setClockTo("Tue 09:00");
+    const body = JSON.stringify({
+      samples: [
+        { type: "sleep", start: "2026-01-05T23:10:00-05:00", end: "2026-01-06T06:30:00-05:00", value: 1, source: null },
+        { type: "mindful", start: "2026-01-05T12:00:00-05:00", end: "2026-01-05T12:10:00-05:00", value: null },
+        { type: "steps", start: null, end: null, value: 1234 },
+        "sleep|2026-01-05T23:10:00-05:00|2026-01-06T06:30:00-05:00",
+        { type: "sleep", start: { at: "2026-01-05T23:10:00-05:00" }, end: "2026-01-06T06:30:00-05:00" },
+      ],
+    });
+
+    const response = await upload(s, body, { key, contentType: "application/json" });
+
+    expect(response).toMatchObject({
+      status: 200,
+      text: "Pact got 1 sleep sample and 1 mindful session, and skipped 2 lines it couldn't read.",
+    });
+  });
+
+  test("an empty key in the URL falls back to the bearer token", async () => {
+    const { s, key } = await ownerWithKey();
+    s.setClockTo("Tue 09:00");
+
+    const response = await upload(s, LINES, { key: "", bearer: key });
+
+    expect(response).toMatchObject({ status: 200, text: "Pact got 2 sleep samples and 1 mindful session." });
   });
 
   test("without a key, or with one no account has, it answers 401 in plain text and keeps nothing", async () => {
@@ -3048,7 +3085,7 @@ describe("Apple Health", () => {
 
   test("a JSON body of another shape answers 400", async () => {
     const { s, key } = await ownerWithKey();
-    for (const body of ["{", JSON.stringify({ samples: "none" }), JSON.stringify({ samples: [{ type: 1 }] })]) {
+    for (const body of ["{", JSON.stringify({ samples: "none" }), JSON.stringify({ sample: [] })]) {
       expect((await upload(s, body, { key, contentType: "application/json" })).status).toBe(400);
     }
   });
