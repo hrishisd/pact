@@ -4,6 +4,7 @@
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
 import { money, scheduleText } from "../shared/format.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import type {
   AccountId,
@@ -179,7 +180,7 @@ export function deletePact(ctx: CoreContext, accountId: AccountId, pactId: strin
   if (!row) return { ok: false, reason: "pact-not-found" };
   if (editWindowClosesAt(row, ctx.clock.now()) === null) return { ok: false, reason: "edit-window-closed" };
   // In its window a pact can have evidence, reminders sent, a day an Anki check judged
-  // Satisfied and a night's first sleep from Oura. It has no penalty, since nothing is due
+  // Satisfied and a night's first sleep. It has no penalty, since nothing is due
   // within an hour of creation, and no excuse, vacation or change request, which the
   // window refuses.
   removeEvidence(ctx, pactId, () => true);
@@ -591,9 +592,9 @@ export function termsByKind(ctx: CoreContext, pact: PactRow): TermsByKind {
   const schedule = scheduleOf(pact.schedule);
   if (pact.evidence_kind === "camera") return { evidenceKind: "camera", schedule, dueBy: pact.due_by };
   if (schedule.kind !== "fixed-days") throw new Error(`${pact.evidence_kind} pact ${pact.id} isn't on Fixed days`);
-  if (pact.evidence_kind === "oura") {
-    if (pact.in_bed_by === null) throw new Error(`Oura Ring pact ${pact.id} has no in-bed-by time`);
-    return { evidenceKind: "oura", schedule, inBedBy: pact.in_bed_by };
+  if (isBedtimeKind(pact.evidence_kind)) {
+    if (pact.in_bed_by === null) throw new Error(`bedtime pact ${pact.id} has no in-bed-by time`);
+    return { evidenceKind: pact.evidence_kind, schedule, inBedBy: pact.in_bed_by };
   }
   const anki = ankiTerms(ctx, pact);
   if (!anki) throw new Error(`Anki pact ${pact.id} has no deck`);

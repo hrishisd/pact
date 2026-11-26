@@ -1,5 +1,6 @@
 // A pact's terms as a change sends them.
 
+import { isBedtimePact } from "./evidence-kinds.ts";
 import type { CurrentTerms, PactChange, PactTerms } from "./types.ts";
 
 /**
@@ -18,11 +19,10 @@ export function termsOf(pact: CurrentTerms & Pick<PactTerms, "reminders">): Pact
     reviewerIds: pact.reviewers.map((r) => r.id),
     reminders: pact.reminders,
   };
+  if (isBedtimePact(pact)) return { ...terms, schedule: pact.schedule, inBedBy: pact.inBedBy };
   switch (pact.evidenceKind) {
     case "camera":
       return { ...terms, schedule: pact.schedule, ...(pact.dueBy !== null && { dueBy: pact.dueBy }) };
-    case "oura":
-      return { ...terms, schedule: pact.schedule, inBedBy: pact.inBedBy };
     case "anki":
       return {
         ...terms,

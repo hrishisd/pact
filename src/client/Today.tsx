@@ -7,7 +7,7 @@
 // During an approved vacation, its banner comes after the alerts, and the
 // pacts it covers are gone from the sections.
 //
-// A bedtime night Oura hasn't reported yet comes first, as No Oura data. While
+// A bedtime night whose sleep hasn't arrived yet comes first, as No Oura data. While
 // that card is on screen, Today checks Oura now: when it opens, when the app
 // comes back to the foreground, and every 30 seconds. While an Anki day not
 // judged yet is on screen, Today checks AnkiWeb now when it opens and when the
@@ -29,7 +29,7 @@ import {
   type TodayAnkiCard,
   type TodayBillCard,
   type TodayMissedCard,
-  type TodayNoOuraDataCard,
+  type TodayNoSleepDataCard,
   type TodaySection,
   type TodayToDoCard,
   type TodayWaitingItem,
@@ -118,7 +118,7 @@ export function Today({
   const ankiConnectionProblem = brokenConnection("anki");
   // Checking can't help while the connection is broken.
   const oura = useCheckNow(
-    !ouraConnectionProblem && (today?.sections.some((section) => section.kind === "no-oura-data") ?? false),
+    !ouraConnectionProblem && (today?.sections.some((section) => section.kind === "no-sleep-data") ?? false),
     api.checkOura,
     reload,
     CHECK_OURA_EVERY_MS,
@@ -339,10 +339,10 @@ function Section({
   onChanged: () => void;
 }) {
   switch (section.kind) {
-    case "no-oura-data":
+    case "no-sleep-data":
       return section.cards.map((card) => (
-        <NoOuraDataCard
-          key={`no-oura-data:${card.pactId}:${card.occurrenceDate}`}
+        <NoSleepDataCard
+          key={`no-sleep-data:${card.pactId}:${card.occurrenceDate}`}
           card={card}
           now={now}
           check={oura}
@@ -601,7 +601,7 @@ function LaterCard({
  * before 6pm still counts. Tonight's deadline rides on it, and File excuse
  * covers a night without the ring.
  */
-function NoOuraDataCard({
+function NoSleepDataCard({
   card,
   now,
   check: { checking, unreachable },
@@ -609,7 +609,7 @@ function NoOuraDataCard({
   onOpen,
   onFileExcuse,
 }: {
-  card: Json<TodayNoOuraDataCard>;
+  card: Json<TodayNoSleepDataCard>;
   now: number;
   check: CheckState;
   ouraConnectionProblem: boolean;
@@ -722,7 +722,7 @@ function CheckingAnkiWeb() {
 }
 
 /**
- * A Missed card's day, and for a bedtime night when Oura saw the owner get
+ * A Missed card's day, and for a bedtime night when the owner got
  * into bed, or for an Anki day why. Today's day past its due-by time says when evidence was due. A
  * Weekly count week says how far it got.
  */

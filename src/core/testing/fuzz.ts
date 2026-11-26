@@ -16,6 +16,7 @@
 // asked (see the top of that file).
 
 import { addDays } from "../../shared/calendar.ts";
+import { isBedtimeKind } from "../../shared/evidence-kinds.ts";
 import { termsOf } from "../../shared/terms.ts";
 import {
   MAX_TEXT_CHARS,
@@ -781,9 +782,9 @@ export class World {
       penaltyCents: d % 23 === 0 ? 0 : PENALTIES[d % PENALTIES.length]!,
       recipientId: recipient.id,
       reviewerIds: (reviewers.length > 0 || d % 19 === 0 ? reviewers : [friends[c % friends.length]!]).map((r) => r.id),
-      ...(evidenceKind === "oura" && { inBedBy: ["22:30", "23:00", "00:00", "01:00"][(d >>> 8) % 4]! }),
+      ...(isBedtimeKind(evidenceKind) && { inBedBy: ["22:30", "23:00", "00:00", "01:00"][(d >>> 8) % 4]! }),
       ...(evidenceKind === "anki" && { ankiDeckId: DECKS[(d >>> 8) % DECKS.length]! }),
-      ...(evidenceKind !== "oura" && dueBy !== undefined && { dueBy }),
+      ...(!isBedtimeKind(evidenceKind) && dueBy !== undefined && { dueBy }),
       ...(startDate !== undefined && { startDate }),
       ...(endDate !== undefined && { endDate }),
       ...((d >>> 12) % 3 === 0 && { reminders: this.reminders(who, schedule, d >>> 14, c >>> 16) }),
@@ -825,7 +826,7 @@ export class World {
           return;
         }
         case 2:
-          if (pact.evidenceKind === "oura") change.inBedBy = ["22:00", "23:00", "00:00", "01:30"][n % 4]!;
+          if (isBedtimeKind(pact.evidenceKind)) change.inBedBy = ["22:00", "23:00", "00:00", "01:30"][n % 4]!;
           else if (n % 4 === 0) delete change.dueBy;
           else change.dueBy = CLOCK_TIMES[n % CLOCK_TIMES.length]!;
           return;

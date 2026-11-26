@@ -46,8 +46,8 @@ export interface PresentOptions {
   compact?: boolean;
   /** A period schedule's period, of this kind. */
   period?: PeriodKind;
-  /** A bedtime pact's night: one past its in-bed-by time is waiting on Oura. */
-  oura?: boolean;
+  /** A bedtime pact's night: one past its in-bed-by time is waiting on its sleep. */
+  bedtime?: boolean;
   /** A One-time pact's date: open on another day (Submit anytime), it's due on that date, not today. */
   dueOn?: LocalDate;
 }
@@ -61,7 +61,7 @@ export interface PresentOptions {
  * yet from Coming up to Due today to Not judged yet while the screen is open.
  */
 export function presentOccurrence(status: Status, now: number, options: PresentOptions): OccurrencePresentation {
-  const { timezone, compact = false, period, oura = false, dueOn } = options;
+  const { timezone, compact = false, period, bedtime = false, dueOn } = options;
   const { cover } = status;
   const chip = (text: string, tone: Tone) => ({ text, tone });
   const coveredSquare: Square = cover?.kind === "vacation" ? "vac" : "excused";
@@ -96,7 +96,7 @@ export function presentOccurrence(status: Status, now: number, options: PresentO
               : period
                 ? `Due by ${formatDate(dueDayOf(status.dueAt, timezone))}`
                 : `Due at ${dueClockText(status.dueAt, timezone)}`
-            : oura
+            : bedtime
               ? "No Oura data"
               : "Not judged yet";
       const shown = (c: { text: string; tone: Tone }, s: Square = square) => ({
@@ -115,7 +115,7 @@ export function presentOccurrence(status: Status, now: number, options: PresentO
           return shown(chip(`Due ${formatDate(dueOn)}`, "todo"));
         return shown(chip(period ? capitalized(thisPeriod(period)) : "Due today", "todo"));
       }
-      return shown(chip(oura ? "No Oura data" : "Not judged yet", "soon"));
+      return shown(chip(bedtime ? "No Oura data" : "Not judged yet", "soon"));
     }
   }
 }

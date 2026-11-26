@@ -2,6 +2,7 @@
 // Waiting for approval, and yesterday.
 
 import { addDays } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isPeriodSchedule } from "../shared/schedules.ts";
 import type {
   AccountId,
@@ -16,7 +17,7 @@ import type {
   TodayBillCard,
   TodayComingUpCard,
   TodayMissedCard,
-  TodayNoOuraDataCard,
+  TodayNoSleepDataCard,
   TodaySection,
   TodayToDoCard,
   TodayWaitingItem,
@@ -31,7 +32,7 @@ import { ankiCheckOf, yesterdayEntries } from "./history.ts";
 import { billsForToday } from "./money.ts";
 import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
-import { wallClock } from "./oura-clock.ts";
+import { wallClock } from "./night-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import { activePacts, type ActivePact } from "./pacts.ts";
 import { rejectedVacationAlerts, vacationsOnNow } from "./vacations.ts";
@@ -136,8 +137,8 @@ function todayAlerts(ctx: CoreContext, ownerId: AccountId, now: Date, billAlerts
 }
 
 /**
- * Today's sections. No Oura data: bedtime nights past their deadline that
- * Oura hasn't reported. To do: pacts with an occurrence open now that still
+ * Today's sections. No sleep data: bedtime nights past their deadline whose
+ * sleep hasn't arrived. To do: pacts with an occurrence open now that still
  * needs evidence, and `billCards`. Later: Every 2 weeks and Once a month
  * periods that still need evidence before their reminder window. Missed: other occurrences judged Missed
  * in the last 48 hours and not accepted. Automatic: bedtime nights open
@@ -155,7 +156,7 @@ function todaySections(
   const toDo: (TodayToDoCard | TodayAnkiCard | TodayBillCard)[] = [];
   const later: TodayToDoCard[] = [];
   const automatic: TodayAutomaticCard[] = [];
-  const noOuraData: TodayNoOuraDataCard[] = [];
+  const noSleepData: TodayNoSleepDataCard[] = [];
   const comingUp: TodayComingUpCard[] = [];
   for (const pact of activePacts(ctx, ownerId)) {
     const placed = pactToday(ctx, ownerId, pact, timezone, now);
@@ -170,8 +171,8 @@ function todaySections(
       case "automatic":
         automatic.push(placed.card);
         break;
-      case "no-oura-data":
-        noOuraData.push(placed.card);
+      case "no-sleep-data":
+        noSleepData.push(placed.card);
         break;
       case "coming-up":
         // A first occurrence an approved vacation covers isn't coming up: the owner is off that day.
@@ -185,10 +186,10 @@ function todaySections(
   toDo.sort(byDueAt);
   later.sort(byDueAt);
   automatic.sort(byDueAt);
-  noOuraData.sort((a, b) => a.closesAt.getTime() - b.closesAt.getTime());
+  noSleepData.sort((a, b) => a.closesAt.getTime() - b.closesAt.getTime());
   comingUp.sort((a, b) => a.opensOn.localeCompare(b.opensOn, "en-US"));
   const sections: TodaySection[] = [];
-  if (noOuraData.length > 0) sections.push({ kind: "no-oura-data", cards: noOuraData });
+  if (noSleepData.length > 0) sections.push({ kind: "no-sleep-data", cards: noSleepData });
   if (toDo.length > 0) sections.push({ kind: "to-do", cards: toDo });
   if (later.length > 0) sections.push({ kind: "later", cards: later });
   const missed = recentlyMissed(ctx, ownerId, timezone, now);
@@ -206,9 +207,8 @@ function pactToday(
   timezone: string,
   now: Date,
 ): TodayPlacement | null {
+  if (isBedtimeKind(pact.evidenceKind)) return bedtimeToday(ctx, pact, timezone, now);
   switch (pact.evidenceKind) {
-    case "oura":
-      return bedtimeToday(ctx, pact, timezone, now);
     case "anki":
       return ankiToday(ctx, ownerId, pact, timezone, now);
     case "camera":
@@ -218,7 +218,7 @@ function pactToday(
 
 /**
  * A bedtime pact on Today: Coming up before its first night opens; then
- * last night under No Oura data, else tonight under Automatic. A night with
+ * last night under No sleep data, else tonight under Automatic. A night with
  * an excuse filed is under Waiting for approval instead; one on a vacation
  * waiting for approval stays.
  */
@@ -236,7 +236,7 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
   const tonight = nights.find(
     (night) => night.opensAt.getTime() <= now.getTime() && now.getTime() < night.dueAt.getTime() && open(night),
   );
-  // Last night: past its deadline, and Oura hasn't reported it before it closes.
+  // Last night: past its deadline, and its sleep hasn't arrived before it closes.
   const lastNight = nights.find(
     (night) => night.dueAt.getTime() <= now.getTime() && now.getTime() < night.closesAt.getTime() && open(night),
   );
@@ -248,7 +248,7 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
   if (lastNight) {
     // Tonight's deadline rides on this card.
     return {
-      section: "no-oura-data",
+      section: "no-sleep-data",
       card: {
         ...cardOn(ctx, pact, lastNight.date),
         occurrenceDate: lastNight.date,
@@ -464,7 +464,7 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
 /**
  * What a Missed card's line says beyond its day: Closed at today's due-by
  * time, how far a period got, the Anki check that decided it, or
- * when Oura saw the owner get into bed.
+ * when the owner got into bed.
  */
 function missedDetail(
   ctx: CoreContext,
@@ -482,7 +482,7 @@ function missedDetail(
   if (dueBy !== null && row.evidence_kind !== "anki") return { kind: "closed", dueBy };
   if (onPeriods) return { kind: "period", progress: periodProgress(ctx, row.id, row.date) };
   if (row.evidence_kind === "anki") return { kind: "anki", lastCheck: ankiCheckOf(row) };
-  if (row.evidence_kind === "oura") {
+  if (isBedtimeKind(row.evidence_kind)) {
     return { kind: "night", inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) };
   }
   return null;
@@ -493,5 +493,5 @@ type TodayPlacement =
   | { section: "to-do"; card: TodayToDoCard | TodayAnkiCard }
   | { section: "later"; card: TodayToDoCard }
   | { section: "automatic"; card: TodayAutomaticCard }
-  | { section: "no-oura-data"; card: TodayNoOuraDataCard }
+  | { section: "no-sleep-data"; card: TodayNoSleepDataCard }
   | { section: "coming-up"; card: TodayComingUpCard };

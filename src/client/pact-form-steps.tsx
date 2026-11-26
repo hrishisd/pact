@@ -21,6 +21,7 @@ import {
   type WeekStartsRequest,
 } from "../shared/types.ts";
 import { addDays } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isOncePerPeriod, lastDayOf, type OncePerPeriodKind } from "../shared/schedules.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import {
@@ -211,7 +212,7 @@ export function PactFormStep({
 
 function GoalStep({ form, update }: { form: Form; update: (change: Partial<Form>) => void }) {
   if (form.kind === "anki") return <AnkiGoalStep form={form} update={update} />;
-  if (form.kind === "oura") {
+  if (isBedtimeKind(form.kind)) {
     return (
       <>
         <h2>Goal</h2>
@@ -381,7 +382,7 @@ function ScheduleStep({
   weekStartsFor: WeekStartsFor;
 }) {
   const { days } = form;
-  const oura = form.kind === "oura";
+  const bedtime = isBedtimeKind(form.kind);
   const anki = form.kind === "anki";
   const scheduleKind = scheduleKindOf(form);
   const weekly = scheduleKind === "weekly-count";
@@ -472,8 +473,8 @@ function ScheduleStep({
       ) : (
         <>
           <div className="field">
-            <span>{oura ? "Nights" : "Days"}</span>
-            <div className="days" role="group" aria-label={oura ? "Nights" : "Days"}>
+            <span>{bedtime ? "Nights" : "Days"}</span>
+            <div className="days" role="group" aria-label={bedtime ? "Nights" : "Days"}>
               {WEEKDAYS.map((day) => (
                 <button
                   key={day}
@@ -491,12 +492,12 @@ function ScheduleStep({
             aria-pressed={everyDay}
             onClick={() => onDays(everyDay ? [] : [...WEEKDAYS])}
           >
-            {oura ? "Every night" : "Every day"}
+            {bedtime ? "Every night" : "Every day"}
           </button>
         </>
       )}
       <small className="muted">
-        {oura
+        {bedtime
           ? `Pact checks each night when your ring syncs. If there's no sleep data by ${NIGHT_CLOSES_TEXT} the next day, the night is missed.`
           : anki
             ? `Finish the deck and sync before ${until}. If AnkiWeb doesn't show the deck finished by then, the day is missed.`

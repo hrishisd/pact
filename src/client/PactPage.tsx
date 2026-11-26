@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { API_PATHS, type Json } from "../shared/api.ts";
+import { isBedtimeKind, isBedtimePact } from "../shared/evidence-kinds.ts";
 import { periodKindOfSchedule } from "../shared/schedules.ts";
 import {
   MAX_NAME_CHARS,
@@ -231,9 +232,7 @@ function StageLine({ pact }: { pact: Pact }) {
     <div className="row2">
       <span className={`chip ${chip.className}`}>{chip.label}</span>
       <span className="muted">
-        {pact.evidenceKind === "oura"
-          ? `In bed by ${clockText(pact.inBedBy)}, judged from your ring`
-          : pact.description}
+        {isBedtimePact(pact) ? `In bed by ${clockText(pact.inBedBy)}, judged from your ring` : pact.description}
       </span>
     </div>
   );
@@ -559,7 +558,7 @@ function NameSheet({ pact, onClose, onSaved }: { pact: Pact; onClose: () => void
           className="inp"
           maxLength={MAX_NAME_CHARS}
           value={name}
-          placeholder={pact.evidenceKind === "oura" ? "e.g. In bed by midnight" : "e.g. Gym"}
+          placeholder={isBedtimeKind(pact.evidenceKind) ? "e.g. In bed by midnight" : "e.g. Gym"}
           onChange={(e) => setName(e.target.value)}
         />
         <small>A new name applies right away, with no approval.</small>

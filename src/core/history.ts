@@ -1,6 +1,7 @@
 // History: the pact page's heat map of past occurrences, and Today's Yesterday.
 
 import { addDays } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import {
   WEEKDAYS,
@@ -21,7 +22,7 @@ import type { CoreContext } from "./context.ts";
 import { onApprovedVacation } from "./covers.ts";
 import { occurrenceStatus, rejection, PERIOD_PACT, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
-import { wallClock } from "./oura-clock.ts";
+import { wallClock } from "./night-clock.ts";
 import { occurrencesOf, scheduleOf, type PactRow } from "./rows.ts";
 
 /** The day an Ended pact Ended, in `timezone`; null while it's Active. */
@@ -174,7 +175,7 @@ export function occurrenceRecord(
   );
   const judged = status.kind === "satisfied" || status.kind === "missed";
   let detail: OccurrenceDetail | null = null;
-  if (pact.evidence_kind === "oura" && judged) {
+  if (isBedtimeKind(pact.evidence_kind) && judged) {
     const bedtimeStart = row?.bedtime_start ?? null;
     detail = { kind: "night", inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
   }

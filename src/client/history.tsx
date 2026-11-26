@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Json } from "../shared/api.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import type {
   HeatMapDay,
   HeatMapPeriod,
@@ -51,7 +52,7 @@ function present(record: Occurrence | null, now: number, options: PresentOptions
 }
 
 /**
- * The line under an occurrence: who decided it and why, when Oura saw the
+ * The line under an occurrence: who decided it and why, when the
  * owner get into bed or Pact saw the deck finished (in `timezone`, the
  * profile's), and what a miss cost. `reviewerNames` names who a photo waits
  * for; without it the chip says enough.
@@ -183,7 +184,7 @@ function OneTimeHistory({
   // Open before its date, with Submit anytime: it's due on the deadline's date, not today.
   const { chip, square } = presentOccurrence(record.status, now, {
     timezone,
-    oura: pact.evidenceKind === "oura",
+    bedtime: isBedtimeKind(pact.evidenceKind),
     dueOn: day.date,
   });
   const line = occurrenceLine(
@@ -256,7 +257,7 @@ function DailyHeatMap({
                   <HeatMapSquare
                     key={day.date}
                     day={day}
-                    presented={present(day.occurrence, now, { timezone, oura: pact.evidenceKind === "oura" })}
+                    presented={present(day.occurrence, now, { timezone, bedtime: isBedtimeKind(pact.evidenceKind) })}
                     selected={day.date === selected}
                     onSelect={() => setSelected(day.date)}
                   />
@@ -272,13 +273,13 @@ function DailyHeatMap({
           <div className="spread">
             <b>
               {formatDate(picked.date)}
-              {pact.evidenceKind === "oura" && " night"}
+              {isBedtimeKind(pact.evidenceKind) && " night"}
             </b>
             <DayChip
               status={picked.occurrence.status}
               now={now}
               timezone={timezone}
-              oura={pact.evidenceKind === "oura"}
+              bedtime={isBedtimeKind(pact.evidenceKind)}
             />
           </div>
           {line && <span className="small muted">{line}</span>}
@@ -480,7 +481,7 @@ export function Yesterday({
                 status={entry.occurrence.status}
                 now={now}
                 timezone={timezone}
-                oura={entry.evidenceKind === "oura"}
+                bedtime={isBedtimeKind(entry.evidenceKind)}
               />
             </button>
           );

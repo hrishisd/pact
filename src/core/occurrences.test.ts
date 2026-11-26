@@ -10,7 +10,7 @@ import {
   newOccurrenceTerms,
   NIGHT_STARTS_HOUR,
   nightStartsAt,
-  noOuraDataPushAt,
+  noSleepDataPushAt,
   occurrences,
   occurrencesOverTime,
   type DayClock,
@@ -235,18 +235,18 @@ describe("bedtime nights", () => {
   });
 
   test.each([
-    { ouraOffset: "+01:00", closesAt: "2026-01-06T18:00:00+01:00" },
-    { ouraOffset: "-10:00", closesAt: "2026-01-06T18:00:00-10:00" },
-    { ouraOffset: null, closesAt: "2026-01-06T18:00:00-05:00" },
-  ])("on Oura's clock at $ouraOffset, Monday night closes at 18:00 Tuesday there", ({ ouraOffset, closesAt }) => {
-    const monday = occurrences({ ...mondays, day: night("00:00") }, NEW_YORK, ouraOffset).first;
+    { nightOffset: "+01:00", closesAt: "2026-01-06T18:00:00+01:00" },
+    { nightOffset: "-10:00", closesAt: "2026-01-06T18:00:00-10:00" },
+    { nightOffset: null, closesAt: "2026-01-06T18:00:00-05:00" },
+  ])("on Oura's clock at $nightOffset, Monday night closes at 18:00 Tuesday there", ({ nightOffset, closesAt }) => {
+    const monday = occurrences({ ...mondays, day: night("00:00") }, NEW_YORK, nightOffset).first;
     expect(monday.closesAt).toEqual(new Date(closesAt));
     // Only the close moves: the night still opens and falls due on the account's clock.
     expect(monday.dueAt).toEqual(new Date("2026-01-06T00:00:00-05:00"));
-    expect(nightStartsAt("2026-01-05", NEW_YORK, ouraOffset)).toEqual(
+    expect(nightStartsAt("2026-01-05", NEW_YORK, nightOffset)).toEqual(
       new Date(closesAt.replace("2026-01-06", "2026-01-05")),
     );
-    expect(noOuraDataPushAt("2026-01-05", NEW_YORK, ouraOffset)).toEqual(new Date(closesAt.replace("T18", "T15")));
+    expect(noSleepDataPushAt("2026-01-05", NEW_YORK, nightOffset)).toEqual(new Date(closesAt.replace("T18", "T15")));
   });
 
   test("a night's 18:00 on the account's clock follows its daylight saving change", () => {

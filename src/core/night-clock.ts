@@ -1,11 +1,13 @@
-// Reading Oura's timestamps on Oura's own clock, where the ring was.
+// Reading a sleep's timestamps on the clock its night is read on. A
+// timestamp here carries the UTC offset of that clock: Oura's own, where the
+// ring was, for an Oura Ring night (`nightClockOf`, rows.ts).
 
 import { addDays, parseClockTime } from "../shared/calendar.ts";
 import type { ClockTime, LocalDate } from "../shared/types.ts";
 import { NIGHT_STARTS_HOUR } from "./occurrences.ts";
 
 /**
- * A timestamp as Oura wrote it, read on Oura's own clock: "YYYY-MM-DDTHH:MM".
+ * A timestamp read on the clock it was written with: "YYYY-MM-DDTHH:MM".
  * Oura's timestamps carry the UTC offset where the ring was, so their wall
  * time is the time there.
  */

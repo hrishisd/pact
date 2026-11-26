@@ -12,7 +12,7 @@
 // reminders, today), whose functions take the CoreContext (context.ts). They
 // share writes (judging.ts, outbox.ts), reads (rows.ts, occurrence-state.ts)
 // and pure rules (pact-rules.ts, occurrences.ts, changes.ts, calendar.ts,
-// bill-math.ts, oura-clock.ts).
+// bill-math.ts, night-clock.ts).
 
 import { randomUUID } from "node:crypto";
 import type {
@@ -106,7 +106,7 @@ import {
   signIn,
 } from "./accounts.ts";
 import { ankiDecks, checkAnki, fetchAnki, recordAnkiChecks, type AnkiPolling } from "./anki-days.ts";
-import { checkOura, fetchSleep, judgeNights, noteOuraClock, pushNoOuraData } from "./bedtime.ts";
+import { checkOura, fetchOuraSleep, judgeNights, noteOuraClock, ouraSessions, pushNoSleepData } from "./bedtime.ts";
 import {
   addReviewers,
   changePact,
@@ -354,7 +354,7 @@ export interface AccountView {
    */
   connectOura(): Promise<void>;
   /**
-   * Checks Oura now for the account's bedtime nights not judged yet, as a
+   * Checks Oura now for the account's Oura Ring nights not judged yet, as a
    * tick would, and judges what it reports. Ignored less than 15 seconds after
    * the account's last check, with no night waiting, or without a working
    * connection. A failing call changes nothing and answers unreachable,
@@ -363,7 +363,7 @@ export interface AccountView {
    */
   checkOura(): Promise<CheckNowResult>;
   /**
-   * Removes the account's Oura connection. Its Active bedtime pacts keep
+   * Removes the account's Oura connection. Its Active Oura Ring pacts keep
    * running: their nights count as Missed until the owner connects again.
    */
   disconnectOura(): Promise<void>;
@@ -786,7 +786,7 @@ class Core implements PactCore {
   async advanceTo(t: Date): Promise<void> {
     // Before the transaction, never in it: a slow Oura can't hold up other writes.
     // An account whose call throws has no data this tick; the next one retries.
-    const fetched = await fetchSleep(this.#ctx, this.#ouraSource, t);
+    const fetched = await fetchOuraSleep(this.#ctx, this.#ouraSource, t);
     const checked = await fetchAnki(this.#ctx, this.#ankiSource, this.#ankiPolling, t);
     const { dropped, givenUp } = await this.#command(
       () => {
@@ -798,8 +798,8 @@ class Core implements PactCore {
         settleAll(this.#ctx, t);
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
         noteOuraClock(this.#ctx, fetched.sleep, t);
-        judgeNights(this.#ctx, t, fetched.sleep);
-        pushNoOuraData(this.#ctx, t);
+        judgeNights(this.#ctx, "oura", t, ouraSessions(fetched.sleep));
+        pushNoSleepData(this.#ctx, t);
         const dropped = remind(this.#ctx, t);
         endPastEndDate(this.#ctx, t);
         makeBills(this.#ctx, t);

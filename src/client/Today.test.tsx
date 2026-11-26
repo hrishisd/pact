@@ -198,7 +198,7 @@ describe("a pull on Today", () => {
     ...TODAY,
     sections: [
       {
-        kind: "no-oura-data",
+        kind: "no-sleep-data",
         cards: [
           {
             pactId: "bed",

@@ -76,9 +76,9 @@ function night(sleep: { start: string; arrived: string } | null, over: Partial<O
   return cameraDay({
     occurrence: NIGHT,
     automatic: {
-      kind: "oura",
+      kind: "bedtime",
       inBedBy: "23:00",
-      firstBedtimeStart: sleep?.start ?? null,
+      bedtimeStart: sleep?.start ?? null,
       arrivedAt: sleep ? at(sleep.arrived) : null,
     },
     ...over,
@@ -443,7 +443,7 @@ describe("a bedtime night, in bed by 23:00", () => {
       name: "with no data before it closes",
       facts: night(null),
       now: "Tue 09:00",
-      verdict: { kind: "waiting", on: "oura" },
+      verdict: { kind: "waiting", on: "sleep" },
     },
     { name: "with no data when it closes", facts: night(null), now: "Tue 18:00", verdict: missed("Tue 18:00") },
     {
@@ -468,7 +468,7 @@ describe("a bedtime night, in bed by 23:00", () => {
       name: "with no data under an approved cover, before it closes",
       facts: night(null, { cover: cover("approved", "Mon 10:00") }),
       now: "Tue 09:00",
-      verdict: { kind: "waiting", on: "oura" },
+      verdict: { kind: "waiting", on: "sleep" },
     },
     {
       name: "with no data under an approved cover, when it closes",

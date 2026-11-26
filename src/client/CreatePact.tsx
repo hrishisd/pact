@@ -21,6 +21,7 @@ import {
   type Refusal,
 } from "../shared/types.ts";
 import { API_PATHS, type FirstOccurrenceResponse, type Json } from "../shared/api.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isOncePerPeriod, lastDayOf } from "../shared/schedules.ts";
 import { ouraResultText, takeOuraResult } from "./oura.tsx";
 import { AnkiLoginFields, NO_ANKI_LOGIN, signInToAnki, type AnkiLogin } from "./anki.tsx";
@@ -50,7 +51,7 @@ type Pact = Json<PactTerms>;
 function stepProblem(step: Step, form: Form): Problem | null {
   switch (step) {
     case "goal":
-      if (form.kind === "oura" && form.inBedBy === "") return "invalid-in-bed-by";
+      if (isBedtimeKind(form.kind) && form.inBedBy === "") return "invalid-in-bed-by";
       if (form.kind === "anki" && form.ankiDeckId === null) return "unknown-deck";
       if (form.name.trim() === "") return "blank-name";
       if (form.kind !== "camera") return null;
@@ -61,7 +62,7 @@ function stepProblem(step: Step, form: Form): Problem | null {
       if (scheduleKind === "one-time" && form.deadline === "") return "no-deadline";
       if (scheduleKind === "fixed-days" && form.days.length === 0) return "no-days";
       if (isOncePerPeriod({ kind: scheduleKind }) && !form.firstPeriodPicked) return "no-first-period";
-      return form.kind !== "oura" && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
+      return !isBedtimeKind(form.kind) && form.dueByOn && form.dueBy === "" ? "invalid-due-by" : null;
     }
     case "penalty": {
       const penaltyCents = parseCents(form.penalty);
@@ -432,7 +433,7 @@ function CheckStep({
   const schedule = scheduleOf(form);
   // Asked for again only when the schedule really changes.
   const scheduleKey = JSON.stringify(schedule);
-  const inBedBy = form.kind === "oura" ? form.inBedBy : undefined;
+  const inBedBy = isBedtimeKind(form.kind) ? form.inBedBy : undefined;
   const { dueBy, startDate } = optionalTimes(form);
   const due = dueBy ? clockText(dueBy) : "midnight";
 

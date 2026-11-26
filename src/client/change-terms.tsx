@@ -5,6 +5,7 @@
 
 import { Fragment } from "react";
 import type { Json } from "../shared/api.ts";
+import { isBedtimeKind, isBedtimePact } from "../shared/evidence-kinds.ts";
 import { periodKindOfSchedule } from "../shared/schedules.ts";
 import type {
   ApprovalReason,
@@ -53,7 +54,7 @@ export function endsWhenText(
 ): string {
   if (ending.kind === "at-once") return "now";
   const kind = periodKindOfSchedule(terms.schedule);
-  const open = kind ? thisPeriod(kind) : terms.evidenceKind === "oura" ? "that night" : "that day";
+  const open = kind ? thisPeriod(kind) : isBedtimeKind(terms.evidenceKind) ? "that night" : "that day";
   return `after ${formatDate(ending.lastDay)}, once ${open} ${kind === "every-2-weeks" ? "have" : "has"} been judged`;
 }
 
@@ -74,8 +75,8 @@ export function openOccurrenceText(schedule: Pick<Schedule, "kind">): string {
 
 /**
  * The terms a pact of this evidence kind and kind of schedule has, in the
- * Request change order. A One-time pact has no start or end date; an Oura
- * Ring pact has no due-by time.
+ * Request change order. A One-time pact has no start or end date; a bedtime
+ * pact has no due-by time.
  */
 export function termsOfKind(current: { evidenceKind: EvidenceKind; schedule: Pick<Schedule, "kind"> }): Term[] {
   if (current.schedule.kind === "one-time") {
@@ -95,7 +96,7 @@ export function termsOfKind(current: { evidenceKind: EvidenceKind; schedule: Pic
       "reminders",
     ];
   }
-  return current.evidenceKind === "oura"
+  return isBedtimeKind(current.evidenceKind)
     ? ["name", "in-bed-by", "schedule", "start-date", "end-date", "penalty", "recipient", "reviewers", "reminders"]
     : [
         "name",
@@ -121,11 +122,11 @@ export function currentValue(term: Exclude<Term, "reminders">, current: Current)
     case "description":
       return current.description;
     case "in-bed-by":
-      return current.evidenceKind === "oura" ? clockText(current.inBedBy) : "—";
+      return isBedtimePact(current) ? clockText(current.inBedBy) : "—";
     case "schedule":
       return scheduleText(current.schedule);
     case "due-by":
-      return dueByText(current.evidenceKind === "oura" ? null : current.dueBy);
+      return dueByText(isBedtimePact(current) ? null : current.dueBy);
     case "start-date":
       return dateText(current.startDate, "No start date");
     case "end-date":
@@ -275,7 +276,7 @@ export function startsText(request: Json<TermsChangeRequestView>, lead: string):
   // A One-time pact's one occurrence takes a change even once it's open.
   if (schedule.kind === "one-time") return `${lead} right away, even if the deadline day has started.`;
   const kind = periodKindOfSchedule(schedule);
-  const unit = request.current.evidenceKind === "oura" ? "night" : kind ? periodWord(kind) : "day";
+  const unit = isBedtimeKind(request.current.evidenceKind) ? "night" : kind ? periodWord(kind) : "day";
   const today =
     start.todayKeepsCents === null
       ? ""

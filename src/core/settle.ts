@@ -5,6 +5,7 @@
 // through `endPact` (ending.ts).
 
 import { addDays } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isPeriodSchedule } from "../shared/schedules.ts";
 import type { AccountId, EvidenceKind, LocalDate } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
@@ -110,8 +111,8 @@ function deletePenalties(ctx: CoreContext, pactId: string, date: LocalDate): voi
  * now, unless approved evidence makes it Satisfied, as at its due time; the
  * rest are judged Excused at their due time. Rejected or withdrawn:
  * the cover no longer counts, and nothing changes. A bedtime night not
- * judged yet is left to judging (`judgeNights`), which waits for Oura until
- * the night closes, and takes a period on its first look after the close.
+ * judged yet is left to judging (`judgeNights`), which waits for its sleep
+ * until the night closes, and takes one on its first look after the close.
  */
 export function settleCoverDays(ctx: CoreContext, pactId: string, dates: readonly LocalDate[], now: Date): void {
   const pact = ctx.one<{ timezone: string; evidence_kind: EvidenceKind }>(
@@ -125,7 +126,7 @@ export function settleCoverDays(ctx: CoreContext, pactId: string, dates: readonl
     const occurrence = covering(day);
     if (occurrence === null || settled.has(occurrence.date)) continue;
     settled.add(occurrence.date);
-    if (pact.evidence_kind === "oura" && !isJudged(ctx, pactId, occurrence.date)) continue;
+    if (isBedtimeKind(pact.evidence_kind) && !isJudged(ctx, pactId, occurrence.date)) continue;
     settle(ctx, pactId, occurrence.date, now);
   }
 }
@@ -133,8 +134,8 @@ export function settleCoverDays(ctx: CoreContext, pactId: string, dates: readonl
 /**
  * The tick's judging: settles each Active pact's Camera and Anki occurrences
  * due by `t`, from where judging got to last time (the pact's
- * `judged_through`), so a stopped scheduler catches up. Oura reports bedtime
- * nights (`judgeNights`).
+ * `judged_through`), so a stopped scheduler catches up. Bedtime nights are
+ * judged from their sleep (`judgeNights`).
  */
 export function settleAll(ctx: CoreContext, t: Date): void {
   for (const pact of pactsToJudge(ctx)) settlePactDueBy(ctx, pact, t);
@@ -148,7 +149,7 @@ export function settleAll(ctx: CoreContext, t: Date): void {
  * it once the check is recorded.
  */
 export function settlePactDueBy(ctx: CoreContext, pact: PactToJudge, t: Date): void {
-  if (pact.evidence_kind === "oura") return;
+  if (isBedtimeKind(pact.evidence_kind)) return;
   const occurrences = occurrencesOf(ctx, pact.id, pact.timezone);
   const due = occurrences.dueAfter(pact.judged_through, t);
   let through: LocalDate | null = null;

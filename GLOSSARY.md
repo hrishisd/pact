@@ -56,6 +56,12 @@ When an occurrence is due and judged: on Fixed days, the due-by time or in-bed-b
 **In-bed-by time**:
 The time an Oura Ring pact's owner must be in bed by each scheduled night, such as 12:00am. An evening time (from 6pm) is that evening; an earlier one is the morning after. It's the night's due time.
 
+**Bedtime pact**:
+A pact whose occurrences are nights, judged from when the owner got into bed rather than from evidence they submit: an Oura Ring pact. Its terms have an in-bed-by time and Fixed days.
+
+**Main sleep**:
+A sleep that can decide a night: Oura's long sleep. A shorter one, such as a nap, never does.
+
 **Night**:
 A bedtime pact's occurrence: the night of Tue Oct 21 runs from 6pm Tuesday to 6pm Wednesday. Oura's first main sleep starting in it decides it; with none by 6pm Wednesday, it's Missed.
 

@@ -2,12 +2,14 @@
 // occurrence follows, accounts, names, friends, reviewers and recipients, each
 // pact's occurrences, connections and Anki decks.
 
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isPeriodSchedule } from "../shared/schedules.ts";
 import type {
   AccountId,
   AnkiCheck,
   AnkiDeck,
   AnkiTerms,
+  BedtimeKind,
   ClockTime,
   Connection,
   ConnectionProblem,
@@ -31,11 +33,11 @@ import {
   type Occurrences,
   type OccurrenceTerms,
   type OneTimeTerms,
-  type OuraClock,
-  type OuraOffset,
+  type NightOffset,
+  type NightOffsets,
   type RecurringTerms,
 } from "./occurrences.ts";
-import { utcOffsetOf } from "./oura-clock.ts";
+import { utcOffsetOf } from "./night-clock.ts";
 import { dayClockOf, EDIT_WINDOW_MS } from "./pact-rules.ts";
 
 export interface PactRow {
@@ -208,7 +210,7 @@ export function lastDayOpened(ctx: CoreContext, pactId: string, timezone: string
 /**
  * The occurrences of pact `pactId` with its owner now in `timezone`, each
  * dated one on the terms it opened with, in the timezone it opened in. A
- * bedtime night closes on the Oura clock it opened on (`ouraClockOf`).
+ * bedtime night closes on its night clock (`nightClockOf`).
  */
 export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string): Occurrences {
   const pact = ctx.one<
@@ -232,9 +234,39 @@ export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string
     pactId,
   );
   if (!pact) throw new Error(`no pact ${pactId}`);
-  const clock = pact.evidence_kind === "oura" ? ouraClockOf(ctx, pact.owner_account_id) : null;
+  const kind = pact.evidence_kind;
+  const offsets = isBedtimeKind(kind) ? nightClockOf(ctx, kind, pact.owner_account_id).offsets : null;
   const terms = occurrenceTermsOf(pact);
-  return occurrencesOverTime(terms, earlierTermsOf(ctx, pact), timezone, clock, earlierTimezonesOf(ctx, pact));
+  return occurrencesOverTime(terms, earlierTermsOf(ctx, pact), timezone, offsets, earlierTimezonesOf(ctx, pact));
+}
+
+/**
+ * How the nights of `account`'s bedtime pacts of evidence kind `kind` are
+ * read: the clock each closes on, and a sleep's start on it. Every bedtime
+ * kind shares the night (`judgeNights`, bedtime.ts); they differ in the
+ * clock.
+ */
+export interface NightClock {
+  /** The UTC offset each night closes on, or null for the timezone it's worked out in. */
+  offsets: NightOffsets;
+  /**
+   * A sleep's `start` (ISO 8601) read on the clock of a night worked out in
+   * `timezone`: ISO 8601 whose wall time (`wallClock`) is the time on that
+   * clock, as the night's window and in-bed-by time are read.
+   */
+  read(start: string, timezone: string): string;
+}
+
+/**
+ * The night clock of `account`'s bedtime pacts of kind `kind`. An Oura Ring
+ * night closes on Oura's clock (`ouraClockOf`), and a sleep is read on its
+ * own timestamp's offset, where the ring was.
+ */
+export function nightClockOf(ctx: CoreContext, kind: BedtimeKind, account: AccountId): NightClock {
+  switch (kind) {
+    case "oura":
+      return { offsets: ouraClockOf(ctx, account), read: (start) => start };
+  }
 }
 
 /**
@@ -243,7 +275,7 @@ export function occurrencesOf(ctx: CoreContext, pactId: string, timezone: string
  * clock (`oura_earlier_clock`, kept by `noteOuraClock`, bedtime.ts); any
  * later night is on the latest sleep Oura reported (`ouraOffsetOf`).
  */
-export function ouraClockOf(ctx: CoreContext, account: AccountId): OuraClock {
+function ouraClockOf(ctx: CoreContext, account: AccountId): NightOffsets {
   const row = ctx.one<{ oura_latest_bedtime_start: string | null }>(
     `SELECT oura_latest_bedtime_start FROM account WHERE id = ?`,
     account,
@@ -266,7 +298,7 @@ export function ouraClockOf(ctx: CoreContext, account: AccountId): OuraClock {
  * or when that offset is the timezone's own at that moment: the owner was
  * at home, and the timezone also knows when its clocks change.
  */
-export function ouraOffsetOf(bedtimeStart: string | null, timezone: string): OuraOffset {
+export function ouraOffsetOf(bedtimeStart: string | null, timezone: string): NightOffset {
   const offset = bedtimeStart === null ? null : utcOffsetOf(bedtimeStart);
   if (bedtimeStart === null || offset === null) return null;
   return utcOffsetMs(offset) === zoneOffsetAt(new Date(bedtimeStart), timezone) ? null : offset;

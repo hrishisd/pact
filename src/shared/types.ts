@@ -122,16 +122,23 @@ export const MAX_WEEKLY_TARGET = 7;
 export const EVIDENCE_KINDS = ["camera", "oura", "anki"] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
+/**
+ * The evidence kinds of bedtime pacts: each occurrence is a night, judged by
+ * when the owner's first main sleep of it started (`isBedtimeKind`).
+ */
+export const BEDTIME_KINDS = ["oura"] as const satisfies readonly EvidenceKind[];
+export type BedtimeKind = (typeof BEDTIME_KINDS)[number];
+
 /** A service that supplies evidence: every evidence kind but Camera. */
 export type ConnectionService = Exclude<EvidenceKind, "camera">;
 
 export interface NewPact {
   evidenceKind: EvidenceKind;
   name: string;
-  /** For Camera: what the photo will show. Oura Ring pacts have none. */
+  /** For Camera: what the photo will show. Bedtime and Anki pacts have none. */
   description: string;
   /**
-   * Oura Ring only: the in-bed-by time. An evening time (from 18:00) is due
+   * Bedtime pacts only: the in-bed-by time. An evening time (from 18:00) is due
    * that evening; an earlier one, the morning after.
    */
   inBedBy?: ClockTime;
@@ -183,10 +190,10 @@ export type CreatePactRefusal =
   | "anki-not-connected"
   /** An Anki pact's deck is missing, or isn't in the owner's deck list as AnkiWeb last gave it. */
   | "unknown-deck"
-  /** An Oura Ring pact's in-bed-by time is missing or isn't "HH:MM". */
+  /** A bedtime pact's in-bed-by time is missing or isn't "HH:MM". */
   | "invalid-in-bed-by"
   /**
-   * A due-by time on an Oura Ring pact, at midnight, or not "HH:MM"; on an
+   * A due-by time on a bedtime pact, at midnight, or not "HH:MM"; on an
    * Anki pact, one after the collection's rollover hour and before noon.
    */
   | "invalid-due-by"
@@ -205,7 +212,7 @@ export type CreatePactRefusal =
   | TextTooLong
   | "no-days"
   /**
-   * A Weekly count or One-time on an Oura Ring or Anki pact, a target that isn't a
+   * A Weekly count or One-time on a bedtime or Anki pact, a target that isn't a
    * whole number from 1 to `MAX_WEEKLY_TARGET`, or a deadline that isn't "YYYY-MM-DD".
    */
   | "invalid-schedule"
@@ -245,7 +252,7 @@ export interface PactTiming {
   schedule: Schedule;
   /** Anki pacts open and fall due on the Anki day, which starts at the collection's rollover hour. Default Camera. */
   evidenceKind?: EvidenceKind;
-  /** Oura Ring only: see `NewPact.inBedBy`. */
+  /** Bedtime pacts only: see `NewPact.inBedBy`. */
   inBedBy?: ClockTime;
   /** Camera and Anki: see `NewPact.dueBy`. */
   dueBy?: ClockTime;
@@ -362,9 +369,9 @@ interface PactPageTerms {
   /**
    * When the owner is reminded, each a clock time in their timezone, in the order
    * they go off. On a Camera pact: that time on each scheduled day, before
-   * the day's due time, while it has no evidence. On an Oura Ring pact: each
+   * the day's due time, while it has no evidence. On a bedtime pact: each
    * scheduled night (from 18:00 that evening, else the morning after), before
-   * the in-bed-by time, unless Oura has already judged the night. Neither fires on
+   * the in-bed-by time, unless the night is already judged. Neither fires on
    * an occurrence an approved excuse covers. On a One-time pact each is
    * dated and goes off once, before the deadline, unless evidence was
    * already submitted.
@@ -430,7 +437,7 @@ export type TermsByKind =
       dueBy: ClockTime | null;
     }
   | {
-      evidenceKind: "oura";
+      evidenceKind: BedtimeKind;
       schedule: FixedDays;
       /** The in-bed-by time. */
       inBedBy: ClockTime;
@@ -444,7 +451,7 @@ export type TermsByKind =
       anki: AnkiTerms;
     };
 
-/** Oura Ring and Anki pacts have Fixed days schedules only. */
+/** Bedtime and Anki pacts have Fixed days schedules only. */
 type FixedDays = Extract<Schedule, { kind: "fixed-days" }>;
 
 /** Cards in a deck as Anki's deck list counts them, the deck's daily limits applied and its subdecks included. */
@@ -556,7 +563,7 @@ export interface HeatMapDay {
 export interface OccurrenceRecord {
   status: RecordedStatus;
   /**
-   * Once judged Satisfied or Missed, on Oura Ring and Anki pacts: the night's
+   * Once judged Satisfied or Missed, on bedtime and Anki pacts: the night's
    * sleep, or the check that decided the Anki day. Null for anything else.
    */
   detail: OccurrenceDetail | null;
@@ -586,11 +593,11 @@ export type RecordedStatus =
       vacation?: { from: LocalDate; to: LocalDate };
     });
 
-/** What an Oura Ring or Anki pact's judged occurrence adds to its record. */
+/** What a bedtime or Anki pact's judged occurrence adds to its record. */
 export type OccurrenceDetail =
   /**
-   * When the owner got into bed, on Oura's clock, or null when Oura
-   * reported no sleep by 18:00 the next day.
+   * When the owner got into bed, on the night's clock (Oura's, for an Oura
+   * Ring night), or null when no sleep arrived by 18:00 the next day.
    */
   | { kind: "night"; inBedAt: ClockTime | null }
   /** The check that decided the Anki day, or null when no check reached AnkiWeb that day. */
@@ -1096,8 +1103,8 @@ export type TodayAlert =
       reviewerNames: string[];
     };
 export type TodaySection =
-  /** Bedtime nights past their in-bed-by time that Oura hasn't reported yet, soonest cutoff first. */
-  | { kind: "no-oura-data"; cards: TodayNoOuraDataCard[] }
+  /** Bedtime nights past their in-bed-by time whose sleep hasn't arrived yet, soonest cutoff first. */
+  | { kind: "no-sleep-data"; cards: TodayNoSleepDataCard[] }
   /** Pacts whose occurrence is open today, and bills to pay, soonest due first. */
   | { kind: "to-do"; cards: (TodayToDoCard | TodayAnkiCard | TodayBillCard)[] }
   /**
@@ -1110,7 +1117,7 @@ export type TodaySection =
    * those Missed through a rejection (alerts) and accepted misses.
    */
   | { kind: "missed"; cards: TodayMissedCard[] }
-  /** Bedtime pacts whose night runs now, soonest deadline first. Nothing to do: Oura reports it. */
+  /** Bedtime pacts whose night runs now, soonest deadline first. Nothing to do: its sleep is reported. */
   | { kind: "automatic"; cards: TodayAutomaticCard[] }
   /** Pacts whose first occurrence hasn't opened yet, soonest first. */
   | { kind: "coming-up"; cards: TodayComingUpCard[] };
@@ -1216,10 +1223,10 @@ export type MissedDetail =
   | { kind: "period"; progress: PeriodProgress };
 
 /**
- * A bedtime night past its in-bed-by time that Oura hasn't reported yet and
- * no excuse covers. Syncing the ring before `closesAt` still counts.
+ * A bedtime night past its in-bed-by time whose sleep hasn't arrived yet and
+ * no excuse covers. Syncing it before `closesAt` still counts.
  */
-export interface TodayNoOuraDataCard extends TodayPactCard {
+export interface TodayNoSleepDataCard extends TodayPactCard {
   /** The night's day in the owner's timezone. */
   occurrenceDate: LocalDate;
   /** 18:00 the next day: with no sleep data by then, it's Missed. */
@@ -1309,7 +1316,7 @@ export type TodayWaitingItem =
 export interface TodayYesterdayEntry {
   pactId: string;
   name: string;
-  /** A bedtime night not judged yet is waiting on Oura, not a reviewer. */
+  /** A bedtime night not judged yet is waiting on its sleep, not a reviewer. */
   evidenceKind: EvidenceKind;
   /** Yesterday, in the owner's timezone. */
   occurrenceDate: LocalDate;

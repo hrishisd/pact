@@ -27,7 +27,7 @@ describe("the No Oura data card", () => {
 
     expect(owner.today().sections).toEqual([
       {
-        kind: "no-oura-data",
+        kind: "no-sleep-data",
         cards: [
           {
             pactId,
@@ -48,7 +48,7 @@ describe("the No Oura data card", () => {
     s.setClockTo("Tue 08:00");
     await createPact("00:00", ["thu"]);
     await s.advanceTo("Wed 09:00");
-    expect(sectionKinds(owner)).toEqual(["no-oura-data", "coming-up"]);
+    expect(sectionKinds(owner)).toEqual(["no-sleep-data", "coming-up"]);
   });
 
   test("shows from the in-bed-by time until the night is judged; a night with no pact tonight carries no deadline", async () => {
@@ -60,7 +60,7 @@ describe("the No Oura data card", () => {
 
     await s.advanceTo("Wed 00:00");
     expect(owner.today().sections).toEqual([
-      { kind: "no-oura-data", cards: [expect.objectContaining({ occurrenceDate: s.date("Tue"), tonight: null })] },
+      { kind: "no-sleep-data", cards: [expect.objectContaining({ occurrenceDate: s.date("Tue"), tonight: null })] },
     ]);
 
     s.ouraSource.addSleep(owner.id, sleep("Tue 23:30"));

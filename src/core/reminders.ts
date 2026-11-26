@@ -3,6 +3,7 @@
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays, dayCount } from "../shared/calendar.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { clockText, formatDate } from "../shared/format.ts";
 import { isOncePerPeriod, isPeriodSchedule, lastDayOf } from "../shared/schedules.ts";
 import type { AccountId, LocalDate } from "../shared/types.ts";
@@ -33,8 +34,8 @@ const REMINDER_LATE_MS = 15 * 60 * 1000;
  * tells the operator. A reminder goes off before its occurrence's due time
  * and only while it's useful: a Camera day with no evidence and not judged
  * (on Weekly count, any day of the week while its target isn't met or
- * waiting for approval), a scheduled bedtime night Oura hasn't judged yet (usually every
- * night, as the ring syncs the next morning), an Anki day not judged yet, never one an
+ * waiting for approval), a scheduled bedtime night not judged yet (usually every
+ * night, as its sleep arrives the next morning), an Anki day not judged yet, never one an
  * approved excuse or vacation covers.
  */
 export function remind(ctx: CoreContext, t: Date): DroppedReminder[] {
@@ -186,7 +187,7 @@ function enqueueReminder(
   const terms = termsOn(ctx, pact.id, occurrence);
   const due = terms.due_by === null ? "midnight" : clockText(terms.due_by);
   let body = `No photo yet today. Due at ${due}.`;
-  if (pact.evidence_kind === "oura") body = `In bed by ${clockText(terms.in_bed_by!)} tonight.`;
+  if (isBedtimeKind(pact.evidence_kind)) body = `In bed by ${clockText(terms.in_bed_by!)} tonight.`;
   if (pact.evidence_kind === "anki") {
     const check = lastAnkiCheck(ctx, pact.id, date);
     body =

@@ -11,12 +11,13 @@
 // moves it after that.
 
 import { isPeriodSchedule, targetOf } from "../shared/schedules.ts";
-import type { AccountId, ClockTime, LocalDate, Schedule } from "../shared/types.ts";
+import { isBedtimeKind } from "../shared/evidence-kinds.ts";
+import type { AccountId, ClockTime, EvidenceKind, LocalDate, Schedule } from "../shared/types.ts";
 import type { CoreContext } from "./context.ts";
 import { coverOn, type Cover } from "./covers.ts";
 import { ANKI_CHECK_HOLDS_JUDGING_MS } from "./judging.ts";
 import type { Occurrence, Occurrences } from "./occurrences.ts";
-import { deadlineWallClock, wallClock } from "./oura-clock.ts";
+import { deadlineWallClock, wallClock } from "./night-clock.ts";
 import type { ReviewOutcome } from "./requests.ts";
 import { ankiDeckOn, occurrencesOf, scheduleOf, termsOn } from "./rows.ts";
 
@@ -28,16 +29,17 @@ export interface EvidenceFact {
   decidedAt: Date | null;
 }
 
-/** A bedtime night's Oura data: the first long_sleep period Oura reported for it, and when Pact got it. */
-export interface OuraFact {
-  kind: "oura";
+/** A bedtime night's sleep data: when its first main sleep started (`judgeNights`), and when Pact got it. */
+export interface BedtimeFact {
+  kind: "bedtime";
   inBedBy: ClockTime;
   /**
-   * As Oura reports it, with its UTC offset; null while none has arrived, and
-   * for a night judged at its close before one arrived. One that arrives on the
-   * first look after the close still judges the night.
+   * Read on the night's clock (`NightClock`), with its UTC offset: for Oura,
+   * as Oura reports it. Null while none has arrived, and for a night judged
+   * at its close before one arrived. One that arrives on the first look after
+   * the close still judges the night.
    */
-  firstBedtimeStart: string | null;
+  bedtimeStart: string | null;
   arrivedAt: Date | null;
 }
 
@@ -67,7 +69,7 @@ export interface OccurrenceFacts {
   terms: { schedule: Schedule; penaltyCents: number; recipientId: string };
   pactEndedAt: Date | null;
   evidence: EvidenceFact[];
-  automatic: OuraFact | AnkiFact | null;
+  automatic: BedtimeFact | AnkiFact | null;
   cover: CoverFact | null;
 }
 
@@ -77,7 +79,7 @@ export type Verdict =
   /** Not due yet, and nothing has decided it. */
   | { kind: "open" }
   /** Due, and waiting for something that may still decide it. */
-  | { kind: "waiting"; on: "evidence" | "oura" | "anki-check" }
+  | { kind: "waiting"; on: "evidence" | "sleep" | "anki-check" }
   | { kind: "satisfied"; at: Date }
   | { kind: "excused"; at: Date; coverId: string }
   | { kind: "missed"; at: Date; penaltyCents: number; recipientId: string };
@@ -94,7 +96,7 @@ type Step = { at: Date; seenAt: Date } & (
   | { kind: "evidence-decided"; decision: ReviewOutcome }
   | { kind: "cover-approved" }
   | { kind: "anki-finished" }
-  | { kind: "oura-arrived" }
+  | { kind: "bedtime-arrived" }
   | { kind: "due" }
   | { kind: "closed" }
 );
@@ -103,7 +105,7 @@ type Step = { at: Date; seenAt: Date } & (
 const STEP_ORDER: Record<Step["kind"], number> = {
   "evidence-decided": 0,
   "anki-finished": 0,
-  "oura-arrived": 0,
+  "bedtime-arrived": 0,
   "cover-approved": 1,
   due: 2,
   closed: 2,
@@ -123,7 +125,7 @@ const STEP_ORDER: Record<Step["kind"], number> = {
  * - An Anki day is Satisfied when a check finds its deck finished before its
  *   due time; at its due time it's judged as a Camera day with no evidence,
  *   unless a check that started before then is still running.
- * - A bedtime night is judged when Oura's first period for it arrives:
+ * - A bedtime night is judged when its first main sleep arrives:
  *   Satisfied if it starts before the in-bed-by time, else Missed, or Excused
  *   under an approved cover. With none by the time it closes, it's Missed then,
  *   or Excused under an approved cover.
@@ -168,12 +170,14 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
   if (cover?.state === "approved" && cover.approvedAt !== null && cover.approvedAt.getTime() <= now.getTime()) {
     steps.push({ kind: "cover-approved", at: cover.approvedAt, seenAt: cover.approvedAt });
   }
-  let ouraOnTime = false;
-  if (automatic?.kind === "oura") {
-    if (automatic.firstBedtimeStart !== null && automatic.arrivedAt !== null) {
+  let inBedOnTime = false;
+  if (automatic?.kind === "bedtime") {
+    if (automatic.bedtimeStart !== null && automatic.arrivedAt !== null) {
       const arrivedAt = automatic.arrivedAt;
-      if (arrivedAt.getTime() <= now.getTime()) steps.push({ kind: "oura-arrived", at: arrivedAt, seenAt: arrivedAt });
-      ouraOnTime = wallClock(automatic.firstBedtimeStart) < deadlineWallClock(occurrence.date, automatic.inBedBy);
+      if (arrivedAt.getTime() <= now.getTime()) {
+        steps.push({ kind: "bedtime-arrived", at: arrivedAt, seenAt: arrivedAt });
+      }
+      inBedOnTime = wallClock(automatic.bedtimeStart) < deadlineWallClock(occurrence.date, automatic.inBedBy);
     }
     // With no period by the time judging looks after the close, the night is judged at its close.
     if (automatic.arrivedAt === null && occurrence.closesAt.getTime() <= now.getTime()) {
@@ -218,7 +222,7 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
         break;
       case "cover-approved":
         if (outcome?.kind === "missed") outcome = excused(step.at);
-        else if (outcome === null && past && automatic?.kind !== "oura") {
+        else if (outcome === null && past && automatic?.kind !== "bedtime") {
           // Judged as the due time would: approved evidence still beats the cover at the due instant itself.
           if (onPeriods) outcome = judgePeriod(step.at);
           else outcome = approvedDays(step.at) > 0 ? satisfied(step.at) : excused(step.at);
@@ -227,9 +231,9 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
       case "anki-finished":
         outcome ??= satisfied(step.at);
         break;
-      case "oura-arrived":
+      case "bedtime-arrived":
         if (outcome !== null) break;
-        if (ouraOnTime) outcome = satisfied(step.at);
+        if (inBedOnTime) outcome = satisfied(step.at);
         else if (coverApprovedBy(step.at)) outcome = excused(step.at);
         else outcome = missed(step.at);
         break;
@@ -242,7 +246,7 @@ export function verdictOf(facts: OccurrenceFacts, now: Date): Verdict {
   if (outcome !== null) return outcome;
   if (endedBeforeDue && pactEndedAt.getTime() <= now.getTime()) return { kind: "not-the-pacts" };
   if (now.getTime() < occurrence.dueAt.getTime()) return { kind: "open" };
-  if (automatic?.kind === "oura") return { kind: "waiting", on: "oura" };
+  if (automatic?.kind === "bedtime") return { kind: "waiting", on: "sleep" };
   if (automatic?.kind === "anki") return { kind: "waiting", on: "anki-check" };
   return { kind: "waiting", on: "evidence" };
 }
@@ -286,8 +290,8 @@ export function ankiCheckHolds(ctx: CoreContext, pactId: string, date: LocalDate
  * stored: the checks of AnkiWeb and when each was answered, which only the
  * core holds, in memory. The ones still running are read from the context
  * (`ctx.ankiChecksRunning`); a finished check's answer reads as recorded
- * when it started. A bedtime night's first sleep
- * period is stored on the occurrence when it arrives (`judgeNights`).
+ * when it started. A bedtime night's first main
+ * sleep is stored on the occurrence when it arrives (`judgeNights`).
  */
 export function occurrenceFacts(
   ctx: CoreContext,
@@ -295,7 +299,7 @@ export function occurrenceFacts(
   date: LocalDate,
   known: { occurrences?: Occurrences; supposing?: SupposedDecision } = {},
 ): OccurrenceFacts | null {
-  const pact = ctx.one<{ timezone: string; ended_at: string | null; evidence_kind: string; owner: AccountId }>(
+  const pact = ctx.one<{ timezone: string; ended_at: string | null; evidence_kind: EvidenceKind; owner: AccountId }>(
     `SELECT account.timezone, pact.ended_at, pact.evidence_kind, pact.owner_account_id AS owner
        FROM pact JOIN account ON account.id = pact.owner_account_id WHERE pact.id = ?`,
     pactId,
@@ -342,8 +346,8 @@ export function occurrenceFacts(
           ? supposing.at
           : new Date(coverDecidedAt(ctx, found.id)),
   };
-  let automatic: OuraFact | AnkiFact | null = null;
-  if (pact.evidence_kind === "oura") {
+  let automatic: BedtimeFact | AnkiFact | null = null;
+  if (isBedtimeKind(pact.evidence_kind)) {
     const row = ctx.one<{ bedtime_start: string | null; bedtime_arrived_at: string | null }>(
       `SELECT bedtime_start, bedtime_arrived_at FROM occurrence WHERE pact_id = ? AND date = ?`,
       pactId,
@@ -351,9 +355,9 @@ export function occurrenceFacts(
     );
     const arrivedAt = row?.bedtime_arrived_at ?? null;
     automatic = {
-      kind: "oura",
+      kind: "bedtime",
       inBedBy: terms.in_bed_by!,
-      firstBedtimeStart: arrivedAt === null ? null : row!.bedtime_start,
+      bedtimeStart: arrivedAt === null ? null : row!.bedtime_start,
       arrivedAt: arrivedAt === null ? null : new Date(arrivedAt),
     };
   } else if (pact.evidence_kind === "anki") {

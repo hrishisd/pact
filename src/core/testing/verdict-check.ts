@@ -6,17 +6,17 @@
 // ticket that fixes it.
 //
 // Two facts it watches for itself: which checks of AnkiWeb are still
-// running, which the core keeps only in memory, and when each bedtime
+// running, which the core keeps only in memory, and when each Oura Ring
 // night's first sleep period reached the core. The core stores the latter
 // (`judgeNights`); the check takes it from what Oura gave the core instead,
 // so a wrong stored period shows as a mismatch too.
 
 import { addDays } from "../../shared/calendar.ts";
-import type { AccountId, LocalDate } from "../../shared/types.ts";
+import type { AccountId, EvidenceKind, LocalDate } from "../../shared/types.ts";
 import { localDateOf } from "../calendar.ts";
 import { createContext, type CoreContext } from "../context.ts";
 import { openWithPragmas, type Db } from "../db.ts";
-import { nightOf, wallClock } from "../oura-clock.ts";
+import { nightOf, wallClock } from "../night-clock.ts";
 import type { AnkiSource, Clock, OuraSleepPeriod, OuraSource } from "../ports.ts";
 import { ANKI_CHECK_HOLDS_JUDGING_MS } from "../judging.ts";
 import { occurrencesOf } from "../rows.ts";
@@ -218,8 +218,14 @@ export class VerdictCheck {
     const now = this.#clock.now();
     const lastTick = lastTickOf(ctx);
     const tickedThrough = lastTick === null ? null : new Date(lastTick);
-    const pacts = ctx.all<{ id: string; timezone: string; first_occurrence: LocalDate; owner: AccountId }>(
-      `SELECT pact.id, account.timezone, pact.first_occurrence, pact.owner_account_id AS owner
+    const pacts = ctx.all<{
+      id: string;
+      timezone: string;
+      first_occurrence: LocalDate;
+      owner: AccountId;
+      evidence_kind: EvidenceKind;
+    }>(
+      `SELECT pact.id, account.timezone, pact.first_occurrence, pact.owner_account_id AS owner, pact.evidence_kind
          FROM pact JOIN account ON account.id = pact.owner_account_id ORDER BY pact.id`,
     );
     // Occurrences are listed only a week ahead, so a jump past that checks again.
@@ -251,11 +257,12 @@ export class VerdictCheck {
           }
           continue;
         }
-        if (facts.automatic?.kind === "oura") {
+        // An Oura Ring night's sleep as Oura gave it to the core.
+        if (facts.automatic?.kind === "bedtime" && pact.evidence_kind === "oura") {
           const sleep = this.#watch.firstSleep(pact.owner, date, facts.occurrence.closesAt);
           facts.automatic = {
             ...facts.automatic,
-            firstBedtimeStart: sleep?.start ?? null,
+            bedtimeStart: sleep?.start ?? null,
             arrivedAt: sleep?.arrivedAt ?? null,
           };
         }
