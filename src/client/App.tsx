@@ -4,7 +4,7 @@ import type { LocalDate } from "../shared/types.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { AppleHealthPage, lastUploadText } from "./apple-health.tsx";
-import { loadReviewQueue } from "./app-badge.ts";
+import { loadReviewQueue, onReviewCount } from "./app-badge.ts";
 import { ChangePact } from "./ChangePact.tsx";
 import { useReloadWhenDue } from "./coming-back.ts";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
@@ -509,9 +509,11 @@ function useLoadTabs(tab: TabId) {
  * (last-loaded.ts), and by itself on every return to the front, however
  * short, and at midnight, on any page, forms included, pages opened over the
  * Review tab too (`useReloadWhenDue`, coming-back.ts): a push may have
- * changed the app's icon, which each load sets (`loadReviewQueue`,
- * app-badge.ts). The Review tab, while `reviewShown`, sets it whenever its
- * queue loads, and reloads that itself, so there the badge doesn't.
+ * changed the app's icon. Every load of the queue, the reload of the tabs
+ * after a command included, sets the icon and this count alike, the
+ * latest-started one winning (`loadReviewQueue`, `onReviewCount`,
+ * app-badge.ts). The Review tab, while `reviewShown`, also sets it whenever
+ * its queue shows, and reloads that itself, so there the badge doesn't.
  */
 function useReviewCount(
   tab: TabId,
@@ -524,14 +526,15 @@ function useReviewCount(
   const load = useCallback(() => {
     const startedAt = Date.now();
     // A badge that fails to load just keeps its last count, and is due again.
+    // The count itself comes through `onReviewCount`, as from every load of the queue.
     loadAndRemember(API_PATHS.reviewQueue, loadReviewQueue).then(
-      (queue) => {
+      () => {
         loadedAt.current = startedAt;
-        set(queue.length);
       },
       () => {},
     );
   }, []);
+  useEffect(() => onReviewCount(set), []);
   useEffect(() => {
     if (tab !== "review") load();
   }, [tab, load]);

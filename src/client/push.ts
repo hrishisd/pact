@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api.ts";
-import { badgeAppIcon } from "./app-badge.ts";
+import { clearAppIcon } from "./app-badge.ts";
 
 export type PushState =
   /** Not known yet. */
@@ -145,6 +145,6 @@ export async function forgetThisDevice(): Promise<void> {
   } catch {
     // Signing out still goes ahead.
   } finally {
-    badgeAppIcon(0);
+    clearAppIcon();
   }
 }
