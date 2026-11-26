@@ -24,6 +24,7 @@ import {
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { OuraConnectionAlert } from "./oura.tsx";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
+import { AppleHealthConnectionAlert } from "./apple-health.tsx";
 import { ExcuseSheet } from "./ExcuseSheet.tsx";
 import { HeatMap } from "./history.tsx";
 import { AT_ONCE_REFUSAL_TEXT, endsWhenText, openOccurrenceText } from "./change-terms.tsx";
@@ -105,6 +106,8 @@ export function PactPage({
             {pact.connectionProblem &&
               (pact.evidenceKind === "anki" ? (
                 <AnkiConnectionAlert status={pact.connectionProblem} onReconnected={reload} />
+              ) : pact.evidenceKind === "apple_health" ? (
+                <AppleHealthConnectionAlert />
               ) : (
                 <OuraConnectionAlert status={pact.connectionProblem} />
               ))}

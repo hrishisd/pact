@@ -9,7 +9,17 @@ import { EvidencePage } from "./EvidencePage.tsx";
 import { ExcusePage } from "./ExcusePage.tsx";
 import { formatDay, initial } from "./format.ts";
 import { FriendsSection } from "./Friends.tsx";
-import { BackIcon, CardsIcon, GoogleIcon, LedgersIcon, PactsIcon, ReviewIcon, RingIcon, TodayIcon } from "./icons.tsx";
+import {
+  BackIcon,
+  CardsIcon,
+  GoogleIcon,
+  HeartIcon,
+  LedgersIcon,
+  PactsIcon,
+  ReviewIcon,
+  RingIcon,
+  TodayIcon,
+} from "./icons.tsx";
 import { InvitePage } from "./InvitePage.tsx";
 import type { ItemOpeners } from "./item-page.tsx";
 import { NotificationsAlert, NotificationsPage, NotificationsSection } from "./Notifications.tsx";
@@ -608,7 +618,8 @@ function ConnectionsSection({
 
 /**
  * What each service's row says, how it disconnects, and how it reconnects:
- * Oura through its own sign-in page, AnkiWeb with a form right here.
+ * Oura through its own sign-in page, AnkiWeb with a form right here, Apple
+ * Health on its setup page (it never needs reconnecting: its key is only replaced).
  */
 const SERVICES = {
   oura: {
@@ -628,6 +639,15 @@ const SERVICES = {
     iconClass: "k-anki",
     disconnect: () => api.disconnectAnki(),
     reconnect: { kind: "form" },
+  },
+  apple_health: {
+    name: "Apple Health",
+    short: "Apple Health",
+    unit: "nights",
+    icon: <HeartIcon />,
+    iconClass: "k-ring",
+    disconnect: () => api.disconnectAppleHealth(),
+    reconnect: { kind: "link", href: APP_PATHS.appleHealth },
   },
 } as const;
 

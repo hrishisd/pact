@@ -104,6 +104,13 @@ export const RingIcon = () => (
   </svg>
 );
 
+/** Apple Health: a heart. */
+export const HeartIcon = () => (
+  <svg {...common}>
+    <path d="M12 19.5s-7.5-4.4-7.5-9.6A4.2 4.2 0 0 1 12 7.4a4.2 4.2 0 0 1 7.5 2.5c0 5.2-7.5 9.6-7.5 9.6z" />
+  </svg>
+);
+
 export const DollarIcon = () => (
   <svg {...common} strokeWidth={1.9}>
     <path d="M15.5 8.2c-.6-1.2-1.9-1.9-3.6-1.9-2 0-3.4 1-3.4 2.5 0 3.5 7.3 1.9 7.3 5.5 0 1.6-1.6 2.7-3.9 2.7-1.8 0-3.2-.8-3.8-2.1M12 4v16" />

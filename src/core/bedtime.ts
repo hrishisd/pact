@@ -1,6 +1,7 @@
 // Bedtime pacts: judging each night from the sleep its source reports, the
 // push when a night has no sleep data, and Oura as a source: checking it, and
-// the clock its timestamps carry.
+// the clock its timestamps carry. Apple Health, the other source, is in
+// apple-health.ts.
 
 import { APP_PATHS } from "../shared/api.ts";
 import { addDays } from "../shared/calendar.ts";
@@ -130,16 +131,27 @@ function lastNightStarted(at: Date, timezone: string, offset: NightOffset): Loca
 
 /**
  * One sleep as a source reports it, for judging bedtime nights
- * (`judgeNights`). Oura's sleep periods are one source (`ouraSessions`).
+ * (`judgeNights`). Oura's sleep periods are one source (`ouraSessions`),
+ * Apple Health's samples merged into sessions another (`appleHealthSessions`,
+ * apple-health.ts).
  */
 export interface SleepSession {
   /** ISO 8601, with a UTC offset where the source gives one; judging reads it on the night's clock (`NightClock`). */
   start: string;
   /** ISO 8601. */
   end: string;
-  /** Whether it can decide a night: Oura's long_sleep. Any other, such as a nap, never does. */
+  /** Whether it can decide a night: Oura's long_sleep, or an Apple Health session of 3 hours or more. Any other, such as a nap, never does. */
   isMain: boolean;
+  /** The app the sleep came from, as Apple Health names it ("Oura"); null for Oura's own, and when Apple Health gives none. */
+  source: string | null;
 }
+
+/**
+ * Each account's sleep sessions for `judgeNights`: as a map, or asked for
+ * once per account with a night waiting, with `from` its earliest such
+ * night's date, so a source that keeps every sleep reads only what judging needs.
+ */
+export type SleepSessions = Map<AccountId, SleepSession[]> | ((account: AccountId, from: LocalDate) => SleepSession[]);
 
 /** Oura's sleep periods, by account, as sleep sessions: a long_sleep is a main sleep. */
 export function ouraSessions(sleep: Map<AccountId, OuraSleepPeriod[]>): Map<AccountId, SleepSession[]> {
@@ -151,6 +163,7 @@ export function ouraSessions(sleep: Map<AccountId, OuraSleepPeriod[]>): Map<Acco
         start: period.bedtime_start,
         end: period.bedtime_end,
         isMain: period.type === "long_sleep",
+        source: null,
       })),
     );
   }
@@ -298,6 +311,11 @@ function syncText(ctx: CoreContext, kind: BedtimeKind, owner: AccountId): string
   switch (kind) {
     case "oura":
       return connectionProblem(ctx, owner, "oura") === null ? "Open the Oura app to sync it" : "Reconnect Oura";
+    case "apple_health":
+      // Pact can't reach the phone: the owner runs the Pact Health Shortcut, from Today's Sync now.
+      return connectionProblem(ctx, owner, "apple_health") === null
+        ? "Open Pact and tap Sync now"
+        : "Set up Apple Health in Pact";
   }
 }
 
@@ -306,26 +324,28 @@ function syncText(ctx: CoreContext, kind: BedtimeKind, owner: AccountId): string
  * from where judging got to, as of `t`, given each account's `sessions`
  * from that kind's source. A night is decided by the first main sleep
  * starting in its window, read on the night's clock (`nightClockOf`),
- * which is kept on the night as it arrives (`verdictOf` has the rules). A
- * night with none by 18:00 the next day is judged then. The first night
- * still waiting stops the cursor.
+ * which is kept on the night as it arrives, with its source (`verdictOf`
+ * has the rules). A night with none by 18:00 the next day is judged then.
+ * The first night still waiting stops the cursor.
  */
 export function judgeNights(
   ctx: CoreContext,
   kind: BedtimeKind,
   t: Date,
-  sessions: Map<AccountId, SleepSession[]>,
+  sessions: SleepSessions,
   owner?: AccountId,
 ): void {
+  const waiting = nightsWaiting(ctx, t, { kind, owner });
+  const sessionsOf = sessionsByAccount(waiting, sessions);
   const stopped = new Set<string>();
-  for (const { pact, night, zone, clock } of nightsWaiting(ctx, t, { kind, owner })) {
+  for (const { pact, night, zone, clock } of waiting) {
     if (stopped.has(pact.id)) continue;
-    const start = (sessions.get(pact.owner_account_id) ?? [])
+    const first = (sessionsOf.get(pact.owner_account_id) ?? [])
       .filter((session) => session.isMain)
-      .map((session) => clock.read(session.start, zone))
-      .filter((read) => nightOf(read) === night.date)
-      .sort((a, b) => wallClock(a).localeCompare(wallClock(b), "en-US"))[0];
-    if (start !== undefined) noteFirstSleep(ctx, pact.id, night.date, start, t);
+      .map((session) => ({ start: clock.read(session.start, zone), source: session.source }))
+      .filter((read) => nightOf(read.start) === night.date)
+      .sort((a, b) => wallClock(a.start).localeCompare(wallClock(b.start), "en-US"))[0];
+    if (first !== undefined) noteFirstSleep(ctx, pact.id, night.date, first, t);
     if (settle(ctx, pact.id, night.date, t) === null) {
       stopped.add(pact.id);
       continue;
@@ -334,15 +354,35 @@ export function judgeNights(
   }
 }
 
-/** Keeps when the night's first main sleep started, and when it arrived, unless it already has one. */
-function noteFirstSleep(ctx: CoreContext, pactId: string, date: LocalDate, bedtimeStart: string, at: Date): void {
+/** `sessions` as a map of the accounts with a night in `waiting`, asking a source that's asked once per account. */
+function sessionsByAccount(waiting: WaitingNight[], sessions: SleepSessions): Map<AccountId, SleepSession[]> {
+  if (sessions instanceof Map) return sessions;
+  const from = new Map<AccountId, LocalDate>();
+  for (const { pact, night } of waiting) {
+    const earliest = from.get(pact.owner_account_id);
+    from.set(pact.owner_account_id, earliest === undefined ? night.date : earlierDate(earliest, night.date));
+  }
+  return new Map([...from].map(([account, date]) => [account, sessions(account, date)]));
+}
+
+/**
+ * Keeps when the night's first main sleep started, on the night's clock,
+ * where it came from and when it arrived, unless it already has one.
+ */
+function noteFirstSleep(
+  ctx: CoreContext,
+  pactId: string,
+  date: LocalDate,
+  sleep: { start: string; source: string | null },
+  at: Date,
+): void {
   ctx.db.prepare(`INSERT INTO occurrence (pact_id, date) VALUES (?, ?) ON CONFLICT DO NOTHING`).run(pactId, date);
   ctx.db
     .prepare(
-      `UPDATE occurrence SET bedtime_start = ?, bedtime_arrived_at = ?
+      `UPDATE occurrence SET bedtime_start = ?, bedtime_source = ?, bedtime_arrived_at = ?
          WHERE pact_id = ? AND date = ? AND bedtime_start IS NULL`,
     )
-    .run(bedtimeStart, at.toISOString(), pactId, date);
+    .run(sleep.start, sleep.source, at.toISOString(), pactId, date);
 }
 
 /**

@@ -37,7 +37,7 @@ import {
   type NightOffsets,
   type RecurringTerms,
 } from "./occurrences.ts";
-import { utcOffsetOf } from "./night-clock.ts";
+import { inTimezone, utcOffsetOf } from "./night-clock.ts";
 import { dayClockOf, EDIT_WINDOW_MS } from "./pact-rules.ts";
 
 export interface PactRow {
@@ -260,12 +260,17 @@ export interface NightClock {
 /**
  * The night clock of `account`'s bedtime pacts of kind `kind`. An Oura Ring
  * night closes on Oura's clock (`ouraClockOf`), and a sleep is read on its
- * own timestamp's offset, where the ring was.
+ * own timestamp's offset, where the ring was. An Apple Health night is on
+ * the account's timezone, as a Camera day is, where it opened: a
+ * Shortcut's dates carry the phone's offset when it ran, not where the
+ * owner slept, so only their instants count.
  */
 export function nightClockOf(ctx: CoreContext, kind: BedtimeKind, account: AccountId): NightClock {
   switch (kind) {
     case "oura":
       return { offsets: ouraClockOf(ctx, account), read: (start) => start };
+    case "apple_health":
+      return { offsets: () => null, read: inTimezone };
   }
 }
 

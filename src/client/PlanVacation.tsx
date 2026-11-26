@@ -10,7 +10,7 @@ import { periodKindOfSchedule } from "../shared/schedules.ts";
 import { MAX_EXCUSE_SPAN_DAYS, MAX_TEXT_CHARS, type FileVacationRefusal } from "../shared/types.ts";
 import { api, failureText, TEXT_TOO_LONG_TEXT } from "./api.ts";
 import { dateSpan, formatDate, listNames, money, scheduleText } from "./format.ts";
-import { CameraIcon, CardsIcon, RingIcon } from "./icons.tsx";
+import { CameraIcon, CardsIcon, HeartIcon, RingIcon } from "./icons.tsx";
 import {
   coveredText,
   firstName,
@@ -375,7 +375,12 @@ function reviewersOf(pacts: PactOption[]): PactOption["reviewers"] {
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "en-US"));
 }
 
-const KIND_NAMES: Record<PactOption["evidenceKind"], string> = { camera: "Camera", oura: "Oura Ring", anki: "Anki" };
+const KIND_NAMES: Record<PactOption["evidenceKind"], string> = {
+  camera: "Camera",
+  oura: "Oura Ring",
+  anki: "Anki",
+  apple_health: "Apple Health",
+};
 
 /** "Camera · Mon, Wed, Fri · $5", or "Camera · 3× per week · $20 per short day". */
 function termsLine(pact: PactOption): string {
@@ -397,6 +402,7 @@ const KIND_ICONS: Record<PactOption["evidenceKind"], { className: string; icon: 
   camera: { className: "k-evidence", icon: <CameraIcon /> },
   oura: { className: "k-ring", icon: <RingIcon /> },
   anki: { className: "k-anki", icon: <CardsIcon /> },
+  apple_health: { className: "k-ring", icon: <HeartIcon /> },
 };
 
 const SKIP_TEXT: Record<PactPreview["skipped"][number]["reason"], string> = {

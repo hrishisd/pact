@@ -23,6 +23,10 @@ import type {
   AddRecipientResult,
   AddReviewersResult,
   AnkiDecksResult,
+  AppleHealthKey,
+  AppleHealthStatus,
+  AppleHealthUpload,
+  AppleHealthUploadResult,
   AskOwnerResult,
   ChangePactResult,
   ChangePreviewResult,
@@ -106,6 +110,14 @@ import {
   signIn,
 } from "./accounts.ts";
 import { ankiDecks, checkAnki, fetchAnki, recordAnkiChecks, type AnkiPolling } from "./anki-days.ts";
+import {
+  accountIdForUploadKey,
+  appleHealthSessions,
+  appleHealthStatus,
+  disconnectAppleHealth,
+  makeUploadKey,
+  uploadAppleHealth,
+} from "./apple-health.ts";
 import { checkOura, fetchOuraSleep, judgeNights, noteOuraClock, ouraSessions, pushNoSleepData } from "./bedtime.ts";
 import {
   addReviewers,
@@ -225,6 +237,8 @@ export interface PactCore {
   invite(token: string): InviteLookup;
   /** The account signed in with `email` (whatever its case), or null if there is none. Never writes. */
   accountIdForEmail(email: string): AccountId | null;
+  /** The account whose Apple Health upload key `key` is, or null for one no account has now. Never writes. */
+  accountIdForUploadKey(key: string): AccountId | null;
   /** Commands and queries made as one account. */
   as(accountId: AccountId): AccountView;
   /**
@@ -388,6 +402,28 @@ export interface AccountView {
   checkAnki(): Promise<CheckNowResult>;
   /** Removes the account's AnkiWeb connection. Its Active Anki pacts keep running, and their days count as Missed. */
   disconnectAnki(): Promise<void>;
+  /** Whether Apple Health is connected (the account has an upload key), and its last upload. */
+  appleHealth(): AppleHealthStatus;
+  /**
+   * Makes the account a new Apple Health upload key, which connects Apple
+   * Health, replacing any it had: the old key stops working at once. The
+   * key is only ever in the upload URL returned, this once.
+   */
+  makeAppleHealthKey(): Promise<AppleHealthKey>;
+  /**
+   * Deletes the account's upload key, which disconnects Apple Health. Its
+   * samples stay. Its Active Apple Health pacts keep running, and their
+   * nights count as Missed until it makes a new key.
+   */
+  disconnectAppleHealth(): Promise<void>;
+  /**
+   * Keeps an upload from the account's Pact Health Shortcut and judges its
+   * Apple Health nights waiting for sleep: the first main sleep starting in
+   * a night's window, read on the account's timezone, decides it. Answers
+   * how many sleep samples and mindful sessions it kept and how many lines
+   * it skipped. The server has checked the key (`accountIdForUploadKey`).
+   */
+  uploadAppleHealth(upload: AppleHealthUpload): Promise<AppleHealthUploadResult>;
   today(): Today;
   /**
    * The owner submits photo evidence for the occurrence of `pactId` open now.
@@ -684,6 +720,10 @@ class Core implements PactCore {
     return accountIdForEmail(this.#ctx, email);
   }
 
+  accountIdForUploadKey(key: string): AccountId | null {
+    return accountIdForUploadKey(this.#ctx, key);
+  }
+
   as(accountId: AccountId): AccountView {
     // Every call first checks that the account exists, so no feature function
     // has to: a query as an unknown account throws `UnknownAccountError`, and
@@ -703,6 +743,7 @@ class Core implements PactCore {
       changeRequest: (changeRequestId) => changeRequestPage(this.#ctx, accountId, changeRequestId),
       profile: () => profile(this.#ctx, accountId),
       today: () => todayPage(this.#ctx, accountId),
+      appleHealth: () => appleHealthStatus(this.#ctx, accountId),
       notificationSettings: () => notificationSettingList(this.#ctx, accountId),
       dailySummary: () => dailySummarySetting(this.#ctx, accountId),
       excusePreview: (pactId, dates) => previewExcuse(this.#ctx, accountId, pactId, dates),
@@ -743,6 +784,9 @@ class Core implements PactCore {
       checkAnki: () =>
         checkAnki(this.#ctx, accountId, this.#ankiPolling, this.#ankiSource, (change) => this.#command(change)),
       disconnectAnki: () => this.#command(() => disconnectAnki(this.#ctx, accountId)),
+      makeAppleHealthKey: () => this.#command(() => makeUploadKey(this.#ctx, accountId, this.#appUrl)),
+      disconnectAppleHealth: () => this.#command(() => disconnectAppleHealth(this.#ctx, accountId)),
+      uploadAppleHealth: (upload) => this.#command(() => uploadAppleHealth(this.#ctx, accountId, upload)),
       connectOura: () => this.#command(() => connectOura(this.#ctx, accountId)),
       setNotificationSetting: (setting, enabled) =>
         this.#command(() => setNotificationSetting(this.#ctx, accountId, setting, enabled)),
@@ -799,6 +843,8 @@ class Core implements PactCore {
         for (const account of fetched.disconnected) markDisconnected(this.#ctx, "oura", account, fetched.askedAt);
         noteOuraClock(this.#ctx, fetched.sleep, t);
         judgeNights(this.#ctx, "oura", t, ouraSessions(fetched.sleep));
+        // Uploads judge as they arrive; this judges at close the nights none decided.
+        judgeNights(this.#ctx, "apple_health", t, (account, from) => appleHealthSessions(this.#ctx, account, from));
         pushNoSleepData(this.#ctx, t);
         const dropped = remind(this.#ctx, t);
         endPastEndDate(this.#ctx, t);

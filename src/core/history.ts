@@ -31,6 +31,15 @@ export function endedOnOf(pact: Pick<PactRow, "ended_at">, timezone: string): Lo
 }
 
 /** An Anki day's deciding check as its occurrence row stores it; null when no check reached AnkiWeb. */
+/** A judged night's detail: when the owner was in bed (wall-clock "HH:MM"), and the Apple Health source that said so, if any. */
+export function nightDetail(bedtimeStart: string | null, source: string | null): OccurrenceDetail {
+  return {
+    kind: "night",
+    inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11),
+    ...(source !== null && { source }),
+  };
+}
+
 export function ankiCheckOf(row: { anki_cards_left: number | null; anki_checked_at: string | null }): AnkiCheck | null {
   if (row.anki_cards_left === null || row.anki_checked_at === null) return null;
   return { cardsLeft: row.anki_cards_left, checkedAt: new Date(row.anki_checked_at) };
@@ -160,11 +169,12 @@ export function occurrenceRecord(
   const status = occurrenceStatus(ctx, pact.id, occurrence);
   const row = ctx.one<{
     bedtime_start: string | null;
+    bedtime_source: string | null;
     anki_cards_left: number | null;
     anki_checked_at: string | null;
     recipient_name: string | null;
   }>(
-    `SELECT occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at,
+    `SELECT occurrence.bedtime_start, occurrence.bedtime_source, occurrence.anki_cards_left, occurrence.anki_checked_at,
               recipient.name AS recipient_name
        FROM occurrence
        LEFT JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
@@ -176,8 +186,7 @@ export function occurrenceRecord(
   const judged = status.kind === "satisfied" || status.kind === "missed";
   let detail: OccurrenceDetail | null = null;
   if (isBedtimeKind(pact.evidence_kind) && judged) {
-    const bedtimeStart = row?.bedtime_start ?? null;
-    detail = { kind: "night", inBedAt: bedtimeStart === null ? null : wallClock(bedtimeStart).slice(11) };
+    detail = nightDetail(row?.bedtime_start ?? null, row?.bedtime_source ?? null);
   }
   if (pact.evidence_kind === "anki" && row && judged) detail = { kind: "anki", lastCheck: ankiCheckOf(row) };
   return { status: recordedStatus(ctx, pact, occurrence.date, status, row?.recipient_name ?? null), detail };

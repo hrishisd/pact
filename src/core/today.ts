@@ -6,6 +6,7 @@ import { isBedtimeKind } from "../shared/evidence-kinds.ts";
 import { isPeriodSchedule } from "../shared/schedules.ts";
 import type {
   AccountId,
+  BedtimeKind,
   ConnectionService,
   EvidenceKind,
   LocalDate,
@@ -28,11 +29,10 @@ import type { CoreContext } from "./context.ts";
 import { coveredSql, excusableUntil, excuseWindowOpensSql, onApprovedVacation } from "./covers.ts";
 import { rejectedDayAlerts, rejectedEvidenceAlerts } from "./evidence.ts";
 import { rejectedExcuseAlertStandsSql, rejectedExcuseAlerts } from "./excuses.ts";
-import { ankiCheckOf, yesterdayEntries } from "./history.ts";
+import { ankiCheckOf, nightDetail, yesterdayEntries } from "./history.ts";
 import { billsForToday } from "./money.ts";
 import { evidenceDecision, MISSED_THROUGH_REJECTION, occurrenceView, periodProgress } from "./occurrence-state.ts";
 import type { Occurrence } from "./occurrences.ts";
-import { wallClock } from "./night-clock.ts";
 import { EXCUSE_WINDOW_MS } from "./pact-rules.ts";
 import { activePacts, type ActivePact } from "./pacts.ts";
 import { rejectedVacationAlerts, vacationsOnNow } from "./vacations.ts";
@@ -125,7 +125,7 @@ function todayAlerts(ctx: CoreContext, ownerId: AccountId, now: Date, billAlerts
   // A connection matters only while an Active pact is judged from it.
   const problemWith = (service: ConnectionService) =>
     activePactsUsing(ctx, ownerId, service) > 0 ? connectionProblem(ctx, ownerId, service) : null;
-  const connectionAlerts = (["oura", "anki"] as const).flatMap((service): TodayAlert[] => {
+  const connectionAlerts = (["oura", "anki", "apple_health"] as const).flatMap((service): TodayAlert[] => {
     const status = problemWith(service);
     return status ? [{ kind: "connection", service, status }] : [];
   });
@@ -207,7 +207,7 @@ function pactToday(
   timezone: string,
   now: Date,
 ): TodayPlacement | null {
-  if (isBedtimeKind(pact.evidenceKind)) return bedtimeToday(ctx, pact, timezone, now);
+  if (isBedtimeKind(pact.evidenceKind)) return bedtimeToday(ctx, pact, pact.evidenceKind, timezone, now);
   switch (pact.evidenceKind) {
     case "anki":
       return ankiToday(ctx, ownerId, pact, timezone, now);
@@ -222,7 +222,13 @@ function pactToday(
  * an excuse filed is under Waiting for approval instead; one on a vacation
  * waiting for approval stays.
  */
-function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now: Date): TodayPlacement | null {
+function bedtimeToday(
+  ctx: CoreContext,
+  pact: ActivePact,
+  evidenceKind: BedtimeKind,
+  timezone: string,
+  now: Date,
+): TodayPlacement | null {
   const { first, between } = occurrencesOf(ctx, pact.id, timezone);
   if (now.getTime() < first.opensAt.getTime()) {
     return { section: "coming-up", card: comingUpCard(ctx, pact, first) };
@@ -251,6 +257,7 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
       section: "no-sleep-data",
       card: {
         ...cardOn(ctx, pact, lastNight.date),
+        evidenceKind,
         occurrenceDate: lastNight.date,
         closesAt: lastNight.closesAt,
         tonight: tonightCard ?? null,
@@ -262,6 +269,7 @@ function bedtimeToday(ctx: CoreContext, pact: ActivePact, timezone: string, now:
       section: "automatic",
       card: {
         ...cardOn(ctx, pact, tonightCard.occurrenceDate),
+        evidenceKind,
         editWindowClosesAt: pact.editWindowClosesAt,
         ...tonightCard,
       },
@@ -431,11 +439,13 @@ function recentlyMissed(ctx: CoreContext, ownerId: AccountId, timezone: string, 
     judged_at: string;
     excuse_window_opens: string;
     bedtime_start: string | null;
+    bedtime_source: string | null;
     anki_cards_left: number | null;
     anki_checked_at: string | null;
   }>(
     `SELECT pact.id, pact.name, pact.evidence_kind, pact.schedule, penalty.amount_cents, occurrence.date,
-              occurrence.judged_at, ${WINDOW_OPENS} AS excuse_window_opens, occurrence.bedtime_start, occurrence.anki_cards_left, occurrence.anki_checked_at
+              occurrence.judged_at, ${WINDOW_OPENS} AS excuse_window_opens, occurrence.bedtime_start,
+              occurrence.bedtime_source, occurrence.anki_cards_left, occurrence.anki_checked_at
        FROM occurrence
        JOIN pact ON pact.id = occurrence.pact_id
        JOIN penalty ON penalty.pact_id = occurrence.pact_id AND penalty.occurrence_date = occurrence.date
@@ -473,6 +483,7 @@ function missedDetail(
     evidence_kind: EvidenceKind;
     date: LocalDate;
     bedtime_start: string | null;
+    bedtime_source: string | null;
     anki_cards_left: number | null;
     anki_checked_at: string | null;
   },
@@ -482,9 +493,7 @@ function missedDetail(
   if (dueBy !== null && row.evidence_kind !== "anki") return { kind: "closed", dueBy };
   if (onPeriods) return { kind: "period", progress: periodProgress(ctx, row.id, row.date) };
   if (row.evidence_kind === "anki") return { kind: "anki", lastCheck: ankiCheckOf(row) };
-  if (isBedtimeKind(row.evidence_kind)) {
-    return { kind: "night", inBedAt: row.bedtime_start === null ? null : wallClock(row.bedtime_start).slice(11) };
-  }
+  if (isBedtimeKind(row.evidence_kind)) return nightDetail(row.bedtime_start, row.bedtime_source);
   return null;
 }
 

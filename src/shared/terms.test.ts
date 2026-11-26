@@ -16,18 +16,18 @@ type FullPact = CurrentTerms & Pick<PactTerms, "reminders">;
  * `PactChange`, so a new term won't compile until it's listed here.
  */
 const KINDS_WITH: { [K in keyof Required<PactChange>]: EvidenceKind[] } = {
-  name: ["camera", "oura", "anki"],
-  description: ["camera", "oura", "anki"],
-  inBedBy: ["oura"],
+  name: ["camera", "oura", "anki", "apple_health"],
+  description: ["camera", "oura", "anki", "apple_health"],
+  inBedBy: ["oura", "apple_health"],
   dueBy: ["camera", "anki"],
   ankiDeckId: ["anki"],
-  startDate: ["camera", "oura", "anki"],
-  endDate: ["camera", "oura", "anki"],
-  reminders: ["camera", "oura", "anki"],
-  schedule: ["camera", "oura", "anki"],
-  penaltyCents: ["camera", "oura", "anki"],
-  recipientId: ["camera", "oura", "anki"],
-  reviewerIds: ["camera", "oura", "anki"],
+  startDate: ["camera", "oura", "anki", "apple_health"],
+  endDate: ["camera", "oura", "anki", "apple_health"],
+  reminders: ["camera", "oura", "anki", "apple_health"],
+  schedule: ["camera", "oura", "anki", "apple_health"],
+  penaltyCents: ["camera", "oura", "anki", "apple_health"],
+  recipientId: ["camera", "oura", "anki", "apple_health"],
+  reviewerIds: ["camera", "oura", "anki", "apple_health"],
   // The owner's words for the reviewers, never a term of the pact.
   note: [],
 };
@@ -51,6 +51,7 @@ const days: Extract<Schedule, { kind: "fixed-days" }> = { kind: "fixed-days", da
 const FULL = {
   camera: { ...shared, evidenceKind: "camera", schedule: days, dueBy: "21:00" },
   oura: { ...shared, evidenceKind: "oura", schedule: days, inBedBy: "23:00" },
+  apple_health: { ...shared, evidenceKind: "apple_health", schedule: days, inBedBy: "23:00" },
   anki: {
     ...shared,
     evidenceKind: "anki",
@@ -83,6 +84,7 @@ describe("termsOf", () => {
     };
     expect(termsOf(FULL.camera)).toEqual({ ...common, dueBy: "21:00" });
     expect(termsOf(FULL.oura)).toEqual({ ...common, inBedBy: "23:00" });
+    expect(termsOf(FULL.apple_health)).toEqual({ ...common, inBedBy: "23:00" });
     expect(termsOf(FULL.anki)).toEqual({ ...common, dueBy: "02:00", ankiDeckId: "1700000000001" });
   });
 

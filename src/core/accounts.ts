@@ -124,10 +124,12 @@ export function setTimezone(ctx: CoreContext, accountId: AccountId, timezone: st
  * When an owner's move from `from` to `to` makes due times later from
  * `until` on, tells each reviewer of their affected pacts once, naming only
  * the pacts that reviewer reviews. The shift is read at the start of
- * `until`, the first day in `to`. Affected: Active Camera and Anki pacts
- * whose reviewers have been told of them, with a day from `until` that
- * takes `to`. Oura Ring nights follow the offset Oura reports. A move that
- * makes due times earlier is stricter and tells nobody.
+ * `until`, the first day in `to`. Affected: Active Camera, Anki and Apple
+ * Health pacts whose reviewers have been told of them, with a day from
+ * `until` that takes `to`: an Apple Health night is read on the account's
+ * timezone, so its in-bed-by time moves with it. Oura Ring nights follow
+ * the offset Oura reports. A move that makes due times earlier is stricter
+ * and tells nobody.
  */
 function tellReviewersOfLaterDueTimes(
   ctx: CoreContext,
@@ -142,7 +144,7 @@ function tellReviewersOfLaterDueTimes(
     .all<{ id: string; name: string; schedule: string }>(
       `SELECT id, name, schedule FROM pact
        WHERE owner_account_id = ? AND stage = 'active' AND reviewers_notified_at IS NOT NULL
-         AND evidence_kind IN ('camera', 'anki') AND (end_date IS NULL OR end_date >= ?)
+         AND evidence_kind IN ('camera', 'anki', 'apple_health') AND (end_date IS NULL OR end_date >= ?)
        ORDER BY created_at, id`,
       ownerId,
       until,

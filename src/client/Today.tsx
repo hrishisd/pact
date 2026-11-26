@@ -39,6 +39,7 @@ import {
 } from "../shared/types.ts";
 import { dayCount } from "../shared/calendar.ts";
 import { AnkiConnectionAlert, AnkiDeckMissing } from "./anki.tsx";
+import { AppleHealthConnectionAlert } from "./apple-health.tsx";
 import { api, failureText, uploadFailureText } from "./api.ts";
 import {
   ankiMissText,
@@ -235,7 +236,7 @@ function alertKey(alert: Json<TodayAlert>): string {
 }
 
 /** Under a card, after a check a pull sent couldn't reach the service. */
-const UNREACHED_TEXT: Record<ConnectionService, string> = {
+const UNREACHED_TEXT: Record<Exclude<ConnectionService, "apple_health">, string> = {
   oura: "Couldn't reach Oura. Pact will try again.",
   anki: "Couldn't reach AnkiWeb. Pact will try again.",
 };
@@ -889,11 +890,14 @@ function Alert({
     case "bill-overdue":
       return <OverdueAlert alert={alert} timezone={timezone} onPaid={onChanged} />;
     case "connection":
-      return alert.service === "oura" ? (
-        <OuraConnectionAlert status={alert.status} error={ouraError} />
-      ) : (
-        <AnkiConnectionAlert status={alert.status} onReconnected={onChanged} />
-      );
+      switch (alert.service) {
+        case "oura":
+          return <OuraConnectionAlert status={alert.status} error={ouraError} />;
+        case "anki":
+          return <AnkiConnectionAlert status={alert.status} onReconnected={onChanged} />;
+        case "apple_health":
+          return <AppleHealthConnectionAlert />;
+      }
   }
 }
 

@@ -204,6 +204,7 @@ describe("a pull on Today", () => {
             pactId: "bed",
             name: "In bed by 11",
             penaltyCents: 1000,
+            evidenceKind: "oura",
             occurrenceDate: "2026-01-04",
             closesAt: "2026-01-05T23:00:00Z",
             tonight: null,

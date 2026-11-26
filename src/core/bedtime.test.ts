@@ -584,6 +584,7 @@ describe("Today", () => {
             pactId,
             name: "In bed by midnight",
             penaltyCents: 500,
+            evidenceKind: "oura",
             editWindowClosesAt: null,
             occurrenceDate: s.date("Mon"),
             dueAt: s.at("Tue 00:00"),

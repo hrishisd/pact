@@ -26,6 +26,8 @@ import {
   OURA_RECONNECT_PATH,
   TIMEZONE_SIGN_IN_KEY,
   MAX_PHOTO_BYTES,
+  APPLE_HEALTH_MAX_BODY_BYTES,
+  APPLE_HEALTH_MAX_LINES,
   PAYMENT_AMOUNT_FIELD,
   PAYMENT_NOTE_FIELD,
   type AcceptInviteResponse,
@@ -39,10 +41,14 @@ import {
   type WaitingOnReplyResponse,
   type AddRecipientResponse,
   type AnkiDecksResponse,
+  type AppleHealthResponse,
+  type AppleHealthSamplesRequest,
   type CheckAnkiResponse,
   type ConnectAnkiRequest,
   type ConnectAnkiResponse,
   type DisconnectAnkiResponse,
+  type DisconnectAppleHealthResponse,
+  type MakeAppleHealthKeyResponse,
   type ChangePactRequest,
   type ChangePactResponse,
   type AddReviewersRequest,
@@ -2092,6 +2098,8 @@ describe("api", () => {
     // (The auth handler under AUTH_BASE_PATH is public too, but isn't in API_PATHS.)
     const publicPaths: Partial<Record<keyof typeof API_PATHS, string>> = {
       invite: "the invite page shows to signed-out visitors, so its lookup can't need a session",
+      appleHealthSamples:
+        "the Pact Health Shortcut has no session: its upload key is its credential (tested under Apple Health)",
     };
 
     // A route's shape with its parameters' names dropped, so "/api/pacts/:pactId"
@@ -2881,6 +2889,194 @@ describe("connecting Oura", () => {
   test("checking and disconnecting need a session", async () => {
     const s = await server();
     for (const path of [API_PATHS.ouraCheck, API_PATHS.ouraDisconnect]) {
+      expect((await s.request(path, { method: "POST" })).status).toBe(401);
+    }
+  });
+});
+
+describe("Apple Health", () => {
+  /** A signed-in owner with a new upload key, and its upload URL's path and key. */
+  async function ownerWithKey() {
+    const { s, owner, pact, createPact } = await ownerWithFriend();
+    const made = await owner.post<MakeAppleHealthKeyResponse>(API_PATHS.appleHealthKey);
+    expect(made.status).toBe(200);
+    const url = new URL(made.body.uploadUrl);
+    const key = url.searchParams.get("key")!;
+    return { s, owner, pact, createPact, uploadUrl: made.body.uploadUrl, key };
+  }
+
+  /** Posts `body` to the upload route with no session, as the Shortcut does. */
+  async function upload(
+    s: Server,
+    body: string,
+    { key, bearer, contentType = "text/plain" }: { key?: string; bearer?: string; contentType?: string },
+  ) {
+    const query = key === undefined ? "" : `?key=${encodeURIComponent(key)}`;
+    const response = await s.request(`${API_PATHS.appleHealthSamples}${query}`, {
+      method: "POST",
+      headers: { "Content-Type": contentType, ...(bearer !== undefined && { Authorization: `Bearer ${bearer}` }) },
+      body,
+    });
+    return { status: response.status, type: response.headers.get("Content-Type"), text: await response.text() };
+  }
+
+  const LINES = [
+    "sleep|2026-01-05T23:10:00-05:00|2026-01-06T02:00:00-05:00|Core|Oura",
+    "sleep|2026-01-06T02:00:00-05:00|2026-01-06T06:30:00-05:00|Deep|Oura",
+    "mindful|2026-01-05T12:00:00-05:00|2026-01-05T12:10:00-05:00||iPhone",
+  ].join("\n");
+
+  test("making a key connects Apple Health and answers its upload URL, this once", async () => {
+    const { s, owner, uploadUrl, key } = await ownerWithKey();
+    expect(uploadUrl).toBe(`https://pact.example.test${API_PATHS.appleHealthSamples}?key=${key}`);
+    expect(key.length).toBeGreaterThanOrEqual(32);
+    expect(await owner.get<AppleHealthResponse>(API_PATHS.appleHealth)).toEqual({
+      status: 200,
+      body: { connected: true, lastUpload: null },
+    });
+    const me = await owner.get<MeResponse>(API_PATHS.me);
+    expect(me.body.connections).toEqual([
+      expect.objectContaining({ service: "apple_health", status: "connected", lastUpload: null }),
+    ]);
+    // Only the key's hash is kept.
+    const db = new Database(join(s.staticDir, "pact.db"), { readonly: true });
+    try {
+      const rows = db.prepare(`SELECT key_hash FROM apple_health_key`).all() as { key_hash: string }[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.key_hash).not.toContain(key);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("an upload with the key in the URL needs no session, goes to the core, and answers in plain text", async () => {
+    const { s, owner, key } = await ownerWithKey();
+    s.setClockTo("Tue 09:00");
+
+    const response = await upload(s, LINES, { key });
+
+    expect(response).toEqual({
+      status: 200,
+      type: expect.stringMatching(/^text\/plain/),
+      text: "Pact got 2 sleep samples and 1 mindful session.",
+    });
+    expect((await owner.get<AppleHealthResponse>(API_PATHS.appleHealth)).body).toEqual({
+      connected: true,
+      lastUpload: { at: s.at("Tue 09:00").toISOString(), sleepSamples: 2, mindfulSessions: 1 },
+    });
+  });
+
+  test("the key also works as a bearer token, and a JSON body is read as samples", async () => {
+    const { s, key } = await ownerWithKey();
+    s.setClockTo("Tue 09:00");
+    const body: AppleHealthSamplesRequest = {
+      samples: [
+        {
+          type: "sleep",
+          start: "2026-01-05T23:10:00-05:00",
+          end: "2026-01-06T06:30:00-05:00",
+          value: "Asleep",
+          source: "Watch",
+        },
+        {
+          type: "heart_rate",
+          start: "2026-01-05T23:10:00-05:00",
+          end: "2026-01-05T23:11:00-05:00",
+          value: "60",
+          source: "Watch",
+        },
+      ],
+    };
+
+    const response = await upload(s, JSON.stringify(body), { bearer: key, contentType: "application/json" });
+
+    expect(response).toMatchObject({ status: 200, text: "Pact got 1 sleep sample and 0 mindful sessions." });
+  });
+
+  test("lines it can't read are skipped and counted; blank lines and a header aren't", async () => {
+    const { s, key } = await ownerWithKey();
+    s.setClockTo("Tue 09:00");
+    const body = ["type|start|end|value|source", "", "sleep|yesterday|today|Core|Watch", "nonsense", LINES, ""].join(
+      "\r\n",
+    );
+
+    const response = await upload(s, body, { key });
+
+    expect(response).toMatchObject({
+      status: 200,
+      text: "Pact got 2 sleep samples and 1 mindful session, and skipped 2 lines it couldn't read.",
+    });
+  });
+
+  test("without a key, or with one no account has, it answers 401 in plain text and keeps nothing", async () => {
+    const { s, owner, key } = await ownerWithKey();
+    for (const tried of [{}, { key: "" }, { key: "not-a-key" }, { bearer: "not-a-key" }]) {
+      const response = await upload(s, LINES, tried);
+      expect(response.status).toBe(401);
+      expect(response.type).toMatch(/^text\/plain/);
+    }
+    // A new key replaces the old one: the old URL stops working.
+    await owner.post<MakeAppleHealthKeyResponse>(API_PATHS.appleHealthKey);
+    expect((await upload(s, LINES, { key })).status).toBe(401);
+    expect((await owner.get<AppleHealthResponse>(API_PATHS.appleHealth)).body.lastUpload).toBeNull();
+    // The key is never logged.
+    expect(s.logs.join("\n")).not.toContain(key);
+  });
+
+  test("a body over 1 MB, or of more than 5,000 lines, answers 400 and keeps nothing", async () => {
+    const { s, owner, key } = await ownerWithKey();
+    const line = "sleep|2026-01-05T23:10:00-05:00|2026-01-06T06:30:00-05:00|Core|Watch";
+    const tooBig = `${line}\n`.repeat(Math.ceil(APPLE_HEALTH_MAX_BODY_BYTES / line.length));
+    const tooLong = Array.from({ length: APPLE_HEALTH_MAX_LINES + 1 }, () => "sleep|x|y|z|w").join("\n");
+    const tooManySamples = JSON.stringify({
+      samples: Array.from({ length: APPLE_HEALTH_MAX_LINES + 1 }, () => ({
+        type: "sleep",
+        start: "",
+        end: "",
+        value: "",
+        source: "",
+      })),
+    });
+
+    for (const body of [tooBig, tooLong, tooManySamples]) {
+      const response = await upload(s, body, { key });
+      expect(response.status).toBe(400);
+      expect(response.type).toMatch(/^text\/plain/);
+    }
+    expect((await owner.get<AppleHealthResponse>(API_PATHS.appleHealth)).body.lastUpload).toBeNull();
+  });
+
+  test("a JSON body of another shape answers 400", async () => {
+    const { s, key } = await ownerWithKey();
+    for (const body of ["{", JSON.stringify({ samples: "none" }), JSON.stringify({ samples: [{ type: 1 }] })]) {
+      expect((await upload(s, body, { key, contentType: "application/json" })).status).toBe(400);
+    }
+  });
+
+  test("an Apple Health pact needs the connection; disconnecting deletes the key and answers the profile", async () => {
+    const s0 = await ownerWithFriend();
+    const bedtime = { ...s0.pact, evidenceKind: "apple_health", name: "Bed by 11", description: "", inBedBy: "23:00" };
+    expect((await s0.owner.post<CreatePactResponse>(API_PATHS.pacts, bedtime)).body).toEqual({
+      ok: false,
+      reason: "apple-health-not-connected",
+    });
+
+    const made = await s0.owner.post<MakeAppleHealthKeyResponse>(API_PATHS.appleHealthKey);
+    const key = new URL(made.body.uploadUrl).searchParams.get("key")!;
+    await s0.createPact(bedtime);
+
+    const after = await s0.owner.post<DisconnectAppleHealthResponse>(API_PATHS.appleHealthDisconnect);
+    expect(after.status).toBe(200);
+    expect(after.body.connections).toEqual([]);
+    expect((await upload(s0.s, LINES, { key })).status).toBe(401);
+    const today = await s0.owner.get<TodayResponse>(API_PATHS.today);
+    expect(today.body.alerts).toEqual([{ kind: "connection", service: "apple_health", status: "not-connected" }]);
+  });
+
+  test("the setup routes need a session", async () => {
+    const s = await server();
+    expect((await s.request(API_PATHS.appleHealth)).status).toBe(401);
+    for (const path of [API_PATHS.appleHealthKey, API_PATHS.appleHealthDisconnect]) {
       expect((await s.request(path, { method: "POST" })).status).toBe(401);
     }
   });

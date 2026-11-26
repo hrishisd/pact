@@ -369,6 +369,7 @@ export const SERVICE_OF_KIND: Record<EvidenceKind, ConnectionService | null> = {
   camera: null,
   oura: "oura",
   anki: "anki",
+  apple_health: "apple_health",
 };
 
 /** An Active pact as Today and the Pacts tab read it. */
@@ -457,8 +458,8 @@ export function checkedPact(
 }
 
 /**
- * Where `pact`'s evidence comes from, or why it can't. Creating an Oura Ring
- * or Anki pact needs its connection, and an Anki pact a deck from the owner's
+ * Where `pact`'s evidence comes from, or why it can't. Creating an Oura Ring,
+ * Anki or Apple Health pact needs its connection, and an Anki pact a deck from the owner's
  * deck list. An edit or a change (`existing` given) needs neither, unless it
  * gives an Anki pact another deck: its own deck counts as known even with
  * the connection gone. An Anki pact's day turns at the collection's rollover
@@ -476,6 +477,11 @@ export function evidenceSource(
     case "oura":
       if (existing === undefined && !hasConnection(ctx, ownerId, "oura")) {
         return { ok: false, reason: "oura-not-connected" };
+      }
+      return { ok: true, ankiDeckId: null, ankiRollover: null };
+    case "apple_health":
+      if (existing === undefined && !hasConnection(ctx, ownerId, "apple_health")) {
+        return { ok: false, reason: "apple-health-not-connected" };
       }
       return { ok: true, ankiDeckId: null, ankiRollover: null };
     case "anki": {
@@ -628,8 +634,10 @@ export function moveOneTimeOccurrence(ctx: CoreContext, pactId: string, from: Lo
   if (from === to) return;
   ctx.db
     .prepare(
-      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at)
-       SELECT pact_id, ?, outcome, judged_at, bedtime_start, bedtime_arrived_at, miss_accepted_at FROM occurrence
+      `INSERT INTO occurrence (pact_id, date, outcome, judged_at, bedtime_start, bedtime_source, bedtime_arrived_at,
+                               miss_accepted_at)
+       SELECT pact_id, ?, outcome, judged_at, bedtime_start, bedtime_source, bedtime_arrived_at, miss_accepted_at
+       FROM occurrence
        WHERE pact_id = ? AND date = ?`,
     )
     .run(to, pactId, from);

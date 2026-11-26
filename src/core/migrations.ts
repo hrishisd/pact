@@ -938,4 +938,103 @@ export const migrations: readonly Migration[] = [
     PRIMARY KEY (account_id, until)
   );
   `,
+  // 39: Apple Health
+  {
+    foreignKeysOff: true,
+    sql: `
+  -- The evidence kind Apple Health, and Apple Health as a connection's
+  -- service. SQLite can't change a CHECK constraint, so pact and connection
+  -- are rebuilt by SQLite's 12-step procedure, as migration 26 rebuilt them.
+  -- pact has one index (pact_owner) and no triggers; connection has only its
+  -- primary key's; no view reads either. The tables that reference pact do
+  -- so by name, so they reference the new one once it's renamed.
+  CREATE TABLE pact_new (
+    id TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account (id),
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    evidence_kind TEXT NOT NULL CHECK (evidence_kind IN ('camera', 'oura', 'anki', 'apple_health')),
+    schedule TEXT NOT NULL, -- JSON, the shared Schedule type
+    penalty_cents INTEGER NOT NULL CHECK (penalty_cents > 0),
+    recipient_id TEXT NOT NULL REFERENCES recipient (id),
+    stage TEXT NOT NULL CHECK (stage IN ('active', 'ended')),
+    first_occurrence TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    judged_through TEXT,
+    reviewers_notified_at TEXT,
+    in_bed_by TEXT,
+    ended_at TEXT,
+    due_by TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    reminders TEXT NOT NULL DEFAULT '[]',
+    reminded_through TEXT,
+    anki_deck_id TEXT,
+    anki_rollover_hour INTEGER CHECK (anki_rollover_hour BETWEEN 0 AND 23),
+    end_approved_at TEXT,
+    CHECK ((evidence_kind = 'anki') = (anki_deck_id IS NOT NULL)),
+    CHECK ((evidence_kind = 'anki') = (anki_rollover_hour IS NOT NULL))
+  );
+  INSERT INTO pact_new (id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents,
+                        recipient_id, stage, first_occurrence, created_at, judged_through,
+                        reviewers_notified_at, in_bed_by, ended_at, due_by, start_date, end_date, reminders,
+                        reminded_through, anki_deck_id, anki_rollover_hour, end_approved_at)
+    SELECT id, owner_account_id, name, description, evidence_kind, schedule, penalty_cents, recipient_id, stage,
+           first_occurrence, created_at, judged_through, reviewers_notified_at, in_bed_by, ended_at, due_by,
+           start_date, end_date, reminders, reminded_through, anki_deck_id, anki_rollover_hour, end_approved_at
+    FROM pact;
+  DROP TABLE pact;
+  ALTER TABLE pact_new RENAME TO pact;
+  CREATE INDEX pact_owner ON pact (owner_account_id);
+
+  CREATE TABLE connection_new (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    service TEXT NOT NULL CHECK (service IN ('oura', 'anki', 'apple_health')),
+    status TEXT NOT NULL CHECK (status IN ('connected', 'needs-reconnecting')),
+    connected_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, service)
+  );
+  INSERT INTO connection_new (account_id, service, status, connected_at)
+    SELECT account_id, service, status, connected_at FROM connection;
+  DROP TABLE connection;
+  ALTER TABLE connection_new RENAME TO connection;
+
+  -- The account's upload key, as the hex SHA-256 of the key: the key itself
+  -- is shown once, inside the upload URL, and never stored. One per account,
+  -- while its Apple Health connection lasts; a new key replaces it.
+  CREATE TABLE apple_health_key (
+    account_id TEXT PRIMARY KEY REFERENCES account (id),
+    key_hash TEXT NOT NULL UNIQUE,
+    made_at TEXT NOT NULL
+  );
+
+  -- The last upload from the account's Pact Health Shortcut: when, and how
+  -- many sleep samples and mindful sessions from the last 14 days it held.
+  -- NULL before the first. Kept when the key is replaced or deleted.
+  ALTER TABLE account ADD COLUMN apple_health_uploaded_at TEXT;
+  ALTER TABLE account ADD COLUMN apple_health_sleep_samples INTEGER;
+  ALTER TABLE account ADD COLUMN apple_health_mindful_sessions INTEGER;
+
+  -- Every Apple Health sample the account uploaded, once each: its type,
+  -- start and end (as UTC ISO 8601, so one sent again with another offset
+  -- is the same sample), its value as Shortcuts writes it, the app that wrote
+  -- it ('' for none), and when Pact first got it. Kept after a disconnect:
+  -- they're the evidence for nights already judged.
+  CREATE TABLE apple_health_sample (
+    account_id TEXT NOT NULL REFERENCES account (id),
+    type TEXT NOT NULL CHECK (type IN ('sleep', 'mindful')),
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    value TEXT NOT NULL,
+    source TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, type, start_at, end_at, value, source)
+  );
+
+  -- The app the sleep that decided a bedtime night came from, as Apple
+  -- Health named it: the source of its sleep session's earliest sample.
+  -- NULL for Oura Ring nights, and for an Apple Health one with no source.
+  ALTER TABLE occurrence ADD COLUMN bedtime_source TEXT;
+  `,
+  },
 ];

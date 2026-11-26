@@ -74,6 +74,7 @@ export type Problem =
 export const PROBLEMS: Record<Problem, string> = {
   "oura-not-connected": "Connect your Oura Ring first.",
   "anki-not-connected": "Connect AnkiWeb first.",
+  "apple-health-not-connected": "Set up Apple Health first.",
   "unknown-deck": "Pick a deck.",
   "anki-due-by": "Pick a time from noon until your Anki day ends, or turn off Due by a set time.",
   "invalid-in-bed-by": "Pick a time.",

@@ -33,6 +33,7 @@ describe("the No Oura data card", () => {
             pactId,
             name: "In bed by midnight",
             penaltyCents: 500,
+            evidenceKind: "oura",
             occurrenceDate: s.date("Tue"),
             closesAt: s.at("Wed 18:00"),
             tonight: { occurrenceDate: s.date("Wed"), dueAt: s.at("Thu 00:00"), inBedBy: "00:00" },

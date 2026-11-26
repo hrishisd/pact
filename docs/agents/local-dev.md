@@ -73,6 +73,25 @@ Without `ANKI_TOKEN_KEY` set, development uses a stand-in for AnkiWeb (`devAnki`
 
 To try the real adapter, set `ANKI_TOKEN_KEY` and `ANKI_PYTHON` (a Python with `pip install -r src/core/anki-requirements.txt`). Anki's own sync server (`python -m anki.syncserver`, from the same package) can stand in for AnkiWeb: `ankiAdapter`'s `loginEndpoint` option points the login at it.
 
+## Apple Health without an iPhone
+
+The upload route takes the same posts the Pact Health Shortcut sends, so curl can stand in for the phone. Make a key as a signed-in account (this connects Apple Health), then post samples to the URL it returns, which carries the key; no cookie is needed. Keep the URL in your scratchpad, since it is shown only once.
+
+```sh
+curl -s -b JAR -X POST http://localhost:5173/api/apple-health/key
+# {"uploadUrl":"http://localhost:5173/api/apple-health/samples?key=KEY"}
+printf '%s\n' \
+  'sleep|2026-11-25T23:40:00-05:00|2026-11-26T03:00:00-05:00|Core|Oura' \
+  'sleep|2026-11-26T03:20:00-05:00|2026-11-26T07:00:00-05:00|Deep|Oura' \
+  'mindful|2026-11-26T08:00:00-05:00|2026-11-26T08:10:00-05:00||Calm' |
+  curl -s --data-binary @- "http://localhost:5173/api/apple-health/samples?key=KEY"
+# Pact got 2 sleep samples and 1 mindful session.
+```
+
+- Each line is `type|start|end|value|source`, dates in ISO 8601 with an offset. JSON works too: `-H 'Content-Type: application/json' -d '{"samples":[{"type":"sleep","start":"…","end":"…","value":"Core","source":"Oura"}]}'`. The key can go in `-H "Authorization: Bearer KEY"` instead of the query.
+- Samples count only from 14 days before now up to now (the dev clock's now, with `PACT_DEV_CLOCK=1`). An upload judges the account's Apple Health nights at once; `GET /api/apple-health` shows the last upload.
+- A wrong key answers 401; making a new key (`POST /api/apple-health/key` again) stops the old URL working. `POST /api/apple-health/disconnect` deletes the key.
+
 ## Server log
 
 The server writes its output (and crash traces) to `logs/pact.log` next to the database: `.dev-data.nosync/logs/pact.log` with the defaults (its directory is `PACT_DB_PATH`'s). When a screen shows a load error, read the end of it: `tail -n 100 .dev-data.nosync/logs/pact.log`. It rotates to `pact.log.1` at 10 MB.
