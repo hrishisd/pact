@@ -13,7 +13,7 @@ import { APP_PATHS } from "../shared/api.ts";
 import { App } from "./App.tsx";
 import { Ledgers } from "./Ledgers.tsx";
 import { Pacts } from "./Pacts.tsx";
-import { PULL_THRESHOLD_PX, PullToRefresh, useRefreshOnPull } from "./pull-to-refresh.tsx";
+import { PULL_THRESHOLD_PX, PullToRefresh, useRefresh } from "./pull-to-refresh.tsx";
 import { Review } from "./Review.tsx";
 import { answers, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
 import { useLoad } from "./ui.tsx";
@@ -25,28 +25,28 @@ const busy = () => screen.getByRole("main").getAttribute("aria-busy");
 const fingerFor = (px: number) => px * 2;
 
 /** A tab whose refresh is `refresh`. */
-function Tab({ refresh }: { refresh: () => Promise<unknown> }) {
-  useRefreshOnPull(refresh);
+function Tab({ refresh }: { refresh: () => Promise<boolean> }) {
+  useRefresh(refresh);
   return <p>A tab</p>;
 }
 
 /** The shell, showing `tab`. */
 function shellWith(tab: ReactElement, pullable = true) {
   return (
-    <PullToRefresh pullable={pullable} header={<h1>Today</h1>} mainClassName="scroll gut">
+    <PullToRefresh pullable={pullable} timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
       {tab}
     </PullToRefresh>
   );
 }
 
-function shell(refresh: () => Promise<unknown>, pullable = true) {
+function shell(refresh: () => Promise<boolean>, pullable = true) {
   return renderWithUser(shellWith(<Tab refresh={refresh} />, pullable));
 }
 
 /** A refresh the test finishes by calling `done`. */
 function heldRefresh() {
   let done = () => {};
-  const refresh = vi.fn(() => new Promise<void>((resolve) => (done = resolve)));
+  const refresh = vi.fn(() => new Promise<boolean>((resolve) => (done = () => resolve(true))));
   return { refresh, done: () => done() };
 }
 
@@ -64,20 +64,20 @@ describe("the pull", () => {
   });
 
   test("a refresh that fails still ends the bar", async () => {
-    shell(() => Promise.reject(new Error("offline")));
+    shell(() => Promise.resolve(false));
     pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(busy()).toBeNull());
   });
 
   test("a pull short of the threshold refreshes nothing", () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn(() => Promise.resolve(true));
     shell(refresh);
     pullDown(fingerFor(PULL_THRESHOLD_PX - 1));
     expect(refresh).not.toHaveBeenCalled();
   });
 
   test("a pull that starts below the top is a scroll", () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn(() => Promise.resolve(true));
     shell(refresh);
     const main = screen.getByRole("main");
     Object.defineProperty(main, "scrollTop", { value: 200, configurable: true });
@@ -86,7 +86,7 @@ describe("the pull", () => {
   });
 
   test("a finger that first moves up is a scroll, even if it then comes down", () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn(() => Promise.resolve(true));
     shell(refresh);
     const main = screen.getByRole("main");
     fireEvent.touchStart(main, { touches: [{ clientY: 300 }] });
@@ -97,7 +97,7 @@ describe("the pull", () => {
   });
 
   test("a cancelled touch springs back without refreshing", () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn(() => Promise.resolve(true));
     shell(refresh);
     const main = screen.getByRole("main");
     fireEvent.touchStart(main, { touches: [{ clientY: 100 }] });
@@ -143,20 +143,24 @@ describe("the pull", () => {
     const settled = vi.fn();
     function Loading() {
       const { reload } = useLoad(() => new Promise<never>(() => {}));
-      useRefreshOnPull(() => reload().then(settled));
+      useRefresh(async () => {
+        const loaded = await reload();
+        settled();
+        return loaded;
+      });
       return <p>A loading tab</p>;
     }
     const { rerender } = renderWithUser(shellWith(<Loading />));
     pullDown(fingerFor(PULL_THRESHOLD_PX));
     await waitFor(() => expect(busy()).toBe("true"));
 
-    rerender(shellWith(<Tab refresh={() => Promise.resolve()} />));
+    rerender(shellWith(<Tab refresh={() => Promise.resolve(true)} />));
 
     await waitFor(() => expect(settled).toHaveBeenCalledTimes(1));
   });
 
   test("a page opened from a tab has no pull", () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn(() => Promise.resolve(true));
     shell(refresh, false);
     pullDown(fingerFor(PULL_THRESHOLD_PX + 20));
     expect(refresh).not.toHaveBeenCalled();
@@ -166,7 +170,7 @@ describe("the pull", () => {
 describe("each tab's refresh", () => {
   const inShell = (tab: ReactElement) =>
     renderWithUser(
-      <PullToRefresh pullable header={<h1>Tab</h1>} mainClassName="scroll gut">
+      <PullToRefresh pullable timezone="America/New_York" header={<h1>Tab</h1>} mainClassName="scroll gut">
         {tab}
       </PullToRefresh>,
     );
@@ -216,7 +220,14 @@ describe("in the app", () => {
     const spies = stubApi({
       me: answers(me),
       pacts: answers<PactsResponse>([]),
-      today: answers<TodayResponse>({ hasPacts: false, alerts: [], sections: [], waiting: [], yesterday: [] }),
+      today: answers<TodayResponse>({
+        date: "2026-01-05",
+        hasPacts: false,
+        alerts: [],
+        sections: [],
+        waiting: [],
+        yesterday: [],
+      }),
       reviewQueue: answers<ReviewQueueResponse>([]),
       waitingOnReply: answers<WaitingOnReplyResponse>([]),
       ledgers: answers<LedgersResponse>([]),
@@ -237,7 +248,14 @@ describe("in the app", () => {
         .fn<() => Promise<PactsResponse>>()
         .mockResolvedValueOnce([])
         .mockReturnValue(new Promise(() => {})),
-      today: answers<TodayResponse>({ hasPacts: false, alerts: [], sections: [], waiting: [], yesterday: [] }),
+      today: answers<TodayResponse>({
+        date: "2026-01-05",
+        hasPacts: false,
+        alerts: [],
+        sections: [],
+        waiting: [],
+        yesterday: [],
+      }),
       reviewQueue: answers<ReviewQueueResponse>([]),
       waitingOnReply: answers<WaitingOnReplyResponse>([]),
       ledgers: answers<LedgersResponse>([]),

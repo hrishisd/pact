@@ -1,6 +1,6 @@
 # Design review: plan
 
-Status: ready-for-agent
+Status: done
 
 Every ticket under `issues/` is `ready-for-agent` and can start once the tickets in its `Blocked by:` line are done. The owner's answers are under "Decisions made" below.
 

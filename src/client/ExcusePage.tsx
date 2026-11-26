@@ -10,6 +10,7 @@ import type { ExcuseDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { DayChip, excuseDatesText, excuseDayText } from "./excuse-days.tsx";
 import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, StateLine, SentTo } from "./item-page.tsx";
+import { useRefresh } from "./pull-to-refresh.tsx";
 import { LoadedFound, useLoad, useNow } from "./ui.tsx";
 
 export function ExcusePage({
@@ -23,6 +24,7 @@ export function ExcusePage({
   onOpenPact: (pactId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(() => api.excuse(excuseId), API_PATHS.excuse(excuseId));
+  useRefresh(reload);
 
   return (
     <LoadedFound

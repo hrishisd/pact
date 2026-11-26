@@ -15,7 +15,7 @@ import { DiffList, endsWhenText, EverythingElse, startsText } from "./change-ter
 import { ItemKindHeader, PhotoLinks, ScreenshotLink, WaitingRow } from "./item-page.tsx";
 import { AskSheet, Thread } from "./questions.tsx";
 import { coveredText, firstName, pactsText, periodLabel, plural } from "./vacation-text.ts";
-import { useRefreshOnPull } from "./pull-to-refresh.tsx";
+import { useRefresh } from "./pull-to-refresh.tsx";
 import { Empty, Loaded, loadedData, useLoad, useNow, useSend } from "./ui.tsx";
 
 /** `onQueue` hears the queue's length each time it loads, for the tab's badge. */
@@ -30,7 +30,7 @@ export function Review({
   const { state, reload } = useLoad(api.reviewQueue, API_PATHS.reviewQueue);
   const queue = loadedData(state);
   const { state: waitingState, reload: reloadWaiting } = useLoad(api.waitingOnReply, API_PATHS.waitingOnReply);
-  useRefreshOnPull(() => Promise.all([reload(), reloadWaiting()]));
+  useRefresh(async (run) => (await Promise.all([reload(run), reloadWaiting(run)])).every(Boolean));
   const waiting = loadedData(waitingState);
   const [index, setIndex] = useState(0);
   // Says why the last decision didn't go through, above the next item.

@@ -15,6 +15,7 @@ describe("submitting evidence", () => {
 
     expect(submitted).toEqual({ ok: true, evidenceId: expect.any(String) });
     expect(owner.today()).toEqual({
+      date: expect.any(String),
       hasPacts: true,
       alerts: [],
       sections: [],
