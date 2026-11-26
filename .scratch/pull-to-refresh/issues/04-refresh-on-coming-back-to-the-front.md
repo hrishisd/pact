@@ -1,6 +1,6 @@
 # 04 Refresh when the installed app comes back to the front
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 From an outside audit of the code (finding F3, parts a and b), checked against the code on 2026-11-22. Parts c (the header's date format) and d (noticing notifications turned off in Settings) are fixed.
