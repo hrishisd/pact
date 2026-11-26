@@ -24,7 +24,6 @@ export function ExcusePage({
   onOpenPact: (pactId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(() => api.excuse(excuseId), API_PATHS.excuse(excuseId));
-  // A page that shows what it loads reloads it by itself when due on coming back to the front.
   useRefresh(reload);
 
   return (

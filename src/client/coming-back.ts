@@ -1,19 +1,18 @@
 // Coming back to the front (.scratch/pull-to-refresh/issues/04-refresh-on-coming-back-to-the-front.md):
 // iOS often keeps Pact in memory while other apps are used, so coming back
-// shows what was there when the app was left. The shown screen reloads by
-// itself when what it shows may be old: on coming back, when it last loaded
-// more than RELOAD_AFTER_MS ago or on another day in the profile's timezone,
-// and at local midnight while the app is in front. The one
-// `visibilitychange` listener here runs those reloads first, then anything
-// else that runs on every return (`onComingBack`), so that can join a reload
-// already started.
+// shows what was there when the app was left. What may be old reloads by
+// itself (`useReloadWhenDue`): on coming back, when it last loaded more than
+// RELOAD_AFTER_MS ago or on another day in the profile's timezone, and at
+// local midnight while the app is in front. On a return when the shown
+// screen isn't due a reload, what runs on every return (`onComingBack`) runs
+// instead.
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { partsIn } from "../shared/format.ts";
 import { dateIn } from "./format.ts";
 import { anySheetOpen, onLastSheetClosed } from "./ui.tsx";
 
-/** How long ago the shown screen may have loaded, on coming back to the front, before it reloads. */
+/** How long ago something shown may have loaded, on coming back to the front, before it reloads. */
 export const RELOAD_AFTER_MS = 10 * 60_000;
 /**
  * The longest the wait for midnight goes before working it out again, so a
@@ -22,17 +21,23 @@ export const RELOAD_AFTER_MS = 10 * 60_000;
 const MIDNIGHT_RECHECK_MS = 60 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
-/** The reloads' checks (`useReloadWhenDue`), which run before the other listeners. */
-const reloadChecks = new Set<() => void>();
-/** What runs on every return (`onComingBack`). */
+/** Whether what loaded at `at` (ms) is due a reload at `now`, in `timezone`. */
+type Due = (at: number, now: number, timezone: string) => boolean;
+const newDay: Due = (at, now, timezone) => dateIn(at, timezone) !== dateIn(now, timezone);
+const old: Due = (at, now, timezone) => now - at > RELOAD_AFTER_MS || newDay(at, now, timezone);
+
+/** The reloads' checks on coming back (`useReloadWhenDue`); each answers whether the shown screen's came due. */
+const reloadChecks = new Set<() => boolean>();
+/** What runs on every return when the shown screen isn't due a reload (`onComingBack`). */
 const listeners = new Set<() => void>();
 
 function cameBack(): void {
   if (document.visibilityState !== "visible") return;
-  for (const listener of [...reloadChecks, ...listeners]) listener();
+  const shownScreenDue = [...reloadChecks].map((check) => check()).includes(true);
+  if (!shownScreenDue) for (const listener of [...listeners]) listener();
 }
 
-function listen(set: Set<() => void>, listener: () => void): () => void {
+function listen<T>(set: Set<T>, listener: T): () => void {
   if (reloadChecks.size + listeners.size === 0) document.addEventListener("visibilitychange", cameBack);
   set.add(listener);
   return () => {
@@ -42,37 +47,60 @@ function listen(set: Set<() => void>, listener: () => void): () => void {
 }
 
 /**
- * Calls `listener` each time the app comes back to the front, after the
- * shown screen's reload has started if it was due, until the returned
- * function stops it.
+ * Calls `listener` each time the app comes back to the front, unless the
+ * shown screen is due a reload then, until the returned function stops it.
+ * That reload does what a listener would (Today's check of Oura and
+ * AnkiWeb), once a sheet open closes.
  */
 export function onComingBack(listener: () => void): () => void {
   return listen(listeners, listener);
 }
 
 /**
- * Calls `reload` when the shown screen is due a reload: on coming back to the
- * front, if it last loaded (`loadedAt()`, ms) more than RELOAD_AFTER_MS ago
- * or on another day in `timezone` (the profile's); and, while the app is in
- * front, at that timezone's midnight. While any sheet is open, it waits, and
- * calls `reload` when the last one closes, if the screen is still due.
- * `loadedAt()` answers null when the shown screen has nothing to reload (a
- * form).
+ * Calls `reload` when what it reloads is due: on coming back to the front, if
+ * it last loaded (`loadedAt()`, ms) more than RELOAD_AFTER_MS ago or on
+ * another day in `timezone` (the profile's); and, while the app is in front,
+ * at that timezone's midnight. While any sheet is open, it waits, and calls
+ * `reload` when the last one closes, if still due. `loadedAt()` answers null
+ * when there is nothing to reload (a form). With `shownScreen`, a return on
+ * which it is due, now or once a sheet closes, runs no `onComingBack`
+ * listener. Returns a check that calls `reload` if it is due now, for when it
+ * may have come due unheard (while a refresh ran).
  */
-export function useReloadWhenDue(loadedAt: () => number | null, timezone: string, reload: () => void): void {
-  const latest = useRef({ loadedAt, reload });
-  latest.current = { loadedAt, reload };
+export function useReloadWhenDue(
+  loadedAt: () => number | null,
+  timezone: string,
+  reload: () => void,
+  { shownScreen = false }: { shownScreen?: boolean } = {},
+): () => void {
+  const latest = useRef({ loadedAt, timezone, reload, shownScreen });
+  latest.current = { loadedAt, timezone, reload, shownScreen };
+  /** It came due while a sheet was open. */
+  const waiting = useRef(false);
+  /** Reloads if `due`, or waits for the sheets to close; answers whether it was due. */
+  const reloadIf = useCallback((due: Due): boolean => {
+    const { loadedAt, timezone, reload } = latest.current;
+    const at = loadedAt();
+    if (at === null || document.visibilityState === "hidden" || !due(at, Date.now(), timezone)) return false;
+    if (anySheetOpen()) waiting.current = true;
+    else reload();
+    return true;
+  }, []);
+
   useEffect(() => {
-    const newDay = (at: number, now: number) => dateIn(at, timezone) !== dateIn(now, timezone);
-    const old = (at: number, now: number) => now - at > RELOAD_AFTER_MS || newDay(at, now);
-    /** A reload came due while a sheet was open. */
-    let waiting = false;
-    const reloadIf = (due: (at: number, now: number) => boolean) => {
-      const at = latest.current.loadedAt();
-      if (at === null || document.visibilityState === "hidden" || !due(at, Date.now())) return;
-      if (anySheetOpen()) waiting = true;
-      else latest.current.reload();
+    const stopListening = listen(reloadChecks, () => reloadIf(old) && latest.current.shownScreen);
+    const stopWaiting = onLastSheetClosed(() => {
+      if (!waiting.current) return;
+      waiting.current = false;
+      reloadIf(old);
+    });
+    return () => {
+      stopListening();
+      stopWaiting();
     };
+  }, []);
+
+  useEffect(() => {
     let timer: number | undefined;
     // Worked out afresh on each return too: a timer can't be trusted after iOS has frozen the app.
     const waitForMidnight = () => {
@@ -84,21 +112,14 @@ export function useReloadWhenDue(loadedAt: () => number | null, timezone: string
       }, wait);
     };
     waitForMidnight();
-    const stopListening = listen(reloadChecks, () => {
-      reloadIf(old);
-      waitForMidnight();
-    });
-    const stopWaiting = onLastSheetClosed(() => {
-      if (!waiting) return;
-      waiting = false;
-      reloadIf(old);
-    });
+    document.addEventListener("visibilitychange", waitForMidnight);
     return () => {
       window.clearTimeout(timer);
-      stopListening();
-      stopWaiting();
+      document.removeEventListener("visibilitychange", waitForMidnight);
     };
   }, [timezone]);
+
+  return useCallback(() => void reloadIf(old), []);
 }
 
 /** How long from `now` (ms) to the next midnight on the wall clock in `timeZone`, ignoring daylight saving changes. */

@@ -51,14 +51,13 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
 /**
  * Loads on mount, and again on `reload()`, keeping the last data meanwhile
  * and if the reload fails. Only the newest load's answer counts: an older one
- * arriving after it is dropped. `reload()`'s promise settles once a load it
- * started, or a newer one, has answered, whether it loaded or failed, or once
- * the screen goes away, which drops the load.
+ * arriving after it is dropped. `reload()`'s promise resolves once a load it
+ * started, or a newer one, has answered: true if it loaded, false if it
+ * failed or the screen went away, which drops the load.
  *
  * `reload({ quiet: true })` is for a reload the screen didn't ask for (on
  * coming back to the front, pull-to-refresh.tsx): if that load fails, the
- * screen stays as it was, with no "couldn't load", and the promise rejects
- * with why, so it can be tried again.
+ * screen stays as it was, with no "couldn't load".
  *
  * With a `key` (the API path it loads), what it loads is remembered
  * (last-loaded.ts), and the screen opened again starts with that while it
@@ -70,37 +69,36 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
 export function useLoad<T>(
   load: () => Promise<T>,
   key?: string,
-): { state: Load<T>; reload: (options?: ReloadOptions) => Promise<void> } {
+): { state: Load<T>; reload: (options?: ReloadOptions) => Promise<boolean> } {
   const [state, setState] = useState<Load<T>>(() => {
     const last = key === undefined ? undefined : lastLoaded<T>(key);
     return last === undefined ? { kind: "loading" } : { kind: "loaded", data: last, reloadFailed: null };
   });
   const [loads, setLoads] = useState(0);
   const requested = useRef(0);
-  /** The loads asked for quietly; a load is quiet when the newest request it answers was. */
-  const quietLoads = useRef(new Set<number>());
+  /** The newest load asked for, if it was asked for quietly. */
+  const quietLoad = useRef<number | null>(null);
   /** Each `reload()` waiting for an answer, with the load it asked for. */
-  const waiting = useRef<{ load: number; answered: (error?: { error: unknown }) => void }[]>([]);
+  const waiting = useRef<{ load: number; answered: (loaded: boolean) => void }[]>([]);
   // A reload runs the cleanup first, which drops the load before it. `load`
   // is left out of the deps on purpose: callers pass a new function each
   // render, and a screen showing something else gets a new `key` instead.
   useEffect(() => {
-    const quiet = quietLoads.current.has(loads);
-    const answered = (failure?: { error: unknown }) => {
+    const quiet = quietLoad.current === loads;
+    const answered = (loaded: boolean) => {
       const done = waiting.current.filter((reload) => reload.load <= loads);
       waiting.current = waiting.current.filter((reload) => reload.load > loads);
-      for (const asked of quietLoads.current) if (asked <= loads) quietLoads.current.delete(asked);
-      for (const reload of done) reload.answered(failure);
+      for (const reload of done) reload.answered(loaded);
     };
     return settleUnlessDropped(
       key === undefined ? load() : loadAndRemember(key, load),
       (data) => {
         setState((before) => settledLoad(before, { ok: true, data }));
-        answered();
+        answered(true);
       },
       (error) => {
         if (!quiet) setState((before) => settledLoad(before, { ok: false, error }));
-        answered({ error });
+        answered(false);
       },
     );
   }, [loads]);
@@ -109,17 +107,15 @@ export function useLoad<T>(
     () => () => {
       const gone = waiting.current;
       waiting.current = [];
-      for (const reload of gone) reload.answered();
+      for (const reload of gone) reload.answered(false);
     },
     [],
   );
   const reload = useCallback(
     ({ quiet = false }: ReloadOptions = {}) =>
-      new Promise<void>((resolve, reject) => {
+      new Promise<boolean>((answered) => {
         requested.current += 1;
-        if (quiet) quietLoads.current.add(requested.current);
-        // Only a quiet reload hears that its load failed; the screen says so for any other.
-        const answered = (failure?: { error: unknown }) => (quiet && failure ? reject(failure.error) : resolve());
+        quietLoad.current = quiet ? requested.current : null;
         waiting.current.push({ load: requested.current, answered });
         setLoads(requested.current);
       }),
@@ -128,7 +124,7 @@ export function useLoad<T>(
   return { state, reload };
 }
 
-/** How `useLoad`'s `reload()` treats a failure: `quiet`, it shows nothing and rejects instead. */
+/** How `useLoad`'s `reload()` treats a failure: `quiet`, the screen doesn't show it. */
 interface ReloadOptions {
   quiet?: boolean;
 }

@@ -22,7 +22,6 @@ export function PaymentPage({
   onOpenLedger: (recipientId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(() => api.payment(paymentId), API_PATHS.paymentItem(paymentId));
-  // A page that shows what it loads reloads it by itself when due on coming back to the front.
   useRefresh(reload);
 
   return (

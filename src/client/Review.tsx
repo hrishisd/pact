@@ -30,7 +30,7 @@ export function Review({
   const { state, reload } = useLoad(api.reviewQueue, API_PATHS.reviewQueue);
   const queue = loadedData(state);
   const { state: waitingState, reload: reloadWaiting } = useLoad(api.waitingOnReply, API_PATHS.waitingOnReply);
-  useRefresh((run) => Promise.all([reload(run), reloadWaiting(run)]));
+  useRefresh(async (run) => (await Promise.all([reload(run), reloadWaiting(run)])).every(Boolean));
   const waiting = loadedData(waitingState);
   const [index, setIndex] = useState(0);
   // Says why the last decision didn't go through, above the next item.

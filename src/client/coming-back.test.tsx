@@ -40,19 +40,30 @@ const busy = () => screen.getByRole("main").getAttribute("aria-busy");
 /** Lets what the app started run: answers, renders, and the fake timers due now. */
 const settle = () => act(() => vi.advanceTimersByTimeAsync(0));
 
+/**
+ * Moves the fake clock to `time` with the app in front, running the timers
+ * due on the way. To a named time, not by a span, so however long the test
+ * took to get here in real time (which the fake clock follows too) it can't
+ * overshoot.
+ */
+const advanceTo = (time: string) =>
+  act(() => vi.advanceTimersByTimeAsync(Date.parse(time) - vi.getMockedSystemTime()!.getTime()));
+
 beforeEach(() => {
   // Timers move with real time too, so Testing Library's waits still work.
   vi.useFakeTimers({ now: new Date(OPENED), shouldAdvanceTime: true });
 });
 
+type Refresh = (run: RefreshRun) => Promise<boolean>;
+
 /** A screen whose refresh is `refresh`. */
-function Screen({ refresh }: { refresh: (run: RefreshRun) => Promise<unknown> }) {
+function Screen({ refresh }: { refresh: Refresh }) {
   useRefresh(refresh);
   return <p>A screen</p>;
 }
 
 /** The shell showing a screen whose refresh is `refresh`: a tab, or with `pullable` false a page opened from one. */
-function shell(refresh: (run: RefreshRun) => Promise<unknown>, pullable = true) {
+function shell(refresh: Refresh, pullable = true) {
   return renderWithUser(
     <PullToRefresh pullable={pullable} timezone={ZONE} header={<h1>Today</h1>} mainClassName="scroll gut">
       <Screen refresh={refresh} />
@@ -60,15 +71,15 @@ function shell(refresh: (run: RefreshRun) => Promise<unknown>, pullable = true) 
   );
 }
 
-/** A refresh the test finishes by calling `done`, or fails with `fail`. */
+/** A refresh the test finishes by calling `done` (it loaded), or `fail` (it didn't). */
 function heldRefresh() {
   let done = () => {};
   let fail = () => {};
   const refresh = vi.fn(
     (_run: RefreshRun) =>
-      new Promise<void>((resolve, reject) => {
-        done = resolve;
-        fail = () => reject(onOurSide);
+      new Promise<boolean>((resolve) => {
+        done = () => resolve(true);
+        fail = () => resolve(false);
       }),
   );
   return { refresh, done: () => act(() => done()), fail: () => act(() => fail()) };
@@ -78,14 +89,14 @@ const BY_ITSELF: RefreshRun = { pulled: false, quiet: true };
 
 describe("when the shown screen refreshes by itself", () => {
   test("a short trip away refreshes nothing", () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     shell(refresh);
     comeBackAt("2026-11-21T15:09:00Z");
     expect(refresh).not.toHaveBeenCalled();
   });
 
   test("back more than 10 minutes after it loaded, it refreshes once, quietly", async () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     shell(refresh);
     comeBackAt("2026-11-21T15:11:00Z");
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -98,7 +109,7 @@ describe("when the shown screen refreshes by itself", () => {
 
   test("back two minutes later on a new day in the profile's timezone, it refreshes", () => {
     vi.setSystemTime(new Date("2026-11-22T04:59:00Z")); // Sat 23:59 in New York
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     shell(refresh);
     comeBackAt("2026-11-22T05:01:00Z");
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -106,25 +117,52 @@ describe("when the shown screen refreshes by itself", () => {
 
   test("a new day on this device's clock but not in the profile's timezone isn't one", () => {
     vi.setSystemTime(new Date("2026-11-21T23:59:00Z")); // Sat 18:59 in New York
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     shell(refresh);
     comeBackAt("2026-11-22T00:01:00Z");
     expect(refresh).not.toHaveBeenCalled();
   });
 
   test("with the app in front, it refreshes at midnight in the profile's timezone", async () => {
-    vi.setSystemTime(new Date("2026-11-22T04:58:00Z")); // Sat 23:58 in New York
-    const refresh = vi.fn(() => Promise.resolve());
+    vi.setSystemTime(new Date("2026-11-22T04:55:00Z")); // Sat 23:55 in New York
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     shell(refresh);
-    await act(() => vi.advanceTimersByTimeAsync(119_000));
+    await advanceTo("2026-11-22T04:59:59Z");
     expect(refresh).not.toHaveBeenCalled();
-    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    await advanceTo("2026-11-22T05:00:01Z");
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledWith(BY_ITSELF);
   });
 
+  test("a pull that answers after midnight is followed by midnight's refresh", async () => {
+    vi.setSystemTime(new Date("2026-11-22T04:55:00Z")); // Sat 23:55 in New York
+    const { refresh, done } = heldRefresh();
+    shell(refresh);
+    await advanceTo("2026-11-22T04:59:59Z");
+    pullDown();
+    // Midnight comes while the pull runs; its Saturday answer comes after.
+    await advanceTo("2026-11-22T05:00:01Z");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await done();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenLastCalledWith(BY_ITSELF);
+  });
+
+  test("a pull that fails isn't a load", async () => {
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(false));
+    shell(refresh);
+    act(() => vi.setSystemTime(new Date("2026-11-21T15:08:00Z")));
+    pullDown();
+    await waitFor(() => expect(busy()).toBeNull());
+
+    // 11 minutes after it opened, the last time it loaded.
+    comeBackAt("2026-11-21T15:11:00Z");
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenLastCalledWith(BY_ITSELF);
+  });
+
   test("a pull counts as a load: pulled, then away 9 minutes, nothing refreshes", async () => {
-    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve());
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     shell(refresh);
     act(() => vi.setSystemTime(new Date("2026-11-21T15:08:00Z")));
     pullDown();
@@ -152,7 +190,7 @@ describe("when the shown screen refreshes by itself", () => {
   });
 
   test("a page opened from a tab still can't be pulled", () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     shell(refresh, false);
     pullDown();
     expect(refresh).not.toHaveBeenCalled();
@@ -170,7 +208,7 @@ describe("when the shown screen refreshes by itself", () => {
   });
 
   test("while a sheet is open it waits, and runs when the last sheet closes", async () => {
-    const refresh = vi.fn(() => Promise.resolve());
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
     function ScreenWithSheet() {
       const [open, setOpen] = useState(true);
       useRefresh(refresh);
@@ -197,6 +235,34 @@ describe("when the shown screen refreshes by itself", () => {
     expect(screen.getByText("No sheet")).toBeTruthy();
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledWith(BY_ITSELF);
+  });
+
+  test("waiting for a sheet, it still runs when the sheet closes after the profile's timezone changed in it", () => {
+    const refresh = vi.fn((_run: RefreshRun) => Promise.resolve(true));
+    function ScreenWithSheet() {
+      const [open, setOpen] = useState(true);
+      useRefresh(refresh);
+      return open ? (
+        <Sheet title="Profile" closeLabel="Done" onClose={() => setOpen(false)}>
+          <p>In the sheet</p>
+        </Sheet>
+      ) : (
+        <p>No sheet</p>
+      );
+    }
+    const inZone = (timezone: string) => (
+      <PullToRefresh pullable timezone={timezone} header={<h1>Today</h1>} mainClassName="scroll gut">
+        <ScreenWithSheet />
+      </PullToRefresh>
+    );
+    const { rerender } = renderWithUser(inZone(ZONE));
+    comeBackAt("2026-11-21T15:11:00Z");
+
+    rerender(inZone("Europe/London"));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    act(() => endSheetSlides());
+
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -253,6 +319,25 @@ describe("a refresh by itself that fails", () => {
     await waitFor(() => expect(busy()).toBeNull());
   });
 
+  test("a refresh that failed twice isn't a load: back a minute later, it tries again", async () => {
+    const spies = stubApi({ pacts: answers<PactsResponse>([], onOurSide, onOurSide, []) });
+    renderWithUser(
+      <PullToRefresh pullable timezone={ZONE} header={<h1>Pacts</h1>} mainClassName="scroll gut">
+        <Pacts onOpenPact={() => {}} onCreate={() => {}} />
+      </PullToRefresh>,
+    );
+    await screen.findByText("No pacts yet");
+    comeBackAt("2026-11-21T15:11:00Z");
+    await act(() => vi.advanceTimersByTimeAsync(RETRY_AFTER_MS));
+    expect(await screen.findByText("Pacts couldn't load")).toBeTruthy();
+    await waitFor(() => expect(busy()).toBeNull());
+
+    comeBackAt("2026-11-21T15:12:00Z");
+
+    await waitFor(() => expect(spies.pacts).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(screen.queryByText("Pacts couldn't load")).toBeNull());
+  });
+
   test("shows nothing when the second try loads", async () => {
     const spies = stubApi({ pacts: answers<PactsResponse>([], onOurSide, []) });
     renderWithUser(
@@ -278,7 +363,15 @@ describe("in the app", () => {
     ouraAvailable: false,
     ankiAvailable: false,
   };
-  const NOTHING_TODAY: TodayResponse = { hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] };
+  const NOTHING_TODAY: TodayResponse = {
+    date: "2026-11-21",
+    hasPacts: true,
+    alerts: [],
+    sections: [],
+    waiting: [],
+    yesterday: [],
+  };
+  const NOTHING_SUNDAY: TodayResponse = { ...NOTHING_TODAY, date: "2026-11-22" };
   const VACATION: ReviewQueueResponse[number] = {
     kind: "vacation",
     id: "v1",
@@ -294,10 +387,10 @@ describe("in the app", () => {
     thread: { comments: [], waitingOnReply: false },
   };
 
-  function stubAll(reviewQueue = answers<ReviewQueueResponse>([])) {
+  function stubAll(reviewQueue = answers<ReviewQueueResponse>([]), today = answers(NOTHING_TODAY)) {
     return stubApi({
       me: answers(me),
-      today: answers(NOTHING_TODAY),
+      today,
       pacts: answers<PactsResponse>([]),
       reviewQueue,
       waitingOnReply: answers<WaitingOnReplyResponse>([]),
@@ -353,7 +446,7 @@ describe("in the app", () => {
   });
 
   test("Today's header turns to the new day with its cards at midnight, with the app in front", async () => {
-    vi.setSystemTime(new Date("2026-11-22T04:58:00Z")); // Sat 23:58 in New York
+    vi.setSystemTime(new Date("2026-11-22T04:50:00Z")); // Sat 23:50 in New York
     window.history.replaceState(null, "", APP_PATHS.today);
     const spies = stubAll(answers<ReviewQueueResponse>([], [VACATION]));
     renderWithUser(<App />);
@@ -363,13 +456,13 @@ describe("in the app", () => {
     const loads = spies.today.mock.calls.length;
     // Sunday's Today answers when the test says.
     let answerToday = () => {};
-    spies.today.mockImplementation(() => new Promise((resolve) => (answerToday = () => resolve(NOTHING_TODAY))));
+    spies.today.mockImplementation(() => new Promise((resolve) => (answerToday = () => resolve(NOTHING_SUNDAY))));
 
-    await act(() => vi.advanceTimersByTimeAsync(119_000));
+    await advanceTo("2026-11-22T04:59:59Z");
     expect(screen.getByText("Sat Nov 21")).toBeTruthy();
     expect(spies.today).toHaveBeenCalledTimes(loads);
 
-    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    await advanceTo("2026-11-22T05:00:01Z");
     expect(spies.today).toHaveBeenCalledTimes(loads + 1);
     // The badge's new count shows at once; the header waits for the cards.
     expect(await screen.findByLabelText("1 to review")).toBeTruthy();
@@ -378,10 +471,28 @@ describe("in the app", () => {
     expect(await screen.findByText("Sun Nov 22")).toBeTruthy();
   });
 
+  test("Today's header stays on the old day, with the old cards, while Today can't load the new one", async () => {
+    vi.setSystemTime(new Date("2026-11-22T04:50:00Z")); // Sat 23:50 in New York
+    window.history.replaceState(null, "", APP_PATHS.today);
+    const spies = stubAll();
+    renderWithUser(<App />);
+    await screen.findByText("Nothing to do right now");
+    await opened(spies);
+    spies.today.mockImplementation(() => Promise.reject(onOurSide));
+
+    await advanceTo("2026-11-22T05:00:01Z");
+    await act(() => vi.advanceTimersByTimeAsync(RETRY_AFTER_MS));
+
+    expect(await screen.findByText("Today couldn't load")).toBeTruthy();
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(screen.getByText("Sat Nov 21")).toBeTruthy();
+    expect(screen.getByText("Nothing to do right now")).toBeTruthy();
+  });
+
   test("Today's header shows the new day after a short trip away across midnight", async () => {
     vi.setSystemTime(new Date("2026-11-22T04:59:00Z")); // Sat 23:59 in New York
     window.history.replaceState(null, "", APP_PATHS.today);
-    const spies = stubAll();
+    const spies = stubAll(undefined, answers(NOTHING_TODAY, NOTHING_SUNDAY));
     renderWithUser(<App />);
     await screen.findByText("Nothing to do right now");
     await opened(spies);
@@ -409,19 +520,59 @@ describe("in the app", () => {
     expect(counts(spies)).toEqual({ ...before, pact: before.pact! + 1, reviewQueue: before.reviewQueue! + 1 });
   });
 
-  test("a form page never reloads by itself", async () => {
+  test("a form page never reloads by itself, though the Review badge does", async () => {
     window.history.replaceState(null, "", APP_PATHS.newVacation);
-    const spies = stubAll();
+    const spies = stubAll(answers<ReviewQueueResponse>([], [VACATION]));
     renderWithUser(<App />);
     await screen.findByLabelText("First day");
     await opened(spies);
     const before = counts(spies);
 
     comeBackAt("2026-11-21T15:11:00Z");
-    comeBackAt("2026-11-22T15:11:00Z");
-    await settle();
 
-    expect(counts(spies)).toEqual(before);
+    expect(await screen.findByLabelText("1 to review")).toBeTruthy();
+    await settle();
+    expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
     expect(busy()).toBeNull();
+    // Back again soon after: the badge loaded at 15:11.
+    comeBackAt("2026-11-21T15:20:00Z");
+    await settle();
+    expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
+  });
+
+  test("on a form page, the Review badge reloads at midnight", async () => {
+    vi.setSystemTime(new Date("2026-11-22T04:55:00Z")); // Sat 23:55 in New York
+    window.history.replaceState(null, "", APP_PATHS.newVacation);
+    const spies = stubAll(answers<ReviewQueueResponse>([], [VACATION]));
+    renderWithUser(<App />);
+    await screen.findByLabelText("First day");
+    await opened(spies);
+    const before = counts(spies);
+
+    await advanceTo("2026-11-22T04:59:59Z");
+    expect(counts(spies)).toEqual(before);
+    await advanceTo("2026-11-22T05:00:01Z");
+
+    expect(await screen.findByLabelText("1 to review")).toBeTruthy();
+    expect(counts(spies)).toEqual({ ...before, reviewQueue: before.reviewQueue! + 1 });
+  });
+
+  test("on Review, back after 11 minutes, its queue loads once, for the tab and the badge alike", async () => {
+    window.history.replaceState(null, "", APP_PATHS.review);
+    const spies = stubAll(answers<ReviewQueueResponse>([], [VACATION]));
+    renderWithUser(<App />);
+    await screen.findByText("Nothing to review");
+    await opened(spies);
+    const before = counts(spies);
+
+    comeBackAt("2026-11-21T15:11:00Z");
+
+    expect(await screen.findByLabelText("1 to review")).toBeTruthy();
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(counts(spies)).toEqual({
+      ...before,
+      reviewQueue: before.reviewQueue! + 1,
+      waitingOnReply: before.waitingOnReply! + 1,
+    });
   });
 });

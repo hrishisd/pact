@@ -5,19 +5,11 @@
 // back and the line becomes a moving bar until the refresh settles.
 //
 // The same refresh, on a tab or a page that shows what it loads, runs by
-// itself on coming back to the front when the screen is due a reload
-// (coming-back.ts), with the same bar: quietly, trying once more if it fails.
+// itself on coming back to the front and at midnight when the screen is due
+// a reload (coming-back.ts), with the same bar: quietly, trying once more if
+// it fails.
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useReloadWhenDue } from "./coming-back.ts";
 
 /** How far the content must be pulled, in px after resistance, for letting go to refresh. */
@@ -31,14 +23,15 @@ export const RETRY_AFTER_MS = 3000;
 
 /**
  * How a refresh runs. `pulled`: by a pull, not by itself. `quiet`: if it
- * fails, the screen shows nothing and the promise rejects, so it can be tried
- * again (`useLoad`'s `reload({ quiet })`, ui.tsx).
+ * fails, the screen shows nothing, so it can be tried again (`useLoad`'s
+ * `reload({ quiet })`, ui.tsx).
  */
 export interface RefreshRun {
   pulled: boolean;
   quiet: boolean;
 }
-type Refresh = (run: RefreshRun) => Promise<unknown>;
+/** Resolves to whether it loaded. */
+type Refresh = (run: RefreshRun) => Promise<boolean>;
 /** Makes `refresh` the shown screen's; the returned function undoes it, unless another took its place. */
 type Register = (refresh: Refresh) => () => void;
 
@@ -46,16 +39,16 @@ const RegisterRefresh = createContext<Register>(() => () => {});
 
 /**
  * What refreshes this screen: a pull on a tab, and coming back to the front
- * on a tab or a page that shows what it loads. Its promise settling, whether
- * it resolves or rejects, ends the bar. A screen that registers one counts as
- * loaded when it opens; a form registers none, so it never reloads by itself.
+ * or midnight on a tab or a page that shows what it loads. Its promise
+ * settling ends the bar. A screen that registers one counts as loaded when it
+ * opens, and again from when a try of its refresh starts that loads; a form
+ * registers none, so it never reloads by itself.
  */
 export function useRefresh(refresh: Refresh): void {
   const register = useContext(RegisterRefresh);
   const latest = useRef(refresh);
   latest.current = refresh;
-  // Before the browser paints, so the header's day follows the screen opened (`onLoaded`).
-  useLayoutEffect(() => register((run) => latest.current(run)), [register]);
+  useEffect(() => register((run) => latest.current(run)), [register]);
 }
 
 /**
@@ -63,23 +56,18 @@ export function useRefresh(refresh: Refresh): void {
  * has pull to refresh; a page opened from a tab can't be pulled. Either
  * refreshes by itself when due on coming back to the front, or at midnight
  * in `timezone` (the profile's), and the header's bar moves while any
- * refresh runs. One refresh runs at a time. Touch only: a mouse never pulls.
+ * refresh runs. One refresh runs at a time; one that comes due meanwhile
+ * runs once it settles, if still due. Touch only: a mouse never pulls.
  */
 export function PullToRefresh({
   pullable,
   timezone,
-  onLoaded,
-  onRefreshingItself,
   header,
   mainClassName,
   children,
 }: {
   pullable: boolean;
   timezone: string;
-  /** When the shown screen opened, or a refresh of it settled (ms): what it shows is from then. */
-  onLoaded?: (at: number) => void;
-  /** The shown screen is refreshing by itself, so the shell can refresh what it shows around it. */
-  onRefreshingItself?: () => void;
   /** What goes inside the header. */
   header: ReactNode;
   mainClassName: string;
@@ -93,27 +81,26 @@ export function PullToRefresh({
   const loadedAt = useRef<number | null>(null);
   /** The refresh running now, if any. */
   const running = useRef<{ refresh: Refresh } | null>(null);
+  /** A refresh by itself came due while another ran. */
+  const dueWhileRunning = useRef(false);
+  /** Refreshes by itself if due now (`useReloadWhenDue`'s check). */
+  const refreshIfDue = useRef(() => {});
   const [refreshing, setRefreshing] = useState(false);
-  const callbacks = useRef({ onLoaded, onRefreshingItself });
-  callbacks.current = { onLoaded, onRefreshingItself };
 
-  const loaded = useCallback(() => {
-    const at = Date.now();
-    loadedAt.current = at;
-    callbacks.current.onLoaded?.(at);
-  }, []);
-
-  /** Ends `run`, unless a newer run has taken its place. */
+  /** Ends `run`, unless a newer run has taken its place; then runs a refresh that came due meanwhile. */
   const end = useCallback((run: { refresh: Refresh }) => {
     if (running.current !== run) return;
     running.current = null;
     setRefreshing(false);
+    if (!dueWhileRunning.current) return;
+    dueWhileRunning.current = false;
+    refreshIfDue.current();
   }, []);
 
   const register = useCallback<Register>(
     (refresh) => {
       current.current = refresh;
-      loaded();
+      loadedAt.current = Date.now();
       return () => {
         if (current.current === refresh) {
           current.current = null;
@@ -124,50 +111,54 @@ export function PullToRefresh({
         if (running.current?.refresh === refresh) end(running.current);
       };
     },
-    [end, loaded],
+    [end],
   );
 
   /**
    * Runs the shown screen's refresh through `tries`, with the bar, unless a
-   * refresh runs already. `tries` calls it at once, so a check it starts is
-   * running before anything else on the same return (Today's `useCheckNow`).
-   * Once it settles, the screen counts as loaded, unless it was left.
+   * refresh runs already. `tryOnce` runs it once and answers whether it
+   * loaded; one that loads counts as a load from when it started, unless the
+   * screen was left.
    */
   const run = useCallback(
-    async (tries: (refresh: Refresh, left: () => boolean) => Promise<unknown>) => {
+    async (tries: (tryOnce: (run: RefreshRun) => Promise<boolean>, left: () => boolean) => Promise<unknown>) => {
       const refresh = current.current;
       if (!refresh || running.current) return;
       const thisRun = { refresh };
       running.current = thisRun;
       setRefreshing(true);
+      const left = () => running.current !== thisRun;
+      const tryOnce = async (how: RefreshRun) => {
+        const startedAt = Date.now();
+        const ok = await refresh(how);
+        if (ok && !left()) loadedAt.current = startedAt;
+        return ok;
+      };
       try {
-        await tries(refresh, () => running.current !== thisRun);
-      } catch {
-        // The screen shows its own failure (a "couldn't load" line); the bar just stops.
+        await tries(tryOnce, left);
       } finally {
-        if (running.current === thisRun) loaded();
         end(thisRun);
       }
     },
-    [end, loaded],
+    [end],
   );
 
-  const pull = useCallback(() => run((refresh) => refresh({ pulled: true, quiet: false })), [run]);
+  const pull = useCallback(() => run((tryOnce) => tryOnce({ pulled: true, quiet: false })), [run]);
 
   // Quiet at first: right after a phone wakes, its network often isn't ready.
   // The second try, once online or after RETRY_AFTER_MS, shows its failure.
   const refreshItself = useCallback(() => {
-    callbacks.current.onRefreshingItself?.();
-    void run(async (refresh, left) => {
-      try {
-        await refresh({ pulled: false, quiet: true });
-      } catch {
-        await onlineOrAfter(RETRY_AFTER_MS);
-        if (!left()) await refresh({ pulled: false, quiet: false });
-      }
+    if (running.current) {
+      dueWhileRunning.current = true;
+      return;
+    }
+    void run(async (tryOnce, left) => {
+      if (await tryOnce({ pulled: false, quiet: true })) return;
+      await onlineOrAfter(RETRY_AFTER_MS);
+      if (!left()) await tryOnce({ pulled: false, quiet: false });
     });
   }, [run]);
-  useReloadWhenDue(() => loadedAt.current, timezone, refreshItself);
+  refreshIfDue.current = useReloadWhenDue(() => loadedAt.current, timezone, refreshItself, { shownScreen: true });
 
   useEffect(() => {
     const scroller = scroll.current;

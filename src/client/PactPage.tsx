@@ -77,7 +77,6 @@ export function PactPage({
   // Opened again, it starts from the pact as last loaded while it loads afresh. Reloaded after a change made
   // here, keeping the pact shown meanwhile and if the reload fails. The at-once changes send only their own term.
   const { state, reload } = useLoad(() => api.pact(pactId), API_PATHS.pact(pactId));
-  // A page that shows what it loads reloads it by itself when due on coming back to the front.
   useRefresh(reload);
   const result = loadedData(state);
   // One clock for the page: the edit window's countdown, what it allows, and the heat map's today.
@@ -657,7 +656,7 @@ function AddReviewerSheet({
             kind={pact.evidenceKind}
             hint={hint}
             onInvite={onInvite}
-            onCheckAgain={loadFriends}
+            onCheckAgain={() => void loadFriends()}
           />
         </div>
         {error && <p className="error">{error}</p>}

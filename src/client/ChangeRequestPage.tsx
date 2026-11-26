@@ -24,7 +24,6 @@ export function ChangeRequestPage({
   onOpenPact: (pactId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(() => api.changeRequest(changeRequestId), API_PATHS.changeRequest(changeRequestId));
-  // A page that shows what it loads reloads it by itself when due on coming back to the front.
   useRefresh(reload);
   // Here rather than in the view, like the load, so a refusal's words outlast the reload after it.
   const withdrawal = useSend(

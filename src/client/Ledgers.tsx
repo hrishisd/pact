@@ -82,7 +82,6 @@ export function LedgerPage({
 }) {
   // Reloaded after a payment, keeping the ledger shown meanwhile and if the reload fails.
   const { state, reload } = useLoad(() => api.ledger(recipientId), API_PATHS.ledger(recipientId));
-  // A page that shows what it loads reloads it by itself when due on coming back to the front.
   useRefresh(reload);
   const result = loadedData(state);
   const [paying, setPaying] = useState(false);

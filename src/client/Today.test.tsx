@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { Json, LedgerResponse, TodayResponse } from "../shared/api.ts";
 import type { CheckNowResult, TodayToDoCard } from "../shared/types.ts";
@@ -17,6 +17,7 @@ import { Today } from "./Today.tsx";
 const NOW = "2026-01-05T15:00:00Z";
 
 const TODAY: TodayResponse = {
+  date: "2026-01-05",
   hasPacts: true,
   alerts: [],
   sections: [
@@ -200,53 +201,53 @@ describe("a Today card's own buttons", () => {
   });
 });
 
+/** Tue night not judged yet: a No Oura data card. */
+const OURA_WAITING: TodayResponse = {
+  ...TODAY,
+  sections: [
+    {
+      kind: "no-oura-data",
+      cards: [
+        {
+          pactId: "bed",
+          name: "In bed by 11",
+          penaltyCents: 1000,
+          occurrenceDate: "2026-01-04",
+          closesAt: "2026-01-05T23:00:00Z",
+          tonight: null,
+        },
+      ],
+    },
+    ...TODAY.sections,
+  ],
+};
+const UNREACHABLE = { ok: false, reason: "unreachable" } as const;
+const ANKI_UNREACHED = "Couldn't reach AnkiWeb. Pact will try again.";
+const OURA_UNREACHED = "Couldn't reach Oura. Pact will try again.";
+
+function renderInShell() {
+  return renderWithUser(
+    <PullToRefresh pullable timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
+      <Today
+        timezone="America/New_York"
+        onOpenPact={onOpenPact}
+        onOpenLedger={vi.fn()}
+        openers={openers}
+        onCreate={vi.fn()}
+        onInvite={vi.fn()}
+      />
+    </PullToRefresh>,
+  );
+}
+const busy = () => screen.getByRole("main").getAttribute("aria-busy");
+/** Today has loaded, opened, checked what its cards wait on and reloaded: nothing running. */
+async function opened(spies: { today: { mock: { calls: unknown[] } } }) {
+  await card("Spanish");
+  await waitFor(() => expect(spies.today.mock.calls.length).toBeGreaterThanOrEqual(2));
+  await waitFor(() => expect(screen.queryByText("Checking AnkiWeb…")).toBeNull());
+}
+
 describe("a pull on Today", () => {
-  /** Tue night not judged yet: a No Oura data card. */
-  const OURA_WAITING: TodayResponse = {
-    ...TODAY,
-    sections: [
-      {
-        kind: "no-oura-data",
-        cards: [
-          {
-            pactId: "bed",
-            name: "In bed by 11",
-            penaltyCents: 1000,
-            occurrenceDate: "2026-01-04",
-            closesAt: "2026-01-05T23:00:00Z",
-            tonight: null,
-          },
-        ],
-      },
-      ...TODAY.sections,
-    ],
-  };
-  const UNREACHABLE = { ok: false, reason: "unreachable" } as const;
-  const ANKI_UNREACHED = "Couldn't reach AnkiWeb. Pact will try again.";
-  const OURA_UNREACHED = "Couldn't reach Oura. Pact will try again.";
-
-  function renderInShell() {
-    return renderWithUser(
-      <PullToRefresh pullable timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
-        <Today
-          timezone="America/New_York"
-          onOpenPact={onOpenPact}
-          onOpenLedger={vi.fn()}
-          openers={openers}
-          onCreate={vi.fn()}
-          onInvite={vi.fn()}
-        />
-      </PullToRefresh>,
-    );
-  }
-  const busy = () => screen.getByRole("main").getAttribute("aria-busy");
-  /** Today has loaded, opened, checked what its cards wait on and reloaded: nothing running. */
-  async function opened(spies: { today: { mock: { calls: unknown[] } } }) {
-    await card("Spanish");
-    await waitFor(() => expect(spies.today.mock.calls.length).toBeGreaterThanOrEqual(2));
-    await waitFor(() => expect(screen.queryByText("Checking AnkiWeb…")).toBeNull());
-  }
-
   test("checks Oura and AnkiWeb, whatever cards show, then reloads Today", async () => {
     const spies = stubApi({
       today: answers(TODAY),
@@ -344,90 +345,119 @@ describe("a pull on Today", () => {
     expect(spies.today.mock.calls.length).toBeGreaterThan(loads);
   });
 
-  describe("coming back to the front", () => {
-    beforeEach(() => {
-      // Timers move with real time too, so Testing Library's waits still work.
-      vi.useRealTimers();
-      vi.useFakeTimers({ now: new Date(NOW), shouldAdvanceTime: true });
-    });
-    /** How many checks and loads so far. */
-    const counts = (spies: Record<"today" | "checkAnki" | "checkOura", { mock: { calls: unknown[] } }>) => ({
-      today: spies.today.mock.calls.length,
-      checkAnki: spies.checkAnki.mock.calls.length,
-      checkOura: spies.checkOura.mock.calls.length,
-    });
-
-    test("after a long gap, checks Oura and AnkiWeb once each, then reloads Today once", async () => {
-      let answerOura = () => {};
-      const spies = stubApi({
-        today: answers(TODAY),
-        checkAnki: answers({ ok: true }),
-        // Oura answers after AnkiWeb, when the test says.
-        checkOura: () => new Promise<CheckNowResult>((resolve) => (answerOura = () => resolve({ ok: true }))),
-      });
-      renderInShell();
-      await opened(spies);
-      const before = counts(spies);
-
-      comeBackAt("2026-01-05T15:11:00Z");
-
-      expect(busy()).toBe("true");
-      await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(before.checkAnki + 1));
-      await act(() => vi.advanceTimersByTimeAsync(0));
-      // Today's own check of AnkiWeb, on the same return, is the refresh's: it reloads nothing by itself.
-      expect(spies.today).toHaveBeenCalledTimes(before.today);
-      await act(async () => answerOura());
-      await waitFor(() => expect(busy()).toBeNull());
-      expect(counts(spies)).toEqual({
-        today: before.today + 1,
-        checkAnki: before.checkAnki + 1,
-        checkOura: before.checkOura + 1,
-      });
-    });
-
-    test("after a short trip, Today's own check of what its cards wait on still runs, then reloads Today", async () => {
-      const spies = stubApi({
-        today: answers(TODAY),
-        checkAnki: answers({ ok: true }),
-        checkOura: answers({ ok: true }),
-      });
-      renderInShell();
-      await opened(spies);
-      const before = counts(spies);
-
-      comeBackAt("2026-01-05T15:05:00Z");
-
-      await waitFor(() => expect(spies.today).toHaveBeenCalledTimes(before.today + 1));
-      expect(counts(spies)).toEqual({ ...before, today: before.today + 1, checkAnki: before.checkAnki + 1 });
-      expect(busy()).toBeNull();
-    });
-
-    test("a check of this refresh that can't reach AnkiWeb or Oura says nothing", async () => {
-      const spies = stubApi({
-        today: answers(OURA_WAITING),
-        checkAnki: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
-        checkOura: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
-      });
-      renderInShell();
-      await opened(spies);
-      await waitFor(() => expect(screen.queryByText("Checking Oura…")).toBeNull());
-
-      comeBackAt("2026-01-05T15:11:00Z");
-
-      await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(busy()).toBeNull());
-      expect(spies.checkOura).toHaveBeenCalledTimes(2);
-      expect(screen.queryByText(ANKI_UNREACHED)).toBeNull();
-      expect(screen.queryByText(OURA_UNREACHED)).toBeNull();
-    });
-  });
-
   test("a check Today sends by itself that can't reach AnkiWeb says nothing", async () => {
     const spies = stubApi({ today: answers(TODAY), checkAnki: answers(UNREACHABLE) });
     renderInShell();
     await opened(spies);
     expect(spies.checkAnki).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(ANKI_UNREACHED)).toBeNull();
+  });
+});
+
+describe("coming back to the front", () => {
+  beforeEach(() => {
+    // Timers move with real time too, so Testing Library's waits still work.
+    vi.useRealTimers();
+    vi.useFakeTimers({ now: new Date(NOW), shouldAdvanceTime: true });
+  });
+  /** How many checks and loads so far. */
+  const counts = (spies: Record<"today" | "checkAnki" | "checkOura", { mock: { calls: unknown[] } }>) => ({
+    today: spies.today.mock.calls.length,
+    checkAnki: spies.checkAnki.mock.calls.length,
+    checkOura: spies.checkOura.mock.calls.length,
+  });
+
+  test("after a long gap, checks Oura and AnkiWeb once each, then reloads Today once", async () => {
+    let answerOura = () => {};
+    const spies = stubApi({
+      today: answers(TODAY),
+      checkAnki: answers({ ok: true }),
+      // Oura answers after AnkiWeb, when the test says.
+      checkOura: () => new Promise<CheckNowResult>((resolve) => (answerOura = () => resolve({ ok: true }))),
+    });
+    renderInShell();
+    await opened(spies);
+    const before = counts(spies);
+
+    comeBackAt("2026-01-05T15:11:00Z");
+
+    expect(busy()).toBe("true");
+    await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(before.checkAnki + 1));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // Today's own check of AnkiWeb on every return doesn't run: the refresh checks, then reloads.
+    expect(spies.today).toHaveBeenCalledTimes(before.today);
+    await act(async () => answerOura());
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(counts(spies)).toEqual({
+      today: before.today + 1,
+      checkAnki: before.checkAnki + 1,
+      checkOura: before.checkOura + 1,
+    });
+  });
+
+  test("after a short trip, Today's own check of what its cards wait on still runs, then reloads Today", async () => {
+    const spies = stubApi({
+      today: answers(TODAY),
+      checkAnki: answers({ ok: true }),
+      checkOura: answers({ ok: true }),
+    });
+    renderInShell();
+    await opened(spies);
+    const before = counts(spies);
+
+    comeBackAt("2026-01-05T15:05:00Z");
+
+    await waitFor(() => expect(spies.today).toHaveBeenCalledTimes(before.today + 1));
+    expect(counts(spies)).toEqual({ ...before, today: before.today + 1, checkAnki: before.checkAnki + 1 });
+    expect(busy()).toBeNull();
+  });
+
+  test("after a long gap with a sheet open, checks nothing until it closes, then each service once", async () => {
+    const spies = stubApi({
+      today: answers(TODAY),
+      checkAnki: answers({ ok: true }),
+      checkOura: answers({ ok: true }),
+      ledger: answers(SAM_LEDGER),
+    });
+    renderInShell();
+    await opened(spies);
+    fireEvent.click(within(await card("Pay Sam")).getByRole("button", { name: "Record payment" }));
+    await screen.findByRole("dialog", { name: "Record a payment" });
+    const before = counts(spies);
+
+    comeBackAt("2026-01-05T15:11:00Z");
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(counts(spies)).toEqual(before);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    act(() => endSheetSlides());
+
+    await waitFor(() => expect(spies.today).toHaveBeenCalledTimes(before.today + 1));
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(counts(spies)).toEqual({
+      today: before.today + 1,
+      checkAnki: before.checkAnki + 1,
+      checkOura: before.checkOura + 1,
+    });
+  });
+
+  test("a check of this refresh that can't reach AnkiWeb or Oura says nothing", async () => {
+    const spies = stubApi({
+      today: answers(OURA_WAITING),
+      checkAnki: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
+      checkOura: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
+    });
+    renderInShell();
+    await opened(spies);
+    await waitFor(() => expect(screen.queryByText("Checking Oura…")).toBeNull());
+
+    comeBackAt("2026-01-05T15:11:00Z");
+
+    await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(spies.checkOura).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(ANKI_UNREACHED)).toBeNull();
+    expect(screen.queryByText(OURA_UNREACHED)).toBeNull();
   });
 });
 
@@ -448,6 +478,7 @@ describe("a rejected vacation's alert", () => {
     owedAgainCents: number,
     excusable: { firstDate: string; lastDate: string; until: string } | null = null,
   ): TodayResponse => ({
+    date: "2026-01-05",
     hasPacts: true,
     alerts: [
       {
@@ -508,6 +539,7 @@ describe("a rejected vacation's alert", () => {
 
 describe("the vacation banner", () => {
   const onVacation = (pacts: { kind: "all" } | { kind: "some"; names: string[] }): TodayResponse => ({
+    date: "2026-01-05",
     hasPacts: true,
     alerts: [],
     sections: [],
@@ -582,6 +614,7 @@ describe("the vacation banner", () => {
 
 describe("Waiting for approval", () => {
   const waiting: TodayResponse = {
+    date: "2026-01-05",
     hasPacts: true,
     alerts: [
       {

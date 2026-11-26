@@ -420,6 +420,7 @@ describe("sign-in", () => {
     } satisfies MeResponse);
 
     expect((await operator.get(API_PATHS.today)).body).toEqual({
+      date: expect.any(String),
       hasPacts: false,
       alerts: [],
       sections: [],

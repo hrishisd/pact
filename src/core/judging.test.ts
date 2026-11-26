@@ -303,7 +303,14 @@ describe("Today's order", () => {
   });
 });
 
-const nothingOnToday: Today = { hasPacts: true, alerts: [], sections: [], waiting: [], yesterday: [] };
+const nothingOnToday: Today = {
+  date: expect.any(String),
+  hasPacts: true,
+  alerts: [],
+  sections: [],
+  waiting: [],
+  yesterday: [],
+};
 
 /** Today's Yesterday on Tuesday: Gym's Monday, with `status`. */
 function gymMonday(status: unknown) {

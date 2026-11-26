@@ -21,13 +21,20 @@ const me: MeResponse = {
   ankiAvailable: false,
 };
 
-test("Today's header shows the day in the profile's timezone, written as the app writes days elsewhere", async () => {
-  // 1am Sunday in London is still Saturday evening in New York.
-  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-22T01:00:00Z") });
+test("Today's header shows the day Today loaded is for, as the core says, written as the app writes days elsewhere", async () => {
+  // Whatever this device's clock says: the core decides the day in the profile's timezone.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-25T15:00:00Z") });
   window.history.replaceState(null, "", APP_PATHS.today);
   stubApi({
     me: answers(me),
-    today: answers<TodayResponse>({ hasPacts: false, alerts: [], sections: [], waiting: [], yesterday: [] }),
+    today: answers<TodayResponse>({
+      date: "2026-11-21",
+      hasPacts: false,
+      alerts: [],
+      sections: [],
+      waiting: [],
+      yesterday: [],
+    }),
     pacts: answers<PactsResponse>([]),
     reviewQueue: answers<ReviewQueueResponse>([]),
     waitingOnReply: answers<WaitingOnReplyResponse>([]),
