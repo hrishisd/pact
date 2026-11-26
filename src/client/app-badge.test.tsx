@@ -4,7 +4,7 @@
 // have changed the icon.
 
 import { act, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   LedgersResponse,
   MeResponse,
@@ -15,14 +15,20 @@ import type {
 } from "../shared/api.ts";
 import { APP_PATHS } from "../shared/api.ts";
 import { App } from "./App.tsx";
+import { loadReviewQueue, onReviewCount } from "./app-badge.ts";
 import { forgetLoaded } from "./last-loaded.ts";
 import { forgetThisDevice } from "./push.ts";
 import { answers, comeBackAt, onOurSide, renderWithUser, stubApi } from "./testing/render.tsx";
 
 // Better Auth's sign-out request, the only one in this file that reaches
 // fetch. Before the imports: its client keeps the fetch it finds when made.
-vi.hoisted(() => {
+const { realFetch } = vi.hoisted(() => {
+  const realFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({ success: true });
+  return { realFetch };
+});
+afterAll(() => {
+  globalThis.fetch = realFetch;
 });
 
 const ZONE = "America/New_York";
@@ -110,6 +116,8 @@ beforeEach(() => {
 afterEach(() => {
   delete (navigator as { setAppBadge?: unknown }).setAppBadge;
   delete (navigator as { clearAppBadge?: unknown }).clearAppBadge;
+  delete (navigator as { serviceWorker?: unknown }).serviceWorker;
+  vi.unstubAllGlobals();
 });
 
 const settle = () => act(() => vi.advanceTimersByTimeAsync(0));
@@ -213,9 +221,9 @@ test("leaving the app does nothing", async () => {
   expect(calls).toEqual(["set 1"]);
 });
 
-test("after a command, the queue's reload in the background sets the icon", async () => {
+test("after a command, the queue's reload in the background sets the icon and the Review tab's badge alike", async () => {
   const calls = badgeableIcon();
-  stubAll(answers<ReviewQueueResponse>([vacation("v1")], []));
+  stubAll(answers<ReviewQueueResponse>([vacation("v1")], [vacation("v1"), vacation("v2")]));
   renderWithUser(<App />);
   await screen.findByLabelText("1 to review");
   await settle();
@@ -223,7 +231,8 @@ test("after a command, the queue's reload in the background sets the icon", asyn
   // What any command the person sends does (api.ts).
   act(() => forgetLoaded());
 
-  await waitFor(() => expect(calls).toEqual(["set 1", "clear"]));
+  expect(await screen.findByLabelText("2 to review")).toBeTruthy();
+  expect(calls).toEqual(["set 1", "set 2"]);
 });
 
 test("a browser that refuses the badge, as without notification permission, breaks nothing", async () => {
@@ -279,7 +288,57 @@ test("signing out clears the icon once this device has unsubscribed, and even if
   unsubscribe = () => Promise.reject(new Error("offline"));
   await forgetThisDevice();
   expect(calls).toEqual(["unsubscribe", "clear", "clear"]);
+});
 
-  vi.unstubAllGlobals();
-  delete (navigator as { serviceWorker?: unknown }).serviceWorker;
+/** Loads of the queue that answer when the test says: `answer(n, queue)` answers the `n`th started. */
+function heldQueueLoads() {
+  const pending: ((queue: ReviewQueueResponse) => void)[] = [];
+  stubApi({ reviewQueue: () => new Promise((resolve) => pending.push(resolve)) });
+  return {
+    answer: async (n: number, queue: ReviewQueueResponse) => {
+      pending[n - 1]!(queue);
+      await settle();
+    },
+  };
+}
+
+test("of two loads of the queue, an older one answering last changes nothing", async () => {
+  const calls = badgeableIcon();
+  const { answer } = heldQueueLoads();
+  const heard: number[] = [];
+  const stop = onReviewCount((count) => heard.push(count));
+
+  const older = loadReviewQueue();
+  const newer = loadReviewQueue();
+  await answer(2, [vacation("v1"), vacation("v2")]);
+  await answer(1, [vacation("v1")]);
+
+  // Each still answers its own caller.
+  expect((await older).length).toBe(1);
+  expect((await newer).length).toBe(2);
+  expect(calls).toEqual(["set 2"]);
+  expect(heard).toEqual([2]);
+  stop();
+});
+
+test("a load of the queue started before signing out never sets the icon; one started after does", async () => {
+  const calls = badgeableIcon();
+  const { answer } = heldQueueLoads();
+  const heard: number[] = [];
+  const stop = onReviewCount((count) => heard.push(count));
+
+  const before = loadReviewQueue();
+  await forgetThisDevice();
+  await answer(1, [vacation("v1")]);
+  await before;
+  expect(calls).toEqual(["clear"]);
+  expect(heard).toEqual([]);
+
+  // Signed in again.
+  const after = loadReviewQueue();
+  await answer(2, [vacation("v1"), vacation("v2")]);
+  await after;
+  expect(calls).toEqual(["clear", "set 2"]);
+  expect(heard).toEqual([2]);
+  stop();
 });
