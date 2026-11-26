@@ -184,6 +184,14 @@ export interface NotificationOf<K extends NotificationKind> {
 
 export type Notification = { [K in NotificationKind]: NotificationOf<K> }[NotificationKind];
 
+/**
+ * A notification as it's sent, with `badge`: the recipient's Review Queue
+ * size when it goes, for the number on the app's icon. Worked out at each
+ * send, never stored, so a retry carries the count then. None when it goes
+ * to no device, or the count couldn't be worked out.
+ */
+export type OutgoingPush = Notification & { badge?: number };
+
 export interface DeliveryReport {
   /** Endpoints of devices the push service says are gone; the core removes them. */
   expired: string[];
@@ -196,7 +204,7 @@ export interface DeliveryReport {
  * be none). Throwing means no device was reached; the core retries them all.
  */
 export interface Notifier {
-  deliver(notification: Notification, devices: readonly PushDevice[]): Promise<DeliveryReport>;
+  deliver(push: OutgoingPush, devices: readonly PushDevice[]): Promise<DeliveryReport>;
 }
 
 /** One email: plain text, with an HTML version when there is one. */

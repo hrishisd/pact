@@ -25,6 +25,7 @@ const DAY_MS = 24 * 60 * 60_000;
 type Due = (at: number, now: number, timezone: string) => boolean;
 const newDay: Due = (at, now, timezone) => dateIn(at, timezone) !== dateIn(now, timezone);
 const old: Due = (at, now, timezone) => now - at > RELOAD_AFTER_MS || newDay(at, now, timezone);
+const always: Due = () => true;
 
 /** The reloads' checks on coming back (`useReloadWhenDue`); each answers whether the shown screen's came due. */
 const reloadChecks = new Set<() => boolean>();
@@ -59,22 +60,25 @@ export function onComingBack(listener: () => void): () => void {
 /**
  * Calls `reload` when what it reloads is due: on coming back to the front, if
  * it last loaded (`loadedAt()`, ms) more than RELOAD_AFTER_MS ago or on
- * another day in `timezone` (the profile's); and, while the app is in front,
- * at that timezone's midnight. While any sheet is open, it waits, and calls
- * `reload` when the last one closes, if still due. `loadedAt()` answers null
- * when there is nothing to reload (a form). With `shownScreen`, a return on
- * which it is due, now or once a sheet closes, runs no `onComingBack`
- * listener. Returns a check that calls `reload` if it is due now, for when it
- * may have come due unheard (while a refresh ran).
+ * another day in `timezone` (the profile's), or with `everyReturn` on every
+ * return however short; and, while the app is in front, at that timezone's
+ * midnight. While any sheet is open, it waits, and calls `reload` when the
+ * last one closes, if still due. `loadedAt()` answers null when there is
+ * nothing to reload (a form). With `shownScreen`, a return on which it is
+ * due, now or once a sheet closes, runs no `onComingBack` listener. Returns a
+ * check that calls `reload` if it is due now, for when it may have come due
+ * unheard (while a refresh ran).
  */
 export function useReloadWhenDue(
   loadedAt: () => number | null,
   timezone: string,
   reload: () => void,
-  { shownScreen = false }: { shownScreen?: boolean } = {},
+  { shownScreen = false, everyReturn = false }: { shownScreen?: boolean; everyReturn?: boolean } = {},
 ): () => void {
-  const latest = useRef({ loadedAt, timezone, reload, shownScreen });
-  latest.current = { loadedAt, timezone, reload, shownScreen };
+  const latest = useRef({ loadedAt, timezone, reload, shownScreen, everyReturn });
+  latest.current = { loadedAt, timezone, reload, shownScreen, everyReturn };
+  /** Whether a return makes it due. */
+  const onReturn: Due = (...args) => (latest.current.everyReturn ? always : old)(...args);
   /** It came due while a sheet was open. */
   const waiting = useRef(false);
   /** Reloads if `due`, or waits for the sheets to close; answers whether it was due. */
@@ -88,11 +92,11 @@ export function useReloadWhenDue(
   }, []);
 
   useEffect(() => {
-    const stopListening = listen(reloadChecks, () => reloadIf(old) && latest.current.shownScreen);
+    const stopListening = listen(reloadChecks, () => reloadIf(onReturn) && latest.current.shownScreen);
     const stopWaiting = onLastSheetClosed(() => {
       if (!waiting.current) return;
       waiting.current = false;
-      reloadIf(old);
+      reloadIf(onReturn);
     });
     return () => {
       stopListening();

@@ -4,6 +4,7 @@ import type { LocalDate } from "../shared/types.ts";
 import { ApiError, api, failureText, signInWithGoogle, signOut } from "./api.ts";
 import { AnkiReconnectForm } from "./anki.tsx";
 import { AppleHealthPage, lastUploadText } from "./apple-health.tsx";
+import { loadReviewQueue } from "./app-badge.ts";
 import { ChangePact } from "./ChangePact.tsx";
 import { useReloadWhenDue } from "./coming-back.ts";
 import { ChangeRequestPage } from "./ChangeRequestPage.tsx";
@@ -479,7 +480,7 @@ const TAB_LOADS: Record<TabId, [string, () => Promise<unknown>][]> = {
   today: [[API_PATHS.today, () => api.today()]],
   pacts: [[API_PATHS.pacts, () => api.pacts()]],
   review: [
-    [API_PATHS.reviewQueue, () => api.reviewQueue()],
+    [API_PATHS.reviewQueue, loadReviewQueue],
     [API_PATHS.waitingOnReply, () => api.waitingOnReply()],
   ],
   ledgers: [[API_PATHS.ledgers, () => api.ledgers()]],
@@ -505,10 +506,12 @@ function useLoadTabs(tab: TabId) {
 /**
  * The Review tab's badge: how many items wait for this account's decision.
  * Loaded on each change to another tab, sharing the Review tab's load
- * (last-loaded.ts), and by itself when due, on any page, forms included,
- * pages opened over the Review tab too (`useReloadWhenDue`, coming-back.ts).
- * The Review tab, while `reviewShown`, sets it whenever its queue loads, and
- * reloads that itself, so there the badge doesn't.
+ * (last-loaded.ts), and by itself on every return to the front, however
+ * short, and at midnight, on any page, forms included, pages opened over the
+ * Review tab too (`useReloadWhenDue`, coming-back.ts): a push may have
+ * changed the app's icon, which each load sets (`loadReviewQueue`,
+ * app-badge.ts). The Review tab, while `reviewShown`, sets it whenever its
+ * queue loads, and reloads that itself, so there the badge doesn't.
  */
 function useReviewCount(
   tab: TabId,
@@ -521,7 +524,7 @@ function useReviewCount(
   const load = useCallback(() => {
     const startedAt = Date.now();
     // A badge that fails to load just keeps its last count, and is due again.
-    loadAndRemember(API_PATHS.reviewQueue, api.reviewQueue).then(
+    loadAndRemember(API_PATHS.reviewQueue, loadReviewQueue).then(
       (queue) => {
         loadedAt.current = startedAt;
         set(queue.length);
@@ -532,7 +535,7 @@ function useReviewCount(
   useEffect(() => {
     if (tab !== "review") load();
   }, [tab, load]);
-  useReloadWhenDue(() => (reviewShown ? null : loadedAt.current), timezone, load);
+  useReloadWhenDue(() => (reviewShown ? null : loadedAt.current), timezone, load, { everyReturn: true });
   return { value, set };
 }
 

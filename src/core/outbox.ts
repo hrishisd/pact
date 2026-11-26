@@ -18,11 +18,11 @@ import type { CoreContext } from "./context.ts";
 import type {
   Email,
   Mailer,
-  Notification,
   NotificationKind,
   NotificationOf,
   Notifier,
   OperatorAlertDetails,
+  OutgoingPush,
 } from "./ports.ts";
 
 /**
@@ -236,25 +236,46 @@ export function notificationSettings(ctx: CoreContext, accountId: AccountId): No
   return NOTIFICATION_SETTINGS.map((setting) => ({ setting, enabled: !settingIsOff(ctx, accountId, setting) }));
 }
 
-/** Delivers each push waiting, oldest first. Emails go apart (`deliverEmails`). */
-export async function deliverPending(ctx: CoreContext, notifier: Notifier): Promise<void> {
+/**
+ * Delivers each push waiting, oldest first. One going to a device carries
+ * `badgeOf` its recipient as it goes: their Review Queue size, for the app's
+ * icon. If that throws, it goes without one, logged, so a fault in the queue
+ * never holds up a push. Emails go apart (`deliverEmails`).
+ */
+export async function deliverPending(
+  ctx: CoreContext,
+  notifier: Notifier,
+  badgeOf: (recipient: AccountId) => number,
+): Promise<void> {
   const rows = ctx.all<OutboxRow>(`SELECT id, recipient_account_id, kind, payload, sent_to
        FROM outbox WHERE channel = 'push' AND delivered_at IS NULL ORDER BY id`);
   for (const row of rows) {
     try {
-      // Stored by `enqueue`, so the kind and its payload match.
-      const notification = {
-        recipient: row.recipient_account_id,
-        kind: row.kind,
-        payload: JSON.parse(row.payload) as unknown,
-      } as Notification;
       const devices = ctx.all<PushDevice>(
         `SELECT endpoint, p256dh, auth FROM push_subscription WHERE account_id = ? ORDER BY endpoint`,
         row.recipient_account_id,
       );
       const sentTo = JSON.parse(row.sent_to) as string[];
       const toSend = devices.filter((device) => !sentTo.includes(device.endpoint));
-      const { expired, failed } = await notifier.deliver(notification, toSend);
+      let badge: number | undefined;
+      if (toSend.length > 0) {
+        try {
+          badge = badgeOf(row.recipient_account_id);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.log(
+            `notification ${row.id} (${row.kind} to ${row.recipient_account_id}) goes without a badge: ${message}`,
+          );
+        }
+      }
+      // Stored by `enqueue`, so the kind and its payload match.
+      const push = {
+        recipient: row.recipient_account_id,
+        kind: row.kind,
+        payload: JSON.parse(row.payload) as unknown,
+        ...(badge !== undefined && { badge }),
+      } as OutgoingPush;
+      const { expired, failed } = await notifier.deliver(push, toSend);
       for (const endpoint of expired) {
         ctx.db.prepare(`DELETE FROM push_subscription WHERE endpoint = ?`).run(endpoint);
       }

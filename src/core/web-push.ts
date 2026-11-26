@@ -3,7 +3,7 @@
 // device (RFC 8291) and signed with our VAPID keys (RFC 8292).
 
 import { createECDH, createPrivateKey, hkdfSync, randomBytes, sign, createCipheriv } from "node:crypto";
-import type { Clock, DeliveryReport, Notification, Notifier, PushDevice } from "./ports.ts";
+import type { Clock, DeliveryReport, Notifier, OutgoingPush, PushDevice } from "./ports.ts";
 
 export interface VapidKeys {
   /** Base64url: the raw uncompressed P-256 point the browser subscribes with. */
@@ -62,10 +62,16 @@ export function webPushNotifier(vapid: VapidKeys, clock: Clock, options: WebPush
   };
 
   return {
-    async deliver(notification: Notification, devices: readonly PushDevice[]): Promise<DeliveryReport> {
-      const { title, body, url } = notification.payload;
+    async deliver(push: OutgoingPush, devices: readonly PushDevice[]): Promise<DeliveryReport> {
+      const { title, body, url } = push.payload;
+      // What the service worker reads (src/client/public/sw.js): the text to show, the page it opens and the icon's badge, if any.
       const message = Buffer.from(
-        JSON.stringify({ title: title.slice(0, MAX_TITLE_CHARS), body: body.slice(0, MAX_BODY_CHARS), url }),
+        JSON.stringify({
+          title: title.slice(0, MAX_TITLE_CHARS),
+          body: body.slice(0, MAX_BODY_CHARS),
+          url,
+          badge: push.badge,
+        }),
       );
       const results = await Promise.allSettled(devices.map((device) => send(message, device)));
       const report: DeliveryReport = { expired: [], failed: [] };
@@ -75,7 +81,7 @@ export function webPushNotifier(vapid: VapidKeys, clock: Clock, options: WebPush
         else if (result.value === "expired") report.expired.push(endpoint);
       });
       log(
-        `push ${notification.kind} to ${notification.recipient}: ${devices.length} devices, ${report.expired.length} expired, ${report.failed.length} failed`,
+        `push ${push.kind} to ${push.recipient}: ${devices.length} devices, ${report.expired.length} expired, ${report.failed.length} failed`,
       );
       return report;
     },

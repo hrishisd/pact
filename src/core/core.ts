@@ -690,7 +690,7 @@ class Core implements PactCore {
 
   #deliverOutbox(): Promise<void> {
     this.#delivery = this.#delivery
-      .then(() => deliverPending(this.#ctx, this.#notifier))
+      .then(() => deliverPending(this.#ctx, this.#notifier, (recipient) => reviewQueue(this.#ctx, recipient).length))
       .catch((error: unknown) => this.#ctx.log(`outbox delivery stopped, will retry: ${String(error)}`));
     return this.#delivery;
   }

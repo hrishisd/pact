@@ -1,4 +1,5 @@
-// The service worker: shows a push, and opens its page when it's tapped.
+// The service worker: shows a push, sets the app icon's badge to the count it
+// carries, and opens its page when it's tapped.
 // iPhone revokes a subscription whose push doesn't show a notification, so every push shows one.
 
 self.addEventListener("install", () => self.skipWaiting());
@@ -12,13 +13,28 @@ self.addEventListener("push", (event) => {
   } catch {}
   if (typeof message?.title !== "string") message = { title: "Pact", body: "", url: "/" };
   event.waitUntil(
-    self.registration.showNotification(message.title, {
-      body: message.body,
-      icon: "/icons/icon-192.png",
-      data: { url: message.url },
-    }),
+    Promise.all([
+      self.registration.showNotification(message.title, {
+        body: message.body,
+        icon: "/icons/icon-192.png",
+        data: { url: message.url },
+      }),
+      badgeIcon(message.badge),
+    ]),
   );
 });
+
+/**
+ * Sets the app icon's badge to `count`, the push's Review Queue size, or
+ * clears it at 0, where the browser can. Never rejects, so a badge that
+ * fails can't stop the notification showing.
+ */
+async function badgeIcon(count) {
+  try {
+    if (!Number.isInteger(count) || count < 0 || !("setAppBadge" in self.navigator)) return;
+    await (count === 0 ? self.navigator.clearAppBadge() : self.navigator.setAppBadge(count));
+  } catch {}
+}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();

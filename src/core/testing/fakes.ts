@@ -21,6 +21,7 @@ import type {
   OuraSource,
   Photo,
   PhotoStore,
+  OutgoingPush,
   PushDevice,
   StoredPhoto,
 } from "../ports.ts";
@@ -47,17 +48,20 @@ export class FakeClock implements Clock {
   }
 }
 
-/** Records every notification it delivers, and the devices it went to, in delivery order. */
+/** Records every notification it delivers, its badge, and the devices it went to, in delivery order. */
 export class RecordingNotifier implements Notifier {
   readonly sent: Notification[] = [];
+  /** The badge each of `sent` carried, if any. */
+  readonly #badges: (number | undefined)[] = [];
   readonly #devices: { recipient: AccountId; device: PushDevice }[] = [];
   readonly #expired = new Set<string>();
   readonly #failing = new Set<string>();
   #held: Promise<void> = Promise.resolve();
 
-  async deliver(notification: Notification, devices: readonly PushDevice[]): Promise<DeliveryReport> {
+  async deliver({ badge, ...notification }: OutgoingPush, devices: readonly PushDevice[]): Promise<DeliveryReport> {
     await this.#held;
-    this.sent.push(structuredClone(notification));
+    this.sent.push(structuredClone(notification as Notification));
+    this.#badges.push(badge);
     const reached = devices.filter((d) => !this.#failing.has(d.endpoint));
     for (const device of reached) this.#devices.push({ recipient: notification.recipient, device: { ...device } });
     return {
@@ -73,6 +77,13 @@ export class RecordingNotifier implements Notifier {
   sentTo<K extends NotificationKind>(account: { id: AccountId }, kind: K): NotificationOf<K>[];
   sentTo(account: { id: AccountId }, kind?: NotificationKind): Notification[] {
     return this.sent.filter((n) => n.recipient === account.id && (kind === undefined || n.kind === kind));
+  }
+
+  /** The badge (undefined: none) of every notification delivered to `account`, or only those of `kind`, in delivery order. */
+  badgesSentTo(account: { id: AccountId }, kind?: NotificationKind): (number | undefined)[] {
+    return this.sent.flatMap((n, i) =>
+      n.recipient === account.id && (kind === undefined || n.kind === kind) ? [this.#badges[i]] : [],
+    );
   }
 
   /** The kind of every notification delivered to `account`, in delivery order. */
