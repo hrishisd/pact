@@ -8,7 +8,7 @@ Spec: `../spec.md` stories 1, 2, 3, 5, 7, 8 and the Screens and Shortcut section
 ## What to build
 
 - The Apple Health tile in Create pact, and the setup step when there's no connection.
-- The Apple Health setup page (its own app path): make key / upload URL with Copy, the Shortcut steps exactly as in the spec, the automations, Run Pact Health, last upload.
+- The Apple Health setup page (its own app path): make key / upload URL with Copy, the Shortcut steps exactly as in the spec, the automations, Run Pact Health, last upload with its sleep and mindful counts.
 - Profile's Apple Health connection row.
 - Today's Automatic and No Apple Health data cards, with Sync now.
 - The night's source where a bedtime is shown.
