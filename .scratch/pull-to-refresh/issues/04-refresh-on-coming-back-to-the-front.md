@@ -1,6 +1,6 @@
 # 04 Refresh when the installed app comes back to the front
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none
 
 From an outside audit of the code (finding F3, parts a and b), checked against the code on 2026-11-22. Parts c (the header's date format) and d (noticing notifications turned off in Settings) are fixed.
@@ -34,9 +34,30 @@ Whether Pact should reload by itself, and when, is a design decision: the pull t
 - Coordinate with `useCheckNow`, so Today loads once, not twice.
 - For the badge alone, `useReviewCount` can register the reviewQueue reload with `reloadWhenForgotten` so that it also sets the count (about 3 lines).
 
+## Decisions
+
+Settled with the owner on 2026-11-26 in a grilling session. No prototype: the only thing seen is the existing pull bar.
+
+1. **When.** Pact reloads the shown screen when it comes back to the front (`visibilitychange` to visible) if the shown screen last loaded more than 10 minutes ago (a named constant), or if the local day, in the profile's timezone, differs from the day of that last load. "Last loaded" counts any refresh of the shown screen: opening it, a pull, or an automatic reload. Reason: what matters is how old the data is, not how long the app was away. The day rule catches a short gap across midnight and keeps the header and cards on the same day whatever the threshold.
+2. **Midnight while open.** While the app is on screen, a timer to the next local midnight (profile timezone) runs the same reload. The header's date and the cards change together.
+3. **What reloads.** What a pull runs on the shown tab (on Today, checking Oura and AnkiWeb, then reloading Today), and the Review badge. On a view page (pact, ledger, excuse, evidence, payment, change request) that page reloads. Form pages (New pact, Edit, Request change, Plan a vacation, Notifications) never reload by themselves.
+4. **What it shows.** The pull bar under the header moves while the reload runs, as for a pull, on tabs and view pages alike.
+5. **Failure.** A reload on coming back stays quiet if it fails: it tries once more after about 3 seconds, or as soon as the browser reports it is online, whichever comes first. Only if that second try fails does the screen show its usual "couldn't load" line. Oura and AnkiWeb checks in this reload never show "Couldn't reach Oura/AnkiWeb"; only a pull's checks do.
+6. **A sheet is open.** While any sheet is open, the reload waits, and runs when the last sheet closes (if it is still due).
+7. **Short trips.** Today's existing check of Oura and AnkiWeb on every return, while a No Oura data or Anki To do card shows, stays. When the long-gap reload also runs, Today checks each service once, not twice.
+8. **A pull during the reload** waits for the running reload and shows the same bar; it doesn't start another.
+
 ## Acceptance criteria
 
-- [ ] The human has decided whether, and when, Pact reloads on coming back to the front, and what a failure then shows.
-- [ ] Coming back after a short gap reloads nothing; after a long gap or on a new day, the shown tab reloads once, and the badge.
-- [ ] Today's header shows the new day after midnight, together with the reloaded cards.
+- [x] The human has decided whether, and when, Pact reloads on coming back to the front, and what a failure then shows.
+- [ ] Coming back after a short gap reloads nothing; after more than 10 minutes or on a new day, the shown tab or view page reloads once, and the badge.
+- [ ] Form pages never reload by themselves.
+- [ ] The pull bar moves during the reload.
+- [ ] A failed reload stays quiet, retries once (after about 3 s or on `online`), and shows "couldn't load" only if the retry fails. No "Couldn't reach" line from this reload.
+- [ ] While a sheet is open, the reload waits until the last sheet closes.
+- [ ] Today checks Oura and AnkiWeb once, not twice, on a long-gap return.
+- [ ] A pull during the reload doesn't start another.
+- [ ] Today's header shows the new day after midnight, together with the reloaded cards, both on return and while open.
 - [ ] `docs/behaviour.md` says what coming back to the front does.
+- [ ] Phone checks added to `../manual-checks.md`.
+- [ ] `npm run check` passes.
