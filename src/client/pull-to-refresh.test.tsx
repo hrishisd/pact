@@ -13,7 +13,7 @@ import { APP_PATHS } from "../shared/api.ts";
 import { App } from "./App.tsx";
 import { Ledgers } from "./Ledgers.tsx";
 import { Pacts } from "./Pacts.tsx";
-import { PULL_THRESHOLD_PX, PullToRefresh, useRefreshOnPull } from "./pull-to-refresh.tsx";
+import { PULL_THRESHOLD_PX, PullToRefresh, useRefresh } from "./pull-to-refresh.tsx";
 import { Review } from "./Review.tsx";
 import { answers, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
 import { useLoad } from "./ui.tsx";
@@ -26,14 +26,14 @@ const fingerFor = (px: number) => px * 2;
 
 /** A tab whose refresh is `refresh`. */
 function Tab({ refresh }: { refresh: () => Promise<unknown> }) {
-  useRefreshOnPull(refresh);
+  useRefresh(refresh);
   return <p>A tab</p>;
 }
 
 /** The shell, showing `tab`. */
 function shellWith(tab: ReactElement, pullable = true) {
   return (
-    <PullToRefresh pullable={pullable} header={<h1>Today</h1>} mainClassName="scroll gut">
+    <PullToRefresh pullable={pullable} timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
       {tab}
     </PullToRefresh>
   );
@@ -143,7 +143,7 @@ describe("the pull", () => {
     const settled = vi.fn();
     function Loading() {
       const { reload } = useLoad(() => new Promise<never>(() => {}));
-      useRefreshOnPull(() => reload().then(settled));
+      useRefresh(() => reload().then(settled));
       return <p>A loading tab</p>;
     }
     const { rerender } = renderWithUser(shellWith(<Loading />));
@@ -166,7 +166,7 @@ describe("the pull", () => {
 describe("each tab's refresh", () => {
   const inShell = (tab: ReactElement) =>
     renderWithUser(
-      <PullToRefresh pullable header={<h1>Tab</h1>} mainClassName="scroll gut">
+      <PullToRefresh pullable timezone="America/New_York" header={<h1>Tab</h1>} mainClassName="scroll gut">
         {tab}
       </PullToRefresh>,
     );

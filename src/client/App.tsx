@@ -189,6 +189,8 @@ function Shell({
   const [vacationMessage, setVacationMessage] = useState<string | null>(null);
   const reviewCount = useReviewCount(tab);
   useLoadTabs(tab);
+  // When the shown screen opened or last refreshed: Today's header shows that day, so it turns with Today's cards.
+  const [loadedAt, setLoadedAt] = useState(() => Date.now());
   const push = usePush();
   // Pact and recipient names learnt by loading their pages, for a page opened from a link.
   const [pactNames, pactLoaded] = useLearntNames();
@@ -340,7 +342,7 @@ function Shell({
       case "today":
         return {
           title: label,
-          subtitle: formatDay(new Date().toISOString(), profile.timezone),
+          subtitle: formatDay(new Date(loadedAt).toISOString(), profile.timezone),
           body: (
             <>
               <NotificationsAlert push={push} onSetUp={openNotifications} />
@@ -368,9 +370,12 @@ function Shell({
 
   return (
     <div className="app">
-      {/* A tab has pull to refresh; a page opened from one doesn't. */}
+      {/* A tab has pull to refresh; a page opened from one doesn't. Both refresh by themselves when due. */}
       <PullToRefresh
         pullable={page === undefined}
+        timezone={profile.timezone}
+        onLoaded={setLoadedAt}
+        onRefreshingItself={reviewCount.reload}
         mainClassName={foot ? "scroll gut has-foot" : "scroll gut"}
         header={
           <>
@@ -472,11 +477,12 @@ function useLoadTabs(tab: TabId) {
 /**
  * The Review tab's badge: how many items wait for this account's decision.
  * Loaded on each change to another tab, sharing the Review tab's load
- * (last-loaded.ts); the Review tab sets it whenever its queue loads.
+ * (last-loaded.ts), and on `reload()`; the Review tab sets it whenever its
+ * queue loads, so on Review `reload()` leaves it to the tab.
  */
-function useReviewCount(tab: TabId): { value: number; set: (length: number) => void } {
+function useReviewCount(tab: TabId): { value: number; set: (length: number) => void; reload: () => void } {
   const [value, set] = useState(0);
-  useEffect(() => {
+  const reload = useCallback(() => {
     if (tab === "review") return;
     // A badge that fails to load just keeps its last count.
     loadAndRemember(API_PATHS.reviewQueue, api.reviewQueue).then(
@@ -484,7 +490,8 @@ function useReviewCount(tab: TabId): { value: number; set: (length: number) => v
       () => {},
     );
   }, [tab]);
-  return { value, set };
+  useEffect(reload, [reload]);
+  return { value, set, reload };
 }
 
 // ---------- Profile ----------

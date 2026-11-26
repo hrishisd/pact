@@ -55,6 +55,11 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
  * started, or a newer one, has answered, whether it loaded or failed, or once
  * the screen goes away, which drops the load.
  *
+ * `reload({ quiet: true })` is for a reload the screen didn't ask for (on
+ * coming back to the front, pull-to-refresh.tsx): if that load fails, the
+ * screen stays as it was, with no "couldn't load", and the promise rejects
+ * with why, so it can be tried again.
+ *
  * With a `key` (the API path it loads), what it loads is remembered
  * (last-loaded.ts), and the screen opened again starts with that while it
  * loads afresh. Pass one only for a screen that shows what it loads. No key
@@ -62,23 +67,30 @@ export function loadFailure<T>(load: Load<T>): { error: unknown } | null {
  * (the reload would never reach it), nor for a screen that sends what it
  * loaded back in a command: remembered data could undo a change made since.
  */
-export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<T>; reload: () => Promise<void> } {
+export function useLoad<T>(
+  load: () => Promise<T>,
+  key?: string,
+): { state: Load<T>; reload: (options?: ReloadOptions) => Promise<void> } {
   const [state, setState] = useState<Load<T>>(() => {
     const last = key === undefined ? undefined : lastLoaded<T>(key);
     return last === undefined ? { kind: "loading" } : { kind: "loaded", data: last, reloadFailed: null };
   });
   const [loads, setLoads] = useState(0);
   const requested = useRef(0);
+  /** The loads asked for quietly; a load is quiet when the newest request it answers was. */
+  const quietLoads = useRef(new Set<number>());
   /** Each `reload()` waiting for an answer, with the load it asked for. */
-  const waiting = useRef<{ load: number; answered: () => void }[]>([]);
+  const waiting = useRef<{ load: number; answered: (error?: { error: unknown }) => void }[]>([]);
   // A reload runs the cleanup first, which drops the load before it. `load`
   // is left out of the deps on purpose: callers pass a new function each
   // render, and a screen showing something else gets a new `key` instead.
   useEffect(() => {
-    const answered = () => {
+    const quiet = quietLoads.current.has(loads);
+    const answered = (failure?: { error: unknown }) => {
       const done = waiting.current.filter((reload) => reload.load <= loads);
       waiting.current = waiting.current.filter((reload) => reload.load > loads);
-      for (const reload of done) reload.answered();
+      for (const asked of quietLoads.current) if (asked <= loads) quietLoads.current.delete(asked);
+      for (const reload of done) reload.answered(failure);
     };
     return settleUnlessDropped(
       key === undefined ? load() : loadAndRemember(key, load),
@@ -87,8 +99,8 @@ export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<
         answered();
       },
       (error) => {
-        setState((before) => settledLoad(before, { ok: false, error }));
-        answered();
+        if (!quiet) setState((before) => settledLoad(before, { ok: false, error }));
+        answered({ error });
       },
     );
   }, [loads]);
@@ -102,15 +114,23 @@ export function useLoad<T>(load: () => Promise<T>, key?: string): { state: Load<
     [],
   );
   const reload = useCallback(
-    () =>
-      new Promise<void>((answered) => {
+    ({ quiet = false }: ReloadOptions = {}) =>
+      new Promise<void>((resolve, reject) => {
         requested.current += 1;
+        if (quiet) quietLoads.current.add(requested.current);
+        // Only a quiet reload hears that its load failed; the screen says so for any other.
+        const answered = (failure?: { error: unknown }) => (quiet && failure ? reject(failure.error) : resolve());
         waiting.current.push({ load: requested.current, answered });
         setLoads(requested.current);
       }),
     [],
   );
   return { state, reload };
+}
+
+/** How `useLoad`'s `reload()` treats a failure: `quiet`, it shows nothing and rejects instead. */
+interface ReloadOptions {
+  quiet?: boolean;
 }
 
 /**
@@ -276,6 +296,19 @@ export function Empty({ title, body, children }: { title: string; body: string; 
 
 /** How many sheets are open now; the page behind them is held still while any is. */
 let openSheets = 0;
+/** What runs once the last open sheet closes (`onLastSheetClosed`). */
+const lastSheetClosedListeners = new Set<() => void>();
+
+/** Whether any sheet is open now. */
+export function anySheetOpen(): boolean {
+  return openSheets > 0;
+}
+
+/** Calls `listener` each time the last open sheet closes, until the returned function stops it. */
+export function onLastSheetClosed(listener: () => void): () => void {
+  lastSheetClosedListeners.add(listener);
+  return () => lastSheetClosedListeners.delete(listener);
+}
 
 /**
  * Holds the page behind a sheet still (the `sheet-open` class, styles.css) until
@@ -289,7 +322,9 @@ function holdPageStill(): () => void {
   document.documentElement.classList.add("sheet-open");
   return () => {
     openSheets -= 1;
-    if (openSheets === 0) document.documentElement.classList.remove("sheet-open");
+    if (openSheets > 0) return;
+    document.documentElement.classList.remove("sheet-open");
+    for (const listener of [...lastSheetClosedListeners]) listener();
   };
 }
 

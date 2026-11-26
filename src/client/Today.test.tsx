@@ -1,9 +1,17 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { Json, LedgerResponse, TodayResponse } from "../shared/api.ts";
 import type { CheckNowResult, TodayToDoCard } from "../shared/types.ts";
 import { PullToRefresh } from "./pull-to-refresh.tsx";
-import { answers, endSheetSlides, onOurSide, pullDown, renderWithUser, stubApi } from "./testing/render.tsx";
+import {
+  answers,
+  comeBackAt,
+  endSheetSlides,
+  onOurSide,
+  pullDown,
+  renderWithUser,
+  stubApi,
+} from "./testing/render.tsx";
 import { Today } from "./Today.tsx";
 
 const NOW = "2026-01-05T15:00:00Z";
@@ -219,7 +227,7 @@ describe("a pull on Today", () => {
 
   function renderInShell() {
     return renderWithUser(
-      <PullToRefresh pullable header={<h1>Today</h1>} mainClassName="scroll gut">
+      <PullToRefresh pullable timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
         <Today
           timezone="America/New_York"
           onOpenPact={onOpenPact}
@@ -334,6 +342,84 @@ describe("a pull on Today", () => {
     await waitFor(() => expect(busy()).toBeNull());
     expect(spies.checkAnki).toHaveBeenCalledTimes(1);
     expect(spies.today.mock.calls.length).toBeGreaterThan(loads);
+  });
+
+  describe("coming back to the front", () => {
+    beforeEach(() => {
+      // Timers move with real time too, so Testing Library's waits still work.
+      vi.useRealTimers();
+      vi.useFakeTimers({ now: new Date(NOW), shouldAdvanceTime: true });
+    });
+    /** How many checks and loads so far. */
+    const counts = (spies: Record<"today" | "checkAnki" | "checkOura", { mock: { calls: unknown[] } }>) => ({
+      today: spies.today.mock.calls.length,
+      checkAnki: spies.checkAnki.mock.calls.length,
+      checkOura: spies.checkOura.mock.calls.length,
+    });
+
+    test("after a long gap, checks Oura and AnkiWeb once each, then reloads Today once", async () => {
+      let answerOura = () => {};
+      const spies = stubApi({
+        today: answers(TODAY),
+        checkAnki: answers({ ok: true }),
+        // Oura answers after AnkiWeb, when the test says.
+        checkOura: () => new Promise<CheckNowResult>((resolve) => (answerOura = () => resolve({ ok: true }))),
+      });
+      renderInShell();
+      await opened(spies);
+      const before = counts(spies);
+
+      comeBackAt("2026-01-05T15:11:00Z");
+
+      expect(busy()).toBe("true");
+      await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(before.checkAnki + 1));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      // Today's own check of AnkiWeb, on the same return, is the refresh's: it reloads nothing by itself.
+      expect(spies.today).toHaveBeenCalledTimes(before.today);
+      await act(async () => answerOura());
+      await waitFor(() => expect(busy()).toBeNull());
+      expect(counts(spies)).toEqual({
+        today: before.today + 1,
+        checkAnki: before.checkAnki + 1,
+        checkOura: before.checkOura + 1,
+      });
+    });
+
+    test("after a short trip, Today's own check of what its cards wait on still runs, then reloads Today", async () => {
+      const spies = stubApi({
+        today: answers(TODAY),
+        checkAnki: answers({ ok: true }),
+        checkOura: answers({ ok: true }),
+      });
+      renderInShell();
+      await opened(spies);
+      const before = counts(spies);
+
+      comeBackAt("2026-01-05T15:05:00Z");
+
+      await waitFor(() => expect(spies.today).toHaveBeenCalledTimes(before.today + 1));
+      expect(counts(spies)).toEqual({ ...before, today: before.today + 1, checkAnki: before.checkAnki + 1 });
+      expect(busy()).toBeNull();
+    });
+
+    test("a check of this refresh that can't reach AnkiWeb or Oura says nothing", async () => {
+      const spies = stubApi({
+        today: answers(OURA_WAITING),
+        checkAnki: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
+        checkOura: answers<CheckNowResult>({ ok: true }, UNREACHABLE),
+      });
+      renderInShell();
+      await opened(spies);
+      await waitFor(() => expect(screen.queryByText("Checking Oura…")).toBeNull());
+
+      comeBackAt("2026-01-05T15:11:00Z");
+
+      await waitFor(() => expect(spies.checkAnki).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(busy()).toBeNull());
+      expect(spies.checkOura).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText(ANKI_UNREACHED)).toBeNull();
+      expect(screen.queryByText(OURA_UNREACHED)).toBeNull();
+    });
   });
 
   test("a check Today sends by itself that can't reach AnkiWeb says nothing", async () => {

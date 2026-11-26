@@ -8,6 +8,7 @@ import type { EvidenceDetail } from "../shared/types.ts";
 import { api } from "./api.ts";
 import { formatDate } from "./format.ts";
 import { ItemKindHeader, ItemStateChip, OwnerThread, PhotoLinks, StateLine, SentTo } from "./item-page.tsx";
+import { useRefresh } from "./pull-to-refresh.tsx";
 import { LoadedFound, useLoad } from "./ui.tsx";
 
 export function EvidencePage({
@@ -21,6 +22,8 @@ export function EvidencePage({
   onOpenPact: (pactId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(() => api.evidence(evidenceId), API_PATHS.evidenceItem(evidenceId));
+  // A page that shows what it loads reloads it by itself when due on coming back to the front.
+  useRefresh(reload);
 
   return (
     <LoadedFound

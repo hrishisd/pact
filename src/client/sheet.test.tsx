@@ -34,7 +34,7 @@ function TabWithSheets() {
   const [first, setFirst] = useState(false);
   const [second, setSecond] = useState(false);
   return (
-    <PullToRefresh pullable header={<h1>Today</h1>} mainClassName="scroll gut">
+    <PullToRefresh pullable timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
       <button onClick={() => setFirst(true)}>Open the first</button>
       <button onClick={() => setSecond(true)}>Open the second</button>
       {first && (
@@ -86,7 +86,7 @@ describe("the page behind an open sheet", () => {
   test("scrolls again once a screen with a sheet open goes away", async () => {
     const { user, unmount } = renderWithUser(
       <>
-        <PullToRefresh pullable header={<h1>Today</h1>} mainClassName="scroll gut">
+        <PullToRefresh pullable timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
           <p>A tab</p>
         </PullToRefresh>
         <OpenSheetOnce />
@@ -97,7 +97,7 @@ describe("the page behind an open sheet", () => {
 
     unmount();
     renderWithUser(
-      <PullToRefresh pullable header={<h1>Today</h1>} mainClassName="scroll gut">
+      <PullToRefresh pullable timezone="America/New_York" header={<h1>Today</h1>} mainClassName="scroll gut">
         <p>The next screen</p>
       </PullToRefresh>,
     );

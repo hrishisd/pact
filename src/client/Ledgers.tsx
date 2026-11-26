@@ -11,7 +11,7 @@ import type { LedgerPayment, LedgerPenalty, LedgerSummary } from "../shared/type
 import { api } from "./api.ts";
 import { formatDate, formatDay, money, periodName } from "./format.ts";
 import { RecordPaymentSheet } from "./RecordPayment.tsx";
-import { useRefreshOnPull } from "./pull-to-refresh.tsx";
+import { useRefresh } from "./pull-to-refresh.tsx";
 import { Empty, Loaded, LoadedFound, loadedData, useLoad } from "./ui.tsx";
 
 export function Ledgers({
@@ -23,7 +23,7 @@ export function Ledgers({
   onOpenLedger: (recipientId: string, name: string) => void;
 }) {
   const { state, reload } = useLoad(api.ledgers, API_PATHS.ledgers);
-  useRefreshOnPull(reload);
+  useRefresh(reload);
   // The recipient whose Record a payment sheet is open, outside the cards. By id,
   // so the sheet gets the ledger as reloaded, not as it was when tapped.
   const [paying, setPaying] = useState<string | null>(null);
@@ -82,6 +82,8 @@ export function LedgerPage({
 }) {
   // Reloaded after a payment, keeping the ledger shown meanwhile and if the reload fails.
   const { state, reload } = useLoad(() => api.ledger(recipientId), API_PATHS.ledger(recipientId));
+  // A page that shows what it loads reloads it by itself when due on coming back to the front.
+  useRefresh(reload);
   const result = loadedData(state);
   const [paying, setPaying] = useState(false);
 

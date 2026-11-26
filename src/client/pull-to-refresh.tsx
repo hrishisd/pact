@@ -1,10 +1,24 @@
 // Pull to refresh on the four tabs (.scratch/pull-to-refresh/spec.md): pulling
 // down at the top of a tab and letting go past a threshold runs what the tab
-// registered with `useRefreshOnPull`. While the finger pulls, the content
-// follows it and a line under the header grows; once it lets go, the content
-// springs back and the line becomes a moving bar until the refresh settles.
+// registered with `useRefresh`. While the finger pulls, the content follows
+// it and a line under the header grows; once it lets go, the content springs
+// back and the line becomes a moving bar until the refresh settles.
+//
+// The same refresh, on a tab or a page that shows what it loads, runs by
+// itself on coming back to the front when the screen is due a reload
+// (coming-back.ts), with the same bar: quietly, trying once more if it fails.
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useReloadWhenDue } from "./coming-back.ts";
 
 /** How far the content must be pulled, in px after resistance, for letting go to refresh. */
 export const PULL_THRESHOLD_PX = 64;
@@ -12,33 +26,60 @@ export const PULL_THRESHOLD_PX = 64;
 const PULL_MAX_PX = 120;
 /** How far the content moves for each px the finger moves. */
 const RESISTANCE = 0.5;
+/** How long a refresh that ran by itself and failed waits to try again, unless the browser says it's online first. */
+export const RETRY_AFTER_MS = 3000;
 
-type Refresh = () => Promise<unknown>;
-/** Makes `refresh` what a pull does; the returned function undoes it, unless another took its place. */
+/**
+ * How a refresh runs. `pulled`: by a pull, not by itself. `quiet`: if it
+ * fails, the screen shows nothing and the promise rejects, so it can be tried
+ * again (`useLoad`'s `reload({ quiet })`, ui.tsx).
+ */
+export interface RefreshRun {
+  pulled: boolean;
+  quiet: boolean;
+}
+type Refresh = (run: RefreshRun) => Promise<unknown>;
+/** Makes `refresh` the shown screen's; the returned function undoes it, unless another took its place. */
 type Register = (refresh: Refresh) => () => void;
 
 const RegisterRefresh = createContext<Register>(() => () => {});
 
-/** What a pull on this tab does. The bar runs until its promise settles, whether it resolves or rejects. */
-export function useRefreshOnPull(refresh: Refresh): void {
+/**
+ * What refreshes this screen: a pull on a tab, and coming back to the front
+ * on a tab or a page that shows what it loads. Its promise settling, whether
+ * it resolves or rejects, ends the bar. A screen that registers one counts as
+ * loaded when it opens; a form registers none, so it never reloads by itself.
+ */
+export function useRefresh(refresh: Refresh): void {
   const register = useContext(RegisterRefresh);
   const latest = useRef(refresh);
   latest.current = refresh;
-  useEffect(() => register(() => latest.current()), [register]);
+  // Before the browser paints, so the header's day follows the screen opened (`onLoaded`).
+  useLayoutEffect(() => register((run) => latest.current(run)), [register]);
 }
 
 /**
  * The shell's header and scroll area. On a tab (`pullable`), the scroll area
- * has pull to refresh and the header its bar; a page opened from a tab has
- * neither. Touch only: a mouse never pulls.
+ * has pull to refresh; a page opened from a tab can't be pulled. Either
+ * refreshes by itself when due on coming back to the front, or at midnight
+ * in `timezone` (the profile's), and the header's bar moves while any
+ * refresh runs. One refresh runs at a time. Touch only: a mouse never pulls.
  */
 export function PullToRefresh({
   pullable,
+  timezone,
+  onLoaded,
+  onRefreshingItself,
   header,
   mainClassName,
   children,
 }: {
   pullable: boolean;
+  timezone: string;
+  /** When the shown screen opened, or a refresh of it settled (ms): what it shows is from then. */
+  onLoaded?: (at: number) => void;
+  /** The shown screen is refreshing by itself, so the shell can refresh what it shows around it. */
+  onRefreshingItself?: () => void;
   /** What goes inside the header. */
   header: ReactNode;
   mainClassName: string;
@@ -48,9 +89,19 @@ export function PullToRefresh({
   const content = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
   const current = useRef<Refresh | null>(null);
+  /** When the shown screen last loaded (ms); null while it has no refresh. */
+  const loadedAt = useRef<number | null>(null);
   /** The refresh running now, if any. */
   const running = useRef<{ refresh: Refresh } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const callbacks = useRef({ onLoaded, onRefreshingItself });
+  callbacks.current = { onLoaded, onRefreshingItself };
+
+  const loaded = useCallback(() => {
+    const at = Date.now();
+    loadedAt.current = at;
+    callbacks.current.onLoaded?.(at);
+  }, []);
 
   /** Ends `run`, unless a newer run has taken its place. */
   const end = useCallback((run: { refresh: Refresh }) => {
@@ -62,30 +113,61 @@ export function PullToRefresh({
   const register = useCallback<Register>(
     (refresh) => {
       current.current = refresh;
+      loaded();
       return () => {
-        if (current.current === refresh) current.current = null;
-        // A tab left while its refresh runs ends the run, so the bar stops
+        if (current.current === refresh) {
+          current.current = null;
+          loadedAt.current = null;
+        }
+        // A screen left while its refresh runs ends the run, so the bar stops
         // and the next tab can be pulled; its refresh may never settle.
         if (running.current?.refresh === refresh) end(running.current);
       };
     },
-    [end],
+    [end, loaded],
   );
 
-  const run = useCallback(async () => {
-    const refresh = current.current;
-    if (!refresh) return;
-    const thisRun = { refresh };
-    running.current = thisRun;
-    setRefreshing(true);
-    try {
-      await refresh();
-    } catch {
-      // The tab shows its own failure (a "couldn't load" line); the bar just stops.
-    } finally {
-      end(thisRun);
-    }
-  }, [end]);
+  /**
+   * Runs the shown screen's refresh through `tries`, with the bar, unless a
+   * refresh runs already. `tries` calls it at once, so a check it starts is
+   * running before anything else on the same return (Today's `useCheckNow`).
+   * Once it settles, the screen counts as loaded, unless it was left.
+   */
+  const run = useCallback(
+    async (tries: (refresh: Refresh, left: () => boolean) => Promise<unknown>) => {
+      const refresh = current.current;
+      if (!refresh || running.current) return;
+      const thisRun = { refresh };
+      running.current = thisRun;
+      setRefreshing(true);
+      try {
+        await tries(refresh, () => running.current !== thisRun);
+      } catch {
+        // The screen shows its own failure (a "couldn't load" line); the bar just stops.
+      } finally {
+        if (running.current === thisRun) loaded();
+        end(thisRun);
+      }
+    },
+    [end, loaded],
+  );
+
+  const pull = useCallback(() => run((refresh) => refresh({ pulled: true, quiet: false })), [run]);
+
+  // Quiet at first: right after a phone wakes, its network often isn't ready.
+  // The second try, once online or after RETRY_AFTER_MS, shows its failure.
+  const refreshItself = useCallback(() => {
+    callbacks.current.onRefreshingItself?.();
+    void run(async (refresh, left) => {
+      try {
+        await refresh({ pulled: false, quiet: true });
+      } catch {
+        await onlineOrAfter(RETRY_AFTER_MS);
+        if (!left()) await refresh({ pulled: false, quiet: false });
+      }
+    });
+  }, [run]);
+  useReloadWhenDue(() => loadedAt.current, timezone, refreshItself);
 
   useEffect(() => {
     const scroller = scroll.current;
@@ -124,7 +206,7 @@ export function PullToRefresh({
       startY = null;
       const refresh = e.type === "touchend" && pulled >= PULL_THRESHOLD_PX;
       paint(0, true);
-      if (refresh) void run();
+      if (refresh) void pull();
     };
     scroller.addEventListener("touchstart", start, { passive: true });
     // Not passive: a pull stops the browser scrolling or bouncing the page.
@@ -138,13 +220,13 @@ export function PullToRefresh({
       scroller.removeEventListener("touchcancel", end);
       paint(0, false);
     };
-  }, [pullable, run]);
+  }, [pullable, pull]);
 
   return (
     <RegisterRefresh.Provider value={register}>
       <header className="hdr gut">
         {header}
-        {pullable && <div ref={bar} className={refreshing ? "pullbar working" : "pullbar"} aria-hidden="true" />}
+        <div ref={bar} className={refreshing ? "pullbar working" : "pullbar"} aria-hidden="true" />
       </header>
       <main ref={scroll} className={mainClassName} aria-busy={refreshing || undefined}>
         {pullable ? (
@@ -157,4 +239,17 @@ export function PullToRefresh({
       </main>
     </RegisterRefresh.Provider>
   );
+}
+
+/** Resolves once the browser says it's online, or after `ms`, whichever comes first. */
+function onlineOrAfter(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("online", done);
+      resolve();
+    };
+    const timer = window.setTimeout(done, ms);
+    window.addEventListener("online", done);
+  });
 }
