@@ -192,6 +192,7 @@ function Shell({
   const reviewCount = useReviewCount(tab, profile.timezone);
   useLoadTabs(tab);
   // The day Today's cards are for, once loaded: its header shows it, so it turns with them.
+  // Until then, and if Today's first load fails, the header shows the clock's day in the profile's timezone.
   const [todayDate, setTodayDate] = useState<LocalDate | null>(null);
   const push = usePush();
   // Pact and recipient names learnt by loading their pages, for a page opened from a link.
@@ -344,7 +345,7 @@ function Shell({
       case "today":
         return {
           title: label,
-          subtitle: todayDate === null ? "" : formatDate(todayDate),
+          subtitle: todayDate === null ? formatDay(new Date().toISOString(), profile.timezone) : formatDate(todayDate),
           body: (
             <>
               <NotificationsAlert push={push} onSetUp={openNotifications} />

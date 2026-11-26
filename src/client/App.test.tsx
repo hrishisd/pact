@@ -10,7 +10,7 @@ import type {
 } from "../shared/api.ts";
 import { APP_PATHS } from "../shared/api.ts";
 import { App } from "./App.tsx";
-import { answers, renderWithUser, stubApi } from "./testing/render.tsx";
+import { answers, onOurSide, renderWithUser, stubApi } from "./testing/render.tsx";
 
 const me: MeResponse = {
   email: "me@example.test",
@@ -44,4 +44,23 @@ test("Today's header shows the day Today loaded is for, as the core says, writte
   renderWithUser(<App />);
 
   expect(await screen.findByText("Sat Nov 21")).toBeTruthy();
+});
+
+test("until Today first loads, and if that load fails, Today's header shows the day by the clock in the profile's timezone", async () => {
+  // 1am Sunday in London is still Saturday evening in New York.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-22T01:00:00Z") });
+  window.history.replaceState(null, "", APP_PATHS.today);
+  stubApi({
+    me: answers(me),
+    today: answers<TodayResponse>(onOurSide),
+    pacts: answers<PactsResponse>([]),
+    reviewQueue: answers<ReviewQueueResponse>([]),
+    waitingOnReply: answers<WaitingOnReplyResponse>([]),
+    ledgers: answers<LedgersResponse>([]),
+  });
+
+  renderWithUser(<App />);
+
+  expect(await screen.findByText("Today couldn't load")).toBeTruthy();
+  expect(screen.getByText("Sat Nov 21")).toBeTruthy();
 });
