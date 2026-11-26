@@ -2,8 +2,10 @@
 // and ticks, with the invariants in testing/fuzz-invariants.ts checked after
 // every one.
 //
-// `npm test` runs the fixed seeds below. To look for new failures, run more:
+// `npm test` runs the fixed seeds below. To look for new failures, run more;
+// scripts/fuzz-deep.sh runs many seeds on every core at once:
 //
+//   scripts/fuzz-deep.sh 1000-1199
 //   FUZZ_SEEDS=1000-1499 npx vitest run src/core/fuzz.test.ts
 //   FUZZ_SEEDS=1234 FUZZ_STEPS=400 npx vitest run src/core/fuzz.test.ts
 //
