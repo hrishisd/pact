@@ -16,3 +16,5 @@ An Apple Health pact with measure mindful minutes and a daily target, judged fro
 - Not designed further for now: the human wants the sleep version first. Triage this again after tickets 01–03 land.
 
 ## Comments
+
+- 2026-11-27, the human: after picking Apple Health as the source, the create flow should ask what to track: sleep (bedtime) or mindful minutes. Steps and other measures aren't wanted.
